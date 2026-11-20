@@ -6,7 +6,7 @@
 // not by the store. It also runs every query on D1 itself, whose limits (five
 // terms in a compound SELECT) bun:sqlite does not have, and reads D1's own
 // plans without table statistics. Every value is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { Grant } from "../../../packages/application/src/index.ts";
 import {
@@ -30,6 +30,7 @@ import {
   migrationSql,
   splitSqlStatements,
 } from "../../../packages/storage-d1/src/migrations.ts";
+import { settledTest } from "./support/settle.ts";
 
 const NOW = "2099-03-02T00:00:00.000Z";
 const SINCE_MS = Date.parse("2099-03-01T00:00:00.000Z");
@@ -42,19 +43,18 @@ const GRANT: Grant = {
   budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
 };
 
-let mf: Miniflare;
-beforeAll(() => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {fetch(){return new Response('local')}}",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["SMALL", "LARGE", "PLANS"],
-    }),
-  );
-});
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {fetch(){return new Response('local')}}",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["SMALL", "LARGE", "PLANS"],
+  }),
+);
+const test = settledTest();
 afterAll(async () => {
-  await mf?.dispose();
+  await mf.dispose();
 });
 
 /**

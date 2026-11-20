@@ -8,7 +8,9 @@
   [amendment of 2026-11-08](#amendment-2026-11-08-a-pending-run-whose-terminal-is-missing-spends-no-continuation)
   is accepted (#1155); the
   [visibility amendment of 2026-11-12](#amendment-2026-11-12-the-backlog-reports-retryable-registrations)
-  is proposed (#1270)
+  is accepted (merged 2026-11-12 in [#1314](https://github.com/risu729/kogane/pull/1314)); the
+  [amendment of 2026-11-19](#amendment-2026-11-19-a-continuation-answered-from-its-row-spends-no-continuation)
+  is accepted (merged 2026-11-20 in [#1443](https://github.com/risu729/kogane/pull/1443))
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -501,7 +503,9 @@ say why.
   the five on every tick (the first tick counts the conflict in `blocked`,
   later ones in `alreadyJudged`). A terminal is written with a conditional
   put and never overwritten, so this needs an object replaced outside the
-  collectors.
+  collectors. (Since the
+  [amendment of 2026-11-19](#amendment-2026-11-19-a-continuation-answered-from-its-row-spends-no-continuation)
+  it spends one only on its first tick.)
 - **Open limit:** a pending run whose continuation throws on every tick
   (nothing recorded, so it stays the oldest) still spends one of the five,
   as before this amendment, so five such runs still keep staged
@@ -535,13 +539,14 @@ say why.
   continuation" and "a pending run whose continuation throws still spends a
   continuation" pin the two open limits above: with one continuation, the
   conflicting or throwing run takes it on every tick and the run after it is
-  not continued; the throwing one registers once its cause is gone.
+  not continued; the throwing one registers once its cause is gone. (The
+  amendment of 2026-11-19 replaced the first test with the two named there.)
 
 The existing collection scan suites pass unchanged.
 
 ## Amendment 2026-11-12: The backlog reports retryable registrations
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-12 in [#1314](https://github.com/risu729/kogane/pull/1314)).
 
 ### Context
 
@@ -566,3 +571,113 @@ and retry-interval behavior already specified here.
 retryable, unstaged, blocked and older-contract rows, latest-stage selection,
 codes, attempts and timestamps. The test is synthetic and runs on the real
 CORE migrations.
+
+## Amendment 2026-11-19: a continuation answered from its row spends no continuation
+
+- Status: accepted (merged 2026-11-20 in [#1443](https://github.com/risu729/kogane/pull/1443))
+- Date: 2026-11-19
+
+### Context
+
+The amendment of 2026-11-08 left two pending-run shapes that spend one of the
+five continuations on every tick. One is a pending run whose terminal key now
+holds other bytes. Its continuation reads a new digest and inserts a row for
+it, which is blocked `terminal_digest_conflict`; the pending row of the old
+digest stays pending and stays the oldest, so the run is continued first on
+every tick. From the second tick on, that continuation is answered from the
+blocked row (`alreadyJudged`): the terminal read, the conditional insert and
+the row read, nothing written. The listing has spent none of its five on such
+an answer since this ADR's decision, but the continuation loop counted every
+continuation that found its terminal, so five such runs kept staged
+continuation from every other pending run for good, which then waited a whole
+walk per step. That is the stall the amendment of 2026-11-08 ended for five
+missing terminals, reached through a judged row instead.
+
+On synthetic data with the code before this amendment: five pending runs whose
+terminal keys then hold another manifest, and a sixth pending run with the
+walk past it, give `continued: 5, registered: 0` on every tick; the sixth is
+never continued.
+
+### Options considered
+
+1. **Keep the behaviour, stated as a limit.** Rejected: the limit has the same
+   effect as the one the amendment of 2026-11-08 fixed, and its cost does not
+   justify it.
+2. **Close the old pending row** (a `registered` stage that ends it, such as a
+   blocked or retryable state naming the conflict). Rejected here: CORE judged
+   the new digest's row, not the old one; the stage history is append-only
+   evidence; and closing a pending run is the decision the amendment of
+   2026-11-08 left open for a terminal that never comes back. It is not needed
+   to stop the stall.
+3. **A continuation answered from CORE's row spends none of the five.** Chosen.
+   It is the rule the listing already applies to the same answer, with the
+   same fixed cost, so the bound the 25 pending runs read sets is unchanged.
+
+### Decision
+
+- In the continuations before the listing, a continuation whose answer was
+  read from CORE's row, counted in `alreadyRegistered` or `alreadyJudged`,
+  spends none of the five, as a missing terminal does. It is still counted in
+  `continued`. A first verdict (`blocked` or `retryable` written by this
+  call), a registration, a `pending` yield and a throw still spend one.
+- `already_registered` is covered by the same rule: it is what a continuation
+  answers for a run the queue registered between the pending read and the
+  continuation.
+- Nothing else changes: the 25 pending runs read, the listing, the queue
+  consumer, the counts on the lane's log line and tick record (no new count;
+  `alreadyJudged` already says it), and no migration or new state.
+
+### Consequences
+
+- Five or more pending runs whose terminal keys hold other bytes spend the
+  five continuations on their first tick and none after it; the other pending
+  runs are continued from the next tick on.
+- Each such run costs three operations of the invocation's 500 on every
+  tick, and shares the 25 pending runs read with the runs whose terminal is
+  missing. Any answer from a row costs at most five, as it does in the
+  listing (four for an unreadable terminal already recorded, five for a
+  retryable refusal within its interval), so the continuations answered from
+  rows cost at most 125 of the 500 per tick, the same bound as a listed page
+  of 25 judged terminals; 25 digest conflicts measure 75 (50 D1 statements and
+  25 R2 reads). Every registration still starts only while its reserve fits
+  the invocation's budget (ADR 0010), so the registrations of the five
+  continuations that spend one and of the listing stay within the 500.
+  **Open limit:** when more than 20 of the 25 oldest pending runs are
+  missing or answered from a row, fewer than five continuations do new work,
+  as the amendment of 2026-11-08 states for missing terminals alone.
+- **Open limit:** the old pending row is never closed. It stays in the health
+  route's `registration.pending` and oldest pending age and is read on every
+  tick, as before.
+- A pending run whose continuation throws on every tick still spends one, as
+  the amendment of 2026-11-08 decided.
+
+### Verification
+
+`services/processor/test/collection-scan-convergence.test.ts`:
+
+- "pending runs whose terminal now holds other bytes spend a continuation on
+  their first tick only": five pending runs whose terminal keys then hold
+  another manifest, then a sixth pending run, with the walk past it. The first
+  tick records the five conflicts (`blocked: 5`) and continues no more; the
+  second answers them from their rows (`alreadyJudged: 5`), continues the
+  sixth and seals it (`continued: 6, registered: 1`). Before the change the
+  second tick answers `continued: 5, registered: 0` (the test fails). A third
+  tick costs 10 D1 statements and 5 R2 operations for the five and writes no
+  stage row.
+- "a continuation answered from its row spends none of a single
+  continuation": with one continuation, the run after a conflict is continued
+  and seals on the second tick (it failed before the change).
+- "a continuation answered already_registered spends none of a single
+  continuation": the queue registers a pending run between the pending read
+  and its continuation (simulated at the continuation's terminal read); with
+  one continuation, the run after it is continued and seals on the same tick
+  (`continued: 2, alreadyRegistered: 1, registered: 1`; it failed before the
+  change).
+- "25 pending runs answered from their rows cost three operations each, and a
+  26th is not read": the worst case at the deployed bounds. Five ticks record
+  five conflicts each; the sixth answers all 25 from their rows
+  (`continued: 25, alreadyJudged: 25`) for 50 D1 statements and 25 R2
+  operations, writes no stage row, and does not read the 26th pending run
+  (it failed before the change).
+
+The existing collection scan suites pass unchanged.

@@ -45,6 +45,25 @@ export interface CollectionFailure {
   };
 }
 
+/** A core step of one Sony session, in run order (`CORE_STEPS`, ADR 0099). */
+export type CoreStep =
+  | "login"
+  | "gross-balance"
+  | "monthly-history"
+  | "retained-history"
+  | "wallet";
+
+/**
+ * Where a core run stopped: the steps that finished (their artifacts are the
+ * run's), the step that threw (none of its artifacts are kept) and the planned
+ * steps that never ran. Closed step names only.
+ */
+export interface CoreStepOutcome {
+  readonly completed: readonly CoreStep[];
+  readonly failed: CoreStep;
+  readonly notAttempted: readonly CoreStep[];
+}
+
 export interface CollectionManifest {
   schemaVersion: string;
   source: "sony-bank";
@@ -53,7 +72,10 @@ export interface CollectionManifest {
   completedAt: string;
   status: "success" | "partial" | "failed";
   window: { from: string | null; to: string | null };
-  transactionCount: number;
+  /** Null when the step that owns the canonical history did not finish (INV05). */
+  transactionCount: number | null;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
+  /** Present only on a core run that stopped at a step. */
+  coreSteps?: CoreStepOutcome;
 }

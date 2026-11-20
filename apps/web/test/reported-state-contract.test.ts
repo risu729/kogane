@@ -50,16 +50,126 @@ describe("reported state HTTP contract", () => {
       false,
     );
     expect(mutate((copy) => delete copy["coverage"])).toBe(false);
+    // The manifest pins the body's filters and each row's identity (INV09).
+    expect(mutate((copy) => (copy["manifest"]["filters"]["account"] = "acct-sbi"))).toBe(false);
+    expect(mutate((copy) => delete copy["manifest"]["rows"])).toBe(false);
+    expect(mutate((copy) => (copy["manifest"]["rows"][0][2] = "guessed"))).toBe(false);
+    expect(mutate((copy) => (copy["manifest"]["statementAccounts"][0] = ["balance:1"]))).toBe(
+      false,
+    );
+  });
+
+  test("the left-out statements are counts by closed reason, named as a gap exactly when present", async () => {
+    const body = await reportedStateBody(reportedStateWorld(), "2026-09-10");
+    expect(body.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+    ]);
+    expect(body.coverage.liabilitiesMissing).toContain("statements_before_window");
+    const mutate = (change: (coverage: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy["coverage"]);
+      return validReportedState(copy);
+    };
+    expect(mutate(() => {})).toBe(true);
+    expect(mutate((coverage) => delete coverage["statementsBeforeWindow"])).toBe(false);
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"][0]["count"] = 0))).toBe(false);
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"][0]["count"] = 1.5))).toBe(
+      false,
+    );
+    expect(
+      mutate((coverage) => (coverage["statementsBeforeWindow"][0]["reasonCode"] = "old")),
+    ).toBe(false);
+    // An amount is not part of the count.
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"][0]["amount"] = "20000"))).toBe(
+      false,
+    );
+    // Counted but not named, or named but not counted, is refused.
+    expect(
+      mutate(
+        (coverage) =>
+          (coverage["liabilitiesMissing"] = coverage["liabilitiesMissing"].filter(
+            (gap: string) => gap !== "statements_before_window",
+          )),
+      ),
+    ).toBe(false);
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"] = []))).toBe(false);
+    // One entry per source and reason.
+    expect(
+      mutate((coverage) =>
+        coverage["statementsBeforeWindow"].push({
+          ...coverage["statementsBeforeWindow"][0],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  test("the manifest records the left-out counts per source, account and reason, and they add up to the coverage", async () => {
+    const body = await reportedStateBody(reportedStateWorld(), "2026-09-10");
+    expect(body.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: null, reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        accountId: null,
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+    ]);
+    const mutate = (change: (copy: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy);
+      return validReportedState(copy);
+    };
+    const first = (copy: Record<string, any>): Record<string, any> =>
+      copy["manifest"]["statementsBeforeWindow"][0];
+    expect(mutate(() => {})).toBe(true);
+    expect(mutate((copy) => delete copy["manifest"]["statementsBeforeWindow"])).toBe(false);
+    expect(mutate((copy) => (first(copy)["count"] = 0))).toBe(false);
+    expect(mutate((copy) => (first(copy)["accountId"] = ""))).toBe(false);
+    expect(mutate((copy) => (first(copy)["reasonCode"] = "old"))).toBe(false);
+    expect(mutate((copy) => (first(copy)["amount"] = "20000"))).toBe(false);
+    // One entry per source, account and reason.
+    expect(
+      mutate((copy) => copy["manifest"]["statementsBeforeWindow"].push({ ...first(copy) })),
+    ).toBe(false);
+    // A count the coverage shows and the manifest does not record, or the reverse, is refused.
+    expect(mutate((copy) => (first(copy)["count"] = 2))).toBe(false);
+    expect(mutate((copy) => (copy["coverage"]["statementsBeforeWindow"][0]["count"] = 2))).toBe(
+      false,
+    );
+    expect(mutate((copy) => (copy["manifest"]["statementsBeforeWindow"] = []))).toBe(false);
+    // Split across two accounts, the same counts still add up.
+    expect(
+      mutate((copy) => {
+        first(copy)["accountId"] = "acct-card";
+        copy["manifest"]["statementsBeforeWindow"].unshift({
+          sourceId: "vpass",
+          accountId: null,
+          reasonCode: "due_before_window",
+          count: 1,
+        });
+        copy["coverage"]["statementsBeforeWindow"][0]["count"] = 2;
+      }),
+    ).toBe(true);
   });
 
   test("the capability, the feature and the route", () => {
-    expect(validApiCapabilities({ ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true })).toBe(
-      true,
-    );
+    expect(
+      validApiCapabilities({
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+      }),
+    ).toBe(true);
     expect(clientFeatures(CENTRAL_STORE_CAPABILITIES).reportedStateOnDate).toBe(false);
     expect(
-      clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true })
-        .reportedStateOnDate,
+      clientFeatures({
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+      }).reportedStateOnDate,
     ).toBe(true);
     expect(matchRoute("/state")).toEqual({ name: "reportedState" });
     expect(matchRoute("/state/2026-09-10")).toEqual({

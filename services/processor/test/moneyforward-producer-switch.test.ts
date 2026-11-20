@@ -42,8 +42,10 @@ import { transactionsSql } from "../../../packages/read-model/src/sql.ts";
 import { moneyForwardRunPlan } from "../../collector-moneyforward/src/shared-collection.ts";
 import type { RawArtifact } from "../../collector-moneyforward/src/types.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
-import { identifyParse, identitySweep } from "../src/identity-store.ts";
+import { IDENTITY_POLICY_VERSION, identifyParse, identitySweep } from "../src/identity-store.ts";
 import { sweep } from "../src/worker.ts";
+
+const NEWER_POLICY = IDENTITY_POLICY_VERSION + 1;
 
 const IMPORTER = "collector-r2-importer";
 /** The rewrite migration; stores that stage a pair stop before it. */
@@ -560,15 +562,16 @@ test("after the rewrite re-identifying an importer parse reuses the importer's s
   );
   expect(parses).toHaveLength(2);
   const accounts = await all(env, "SELECT * FROM source_accounts ORDER BY id");
-  // An explicit newer policy version is a new identity run over the same rows.
+  // An explicit version above the build's highest is a new identity run over
+  // the same rows.
   for (const parse of parses)
-    expect(await identifyParse(env.DB, parse, resolveIdentity, 3)).toBe(2);
+    expect(await identifyParse(env.DB, parse, resolveIdentity, NEWER_POLICY)).toBe(2);
   expect(await all(env, "SELECT * FROM source_accounts ORDER BY id")).toEqual(accounts);
   expect(
     await all(
       env,
       `SELECT DISTINCT o.source_account_id FROM identity_observations o
-        JOIN identity_runs r ON r.id=o.identity_run_id WHERE r.policy_version=3`,
+        JOIN identity_runs r ON r.id=o.identity_run_id WHERE r.policy_version=${NEWER_POLICY}`,
     ),
   ).toEqual([{ source_account_id: before[IMPORTER]!.id }]);
   expect(
@@ -577,7 +580,7 @@ test("after the rewrite re-identifying an importer parse reuses the importer's s
       "SELECT account_id,policy_version FROM current_account_mappings WHERE source_account_id=?",
       before[IMPORTER]!.id,
     ),
-  ).toEqual([{ account_id: before[IMPORTER]!.account_id, policy_version: 3 }]);
+  ).toEqual([{ account_id: before[IMPORTER]!.account_id, policy_version: NEWER_POLICY }]);
   // A newer policy over the collector's parse appends a revision, and it
   // derives the importer-era entity from the importer's stored source
   // account, not from a digest of the v2 reference (the collector-era one).
@@ -594,14 +597,14 @@ test("after the rewrite re-identifying an importer parse reuses the importer's s
      WHERE f.producer_id=? AND a.dataset='monthly-transactions'`,
     COLLECTOR,
   );
-  expect(await identifyParse(env.DB, collectorParse!, resolveIdentity, 3)).toBe(2);
+  expect(await identifyParse(env.DB, collectorParse!, resolveIdentity, NEWER_POLICY)).toBe(2);
   expect(
     await all(
       env,
       "SELECT account_id,policy_version FROM current_account_mappings WHERE source_account_id=?",
       before[COLLECTOR]!.id,
     ),
-  ).toEqual([{ account_id: before[IMPORTER]!.account_id, policy_version: 3 }]);
+  ).toEqual([{ account_id: before[IMPORTER]!.account_id, policy_version: NEWER_POLICY }]);
 }, 60_000);
 
 test("after the rewrite a v2 value that was not staged keeps its own entity", async () => {

@@ -156,6 +156,7 @@ failure, and `no-store` apply before any capability is read.
 | `evidenceHistory`      | boolean                 | false        | true                          | The `取得履歴` ("capture history") route and link exist                                                                                                                                                                                                                                                                                                     |
 | `sharedQuery`          | boolean                 | false        | true                          | Summary counts come from `GET /api/v2/query`, not page arithmetic                                                                                                                                                                                                                                                                                           |
 | `reportArtifacts`      | boolean                 | false        | `report_artifacts` present    | The `評価レポート` ("valuation reports") route and link exist; the report routes are requested                                                                                                                                                                                                                                                              |
+| `pendingDecisions`     | boolean                 | false        | true                          | The ホーム page's `判断待ち` panel exists and `GET /api/v2/decisions/pending` is requested ([ADR 0126](adr/0126-pending-decisions-summary.md)); a store without the route is never probed                                                                                                                                                                   |
 
 `balancesV2` is the one capability that also depends on stored state: the
 production Worker advertises it only when the balance projection has a sealed
@@ -229,11 +230,13 @@ others) shows only `表示対象の記録がありません` ("there are no reco
 even though the preview API still serves the fixtures
 ([synthetic display test](../apps/web/test/synthetic-display.browser.test.ts)).
 The preview is therefore a check of the shell and that guard, not of the
-financial pages. `収集スケジュール` ("collection schedules") (`/schedules`), `監査ログ` ("audit log") (`/audit`) and
+financial pages. `収集スケジュール` ("collection schedules") (`/schedules`), `監査ログ` ("audit log") (`/audit`),
+`依頼の一覧` ("request list") (`/operations`) and
 `依頼の経過` ("request progress") (`/operations/op_<id>`) are drawn outside that guard, but the
-preview serves neither `/api/ops/v1/schedules`, `/api/v2/audit` nor
-`/api/ops/v1/operations/{id}`: the schedules page shows its load-error
-messages, the audit page says that this source provides no audit log, and the
+preview serves none of `/api/ops/v1/schedules`, `/api/v2/audit`,
+`/api/ops/v1/operations` and `/api/ops/v1/operations/{id}`: the schedules page shows its load-error
+messages, the audit page says that this source provides no audit log, the
+request list says that this source does not provide it, and the
 operation page says the operation is not found.
 
 `mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata

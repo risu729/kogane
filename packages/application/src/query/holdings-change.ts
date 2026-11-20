@@ -4,7 +4,9 @@
 //
 //   1. `queryDatedState` on each date, narrowed by source only (never by
 //      account: a capture whose identity is not recorded yet must still count
-//      as listing its holdings);
+//      as listing its holdings), without the count of the statements before
+//      the payable window, which no holding needs (its context id records
+//      no count either: ADR 0019, amendment of 2026-11-18);
 //   2. `DATED_POSITION_QUANTITIES_SQL`: each listed position's decimal-v1
 //      quantity, by key, for both dates in one statement;
 //   3. `DATED_SNAPSHOT_UNITS_SQL`: each chosen snapshot's fetch unit, by key;
@@ -22,7 +24,7 @@ import {
   type HoldingsChangeSide,
 } from "../../../domain/src/holdings-change.ts";
 import { instrumentRef } from "../../../domain/src/price-sources.ts";
-import type { ReportedState } from "../../../domain/src/reported-state.ts";
+import type { UncountedReportedState } from "../../../domain/src/reported-state.ts";
 import { parseLocalDate } from "../../../domain/src/time.ts";
 import {
   DATED_POSITION_CONTAINER_PARSERS,
@@ -89,7 +91,7 @@ function idOf(ref: string, prefix: "position:" | "artifact:"): number {
 }
 
 function sideOf(
-  state: ReportedState,
+  state: UncountedReportedState,
   quantities: ReadonlyMap<number, DatedPositionQuantityRow>,
   units: ReadonlyMap<number, string | null>,
 ): HoldingsChangeSide {
@@ -173,11 +175,15 @@ export async function queryHoldingsChange(
   }
 
   const narrowed = request.source === undefined ? {} : { source: request.source };
-  let states: [ReportedState, ReportedState];
+  let states: [UncountedReportedState, UncountedReportedState];
   try {
     states = await Promise.all([
-      queryDatedState(sql, { date: request.from, ...narrowed }),
-      queryDatedState(sql, { date: request.to, ...narrowed }),
+      queryDatedState(sql, {
+        date: request.from,
+        ...narrowed,
+        includeStatementsBeforeWindow: false,
+      }),
+      queryDatedState(sql, { date: request.to, ...narrowed, includeStatementsBeforeWindow: false }),
     ]);
   } catch (error) {
     if (error instanceof DatedStateLimitError) refuse("dated_state_limit_exceeded");

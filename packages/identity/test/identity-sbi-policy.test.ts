@@ -1,11 +1,14 @@
-// SBI Securities identity policy versions (ADR 0113). Policy 1 gave a
-// security code with no RIC, no MIC and no country the placeholder scope
-// `unknown-country`, so two different securities sharing such a code shared
-// one identifier. Policy 2 maps that shape `unresolved`, scoped to its fetch
-// run. Every other shape plans exactly as policy 1 did. Synthetic inputs only.
+// SBI Securities identity policy versions. Policy 1 gave a security code with
+// no RIC, no MIC and no country the placeholder scope `unknown-country`, so
+// two different securities sharing such a code shared one identifier. Policy
+// 2 maps that shape `unresolved`, scoped to its fetch run (ADR 0113). Policies
+// 1 and 2 left a foreign custody or cash-balance row with no account
+// discriminator on the bare `sbi-securities:foreign` reference that the
+// foreign cash history uses; policy 3 scopes it to its fetch run (ADR 0117).
+// Every other shape plans exactly as policy 1 did. Synthetic inputs only.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import type { ArtifactMeta, Observation } from "../../parsers/src/types.ts";
+import type { ArtifactMeta, Observation, Parser } from "../../parsers/src/types.ts";
 import { sbiAccountAssetsCurrent } from "../../parsers/src/parsers/sbi-account-assets-current.ts";
 import { sbiAccountAssetsHistory } from "../../parsers/src/parsers/sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "../../parsers/src/parsers/sbi-domestic-cash-positions.ts";
@@ -15,8 +18,13 @@ import { sbiForeignCashHistory } from "../../parsers/src/parsers/sbi-foreign-cas
 import { sbiForeignCashPositions } from "../../parsers/src/parsers/sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "../../parsers/src/parsers/sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "../../parsers/src/parsers/sbi-yen-detail-history.ts";
-import { SBI_SECURITIES_POLICY_VERSION, sbiIdentity } from "../src/sbi.ts";
-import type { IdentityInput, InstrumentIdentity } from "../src/types.ts";
+import {
+  SBI_SCOPELESS_SECURITY_POLICY_VERSION,
+  SBI_SECURITIES_POLICY_VERSION,
+  SBI_UNDISCRIMINATED_ACCOUNT_POLICY_VERSION,
+  sbiIdentity,
+} from "../src/sbi.ts";
+import type { AccountIdentity, IdentityInput, InstrumentIdentity } from "../src/types.ts";
 
 function input(patch: Partial<IdentityInput> = {}): IdentityInput {
   return {
@@ -68,8 +76,10 @@ const security = (row: IdentityInput, policyVersion: number | undefined): Instru
 const identifier = (item: InstrumentIdentity) => [item.namespace, item.scope, item.value];
 
 describe("SBI Securities identity policy versions", () => {
-  test("the scopeless security rule starts at policy 2", () => {
-    expect(SBI_SECURITIES_POLICY_VERSION).toBe(2);
+  test("the scopeless security rule starts at policy 2, the undiscriminated account rule at 3", () => {
+    expect(SBI_SCOPELESS_SECURITY_POLICY_VERSION).toBe(2);
+    expect(SBI_UNDISCRIMINATED_ACCOUNT_POLICY_VERSION).toBe(3);
+    expect(SBI_SECURITIES_POLICY_VERSION).toBe(3);
   });
 
   test("policy 1 golden: a code with no RIC, MIC or country is recorded as it was", () => {
@@ -168,11 +178,13 @@ describe("SBI Securities identity policy versions", () => {
 
   test("a resolver call without a version applies the newest rules", () => {
     const row = scopeless("Synthetic one", 4);
-    expect(at(row, undefined)).toEqual(at(row, 2));
-    expect(at(row, 10)).toEqual(at(row, 2));
+    expect(at(row, undefined)).toEqual(at(row, 3));
+    expect(at(row, 10)).toEqual(at(row, 3));
+    // Policy 3 changes nothing for a row that states its discriminator.
+    expect(at(row, 3)).toEqual(at(row, 2));
   });
 
-  test("every shape with a RIC, a MIC or a country plans identically under both versions", () => {
+  test("every shape with a RIC, a MIC or a country plans identically under every version", () => {
     const rows: IdentityInput[] = [
       // Foreign with a country and no RIC: scope is the country.
       input({
@@ -212,10 +224,13 @@ describe("SBI Securities identity policy versions", () => {
       // No code at all stays a missing identifier under both versions.
       input({ securityCode: null, extra: { specificAccountCode: "SPECIFIC" } }),
     ];
-    for (const row of rows) expect(at(row, 2)).toEqual(at(row, 1));
+    for (const row of rows) {
+      expect(at(row, 2)).toEqual(at(row, 1));
+      expect(at(row, 3)).toEqual(at(row, 1));
+    }
   });
 
-  test("every SBI parser fixture plans identically under both versions", () => {
+  test("every SBI parser fixture plans identically under every version", () => {
     const basic = "sbi-securities/2026-08-20/run-20260820-210000-poc01";
     const cases = [
       [sbiDomesticCashPositions, "sbi-parser-boundaries/domestic-cash-positions.json"],
@@ -236,6 +251,7 @@ describe("SBI Securities identity policy versions", () => {
       for (const [ordinal, observation] of observations.entries()) {
         const row = fromObservation(observation, ordinal);
         expect(at(row, 2)).toEqual(at(row, 1));
+        expect(at(row, 3)).toEqual(at(row, 1));
       }
     }
   });
@@ -283,6 +299,224 @@ describe("SBI Securities identity policy versions", () => {
         artifact("foreign-trade-records"),
       ),
     ).toThrow();
+  });
+});
+
+describe("SBI Securities foreign rows with no account discriminator (ADR 0117)", () => {
+  const BARE = ["sbi-securities:foreign"];
+  /** A foreign trade row as the trade parser accepts it: the field stated, empty. */
+  const trade = (fetchRunId = 4, specificAccountCode: unknown = "") =>
+    input({
+      kind: "transaction",
+      fetchRunId,
+      securityCode: null,
+      extra: {
+        specificAccountCode,
+        tradeCurrencyCode: "USD",
+        settlementCurrencyCode: "USD",
+        securities: { securitiesCode: "SYNX", countryCode: "US", ric: "SYNX.O" },
+      },
+    });
+  /** A foreign cash history row: its schema has no discriminator field at all. */
+  const ledger = (fetchRunId = 4) =>
+    input({
+      kind: "transaction",
+      fetchRunId,
+      securityCode: null,
+      extra: {
+        valueDate: "2099-01-01",
+        tradeType: "synthetic",
+        description: "synthetic",
+        _kogane: { identityOrigin: "row-occurrence" },
+      },
+    });
+  const position = (fetchRunId = 4) =>
+    input({
+      fetchRunId,
+      extra: { countryCode: "US", securities: { securitiesCode: "SYNX", ric: "SYNX.O" } },
+    });
+  const valuation = (fetchRunId = 4) =>
+    input({
+      kind: "valuation",
+      fetchRunId,
+      securityCode: null,
+      subject: "SYNX",
+      currency: "JPY",
+      extra: position(fetchRunId).extra,
+    });
+  const balance = (fetchRunId = 4) =>
+    input({
+      kind: "balance",
+      fetchRunId,
+      currency: null,
+      instrument: "USD",
+      securityCode: null,
+      extra: { account: {}, currencyEntry: { currencyCode: "USD" }, row: {} },
+    });
+
+  test("policies 1 and 2 golden: every such row is the cash ledger's bare reference", () => {
+    // What policy-1 and policy-2 runs recorded, kept unchanged: the merge.
+    const custody: AccountIdentity = {
+      key: BARE,
+      label: "SBI証券 外国株式（預り区分: 未確定）",
+      role: "foreign-brokerage",
+      status: "unresolved",
+      reason: "exact-provider-account-reference",
+    };
+    for (const version of [1, 2]) {
+      for (const row of [trade(), position(), valuation(), ledger()])
+        expect(at(row, version).account).toEqual(custody);
+      expect(at(balance(), version).account).toEqual({
+        ...custody,
+        label: "SBI証券 外貨預り金（口座区分: 未確定）",
+      });
+      expect(at(trade(), version).issues).toEqual(["missing-specificAccountCode"]);
+      expect(at(balance(), version).issues).toEqual(["missing-accountKind"]);
+      // Another capture names the same reference.
+      expect(at(trade(5), version).account.key).toEqual(BARE);
+    }
+  });
+
+  test("policy 3 golden: a custody row is unresolved on a source account scoped to its fetch run", () => {
+    expect(at(trade(), 3)).toEqual({
+      account: {
+        key: ["sbi-securities:foreign", "missing-specificAccountCode", "fetch-run", "4"],
+        label: "SBI証券 外国株式（預り区分: 未確定）",
+        role: "foreign-brokerage",
+        status: "unresolved",
+        reason: "missing-specificAccountCode",
+      },
+      instruments: at(trade(), 2).instruments,
+      issues: ["missing-specificAccountCode"],
+    });
+    expect(at(balance(), 3).account).toEqual({
+      key: ["sbi-securities:foreign", "missing-accountKind", "fetch-run", "4"],
+      label: "SBI証券 外貨預り金（口座区分: 未確定）",
+      role: "foreign-brokerage",
+      status: "unresolved",
+      reason: "missing-accountKind",
+    });
+    // Only the account changes: units, security and issues are policy 2's.
+    for (const row of [trade(), position(), valuation(), balance()]) {
+      expect(at(row, 3).instruments).toEqual(at(row, 2).instruments);
+      expect(at(row, 3).issues).toEqual(at(row, 2).issues);
+    }
+  });
+
+  test("policy 3 never maps such a row onto the cash ledger, and keeps the namespaces apart", () => {
+    const keys = [trade(), position(), valuation(), balance()].map((row) => at(row, 3).account.key);
+    for (const key of keys) expect(key).not.toEqual(BARE);
+    // Custody rows of one capture share one unresolved account; the cash
+    // balance, in the `accountKind` namespace, does not join them.
+    expect(keys[1]).toEqual(keys[0]);
+    expect(keys[2]).toEqual(keys[0]);
+    expect(keys[3]).not.toEqual(keys[0]);
+    // Another capture gets another account.
+    expect(at(trade(5), 3).account.key).not.toEqual(keys[0]);
+    expect(at(balance(5), 3).account.key).not.toEqual(keys[3]);
+    // A stated value never collides with the scoped key: a provider value
+    // equal to the issue code still keys `specificAccountCode`.
+    expect(at(trade(4, "missing-specificAccountCode"), 3).account.key).toEqual([
+      "sbi-securities:foreign",
+      "specificAccountCode",
+      "missing-specificAccountCode",
+    ]);
+  });
+
+  test("a stated but unusable value is missing; only an absent field marks the cash ledger", () => {
+    for (const value of ["", "   ", null, 7])
+      expect(at(trade(4, value), 3).account.key).toEqual([
+        "sbi-securities:foreign",
+        "missing-specificAccountCode",
+        "fetch-run",
+        "4",
+      ]);
+    // The cash history keeps its bare reference under every version, also an
+    // explicit later one and a call without a version.
+    for (const version of [1, 2, 3, 10, undefined]) {
+      expect(at(ledger(), version)).toEqual(at(ledger(), 1));
+      expect(at(ledger(5), version).account.key).toEqual(BARE);
+    }
+  });
+
+  test("through the real parsers: the four datasets no longer share one account; history keeps its key", () => {
+    // The scenario a reviewer reached with the anonymous fixtures: every
+    // trade, position and balance with its discriminator blanked, in one
+    // capture with the foreign cash history.
+    const json = (path: string) =>
+      JSON.parse(new TextDecoder().decode(fixture(path))) as Record<string, unknown>;
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    const basic = "sbi-securities/2026-08-20/run-20260820-210000-poc01";
+    const trades = json("sbi-parser-boundaries/foreign-trade-records.json") as {
+      pages: { listTradeRecords: { tradeRecords: Record<string, unknown>[] } }[];
+    };
+    for (const page of trades.pages)
+      for (const row of page.listTradeRecords.tradeRecords) row["specificAccountCode"] = "";
+    const positions = json(`${basic}/foreign-cash-positions.json`) as {
+      listSecuritiesBalances: { securitiesBalances: Record<string, unknown>[] };
+    };
+    for (const element of positions.listSecuritiesBalances.securitiesBalances)
+      delete element["specificAccountCode"];
+    const balances = json(`${basic}/foreign-cash-balances.json`) as {
+      listForeignScheduleCashBalances: { foreignCashBalances: Record<string, unknown>[] };
+    };
+    for (const account of balances.listForeignScheduleCashBalances.foreignCashBalances)
+      delete account["accountKind"];
+    const rows = (parser: Parser, bytes: Uint8Array, dataset: string) => {
+      const observations = parser.parse(bytes, artifact(dataset)).observations;
+      expect(observations.length).toBeGreaterThan(0);
+      return observations.map((observation, ordinal) => fromObservation(observation, ordinal));
+    };
+    const datasets = {
+      history: rows(
+        sbiForeignCashHistory,
+        fixture("sbi-parser-boundaries/foreign-cash-history.json"),
+        "foreign-cash-history",
+      ),
+      trade: rows(sbiForeignTradeRecords, encode(trades), "foreign-trade-records"),
+      positions: rows(sbiForeignCashPositions, encode(positions), "foreign-cash-positions"),
+      balances: rows(sbiForeignCashBalances, encode(balances), "foreign-cash-balances"),
+    };
+    expect(new Set(datasets.positions.map((row) => row.kind))).toEqual(
+      new Set(["position", "valuation"]),
+    );
+    const keys = (version: number) =>
+      Object.fromEntries(
+        Object.entries(datasets).map(([name, list]) => [
+          name,
+          [...new Set(list.map((row) => JSON.stringify(at(row, version).account.key)))],
+        ]),
+      );
+    // Policies 1 and 2: all four datasets on the one bare reference (the merge).
+    for (const version of [1, 2])
+      expect(keys(version)).toEqual({
+        history: [JSON.stringify(BARE)],
+        trade: [JSON.stringify(BARE)],
+        positions: [JSON.stringify(BARE)],
+        balances: [JSON.stringify(BARE)],
+      });
+    // Policy 3: history keeps its key; the other three leave it and each other.
+    const custody = JSON.stringify([
+      "sbi-securities:foreign",
+      "missing-specificAccountCode",
+      "fetch-run",
+      "4",
+    ]);
+    expect(keys(3)).toEqual({
+      history: [JSON.stringify(BARE)],
+      trade: [custody],
+      positions: [custody],
+      balances: [
+        JSON.stringify(["sbi-securities:foreign", "missing-accountKind", "fetch-run", "4"]),
+      ],
+    });
+    // Nothing but the account changes, and the history plans are policy 1's.
+    for (const row of datasets.history) expect(at(row, 3)).toEqual(at(row, 1));
+    for (const list of [datasets.trade, datasets.positions, datasets.balances])
+      for (const row of list) {
+        expect(at(row, 3).instruments).toEqual(at(row, 2).instruments);
+        expect(at(row, 3).issues).toEqual(at(row, 2).issues);
+      }
   });
 });
 

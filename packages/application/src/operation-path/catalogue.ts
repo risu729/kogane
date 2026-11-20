@@ -203,8 +203,9 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
-  // The reconstructed state of one account (#610), served while its GET
-  // route is; an unserved tool is not an operation and is not recorded.
+  // The reconstructed state of one account or a scope of several (#610,
+  // ADR 0116), served while its GET route is; an unserved tool is not an
+  // operation and is not recorded.
   "reconstructed-state.read": {
     risk: ["R0"],
     effect: null,
@@ -309,6 +310,15 @@ export const OPERATION_CATALOGUE = {
   // Which bank account each card is debited from (ADR 0114): the
   // カード照合 page's service.
   "card-settlements.debit-accounts": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // What waits for the owner's decision (ADR 0126): the ホーム page's
+  // service, one line per kind of open proposal.
+  "decisions.pending": {
     risk: ["R0"],
     effect: null,
     quiet: "read",

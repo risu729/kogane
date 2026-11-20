@@ -2,8 +2,9 @@
 // (ADR 0073), dated reported state, account correspondence candidates and
 // one source account's correction history (ADR 0077), card statements
 // without a settlement candidate (ADR 0074's 2026-11-07 amendment), each
-// card's debit account (ADR 0114), what was recorded since a time
-// (ADR 0127) and common audit readers.
+// card's debit account (ADR 0114), what waits for the owner's decision
+// (ADR 0126), what was recorded since a time (ADR 0127) and common audit
+// readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -35,6 +36,7 @@ import {
   UNMATCHED_MAX_OFFSET,
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
 import { reviewCardDebitAccounts } from "../../../packages/application/src/query/card-debit-accounts.ts";
+import { pendingDecisionsFor } from "./pending-decisions-api";
 import {
   reviewUpcomingCardBills,
   tokyoDate,
@@ -119,6 +121,8 @@ const schemas = {
   "kogane.card-settlements.debit-accounts": z.strictObject({
     view: z.literal("upcoming").optional(),
   }),
+  // The route takes no parameter.
+  "kogane.decisions.pending": z.strictObject({}),
   // The route's two parameters; the service checks their form and bounds.
   "kogane.changes.since": z.strictObject({
     since: z.string().min(1).max(64),
@@ -183,6 +187,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.card-settlements.debit-accounts":
     "Which bank account each credit card is debited from, the same answer as the operator's カード照合 page. Default view: per card (at most 100; cardsTruncated says when more exist) its newest statement, the provider-stated side (the newest MyJCB 「カード情報」 readings; status named, conflicting, not_named or absent with source_has_no_debit_account_statement or evidence_not_recorded), accepted and undecided candidates per bank account, and the answer: provider-stated, else accepted-settlement (weaker: an amount match a person accepted), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed codes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting). A provider-stated answer with any code is not confirmed: with newer_reading_unresolved the account may have changed. Undecided candidates never answer. view: upcoming (the page's 次回の引落, ?view=upcoming) is compact: bills (each card whose newest statement is due today or later, Asia/Tokyo: card label, statementPeriod, debitDate, amount as exact decimal text or status and reason, debitAccount with answer, account, label, since, codes); byDebitAccount, one line per account and debit date counting every bill to it due by then (cardBills summed exactly) with the account's newest reported balance (never summed) and capturedAt, and covers: yes or no only on exact figures, else unknown with reasons debit_account_unknown, bill_not_exact, balance_not_exact, balance_before_previous_debit, cards_with_unknown_account or cards_with_unknown_due_date; the note other_debits_not_modelled is always there (only known card bills are compared); notListed, other cards with no_statement, payment_date_not_published, no_statement_due, statement_settled or statement_total_refund_or_zero (refund or zero, never netted) and their last statement, never a zero bill. Under records.read and a whole-store read grant. Read-only; it changes no candidate and no setting at any provider.",
+  "kogane.decisions.pending":
+    "What waits for the owner's decision, in one answer under 8 KB, the same as the operator's ホーム page (GET /api/v2/decisions/pending): one line per kind of open proposal (card-settlement.statement: statements with an undecided candidate and no live acceptance; card-ownership.account: accounts those candidates name with no current accepted ownership claim; account-candidate.open/held and instrument-candidate.open/held: the candidate reviews' views; pending-posted.link: undecided pending-to-posted proposals; maintenance-survey.proposal: undecided re-survey proposals of the grant's schedule sources; change-plan.open: planned or approved plans not yet expired), each with its count (complete false: at least countBound), the first ids (at most 5), the oldest proposal time where one is recorded (timeBasis), and its handler: the page, the read tool, the argument an id goes in and the tool that decides it. A line its deployment does not serve, its grant cannot read or its own read refuses past its bounds is unavailable with not_served, unauthorized or budget_exceeded; the other lines still answer. notCovered names the queues it does not count and why. Under records.read and a whole-store read grant. Read-only: it decides, proposes and changes nothing.",
   "kogane.changes.since":
     "What was recorded in the store since an instant, per source, in one answer under 8 KB, the same as GET /api/v2/changes. `since`: an ISO 8601 instant with a zone, at most 31 days back and not in the future; `after`: a source id, to continue an answer the byte bound cut (`next.after` names it). Per source with something new, in source order: `runs` (new fetch runs by their state now, positional in `order.runs`: success, partial, failed, human_required, cancelled, unknown, open = not sealed yet), `captures` (artifacts of those runs), `parses` (new parse runs by state: published, superseded, unadopted, failed, pending), `observations` (rows of the new parse runs a reader may see: transaction, balance, position, valuation), `newestRunAt`, `newestSealedRunId`, `newestParsedAt`, `newestParsedArtifactId`, and `cut`, naming each count that reached its bound and is a lower bound. `unchanged` lists the sources with nothing new. `events` counts the event revisions created since, per kind, first (`new`) or later (`revised`), or is unavailable with not_served. New means recorded at or after `since`, read newest first in recording order within fixed bounds (`bounds`). `handlers` name the existing read tool and argument that list each count's items (kogane.evidence.read, kogane.observations.get, kogane.observations.list, kogane.events.read, and kogane.collection-quality.read for why a source is unchanged; kogane.evidence.read serves only the configured evidence source, so the runs and captures handlers are 404 for any other). `runs` and `captures` need evidence.read and are null without it (`sections`). Counts, closed codes, times and ids only: no amount, label or provider text; nothing is compared by value. `notCovered` names what it does not count. Under records.read and a whole-store read grant. Read-only.",
   "kogane.economic-readiness.read":
@@ -232,6 +238,7 @@ export function readMcpTools(
       case "kogane.accounts.candidates":
       case "kogane.accounts.history":
       case "kogane.economic-readiness.read":
+      case "kogane.decisions.pending":
       case "kogane.changes.since":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
@@ -390,6 +397,15 @@ async function readTool(
         const outcome = await reviewCardDebitAccounts({ grant, sql: d1Executor(env.DB) });
         return outcome.ok
           ? { status: 200, body: { apiVersion: 2, ...outcome.review } }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.decisions.pending": {
+        // The route's own service: capability and perimeter are decided
+        // there, once for both transports.
+        parseRequest(schemas[name], body ?? {});
+        const outcome = await pendingDecisionsFor(env, grant);
+        return outcome.ok
+          ? { status: 200, body: { apiVersion: 2, ...outcome.answer } }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.changes.since": {

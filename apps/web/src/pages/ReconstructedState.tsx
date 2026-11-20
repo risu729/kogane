@@ -1,7 +1,9 @@
-// 残高の再構成: for one account and a range, the balance its provider
-// reported at the start, the balance reconstructed by applying the adopted
-// events to it, and the balance reported at the end, side by side with their
-// difference and the fold's own explanation (docs/reconstructed-state.md).
+// 残高の再構成: for one account, or a scope of up to 20 (ADR 0116), and a
+// range, the balance each provider reported at the start, the balance
+// reconstructed by applying the adopted events to it, and the balance
+// reported at the end, side by side with their difference and the fold's own
+// explanation, per account and unit (docs/reconstructed-state.md). Nothing is
+// added across accounts.
 // The page computes nothing: every figure, status and reason is the server's
 // (`GET /api/v2/reconstructed-state`), shown as exact decimals with closed
 // codes. A difference is shown as a difference, never as an adjustment and
@@ -11,7 +13,7 @@ import { useState, type ReactNode } from "react";
 import { ApiError, useFeatures } from "../api.ts";
 import { validLocalDateText } from "../../../../packages/domain/src/time.ts";
 import { displayLabel } from "../labels.ts";
-import { formProblem } from "../reconstruction-form.ts";
+import { accountsOf, formProblem } from "../reconstruction-form.ts";
 import { SettlementQuantity } from "../reconciliation-display.tsx";
 import {
   useReconstructedState,
@@ -48,7 +50,7 @@ const STATUS: Record<ReconstructedStateResult["status"], { label: string; tone: 
 /** Every reason code of the answer, in words; the code is shown beside it. */
 export const RECONSTRUCTION_REASON_LABELS: Record<string, string> = {
   economic_guard_missing: "この保管庫には経済イベントの採用記録（CORE 0070）がありません",
-  no_reported_container: "この口座の残高を報告する取得元がありません",
+  no_reported_container: "残高を報告する取得元がない口座があります",
   log_empty: "採用のコミット記録がまだありません",
   cut_before_log_start: "指定した時点はコミット記録の開始より前です",
   knowledge_unlogged: "コミット記録に載っていない採用があります（記録開始前の採用など）",
@@ -75,7 +77,7 @@ export const RECONSTRUCTION_REASON_LABELS: Record<string, string> = {
   family_not_evented: "この口座の取引のすべての種類がイベントになってはいません",
   history_coverage_unknown: "この期間の取引履歴がすべて取得されたか分かりません",
   history_gap: "取引履歴に欠けている期間があります",
-  nothing_to_reconstruct: "再構成できる残高がありません",
+  nothing_to_reconstruct: "再構成できる残高がない口座があります",
   positions_not_folded: "保有数量は再構成していません（取得元の表示文字列しかないため）",
 };
 const EXPLANATION: Record<string, { label: string; tone: Tone }> = {
@@ -126,8 +128,9 @@ const COVERAGE: Record<string, string> = {
 /** The route's closed refusal codes, each with a fixed message. */
 export const RECONSTRUCTION_REFUSAL_MESSAGES: Record<string, string> = {
   invalid_query: "条件の形式が正しくありません。",
-  scope_unsupported: "口座は1つだけ指定できます。銘柄ごとの再構成には対応していません。",
-  invalid_account: "口座 ID の形式が正しくありません。",
+  scope_unsupported: "銘柄ごとの再構成には対応していません。",
+  invalid_account: "口座 ID の形式が正しくないか、同じ口座 ID が2回以上指定されています。",
+  too_many_accounts: "口座は20件まで指定できます。",
   invalid_date: "日付を 2026-03-31 のように指定してください。",
   invalid_range: "開始日は終了日より前にしてください。",
   range_too_long: "期間は366日以内にしてください。",
@@ -139,11 +142,11 @@ export const RECONSTRUCTION_REFUSAL_MESSAGES: Record<string, string> = {
   cut_epoch_not_current:
     "指定したコミット記録の世代は現在のものではありません。最新の時点で表示し直してください。",
   set_version_changed: "固定した採用知識の版が変わりました。最新の時点で表示し直してください。",
-  unknown_account: "この口座 ID は登録されていません。",
+  unknown_account: "登録されていない口座 ID があります。",
   scope_restricted: "この権限の範囲では表示できません。",
   capability_missing: "この権限では表示できません。",
   result_limit_exceeded:
-    "この口座の記録は多すぎて、一度に再構成できません。一部だけの再構成はしません。",
+    "指定した口座の記録は多すぎて、一度に再構成できません。一部だけの再構成はしません。",
 };
 
 const reason = (code: string): string => displayLabel(RECONSTRUCTION_REASON_LABELS, code);
@@ -249,7 +252,14 @@ function Components({ cell }: { cell: ReconstructedCell }): ReactNode {
   );
 }
 
-function CellTable({ cells }: { cells: ReconstructedCell[] }): ReactNode {
+function CellTable({
+  cells,
+  several,
+}: {
+  cells: ReconstructedCell[];
+  /** The scope names several accounts: each row says whose it is. */
+  several: boolean;
+}): ReactNode {
   return (
     <div className="table-scroll" role="region" aria-label="残高ごとの比較" tabIndex={0}>
       <table className="reconstructed-state-table">
@@ -260,6 +270,7 @@ function CellTable({ cells }: { cells: ReconstructedCell[] }): ReactNode {
         </caption>
         <thead>
           <tr>
+            {several ? <th scope="col">口座</th> : null}
             <th scope="col">単位</th>
             <th scope="col" className="num">
               開始日の報告値
@@ -278,7 +289,14 @@ function CellTable({ cells }: { cells: ReconstructedCell[] }): ReactNode {
         </thead>
         <tbody>
           {cells.map((cell) => (
-            <tr key={`${cell.measure}/${cell.unitRef ?? cell.unidentifiedRef ?? ""}`}>
+            <tr
+              key={`${cell.accountId}/${cell.measure}/${cell.unitRef ?? cell.unidentifiedRef ?? ""}`}
+            >
+              {several ? (
+                <td>
+                  <code>{cell.accountId}</code>
+                </td>
+              ) : null}
               <th scope="row">
                 {cell.unitRef ?? <Nullable value={null} placeholder="銘柄未特定" />}
                 <div className="dim">{cell.measure === "position" ? "数量" : "残高"}</div>
@@ -316,7 +334,13 @@ function CellTable({ cells }: { cells: ReconstructedCell[] }): ReactNode {
   );
 }
 
-function DispositionTable({ rows }: { rows: LegDispositionRecord[] }): ReactNode {
+function DispositionTable({
+  rows,
+  several,
+}: {
+  rows: LegDispositionRecord[];
+  several: boolean;
+}): ReactNode {
   return (
     <div className="table-scroll" role="region" aria-label="イベントの扱いの一覧" tabIndex={0}>
       <table className="reconstructed-state-table">
@@ -324,6 +348,7 @@ function DispositionTable({ rows }: { rows: LegDispositionRecord[] }): ReactNode
         <thead>
           <tr>
             <th scope="col">イベント</th>
+            {several ? <th scope="col">口座</th> : null}
             <th scope="col">単位</th>
             <th scope="col">扱い</th>
             <th scope="col">理由</th>
@@ -335,6 +360,11 @@ function DispositionTable({ rows }: { rows: LegDispositionRecord[] }): ReactNode
               <td>
                 <code>{row.ref}</code>
               </td>
+              {several ? (
+                <td>
+                  <Nullable value={row.accountId} />
+                </td>
+              ) : null}
               <td>
                 <Nullable value={row.unitRef} />
               </td>
@@ -356,6 +386,62 @@ function DispositionTable({ rows }: { rows: LegDispositionRecord[] }): ReactNode
         </tbody>
       </table>
     </div>
+  );
+}
+
+const FAMILY_COVERAGE: Record<string, string> = {
+  evented: "すべての種類がイベントになっています",
+  "not-evented": "イベントになっていない種類があります",
+  unknown: "イベントになっているか分かりません",
+  "not-declared": "宣言されていません",
+};
+
+/** Each account of a scope of several: whether it is reported at each end, and its cells. */
+function AccountTable({
+  accounts,
+}: {
+  accounts: NonNullable<ReconstructedStateResult["reconstruction"]>["accounts"];
+}): ReactNode {
+  return (
+    <Panel
+      id="reconstructed-accounts-status"
+      title="口座ごとの状況"
+      count={`${accounts.length}件`}
+      note="口座ごとに並べるだけで、口座をまたいで合算はしません。"
+    >
+      <div className="table-scroll" role="region" aria-label="口座ごとの状況の一覧" tabIndex={0}>
+        <table className="reconstructed-state-table">
+          <caption className="visually-hidden">口座ごとの状況の一覧</caption>
+          <thead>
+            <tr>
+              <th scope="col">口座</th>
+              <th scope="col">開始日の取得元</th>
+              <th scope="col">終了日の取得元</th>
+              <th scope="col" className="num">
+                残高の数
+              </th>
+              <th scope="col">取引の種類</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((account) => (
+              <tr key={account.accountId}>
+                <th scope="row">
+                  <code>{account.accountId}</code>
+                </th>
+                <td>{account.startContainer ? "あり" : "なし"}</td>
+                <td>{account.endContainer ? "あり" : "なし"}</td>
+                <td className="num">{account.cells}</td>
+                <td>
+                  {displayLabel(FAMILY_COVERAGE, account.familyCoverage)}{" "}
+                  <code className="dim">{account.familyCoverage}</code>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
@@ -509,6 +595,7 @@ function Answer({
 }): ReactNode {
   const status = STATUS[answer.status];
   const cells = answer.reconstruction?.cells ?? [];
+  const several = answer.accounts.length > 1;
   return (
     <>
       <Panel
@@ -518,8 +605,13 @@ function Answer({
       >
         <div className="panel-body">
           <Kv>
-            <KvRow label="口座">
-              <code>{answer.account}</code>
+            <KvRow label={several ? `口座（${answer.accounts.length}件）` : "口座"}>
+              {answer.accounts.map((account, index) => (
+                <span key={account}>
+                  {index === 0 ? null : " "}
+                  <code>{account}</code>
+                </span>
+              ))}
             </KvRow>
             <KvRow label="基準">現金（入出金の計上日）</KvRow>
             <KvRow label="判定">
@@ -529,6 +621,11 @@ function Answer({
           {answer.reasons.length === 0 ? null : (
             <ReasonList codes={answer.reasons} label="判定の理由" />
           )}
+          {several ? (
+            <p className="footnote">
+              判定と理由は指定した口座全体のものです。どの口座の理由かは、下の口座ごとの状況と各残高の不足で確認できます。
+            </p>
+          ) : null}
         </div>
       </Panel>
       {answer.reconstruction === null ? (
@@ -555,9 +652,10 @@ function Answer({
                 </p>
               </div>
             ) : (
-              <CellTable cells={cells} />
+              <CellTable cells={cells} several={several} />
             )}
           </Panel>
+          {several ? <AccountTable accounts={answer.reconstruction.accounts} /> : null}
           {answer.reported !== null && answer.reported.positionsNotFolded > 0 ? (
             <Notice tone="warn" role="note">
               報告された保有銘柄 {answer.reported.positionsNotFolded} 件は、
@@ -589,7 +687,7 @@ function Answer({
               title="イベントの扱い"
               count={`${answer.reconstruction.dispositions.length}件`}
             >
-              <DispositionTable rows={answer.reconstruction.dispositions} />
+              <DispositionTable rows={answer.reconstruction.dispositions} several={several} />
             </Panel>
           )}
         </>
@@ -607,8 +705,10 @@ export function ReconstructedStatePage(): ReactNode {
   const today = tokyoToday();
   const [chosen, setChosen] = useViewState("reconstructedState.query");
   const [draft, setDraft] = useState<ReconstructedStateQuery>(
-    () => chosen ?? { account: "", from: monthBefore(today), to: today, cut: { kind: "latest" } },
+    () => chosen ?? { accounts: [], from: monthBefore(today), to: today, cut: { kind: "latest" } },
   );
+  // The field's text as typed: one id, or several separated by spaces or commas.
+  const [accountText, setAccountText] = useState(() => draft.accounts.join(" "));
   const [epochDraft, setEpochDraft] = useState(
     draft.cut.kind === "latest" ? "" : draft.cut.coreEpoch,
   );
@@ -632,6 +732,7 @@ export function ReconstructedStatePage(): ReactNode {
   ].sort();
   const request: ReconstructedStateQuery = {
     ...draft,
+    accounts: accountsOf(accountText),
     cut:
       mode === "latest"
         ? { kind: "latest" }
@@ -690,10 +791,11 @@ export function ReconstructedStatePage(): ReactNode {
                   type="text"
                   name="reconstructed-account"
                   list="reconstructed-accounts"
-                  value={draft.account}
+                  value={accountText}
                   autoComplete="off"
                   spellCheck={false}
-                  onChange={(event) => setDraft({ ...draft, account: event.target.value.trim() })}
+                  aria-describedby="reconstructed-account-hint"
+                  onChange={(event) => setAccountText(event.target.value)}
                 />
                 <datalist id="reconstructed-accounts">
                   {accounts.map((account) => (
@@ -775,8 +877,12 @@ export function ReconstructedStatePage(): ReactNode {
               <button className="button" type="submit" disabled={problem !== null}>
                 表示する
               </button>
-              {problem !== null && draft.account !== "" ? <p role="alert">{problem}</p> : null}
+              {problem !== null && accountText.trim() !== "" ? <p role="alert">{problem}</p> : null}
             </form>
+            <p id="reconstructed-account-hint" className="footnote">
+              複数の口座は、口座 ID
+              をスペースまたはカンマで区切って20件まで指定できます。口座ごとに並べて表示し、合算はしません。
+            </p>
           </Panel>
           {chosen === null ? (
             <EmptyState>

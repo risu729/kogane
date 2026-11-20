@@ -484,7 +484,7 @@ the browser renders both views with the existing accessibility checks.
 
 ## Amendment: V Point recovery is current state, while failed receipts remain history (2026-11-11)
 
-Status: proposed. Related: [#1301](https://github.com/risu729/kogane/issues/1301).
+Status: accepted (merged 2026-11-13 in [#1312](https://github.com/risu729/kogane/pull/1312)). Related: [#1301](https://github.com/risu729/kogane/issues/1301).
 
 Context. Both observed daily expired-session reads completed automatic email
 login and a separate successful post-auth collection. The original scheduled

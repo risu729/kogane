@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -7,6 +7,7 @@ import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
 import { cardSettlementImpact } from "../../../packages/domain/src/card-settlement.ts";
 import type { CardSettlementReview } from "../../../packages/domain/src/card-settlement-review.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -328,8 +329,13 @@ const truncated = {
   ],
 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("card settlement review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let review = settlementReview();
@@ -345,6 +351,9 @@ describe.if(runnable)("card settlement review", () => {
   let related: CardSettlementReview[] = [];
   const relatedReads: URLSearchParams[] = [];
   let unmatchedPage: unknown = unmatched;
+  /** The unmatched pages by `offset`, when a test serves more than one. */
+  let unmatchedPages: Map<string, unknown> | null = null;
+  const unmatchedReads: string[] = [];
   let debitAccountsPage: unknown = debitAccounts;
   const debitAccountReads: string[] = [];
   let upcomingPage: unknown = upcomingBills;
@@ -363,6 +372,8 @@ describe.if(runnable)("card settlement review", () => {
     related = [];
     relatedReads.length = 0;
     unmatchedPage = unmatched;
+    unmatchedPages = null;
+    unmatchedReads.length = 0;
     debitAccountsPage = debitAccounts;
     debitAccountReads.length = 0;
     upcomingPage = upcomingBills;
@@ -468,8 +479,11 @@ describe.if(runnable)("card settlement review", () => {
               limit: 50,
             },
           });
-        if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched")
-          return Response.json(unmatchedPage);
+        if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched") {
+          const offset = url.searchParams.get("offset") ?? "0";
+          unmatchedReads.push(offset);
+          return Response.json(unmatchedPages?.get(offset) ?? unmatchedPage);
+        }
         if (
           url.pathname === "/api/v2/reconciliation/card-debit-accounts" &&
           url.search === "?view=upcoming"
@@ -556,7 +570,6 @@ describe.if(runnable)("card settlement review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -823,6 +836,89 @@ describe.if(runnable)("card settlement review", () => {
     expect(await section.locator(".unmatched-allocation").count()).toBe(50);
     expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
+    await page.close();
+  });
+
+  test("a later page the list no longer reaches keeps its pager and never says no statement is left", async () => {
+    // A statement leaves this list once the sweep pairs it with a debit, so a
+    // later page read again can come back empty while the first still lists
+    // statements. Every value is invented.
+    const later = (refs: number[]) => ({
+      ...unmatched,
+      query: { offset: 50 },
+      items: refs.map((ref) => ({
+        ...unmatched.items[1]!,
+        statement: {
+          ...unmatched.items[1]!.statement,
+          ref: { kind: "balance", id: `balance:${ref}`, revision: "parse_run:5" },
+          period: "2098-03",
+        },
+      })),
+    });
+    unmatchedPages = new Map<string, unknown>([
+      ["0", { ...unmatched, nextOffset: 50, nextPage: "offered" }],
+      ["50", later([71])],
+    ]);
+    const page = await open();
+    const section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByText("2098-01", { exact: false }).waitFor();
+    await section.getByRole("button", { name: "次の請求", exact: true }).click();
+    await section.getByText("2098-03", { exact: false }).waitFor();
+    // The sweep pairs the statements of the later page; the page is read again.
+    unmatchedPages.set("50", later([]));
+    const reads = unmatchedReads.length;
+    await page.getByRole("button", { name: "表示を更新", exact: true }).click();
+    await section.getByText("2098-03", { exact: false }).waitFor({ state: "detached" });
+    expect(unmatchedReads.length).toBeGreaterThan(reads);
+    expect(unmatchedReads.at(-1)).toBe("50");
+    const text = await section.innerText();
+    expect(text).not.toContain("照合候補のない請求はありません。");
+    expect(text).toContain("このページに表示する請求はありません。");
+    // The way back to the statements the first page still lists stays.
+    const back = section.getByRole("button", { name: "先頭に戻る", exact: true });
+    expect(await back.isDisabled()).toBe(false);
+    await back.click();
+    await section.getByText("2098-01", { exact: false }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  });
+
+  test("two sections that fail to load each offer a retry named for its own read", async () => {
+    // Shapes the client refuses, so both reads fail on one page.
+    debitAccountsPage = { schemaVersion: "synthetic-invalid" };
+    unmatchedPage = { schemaVersion: "synthetic-invalid" };
+    const page = await open();
+    for (const label of ["カードの引落口座", "照合候補のない請求"])
+      await page.getByText(`${label}を読み込めませんでした`, { exact: false }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    // Each retry repeats its own read and no other. The response is awaited
+    // from before the click, so a fast answer is never missed; 次回の引落 reads
+    // the debit-account path too (view=upcoming), so its answer never counts.
+    for (const [label, path, own, other] of [
+      [
+        "照合候補のない請求",
+        "/api/v2/reconciliation/card-statements-unmatched",
+        unmatchedReads,
+        debitAccountReads,
+      ],
+      [
+        "カードの引落口座",
+        "/api/v2/reconciliation/card-debit-accounts",
+        debitAccountReads,
+        unmatchedReads,
+      ],
+    ] as const) {
+      const ownBefore = own.length;
+      const otherBefore = other.length;
+      const answered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === path && url.searchParams.get("view") !== "upcoming";
+      });
+      await page.getByRole("button", { name: `${label}を再試行`, exact: true }).click();
+      await answered;
+      expect(own.length).toBe(ownBefore + 1);
+      expect(other.length).toBe(otherBefore);
+    }
     await page.close();
   });
 

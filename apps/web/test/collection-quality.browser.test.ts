@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -12,6 +12,7 @@ import {
 } from "../../../packages/application/src/query/collection-quality.ts";
 import { queryCollectionQualityStatus } from "../../../packages/application/src/query/collection-quality-status.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 /** Every age is counted to this instant: two Tokyo days after the synthetic capture. */
 const AS_OF = "2099-01-03T00:00:00.000Z";
 const client = join(import.meta.dir, "../dist-production");
@@ -19,8 +20,13 @@ const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath()
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] === "true"))
   process.exitCode = 1;
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
 describe.if(runnable)("collection quality browser", () => {
-  let browser: Browser, server: ReturnType<typeof Bun.serve>, store: QualityStore, origin: string;
+  let server: ReturnType<typeof Bun.serve>, store: QualityStore, origin: string;
   const requests: { path: string; method: string }[] = [];
   beforeAll(async () => {
     store = new QualityStore();
@@ -135,7 +141,6 @@ describe.if(runnable)("collection quality browser", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60000);
   afterAll(async () => {
     await browser?.close();

@@ -34,7 +34,12 @@ carry their connection/account keys). Changing the principal in that slot
 requires a new producer/connection epoch, not silently reusing it. No rule
 claims multi-login identity from a parser constant. Provider-local accounts
 remain visibly provider-local until evidence or an explicit correction links
-them. Ordinal-only card/reward references are scoped to the fetch run.
+them. Ordinal-only card/reward references are scoped to the fetch run, and
+so, from identity policy 3, is an SBI Securities foreign custody or cash
+balance row that states no account discriminator, so it never joins the
+foreign cash history's account
+([ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md),
+[SBI](identity-sbi.md)).
 
 `source_accounts` preserve the exact reference; `accounts` are the independent
 targets. Append-only `account_mappings` can link several references to one
@@ -180,7 +185,11 @@ second candidate or separated pair for the bare code. Example: `7203` held on
 An adoption is an `assign` identity command under actor
 `rule:instrument-auto-v1`: a `rule` mapping revision onto the listing's
 instrument and a `rule` `assign` decision naming both identifiers, guarded on
-both identifiers' revisions as read, and a `lane` audit record. A later
+both identifiers' revisions as read and on no `listed_as` relation, in any
+status, naming either identifier or either instrument when it is written (a
+keep-apart or a proposal recorded after the read stops it,
+[ADR 0055 amendment 2026-11-19](adr/0055-instrument-candidates.md#amendment-2026-11-19-the-adoption-re-checks-listed_as-when-it-writes)),
+and a `lane` audit record. A later
 identity policy version does not revert it. A person or an agent undoes it
 with `identity.assign` of the bare code back onto its own instrument, which
 the rule never touches again (a `release-override` of that mapping hands it
@@ -208,7 +217,10 @@ policy, bounds and closed codes; the summary counts of the whole read.
   proposed candidate's buttons plan its own `identity.assign` or
   `relation.reject` payload with the reason a person writes, and open the
   confirmation screen; approval and commit happen there. A held candidate
-  offers keeping apart only.
+  offers keeping apart only. A decision moves a candidate out of its view,
+  so a later page can come back empty while the view still holds items: the
+  page then says that this page lists nothing, shows the view's total and
+  keeps 先頭に戻る, and says the view is empty only when its total is zero.
 
 Each request walks every current identity observation once, so its cost is
 linear in captured history (about 0.8 to 0.95 s per 100,000 on workerd and
@@ -345,6 +357,8 @@ store: `GET /api/identity/account-candidates?view=&offset=&sourceAccountId=`
 and the page `/identities/account-candidates` (`口座の対応候補`), whose
 buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
+As on the instrument page, an emptied later page says that it lists nothing
+and keeps its pager; only a view total of zero says the view is empty.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
 Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),

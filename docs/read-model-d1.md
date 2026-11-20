@@ -162,9 +162,36 @@ A build writes rows while `building`, and:
 - each chunk and its checkpoint are one D1 batch, so a statement error rolls
   both back (G2-08), and a re-sent chunk is a no-op only when its content is
   identical — different content for a row that exists raises `projection chunk
-  conflict` in a trigger (G2-07);
+  conflict` in a trigger (G2-07). The reward writer skips only a row whose
+  primary key is written (`ON CONFLICT … DO NOTHING`), so a reward row that
+  fails a CHECK or NOT NULL raises as well
+  ([rewards.md](rewards.md#read-tables-migration-0002_reward_readsql-current-expiry-rows-use-0004_reward_unclassified_bucketssql)).
+  Limit: the balance writer's `INSERT OR IGNORE` skips such a row without an
+  error and moves the checkpoint past it; the build then stops at the
+  verification before the seal (`projection_rows_unverified`) on each later tick,
+  and nothing names the row. Its input refs (`snapshot_input_refs`) are inserted
+  the same way, so a ref that fails a CHECK is left out and the build starts
+  without it; no step compares the stored refs with the plan;
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
   longer write, seal or publish (G2-09);
+- the balance writer (`packages/storage-d1/src/read/writer.ts`) skips only a
+  row or input ref whose primary key is already written:
+  `ON CONFLICT(snapshot_id,scope_key) DO NOTHING` for
+  `current_balance_projection` and
+  `ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING` for
+  `snapshot_input_refs`. A row that fails a CHECK or NOT NULL, or a new scope
+  at a `row_seq` already written, raises its constraint: the chunk and its
+  checkpoint roll back, the tick logs `balance_projection_failed` with the
+  error's class as its code, and the build stays `building` and unpublished at
+  the chunk after its checkpoint; the code names neither the row nor the
+  constraint. An input ref that fails a constraint fails the batch that starts
+  the build, so no build starts. Two starts that read the same next attempt
+  name one snapshot id; the second one's refs hit the primary key and are
+  skipped, and the writer lease decides which start builds it
+  (`test/read-writer.test.ts`, "only a re-sent key is skipped").
+  `snapshot_input_refs` has no digest-conflict trigger: a `(kind, id)` a plan
+  listed twice would keep its first row, and the balance plan lists each once
+  (`services/processor/src/read-projection.ts` keys decisions by id);
 - the seal and the pointer switch are one batch. The pointer moves only to a
   snapshot at least as current as the published one under the same epoch, so a
   build that finishes late is complete but not published (G2-10);

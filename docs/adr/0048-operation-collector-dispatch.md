@@ -733,7 +733,7 @@ change that records its result removes `prestia-bank` until the cause is fixed.
 
 ## Amendment 2026-11-12: Retryable registration visibility
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-12 in [#1314](https://github.com/risu729/kogane/pull/1314)).
 
 ### Context
 
@@ -775,7 +775,7 @@ outranks historical retryable refusals. Malformed legacy failure text becomes
 
 ## Amendment 2026-11-12: Current publication after the tracking horizon
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-13 in [#1324](https://github.com/risu729/kogane/pull/1324)).
 
 ### Context
 
@@ -828,6 +828,9 @@ publication. A newer unrelated run is not evidence for this operation.
   scan, new capability, grant, resource or provider action.
 - The detail page explicitly distinguishes the original deadline failure
   from current publication. The operations list remains a stored summary.
+  (Since [ADR 0086's second 2026-11-18 amendment](0086-operator-operations-list.md#amendment-2026-11-18-a-listed-requests-status-is-the-one-its-record-reads)
+  the list shows the status the record reads, `projected` included; it still
+  carries no current result.)
 - This implementation supplies the same-operation reporting contract; it
   does not itself prove the original production run published or close its
   production acceptance gate.
