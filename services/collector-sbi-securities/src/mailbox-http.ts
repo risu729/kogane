@@ -226,7 +226,8 @@ export class MailboxHttp {
         fail();
       }
       await cancel(response);
-      referer = current;
+      // A one-time hand-off URL is never sent onward as a referer.
+      if (!via(new URL(current))) referer = current;
       current = next.href;
       method = "GET";
       body = undefined;

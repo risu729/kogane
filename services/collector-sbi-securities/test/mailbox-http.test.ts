@@ -165,6 +165,56 @@ test("admits only the exact Edeliv hand-off as an intermediate hop, never as a l
   expect(cancelled).toBe(true);
 });
 
+test("the hand-off's own redirect is still checked, loops are refused and its URL is never a referer", async () => {
+  for (const [onward, requests] of [
+    ["https://evil.invalid/", 2],
+    ["https://m.sbisec.co.jp/switchnaviMain?x=1", 2],
+    [HANDOFF, 2],
+  ] as const) {
+    const urls: string[] = [];
+    const client = new MailboxHttp([], async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+      urls.push(url);
+      return new Response(null, {
+        status: 302,
+        headers: { location: url === MAILBOX_MAIN_LINK ? HANDOFF : onward },
+      });
+    });
+    await expect(client.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(urls).toHaveLength(requests);
+  }
+  let hops = 0;
+  const chained = new MailboxHttp([], async () => {
+    hops++;
+    return new Response(null, {
+      status: 302,
+      headers: { location: `https://m.sbisec.co.jp/switchnavi?page=Edeliv&parm=${hops}` },
+    });
+  });
+  await expect(chained.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+  expect(hops).toBe(5);
+  const { fetcher, calls } = sequence();
+  await new MailboxHttp([], fetcher).open();
+  expect(new Headers(calls[2]!.init.headers).get("referer")).toBe(MAILBOX_MAIN_LINK);
+  const direct = sequence(async () => html());
+  const directFetcher = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.href === MAILBOX_MAIN_LINK) {
+      direct.calls.push({ url: url.href, init });
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://m.sbisec.co.jp/switchnaviMain" },
+      });
+    }
+    return direct.fetcher(input, init);
+  };
+  await new MailboxHttp([], directFetcher).open();
+  expect(direct.calls.map((call) => call.url).slice(0, 2)).toEqual([
+    MAILBOX_MAIN_LINK,
+    "https://m.sbisec.co.jp/switchnaviMain",
+  ]);
+});
+
 test("refuses unobserved redirects before sending a request or secret to the target and cancels response bodies", async () => {
   for (const location of [
     "https://evil.invalid/",

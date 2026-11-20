@@ -439,7 +439,9 @@ Seven scheduled mailbox attempts through 2026-11-19, after the archive
 shipped in [#1281](https://github.com/risu729/kogane/pull/1281), each ended in a
 mailbox terminal with `sbi_mailbox_transport_failed`, while the financial
 terminal of the same run published. The owner's ordinary Chrome session showed
-why, with only paths, statuses and form shapes read. The main-site report link
+a likely cause, with only paths, statuses and form shapes read; later steps
+share the same code, so the next scheduled run decides whether it was the only
+one. The main-site report link
 answers with an HTTP redirect (a `fetch` with `redirect: "manual"` returned an
 opaque redirect) to the mobile site's one-time hand-off
 `https://m.sbisec.co.jp/switchnavi?page=Edeliv&parm=<one-time>&SwitchFromSite=site4.sbisec.co.jp&...`,
@@ -449,7 +451,8 @@ hop is a script or meta-refresh navigation. The collector admitted only a
 direct redirect to `switchnaviMain` and refused the hand-off. It now admits
 that hand-off as an intermediate redirect only (HTTPS, host `m.sbisec.co.jp`,
 path `/switchnavi`, exactly one `page=Edeliv`, no fragment, no port or user
-information); a 200 there is still refused.
+information); a 200 there is still refused, and the one-time hand-off URL is
+not sent as the landing's referer.
 
 The rest of the chain matched the earlier observations in the same session:
 the entry `deisw070.jsp?ePoboxFlag=true` is 200 `text/html; charset=Shift_JIS`
