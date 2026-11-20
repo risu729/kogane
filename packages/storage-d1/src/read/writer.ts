@@ -184,7 +184,10 @@ export interface StartedSnapshot {
  * both start one: the loser's insert matches nothing (or hits the unique
  * attempt), the refs in the same batch then abort it, and the batch is rolled
  * back. The caller gets `null` and continues the winner's build on its next
- * tick.
+ * tick. Two starts that read the same next attempt name the same snapshot id:
+ * the loser's refs then hit the primary key the winner's wrote and are
+ * skipped, so both return that snapshot and the writer lease decides which
+ * one builds it.
  */
 export async function beginSnapshot(
   db: D1Like,
@@ -229,11 +232,15 @@ export async function beginSnapshot(
       // The first ref doubles as the guard's witness: with no row inserted,
       // its `building` trigger aborts the batch. A plan without refs cannot
       // occur (the restriction revision is always one), and is refused below.
+      // Only the primary key is skipped: a ref an earlier start of the same
+      // snapshot id already recorded. A ref the schema refuses (a CHECK or NOT
+      // NULL failure) raises instead of being left out with `changes=0`.
       ...plan.inputRefs.map((ref) =>
         db
           .prepare(
-            `INSERT OR IGNORE INTO snapshot_input_refs(snapshot_id,ref_kind,ref_id,ref_digest,
-              core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)`,
+            `INSERT INTO snapshot_input_refs(snapshot_id,ref_kind,ref_id,ref_digest,
+              core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING`,
           )
           .bind(snapshotId, ref.kind, ref.id, ref.digest, plan.coreEpoch, now),
       ),
@@ -319,6 +326,15 @@ export async function rowDigest(row: ProjectionRow): Promise<string> {
   return await sha256Hex(canonicalJson(row));
 }
 
+/**
+ * One projection row. A re-sent chunk hits the primary key
+ * `(snapshot_id,scope_key)` and is skipped (its trigger has already refused
+ * one with a different digest). Only that key is skipped: a row the schema
+ * refuses (a CHECK or NOT NULL failure, or a second scope at a `row_seq` the
+ * order index already holds) raises and rolls the chunk back, instead of being
+ * left out for `writtenRowsMatch` to report as `projection_rows_unverified`
+ * without naming it.
+ */
 function insertRow(
   db: D1Like,
   snapshotId: string,
@@ -327,7 +343,7 @@ function insertRow(
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO current_balance_projection(
+      `INSERT INTO current_balance_projection(
         snapshot_id,scope_key,subject_scope_key,row_seq,representative_observation_ref,
         member_evidence_refs_json,member_metrics_json,evidence_count,metric_id,definition_release,
         quantity_coefficient,quantity_scale,value_status,unit_ref,state,reason_code,
@@ -336,7 +352,8 @@ function insertRow(
         fetch_artifact_id,amount_minor,amount_text,as_of,observed_at,measure_view,latest_in_group,
         row_digest)
       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
-        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)`,
+        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)
+      ON CONFLICT(snapshot_id,scope_key) DO NOTHING`,
     )
     .bind(
       snapshotId,

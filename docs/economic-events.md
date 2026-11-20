@@ -1372,9 +1372,20 @@ only:
   explanation (`queryCardPurchaseCards`,
   [ADR 0125](adr/0125-card-purchases-per-card-view.md),
   [agent API](agent-api.md#per-card-view-adr-0125)). `view=events` is the
-  default; `usageMonth` outside `view=cards`, an `offset` or `eventId` inside
+  default; `usageMonth` outside `view=cards` and `view=lines`, an `offset` or `eventId` inside
   it, or not exactly one month is `400 invalid_query`, and a malformed month
-  `400 invalid_period`.
+  `400 invalid_period`;
+- `GET /api/v2/card-purchases?view=lines&period=YYYY-MM` or
+  `?view=lines&usageMonth=YYYY-MM`, optionally with `account`,
+  `sort=date|amount` and the previous page's `cursor`: the same month's events
+  as compact lines (date, amount, kind, state, counterparty, event id), at
+  most 25 a page and within 7,168 bytes, sorted by date or by exact amount in
+  the domain and paged by keyset (`queryCardPurchaseLines`,
+  [ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19),
+  [agent API](agent-api.md#purchase-lines-adr-0125-amendment)). `account`,
+  `sort` or `cursor` outside `view=lines`, an `offset` or `eventId` inside it,
+  not exactly one month, a malformed value or another request's cursor is
+  `400 invalid_query`.
 
 It explains recognised card purchases
 (`packages/application/src/query/card-purchases.ts`): per event, its state and
@@ -1478,7 +1489,8 @@ to `false`. It writes nothing.
 An agent reads the same page through the agent API instead:
 `POST /api/agent/v1/purchases.explain`, or the MCP tool
 `kogane.purchases.explain`, with `{period?, eventId?, offset?}`
-([agent API](agent-api.md#card-purchase-explanation)). It is served exactly
+([agent API](agent-api.md#card-purchase-explanation); `view: cards` and
+`view: lines` are the per-card and line answers above). It is served exactly
 while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
 returns its page as `data`, figures, coverage, chain and `explanationRefs`
 unchanged, with each candidate's `actions` and `relation` removed: an agent

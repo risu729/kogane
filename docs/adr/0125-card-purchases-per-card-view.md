@@ -104,8 +104,8 @@ history, last amounts and candidates of 50 events, which the question does not n
   leg by primary key; the usage-month selection has the identical plan. It adds one primary-key lookup per
   listed card for the labels and the page's statement, settlement and current-usage reads. It reads no
   per-event evidence, provider row, history or candidate.
-- "On what" (merchants) is not answered: the view carries no counterparty. The client still reads the page
-  (`view: events`) for that; a compact per-card line list is gap G2 of the plan.
+- "On what" (merchants) is not answered: the view carries no counterparty. The line view of the
+  [amendment below](#amendment-compact-purchase-lines-view-lines-2026-11-19) (gap G2) answers it.
 - The label is the stored account label. Vpass cards all carry `Vpassカード明細` until the read-time card name
   of the Vpass card-name unit (the plan's Unit F) exists; this view does not apply it yet.
 - Reads write nothing (INV07); amounts are added only by `cardPurchaseSummary` in `packages/domain` (INV03); a
@@ -131,3 +131,156 @@ history, last amounts and candidates of 50 events, which the question does not n
   same `data` for each frame, under 8 KB and without provider text; refusals on all three; nothing written.
 - The route-to-tool map of `services/app/test/ui-mcp-parity.test.ts` already maps `/api/v2/card-purchases` to
   `kogane.purchases.explain`.
+
+## Amendment: compact purchase lines (`view: lines`, 2026-11-19)
+
+- Status: proposed. **A published MCP tool change: it needs the owner's approval before merge**, like the decision
+  above.
+- Plan: [MCP everyday questions](../plans/2026-11-mcp-everyday-questions.md), gap G2 (questions Q5 "on what" and
+  Q21).
+
+### Context
+
+`view: cards` answers how much each card was used, but not on what. The counterparties and the largest purchases
+are only in the page of events (`view: events`): 50 events and 70–150 KB a page, in usage-date order. So "what did
+I spend on card X this month, on what?" and "what were my largest purchases this month?" still need every page of
+the month and a client-side sort of decimal amounts, which INV03 keeps out of the client.
+
+### Options considered
+
+1. **Order by amount in SQL.** A leg stores its amount as `coefficient` (text, up to 4,096 digits) and `scale`
+   (0 to 4,096). Text order is not number order (`"999"` sorts after `"1000"`). A cast to an integer is exact only
+   up to 2^63, a cast to a real is not exact at all, and two scales need the coefficient multiplied by a power of
+   ten first. No index orders legs by amount, so SQL would sort the month's rows anyway. Rejected: an inexact or
+   guarded comparison in SQL buys nothing over a domain comparison of the same bounded set. AGENTS.md forbids
+   summing amounts in SQL; ordering by them is not summing, but it has the same exactness problem, so it stays in
+   `packages/domain` too.
+2. **Bound the month and sort in the domain (chosen).** The per-card view already reads the whole month's live
+   events (bounded at 10,000) to total them. The lines sort that same set with `compareCardPurchaseLineKeys`
+   (`compareDecimals`, exact) and read the provider rows of the listed lines only.
+3. **Offset paging.** Rejected: an event recognised between two pages shifts every later offset, so a walk repeats
+   or skips lines. A keyset cursor (the last line's sort key) continues strictly after the line it names.
+4. **A required account.** Rejected: "my largest purchases this month" spans cards, and with a required account it
+   is one call per card. The account is optional, and a line carries its `accountId` only when none is named.
+5. **A fixed number of lines per page, alone.** Rejected: counterparty text has no stored bound, so a fixed count
+   cannot keep an answer under 8 KB. A line count and a byte bound both apply, and the counterparty is cut.
+
+### Decision
+
+- `queryCardPurchaseLines(sql, { period? | usageMonth?, account?, sort?, cursor? })` in
+  `packages/application/src/query/card-purchases.ts` is the one reader. It reads the month exactly as
+  `queryCardPurchaseCards` does (`SELECTION_SQL` or `USAGE_MONTH_SELECTION_SQL` under the same bound, now shared
+  through `monthFilter` and `monthEvents`; no SQL text changes). It keeps the named account's events (`account`: an
+  `accountId` of at most 128 characters matching `[A-Za-z0-9][A-Za-z0-9_.:-]*`), or every event, and sorts them:
+  - `sort: "date"` (default): newest usage date first, the larger event id first on one date. This is the page's
+    order.
+  - `sort: "amount"`: exact amounts first, grouped by unit in code-unit order (two units are never compared),
+    largest first within a unit, then the date order. Every line without an exact amount (an `unknown` event has no
+    leg) comes after them, in the date order.
+- Per line (`CardPurchaseLine`):
+  - `eventId`, `date` (the provider usage date), `kind` (`purchase` or `refund`) and `state` (`captured`,
+    `authorized` or `unknown`).
+  - `amount`: the live leg as decimal text, or `{ unit: null, status: "missing", reason }` with the event's unknown
+    reason. Never a zero.
+  - `lastKnown`, only on a line without an amount: the page's `lastKnownAmount`, read through its own
+    `LAST_AMOUNT_SQL`.
+  - `counterparty`: the first provider row of the event that has one, posted before pending, which is what the
+    page's `sourceRows` publish. It is cut to 64 code points, with `counterpartyCut: true` when cut. Nothing else
+    of the provider rows (locator, observation, current flag) is in a line.
+  - `accountId`, only when no account is named.
+- Beside the lines:
+  - `events`, `unresolved` and `figures` (`cardPurchaseSummary` of the selected events as decimal text). With an
+    account these are the per-card view's figures for that card; without one, its `totals`.
+  - A coverage of `scope`, `completeTransactionHistory: false`, `unrecognizedCurrentRows` and
+    `refundsAllocated: false`. The unrecognised rows' reasons and the statements stay with `view: cards` and
+    `view: events`.
+- Paging:
+  - A page holds at most `CARD_PURCHASE_LINES_MAX` = 25 lines, and fewer when the answer's `data` as compact JSON
+    would pass `CARD_PURCHASE_LINES_BYTES` = 7,168 bytes. One line is always listed.
+  - `nextCursor` is base64url of the canonical JSON of the request (account, period, usage month, sort), the last
+    listed line's key (date, event id and, for the amount order, its unit and canonical decimal text), and the
+    page's depth: the lines listed so far, or more when more lines now sort at or before the previous key, held at
+    the summary bound (10,000, past every grant's `maxRows`) so a cursor claiming more still continues. It is at
+    most 2,048 characters. It is not signed.
+  - A cursor is taken only with the request that issued it (`linesCursorFits`, which the route and the agent
+    service check before reading). Another request's cursor, a malformed one or one with a non-canonical amount
+    text is refused.
+  - The next page is every line strictly after the key in the total order. A walk therefore lists no line twice
+    and skips none while the month's events stay as they are. An event recognised mid-walk is listed if it sorts
+    after the cursor, and not otherwise; an event revised mid-walk may move across the cursor.
+- `kogane.purchases.explain` takes `view: lines` with `account`, `sort` and `cursor`. It answers
+  `{ schemaVersion: "kogane-card-purchases-lines-v1", query: { view, account, period, usageMonth, sort },
+  decisions: "operator-only", nextPage, data }`, `data` being the reader's answer. A next page this grant would be
+  refused is withheld (`data.nextCursor: null`, `nextPage: "budget_exceeded"`), as on the page of events.
+  - The grant rules are the page's. The grant's `maxRows` counts the lines listed across the walk (the cursor's
+    count): a page that would reach past it is `budget_exceeded` before anything is read, so a grant below 25 is
+    refused outright. Because the cursor is not signed, the page is also refused after the read, before anything
+    is answered, when its key's depth in the month (the lines that now sort at or before it) reaches past
+    `maxRows`; a cursor rewritten to claim fewer lines reads no deeper. An event recognised before the cursor
+    mid-walk counts toward that depth, so such a walk can be refused a page the previous answer offered.
+  - `400 invalid_query`, naming the keys: `account`, `sort` or `cursor` with another view; `eventId` or `offset`
+    with this one; not exactly one month; a malformed value; another request's cursor.
+- `GET /api/v2/card-purchases?view=lines&…` serves the same `data` (plus `apiVersion: 2`) to the operator, with the
+  route's codes (`invalid_query`, `invalid_period`, `413 result_limit_exceeded`). `cursor` may be up to 2,048
+  characters; every other parameter stays at 128.
+- The agent audit record counts the listed lines, and marks the read truncated while a next page exists or is
+  withheld.
+- `encodeCursorJson` and `decodeCursorJson` (`packages/application/src/query/cursor.ts`) now carry the base64url
+  canonical JSON form that the agent query cursor (ADR 0091) already used. That cursor is unchanged.
+- Web parity: as for `view: cards`, the operator page does not render the lines; the route serves them.
+
+### Consequences
+
+- "What did I spend on card X this month, on what?" is one call for up to 25 purchases (two for 50), with the
+  card's figures beside them. "What were my largest purchases this month?" is the first page of `sort: "amount"`
+  without an account: one call.
+- An answer stays under 8 KB. 25 lines with a short counterparty measure about 6.4–7 KB of `data`. The largest line
+  shape (an identity-store account id, a 64-code-point counterparty of characters JSON escapes to six bytes) fits
+  about ten lines.
+- Cost: the per-card view's selection (the live-revision index, each recognition and leg by primary key). For the
+  listed lines only, it adds the page's provider-row read (keys by event, observations by primary key) and, for
+  lines without an amount, its last-amount read. It also makes the page's one pass over current usage. No
+  statement, settlement, history, evidence or candidate is read. The in-memory sort covers at most 10,000 events,
+  the same set the figures already add up.
+- The account filter is applied after the month is read, so the 10,000-event bound counts the whole month, not the
+  card.
+- A counterparty is provider text. It appears only inside `data.lines`, as on the page, and a cut one says so.
+- Limits:
+  - A unit reference above 128 characters, or an amount above 512 characters of decimal text, cannot be carried in
+    a cursor. A page that would end on such a line fails rather than hand one out. The stored unit reference is at
+    most 128 characters (migration 0032).
+  - An account id outside the account pattern cannot be named.
+
+### Verification
+
+- `packages/application/test/card-purchase-lines.test.ts`:
+  - The lines of a statement period equal the page's items for that period in the page's order: for every card,
+    for each account alone, and for a usage month against the page's items filtered by usage date. The figures are
+    the per-card view's.
+  - The amount order on stored events: numeric rather than text (10000 before 999); equal amounts by date; the
+    refund ranked by its own amount; the retired event last, with `provider_status_absent` and its last known
+    amount. The amount order on keys across scales and units.
+  - Keyset walks without a duplicate or a skip: both orders, with and without an account, by period and by usage
+    month, and with events recognised between pages.
+  - Cursor refusals before any read: another sort, account or month; a malformed or non-canonical cursor.
+  - A cursor's depth counted from its key: a count rewritten lower is raised to the key's depth and the next cursor
+    counts from it, a deeper claim is kept and held at the summary bound, and a key past every line has the whole
+    selection before it.
+  - Every page within 7,168 bytes, and the agent answer around it under 8 KB, on the largest line shape, with
+    counterparties cut and flagged.
+  - Query plans without `sqlite_stat1`: no scan of legs, keys, observations or accounts; keys and observations by
+    index; no statement, settlement, history, evidence or candidate read.
+  - Nothing written.
+- `packages/application/test/card-purchase-scale.test.ts`, on the scaled store without statistics: every statement
+  period's lines by date equal the page's events in the page's order, and by amount the same events once each, with
+  every page within its bounds; every usage month of one account lists that account's events; the provider-row
+  read's plan is keyed.
+- `packages/application/test/purchases-explain.test.ts`: the request rules of the line view; the grant, perimeter,
+  `maxRows` and summary-bound refusals (a grant that may read one page but not two gets the next page withheld and
+  said, and a cursor past it is refused before any read; a cursor rewritten to claim fewer listed lines is
+  refused by its key's depth); the dispatcher.
+- `services/app/test/purchases-explain.test.ts`: the agent HTTP path, MCP and the operator route answer the same
+  `data` for a period, for a usage month with an account in amount order, and for every page of a cursor walk in
+  both orders. Each answer is under 8 KB, with provider text only in `data.lines[].counterparty`. Refusals on all
+  three paths; nothing written.
+- `services/app/test/agent-api.test.ts`: the published input schema lists `account`, `sort` and `cursor`.

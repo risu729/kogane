@@ -26,8 +26,8 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
 - [2026-11 everyday questions over MCP, in one or two calls](2026-11-mcp-everyday-questions.md):
   proposed on 2026-11-19 for #1414; an audit of 22 everyday questions against the
   published tools, which gaps the in-flight units A–F close, and the remaining gaps
-  ranked. Gap G1 (per-card spending, ADR 0125) is implemented and awaits the owner's
-  approval of the tool change.
+  ranked. Gaps G1 (per-card spending, ADR 0125) and G2 (compact purchase lines, its
+  amendment) are implemented and await the owner's approval of the tool changes.
 
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production

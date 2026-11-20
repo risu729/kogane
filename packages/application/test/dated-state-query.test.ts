@@ -8,7 +8,12 @@ import { describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { METRIC_REGISTRY_RELEASE } from "../../domain/src/metrics.ts";
 import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import { validReportedState } from "../../observation-shared/src/reported-state-contract.ts";
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
+import {
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+  DATED_STATEMENTS_SQL,
+} from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
 import { DatedStateLimitError, queryDatedState } from "../src/query/dated-state.ts";
@@ -682,6 +687,257 @@ describe("card payables on the date", () => {
       "card-b": "due_after_date",
       "card-c": "payment_date_unknown",
     });
+  });
+
+  test("statements the window leaves out are counted per source and reason, under the filters", async () => {
+    const { store } = cards();
+    // Two due before the window (one resolved to card-a's account), and one
+    // undated and captured before the undated bound, unresolved.
+    const june = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    store.identify(june, "vpass", "acct-card", "identified");
+    store.statement({
+      card: "card-a",
+      period: "2026-07",
+      paymentDate: "2026-07-26",
+      minor: 26_000,
+      fetchedAt: "2026-07-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-c",
+      period: "2026-05",
+      paymentDate: null,
+      minor: 900,
+      fetchedAt: "2026-05-03T01:00:00Z",
+    });
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(state.payables.map((p) => p.period)).toEqual(["2026-09", "2026-09", "2026-09"]);
+    expect(state.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 2 },
+      { sourceId: "vpass", reasonCode: "undated_captured_before_window", count: 1 },
+    ]);
+    expect(state.coverage.liabilitiesMissing).toContain("statements_before_window");
+    // The listed statements are in the manifest by ref, and the ones left out
+    // by count per source, resolved account and reason.
+    expect(state.manifest.statementRefs).toHaveLength(3);
+    expect(state.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: null, reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        accountId: null,
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    // The account filter counts only the statements resolved to that account.
+    const byAccount = await queryDatedState(executor(store), {
+      date: "2026-09-10",
+      account: "acct-card",
+    });
+    expect(byAccount.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(byAccount.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    const other = await queryDatedState(executor(store), {
+      date: "2026-09-10",
+      account: "acct-card-b",
+    });
+    expect(other.coverage.statementsBeforeWindow).toEqual([]);
+    expect(other.coverage.liabilitiesMissing).not.toContain("statements_before_window");
+    const bySource = await queryDatedState(executor(store), {
+      date: "2026-09-10",
+      source: "myjcb",
+    });
+    expect(bySource.coverage.statementsBeforeWindow).toEqual([]);
+    // A date whose window still reaches July lists it and counts only June.
+    const august = await queryDatedState(executor(store), { date: "2026-08-20" });
+    expect(august.payables.map((p) => p.period)).toContain("2026-07");
+    expect(august.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+      { sourceId: "vpass", reasonCode: "undated_captured_before_window", count: 1 },
+    ]);
+  });
+
+  test("an answer that leaves no statement out does not name the gap", async () => {
+    const { store } = cards();
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(state.coverage.statementsBeforeWindow).toEqual([]);
+    expect(state.coverage.liabilitiesMissing).toEqual([
+      "unbilled_card_usage",
+      "installment_remaining",
+      "loan_balances",
+    ]);
+    expect(state.manifest.statementsBeforeWindow).toEqual([]);
+  });
+
+  test("a changed count gives a new context id while the listed statements stay the same (INV09)", async () => {
+    const { store } = cards();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    // An older capture's parse published after the first answer: nothing
+    // listed changes, only the count of what the window leaves out.
+    const june = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    const published = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(published.manifest.statementRefs).toEqual(before.manifest.statementRefs);
+    expect(published.manifest.snapshotRefs).toEqual(before.manifest.snapshotRefs);
+    expect(published.manifest.settlementRefs).toEqual(before.manifest.settlementRefs);
+    expect(published.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(published.contextId).not.toBe(before.contextId);
+    // Resolving its account moves the count to another account: the coverage
+    // is unchanged, the manifest and the context id are not.
+    store.identify(june, "vpass", "acct-card", "identified");
+    const resolved = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(resolved.coverage).toEqual(published.coverage);
+    expect(resolved.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(resolved.contextId).not.toBe(published.contextId);
+    expect(resolved.contextId).toBe(await canonicalDigest(resolved.manifest));
+  });
+
+  test("a state read without the count skips its read and records no count", async () => {
+    const { store } = cards();
+    store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    const statements: string[] = [];
+    const inner = executor(store);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.first<T>(sql, args);
+      },
+    };
+    const uncounted = await queryDatedState(recording, {
+      date: "2026-09-10",
+      includeStatementsBeforeWindow: false,
+    });
+    expect(statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    expect(statements).toContain(DATED_STATEMENTS_SQL);
+    expect("statementsBeforeWindow" in uncounted.coverage).toBe(false);
+    expect("statementsBeforeWindow" in uncounted.manifest).toBe(false);
+    // It cannot tell whether a statement was left out, so it names the gap.
+    expect(uncounted.coverage.liabilitiesMissing).toContain("statements_before_window");
+    expect(uncounted.contextId).toBe(await canonicalDigest(uncounted.manifest));
+    // Everything else is the counted answer's.
+    const counted = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const { statementsBeforeWindow: _manifestCounts, ...countedManifest } = counted.manifest;
+    expect(uncounted.manifest).toEqual(countedManifest);
+    expect(uncounted.payables).toEqual(counted.payables);
+    expect(uncounted.accounts).toEqual(counted.accounts);
+    expect(uncounted.contextId).not.toBe(counted.contextId);
+  });
+
+  test("on random stores, every answer meets the wire contract and the counts agree", async () => {
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x0c0de;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    const seen = { answers: 0, counted: 0, split: 0, refused: 0 };
+    for (let round = 0; round < 8; round += 1) {
+      const store = new DatedStore();
+      store.capture({
+        ...SMBC,
+        fetchedAt: `2026-0${1 + random(9)}-10T02:00:00Z`,
+        balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 1 }],
+      });
+      for (let index = 0; index < 24; index += 1) {
+        const month = String(1 + random(11)).padStart(2, "0");
+        const card = `card-${random(4)}`;
+        const due = random(4);
+        const capture = store.statement({
+          card,
+          period: `2026-${month}`,
+          paymentDate: due === 0 ? null : due === 1 ? "unknown" : `2026-${month}-26`,
+          minor: 1 + random(9_000),
+          fetchedAt: `2026-${month}-0${1 + random(9)}T0${random(10)}:00:00Z`,
+        });
+        if (random(3) === 0) continue;
+        // Two cards share an account, so one account can hold several cards' counts.
+        const account = `acct-${card === "card-3" ? "card-0" : card}`;
+        store.identify(capture, "vpass", account, "identified");
+        if (random(3) === 0)
+          store.settle(capture, {
+            account,
+            period: `2026-${month}`,
+            debitDate: `2026-${month}-26`,
+            ...(random(2) === 0 ? { decision: "accepted" as const } : {}),
+          });
+      }
+      const filters = [
+        {},
+        { source: "vpass" },
+        { source: SMBC.source },
+        { account: "acct-card-0" },
+        { account: "acct-card-1" },
+        { source: "vpass", account: "acct-card-2" },
+        { account: "acct-none" },
+      ];
+      for (const date of ["2026-03-31", "2026-07-15", "2026-11-30"])
+        for (const filter of filters) {
+          const state = await queryDatedState(executor(store), { date, ...filter });
+          // What both adapters send (services/app), as JSON text read back.
+          const wire = JSON.parse(JSON.stringify({ apiVersion: 2, ...state })) as Record<
+            string,
+            any
+          >;
+          expect(validReportedState(wire)).toBe(true);
+          expect(state.contextId).toBe(await canonicalDigest(state.manifest));
+          seen.answers += 1;
+          const recorded = state.manifest.statementsBeforeWindow;
+          if (recorded.length > 0) seen.counted += 1;
+          if (new Set(recorded.map((entry) => entry.accountId)).size > 1) seen.split += 1;
+          // Any one count changed in the manifest alone is refused.
+          if (recorded.length > 0) {
+            const copy = structuredClone(wire);
+            copy["manifest"]["statementsBeforeWindow"][random(recorded.length)]["count"] += 1;
+            expect(validReportedState(copy)).toBe(false);
+            seen.refused += 1;
+          }
+          // The uncounted state is the counted one without the count.
+          const uncounted = await queryDatedState(executor(store), {
+            date,
+            ...filter,
+            includeStatementsBeforeWindow: false,
+          });
+          const { statementsBeforeWindow: _counts, ...rest } = state.manifest;
+          expect(uncounted.manifest).toEqual(rest);
+          expect(uncounted.payables).toEqual(state.payables);
+          expect(uncounted.contextId).toBe(await canonicalDigest(rest));
+        }
+    }
+    // The random worlds reach answers with counts, and counts split across accounts.
+    expect(seen.answers).toBe(8 * 3 * 7);
+    expect(seen.counted).toBeGreaterThan(20);
+    expect(seen.split).toBeGreaterThan(5);
+    expect(seen.refused).toBe(seen.counted);
   });
 
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {

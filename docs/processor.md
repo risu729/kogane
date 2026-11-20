@@ -601,7 +601,10 @@ A gate over `instrument_identifiers` and the current mappings ends the tick
 when no pair of the shape is on two instruments; otherwise the full candidate
 read runs at most once an hour (its own tick row with `evaluated: true`
 decides), refuses past 500,000 current identity observations, and at most 50
-adoptions are written a tick.
+adoptions are written a tick. Each write re-checks, in its own batch, that the
+anchor's mapping is still the one read and that no `listed_as` relation about
+either identifier or either instrument was recorded since; otherwise it is
+counted `refused` and writes nothing.
 
 `audit_overflow` has no flag. It turns each `audit_overflow_counters` row of a
 UTC day that has ended into one `overflow` audit record and deletes the row in
@@ -708,7 +711,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
 | `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`, `unmatched` (statements with no candidate, per closed code; [card-settlements.md](card-settlements.md#unmatched-statements))                                              |
 | `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
-| `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
+| `reward_claims_sweep`      | `scanned`, `promoted` (claims written), `known`, `skipped`, `quantity_incomplete` ([rewards.md](rewards.md#7-promotion-job); not the cursor or the release name)                                                                    |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
 | `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed` (including imports whose registration threw, §7), `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                |
