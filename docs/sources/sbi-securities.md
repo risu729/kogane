@@ -433,6 +433,34 @@ behavior remain limits. The catalogue therefore changes only to `partial`,
 not complete. The 67-row browser proof establishes the list contract, not a
 stored production archive.
 
+### 2026-11-20: main-to-mobile hand-off before the mailbox
+
+Seven scheduled mailbox attempts through 2026-11-19, after the archive
+shipped in [#1281](https://github.com/risu729/kogane/pull/1281), each ended in a
+mailbox terminal with `sbi_mailbox_transport_failed`, while the financial
+terminal of the same run published. The owner's ordinary Chrome session showed
+why, with only paths, statuses and form shapes read. The main-site report link
+answers with an HTTP redirect (a `fetch` with `redirect: "manual"` returned an
+opaque redirect) to the mobile site's one-time hand-off
+`https://m.sbisec.co.jp/switchnavi?page=Edeliv&parm=<one-time>&SwitchFromSite=site4.sbisec.co.jp&...`,
+which redirects again to `https://m.sbisec.co.jp/switchnaviMain` with no
+query. A sandboxed frame without scripts landed on `switchnaviMain`, so neither
+hop is a script or meta-refresh navigation. The collector admitted only a
+direct redirect to `switchnaviMain` and refused the hand-off. It now admits
+that hand-off as an intermediate redirect only (HTTPS, host `m.sbisec.co.jp`,
+path `/switchnavi`, exactly one `page=Edeliv`, no fragment, no port or user
+information); a 200 there is still refused.
+
+The rest of the chain matched the earlier observations in the same session:
+the entry `deisw070.jsp?ePoboxFlag=true` is 200 `text/html; charset=Shift_JIS`
+with the HTML 4.01 Transitional doctype and one POST form to `/deisw081` with
+the field `ePoboxFlag`; `deisw081` is 200 Shift_JIS HTML with one POST form to
+the mailbox SSO carrying the seven fields `sfn`, `ric`, `ked`, `epr`, `itv`,
+`hav` and `spm`; the SSO redirects to `DPAW010501000`, which leads to the
+application, whose summary (`DPAW010501030`) and list (`DPAW010501010`)
+answered 200. The application also posts `DPAW010601020`, which the collector
+does not need.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

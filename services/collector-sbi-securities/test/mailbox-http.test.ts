@@ -29,6 +29,8 @@ const cookie = (): MailboxCookie => ({
   hostOnly: false,
 });
 const fields = ["sfn", "ric", "ked", "epr", "itv", "hav", "spm"];
+const HANDOFF =
+  "https://m.sbisec.co.jp/switchnavi?page=Edeliv&parm=synthetic%2509parm&SwitchFromSite=site4.sbisec.co.jp&admin_flg=+";
 function sequence(
   extra: (url: URL, init: RequestInit) => Promise<Response> = async () =>
     new Response("{}", { headers: { "content-type": "application/json" } }),
@@ -38,9 +40,11 @@ function sequence(
     const url = new URL(input instanceof Request ? input.url : input.toString());
     calls.push({ url: url.href, init });
     if (url.href === MAILBOX_MAIN_LINK)
+      return new Response(null, { status: 302, headers: { location: HANDOFF } });
+    if (url.href === HANDOFF)
       return new Response(null, {
         status: 302,
-        headers: { location: "https://m.sbisec.co.jp/switchnaviMain" },
+        headers: { location: "/switchnaviMain", "set-cookie": "nav=synthetic-nav; Path=/" },
       });
     if (url.href === "https://m.sbisec.co.jp/switchnaviMain") return html();
     if (url.href === MAILBOX_ENTRY) return html(mailboxFormHtml(MAILBOX_CONNECT, ["ePoboxFlag"]));
@@ -67,6 +71,7 @@ test("uses exact staged forms and scopes SBI and mailbox cookies to their own or
   await client.api("summary");
   expect(calls.map((call) => call.url)).toEqual([
     MAILBOX_MAIN_LINK,
+    HANDOFF,
     "https://m.sbisec.co.jp/switchnaviMain",
     MAILBOX_ENTRY,
     MAILBOX_CONNECT,
@@ -75,16 +80,18 @@ test("uses exact staged forms and scopes SBI and mailbox cookies to their own or
     MAILBOX_APPLICATION,
     "https://plus.e-shishobako.ne.jp/dp-uw/v1/DPAW010501030",
   ]);
-  expect(new URLSearchParams(calls[3]!.init.body as URLSearchParams).get("ePoboxFlag")).toBe(
+  expect(new URLSearchParams(calls[4]!.init.body as URLSearchParams).get("ePoboxFlag")).toBe(
     "synthetic-ePoboxFlag",
   );
-  expect([...new URLSearchParams(calls[4]!.init.body as URLSearchParams).keys()]).toEqual(fields);
+  expect([...new URLSearchParams(calls[5]!.init.body as URLSearchParams).keys()]).toEqual(fields);
   for (const call of calls) {
     const headers = new Headers(call.init.headers);
     expect(call.init.redirect).toBe("manual");
     expect(headers.has("authorization")).toBe(false);
     if (new URL(call.url).hostname.endsWith("sbisec.co.jp"))
-      expect(headers.get("cookie")).toBe("sbi=synthetic-sbi");
+      expect(headers.get("cookie")).toBe(
+        calls.indexOf(call) <= 1 ? "sbi=synthetic-sbi" : "sbi=synthetic-sbi; nav=synthetic-nav",
+      );
     else expect(headers.get("cookie") ?? "").not.toContain("synthetic-sbi");
   }
   expect(new Headers(calls.at(-1)!.init.headers).get("cookie")).toBe("mail=synthetic-mail");
@@ -116,6 +123,46 @@ test("rotates CSRF before a refused response so the next independent document ca
   expect(new URLSearchParams(calls.at(-1)!.init.body as URLSearchParams).get("_csrf")).toBe(
     "synthetic-rotated",
   );
+});
+
+test("admits only the exact Edeliv hand-off as an intermediate hop, never as a landing", async () => {
+  for (const location of [
+    "https://m.sbisec.co.jp/switchnavi?page=Other&parm=synthetic",
+    "https://m.sbisec.co.jp/switchnavi?page=Edeliv&page=Edeliv",
+    "https://m.sbisec.co.jp/switchnavi?parm=synthetic",
+    "https://m.sbisec.co.jp/switchnavi/extra?page=Edeliv",
+    "https://m.sbisec.co.jp/switchnavi?page=Edeliv#fragment",
+    "http://m.sbisec.co.jp/switchnavi?page=Edeliv",
+    "https://m.sbisec.co.jp:444/switchnavi?page=Edeliv",
+    "https://s.sbisec.co.jp/switchnavi?page=Edeliv",
+  ]) {
+    let count = 0;
+    const client = new MailboxHttp([], async () => {
+      count++;
+      return new Response(null, { status: 302, headers: { location } });
+    });
+    await expect(client.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(count).toBe(1);
+  }
+  let cancelled = false;
+  const urls: string[] = [];
+  const client = new MailboxHttp([], async (input) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+    urls.push(url);
+    if (url === MAILBOX_MAIN_LINK)
+      return new Response(null, { status: 302, headers: { location: HANDOFF } });
+    return new Response(
+      new ReadableStream({
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { headers: { "content-type": "text/html" } },
+    );
+  });
+  await expect(client.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+  expect(urls).toEqual([MAILBOX_MAIN_LINK, HANDOFF]);
+  expect(cancelled).toBe(true);
 });
 
 test("refuses unobserved redirects before sending a request or secret to the target and cancels response bodies", async () => {
