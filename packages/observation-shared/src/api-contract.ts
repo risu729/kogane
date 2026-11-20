@@ -586,9 +586,9 @@ export const OVERVIEW_PARSE_RUN_STATUSES = ["ok", "pending", "error"] as const;
  * At most this many lines in each of the overview summary's per-source and
  * per-parser lists (`notSuccessful`, `notOk`, `unitUpdates`), those with the
  * newest runs; the lines left out are counted in the list's `...Omitted`
- * entry and listed in `full` (ADR 0123, amendment 2026-11-19). It bounds the
- * summary: no other part of it grows with the number of failing sources or
- * parsers.
+ * entry and listed in `full` (ADR 0123, amendment 2026-11-19). No other part
+ * of the summary grows with the number of failing sources or parsers; the
+ * byte budget (`OVERVIEW_SUMMARY_BYTES`) can list fewer.
  */
 export const OVERVIEW_SUMMARY_LINES = 5;
 /**
@@ -597,6 +597,20 @@ export const OVERVIEW_SUMMARY_LINES = 5;
  * status's `byStatus` line (ADR 0123, amendment 2026-11-19).
  */
 export const OVERVIEW_LINE_FAILURE_CODES = 3;
+
+/**
+ * The schema version of a UI page read's tool answer, `{ schemaVersion, data }`
+ * (`kogane.store.read` and its siblings, ADR 0081): the envelope the overview
+ * summary's byte budget measures.
+ */
+export const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
+/**
+ * The bytes the overview summary's tool answer is held to: `{ schemaVersion:
+ * PAGE_READ_SCHEMA_VERSION, data }` serialized as the tool's text content,
+ * UTF-8, at most the 8 KB an MCP client shows (issue 1414; ADR 0123,
+ * amendment 2026-11-20). The route answers `data` alone, which is shorter.
+ */
+export const OVERVIEW_SUMMARY_BYTES = 8 * 1024;
 
 /** The lines of one status that a capped overview summary list left out, and their runs. */
 export interface OverviewOmitted<Status extends string> {
@@ -616,12 +630,23 @@ export interface OverviewOmitted<Status extends string> {
  * line of their own (a failing parser's with its newest failure codes), and
  * the rest are counted, never dropped silently. Provenance (producer,
  * session id, parser version, the superseding parse's id) and text (provider
- * names, warnings) are in `full` only.
+ * names, warnings) are in `full` only. The answer is held to
+ * `OVERVIEW_SUMMARY_BYTES` (amendment 2026-11-20): when the caps leave it
+ * over, sources, then per-line failure codes, then lines move into their
+ * counts and `budget.trimmed` says so; when even the counts and the status
+ * lines pass it, the read is refused (`413 result_limit_exceeded`).
  */
 export interface OverviewSummary {
   detail: "summary";
   counts: Overview["counts"];
+  /**
+   * The sources in the full answer's order (by id), equal artifact counts
+   * sharing a line in order of first appearance; the last `sourcesOmitted`
+   * of that order are left out, only when the byte budget trimmed them.
+   */
   sources: { sourceIds: string[]; artifacts: number }[];
+  /** How many sources the byte budget left out of `sources`; 0 unless `budget.trimmed`. */
+  sourcesOmitted: number;
   fetchRuns: {
     /** One line per status in the window: how many runs, of how many sources, and the newest. */
     byStatus: {
@@ -696,4 +721,15 @@ export interface OverviewSummary {
   /** The `unitUpdates` lines left out and their runs; present exactly when `unitUpdates` is. */
   unitUpdatesOmitted?: { lines: number; runs: number };
   coverage: OverviewPage["coverage"];
+  /**
+   * The byte budget (`OVERVIEW_SUMMARY_BYTES`) and whether it trimmed the
+   * answer. Untrimmed, a list leaves a line out only while it holds
+   * `OVERVIEW_SUMMARY_LINES`, a `notOk` line counts a code only while it
+   * lists `OVERVIEW_LINE_FAILURE_CODES`, and every source is listed.
+   * Trimmed, at least one of those does not hold: a list leaves lines out
+   * while holding fewer, a line counts codes while listing fewer, or
+   * `sourcesOmitted` counts sources. Each is still counted, and every failure
+   * code stays on its status's `byStatus` line.
+   */
+  budget: { bytes: typeof OVERVIEW_SUMMARY_BYTES; trimmed: boolean };
 }
