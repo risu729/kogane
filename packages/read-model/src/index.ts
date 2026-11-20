@@ -139,6 +139,7 @@ export {
 } from "./source-revision";
 export {
   DEFAULT_PROJECTION_PAGE_LIMIT,
+  DEFAULT_SUMMARY_PAGE_LIMIT,
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
   type ProjectionInputsRow,

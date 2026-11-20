@@ -210,6 +210,71 @@ describe("the finalized walk stops on its stated total when `allCnt` is a string
   });
 });
 
+describe("header rows change the count, not the walk (ADR 0023, 2026-11-19 amendment)", () => {
+  // A finalized page carrying one `45` and one `4C` header row before its
+  // `4K/005` rows, in the shapes the statement parser accepts.
+  const header45 = { rowType: "45", data: ["45", "SYNTHETIC", "", "", ""] };
+  const header4C = { rowType: "4C", data: ["4C", "", "SYNTHETIC", ""] };
+  const detail = { rowType: "4K", data: ["4K", "005", ...Array(9).fill("SYNTHETIC")] };
+  const page = (detailRows: number, headers: boolean, k3: Record<string, unknown>) =>
+    envelope({
+      WebMeisaiTopDisplayServiceBean: {
+        meisaiList: [
+          ...(headers ? [header45, header4C] : []),
+          ...Array.from({ length: detailRows }, () => detail),
+        ],
+        webMeisaiTopK3Vo: k3,
+      },
+    });
+
+  test("the walk stops where it did; the month is complete once the headers are left out", async () => {
+    const { post, requests } = scripted([
+      page(2, true, { allCnt: "3", nextPageRow: "3" }),
+      page(1, true, { allCnt: "3", nextPageRow: "5" }),
+    ]);
+    const capture = await collectMonth(post, "202609");
+    expect(requests).toEqual([
+      [TOP, { p01: "202609", p03: "1" }],
+      [TOP, { p01: "202609", p03: "3" }],
+    ]);
+    // The walk's own count is every `meisaiList` entry, as before.
+    expect(capture.transactionCount).toBe(7);
+    expect(await monthCoverage(capture)).toBe("complete");
+  });
+
+  test("a walk that ends on an empty page short of the total is still a mismatch", async () => {
+    const { post, requests } = scripted([
+      page(2, true, { allCnt: "4", nextPageRow: "3" }),
+      page(0, false, { allCnt: "4", nextPageRow: "5" }),
+    ]);
+    const capture = await collectMonth(post, "202609");
+    expect(requests).toHaveLength(2);
+    expect(await monthCoverage(capture)).toBe("stated_total_mismatch");
+  });
+
+  test("a stated-total stop after a page short of the total is still a mismatch", async () => {
+    // `allCnt` 4 is below `nextPageRow` 5, so the walk stops after one page
+    // holding two detail rows and two header rows. Counting the headers would
+    // have made this month look whole.
+    const { post, requests } = scripted([page(2, true, { allCnt: "4", nextPageRow: "5" })]);
+    const capture = await collectMonth(post, "202609");
+    expect(requests).toHaveLength(1);
+    expect(capture.transactionCount).toBe(4);
+    expect(await monthCoverage(capture)).toBe("stated_total_mismatch");
+  });
+
+  test("a page of header rows only is not an empty page: the walk asks for the next one", async () => {
+    const { post, requests } = scripted([
+      page(2, true, { allCnt: "4", nextPageRow: "3" }),
+      page(0, true, { allCnt: "4", nextPageRow: "4" }),
+      page(2, false, { allCnt: "4", nextPageRow: "6" }),
+    ]);
+    const capture = await collectMonth(post, "202609");
+    expect(requests).toHaveLength(3);
+    expect(await monthCoverage(capture)).toBe("complete");
+  });
+});
+
 describe("the customized walk stops on its stated numeric `total`", () => {
   test("an empty top page, then answer pages up to the total: no request past it", async () => {
     const { post, requests } = scripted([
