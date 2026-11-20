@@ -991,7 +991,9 @@ count's items: `kogane.evidence.read` for runs (`page: runs`, `source`) and
 captures (`page: artifacts`, `runId`), `kogane.observations.get` for the newest
 parse's artifact, `kogane.observations.list` for observations,
 `kogane.events.read` for events and `kogane.collection-quality.read` for why a
-source is unchanged. Counts, closed codes, times and ids only: no amount,
+source is unchanged. `kogane.evidence.read` shows only the configured
+source's runs, so for any other source the runs and captures handlers answer
+`404 not_found`. Counts, closed codes, times and ids only: no amount,
 label or provider text.
 
 Bounds: the newest 500 fetch runs per source, 5,000 parse runs and 2,000
@@ -1000,18 +1002,21 @@ capture rows and 50,000 observation rows per kind are counted. A walk whose
 next row is also new makes its counts lower bounds, named in `cut` (`parses`
 and `observations` on every source when the parse walk is cut) or by the
 events line's `complete: false`. The answer is cut between sources before
-8,192 bytes; `next.after` is the `after` that continues it. More than 200
+8,192 bytes; `next.after` is the `after` that continues it. `after` is a
+place in source id order (an id no source has continues from where it sorts),
+and each answer is a fresh read of the sources after it. More than 200
 visible sources is `413 budget_exceeded`. The events line counts revisions,
 but `kogane.events.read` does not filter by date yet (the next slice in the
 ADR).
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; both decided before the request is
-checked or the store is read. Without `evidence.read`, `runs` and `captures`
-are `null` and their tables are not read. It reads and never writes; each
-served agent call records one audit read with the number of sources it
-covers, truncated when the answer continues, a count is cut or the events walk
-is incomplete.
+checked or the store is read, the tool's body included. Without
+`evidence.read`, `runs` and `captures` are `null` and their tables are not
+read, and a source whose only new rows are runs is listed in `unchanged`. It
+reads and never writes; each served agent call records one audit read with
+the number of sources it covers, truncated when the answer continues, a count
+is cut or the events walk is incomplete.
 
 ### Reported state on a date
 

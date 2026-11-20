@@ -34,7 +34,8 @@ export async function changesSinceFor(
   return readChangesSince({
     grant,
     sql: d1Executor(env.DB),
-    served: { events: await eventsV2Available(env) },
+    // Asked by the service once the grant and the request pass.
+    served: async () => ({ events: await eventsV2Available(env) }),
     request,
     now: new Date().toISOString(),
   });
