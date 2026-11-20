@@ -773,7 +773,7 @@ result):
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------: | ------------------------------------------------------------------- |
 | `kogane.collection-quality.read` `{source: "sony-bank", view: "accounts"}`, synthetic store (one cell, no account named)                                                                                      |     1,639 | 1,162                                                               |
 | realistic worst (62 accounts, each three data types of ten months, two statuses, a 64-hex id, a 30-character label and eight reasons a period; 140 unattributed cells of seven units; 2,000 cells, the bound) | 1,025,853 | 9 pages: six of 9 accounts at 7,817–7,819, then 8,100, 7,879, 2,572 |
-| 25 accounts, every reason, status, kind and provider type, 200-character labels                                                                                                                               |         — | 10 pages, 4 to 9 lines, at most 7,987                               |
+| 25 accounts, every reason, status, kind and provider type, 200-character labels                                                                                                                               |         — | 10 pages, 3 to 9 lines, at most 7,987                               |
 
 - An agent's first account read fits what its client shows and names the
   first accounts with their states; `offset` reads the rest, and
@@ -815,7 +815,11 @@ result):
   standing or state, misorders accounts, misplaces `nextOffset` or
   `truncated`, drops a line, misstates an age, carries an unknown reason or
   another limit, puts an unattributed line before its accounts, or passes
-  8 KB fails the wire check.
+  8 KB fails the wire check; and over 150 seeded random sources (labels and
+  unit keys in multi-byte, four-byte and JSON-escaped characters, random
+  reasons, unnamed periods) the walk from offset 0 lists every line once, in
+  order, each page within 8 KB, and a page from a random offset lists the
+  walk's lines there.
 - `packages/application/test/account-coverage.test.ts`: every store answer
   of ADR 0088's tests (unresolved mappings, newest-not-current periods,
   corrected mappings, unattributed cells) also pages into summaries that
@@ -834,7 +838,10 @@ result):
   `detail: summary` with `offset` and `detail: full`; `detail: full` with
   `offset`, an unknown detail, another parameter and a repeated `offset` are
   `invalid_query`, a negative offset `invalid_offset`; the tool refuses
-  `detail: full` with `offset` and an unknown detail.
+  `detail: full` with `offset` and an unknown detail; with a stored label
+  in multi-byte, four-byte and JSON-escaped characters, the UTF-8 bytes of
+  the text `/mcp` writes for the default are `pageReadAnswerBytes` of the
+  route's body, and that text is the `/api/agent/v1` answer.
 - `services/app/test/collection-quality-api.test.ts`: the route's full
   answer under `detail=full` and its summary by default, each passing the
   validator under its own detail only.

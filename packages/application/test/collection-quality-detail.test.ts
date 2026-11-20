@@ -469,3 +469,60 @@ describe("the account view's summary", () => {
     ).toBe(false);
   });
 });
+
+describe("the account view's summary over random sources", () => {
+  test("walks every page of each to the full answer's lines, once each, in order", () => {
+    // A fixed seed, so a failure names the same source on every run.
+    let seed = 20_261_120;
+    const random = () => (seed = (seed * 1_103_515_245 + 12_345) & 0x7f_ff_ff_ff) / 0x7f_ff_ff_ff;
+    const below = (n: number) => Math.floor(random() * n);
+    const some = <T>(values: readonly T[]) => values.filter(() => random() < 0.3);
+    // Multi-byte, four-byte and JSON-escaped characters, so bytes differ from characters.
+    const letters = ["a", "テ", "長", "😀", '"', "\\", "\u0001", "\n", " "];
+    const text = (max: number) =>
+      Array.from({ length: below(max) }, () => letters[below(letters.length)]!)
+        .join("")
+        .slice(0, max);
+    for (let source = 0; source < 150; source++) {
+      const full = syntheticAccountCoverage({
+        ...REALISTIC_ACCOUNT_SCALE,
+        accounts: below(30),
+        typesPerAccount: 1 + below(3),
+        periodsPerType: 1 + below(5),
+        statuses: 1 + below(4),
+        kinds: 1 + below(4),
+        providerTypesPerParser: 1 + below(12),
+        unattributed: { units: below(8), datasets: 1 + below(3), periods: 1 + below(4) },
+      });
+      for (const account of full.accounts) {
+        account.label = text(random() < 0.1 ? 512 : 60);
+        for (const type of account.dataTypes)
+          for (const entry of type.periods) {
+            entry.reasons = some(CELL_REASONS);
+            if (random() < 0.2) entry.period = { kind: "latest", value: null, state: null };
+          }
+      }
+      for (const cell of full.unattributed) {
+        if (random() < 0.2) cell.dataset = null;
+        if (random() < 0.3) cell.unitKey = text(40) || null;
+        cell.reasons = some(CELL_REASONS);
+      }
+      expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "full"), String(source)).toBe(
+        true,
+      );
+      const pages = summaryPages(full);
+      expectCollapsed(full, pages);
+      const lines = pages.flatMap((page) => [...page.accounts, ...page.unattributed]);
+      const units = new Set(
+        full.unattributed.map((cell) => JSON.stringify([cell.dataset, cell.parser, cell.unitKey])),
+      );
+      expect(lines, String(source)).toHaveLength(full.accounts.length + units.size);
+      // A page from any offset lists the lines the walk from 0 has there.
+      const offset = below(lines.length + 1);
+      const page = accountCoverageSummary(full, offset);
+      expect([...page.accounts, ...page.unattributed], String(source)).toEqual(
+        lines.slice(offset, offset + page.accounts.length + page.unattributed.length),
+      );
+    }
+  });
+});

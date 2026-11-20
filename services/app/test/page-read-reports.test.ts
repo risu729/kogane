@@ -9,6 +9,10 @@ import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
+  ACCOUNT_SUMMARY_BYTES,
+  pageReadAnswerBytes,
+} from "../../../packages/observation-shared/src/collection-quality-contract";
+import {
   PAGE_READ_ROUTES,
   pageReadMcpTools,
   pageReadServed,
@@ -20,6 +24,12 @@ import { pageReadHarness, RECORDS_GRANT, tableCounts, withoutTables } from "./pa
 const REPORTS = "kogane.reports.read";
 const QUALITY = "kogane.collection-quality.read";
 const NOW = "2026-08-31T15:00:00.000Z";
+/**
+ * The synthetic account's stored label: multi-byte characters, a four-byte
+ * one and characters JSON escapes, so an answer's bytes differ from its
+ * characters (ADR 0123, amendment 2026-11-20).
+ */
+const QUALITY_LABEL = `合成口座「テスト」😀"\\\u0001${"長".repeat(40)}`;
 /** Records and evidence over the whole store: the collection quality page needs evidence.read. */
 const EVIDENCE_GRANT = { ...RECORDS_GRANT, capabilities: ["records.read", "evidence.read"] };
 const page = pageReadHarness("report-read");
@@ -131,8 +141,8 @@ beforeAll(async () => {
       "INSERT INTO source_accounts VALUES('synthetic-quality-ref','sony-bank','evidence-test','[\"synthetic-quality-ref\"]')",
     ),
     env.DB.prepare(
-      "INSERT INTO accounts VALUES('synthetic-quality-account','Synthetic quality account','synthetic-role','identified')",
-    ),
+      "INSERT INTO accounts VALUES('synthetic-quality-account',?,'synthetic-role','identified')",
+    ).bind(QUALITY_LABEL),
     env.DB.prepare(
       "INSERT INTO account_mappings VALUES('synthetic-quality-map','synthetic-quality-ref',1,'synthetic-quality-account','rule','synthetic_reason',1,'2026-09-11','Synthetic quality account','identified')",
     ),
@@ -427,6 +437,30 @@ describe("collection quality page reads", () => {
       expect(overMcp).toEqual({ isError: false, body: overHttp.body });
     }
     expect(await tableCounts()).toEqual(before);
+  });
+
+  it("hold the account summary to the bytes /mcp writes as its text, multi-byte labels included (ADR 0123, amendment 2026-11-20)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const label = QUALITY_LABEL;
+    const args = { source: "sony-bank", view: "accounts" };
+    const route = await page.route("/api/collection-quality/sony-bank/accounts");
+    expect(route.body).toMatchObject({ accounts: [expect.objectContaining({ label })] });
+    const message = await page.mcpMessage({
+      method: "tools/call",
+      params: { name: QUALITY, arguments: args },
+    });
+    const text: string = message["result"].content[0].text;
+    const overHttp = await page.http(QUALITY, args);
+    expect(overHttp.body).toEqual({ schemaVersion: "kogane-page-read-v1", data: route.body });
+    expect(JSON.parse(text)).toEqual(overHttp.body);
+    // The measure the page is cut by is the text an MCP client receives.
+    expect(new TextEncoder().encode(text).length).toBe(pageReadAnswerBytes(route.body));
+    expect(pageReadAnswerBytes(route.body)).toBeLessThanOrEqual(ACCOUNT_SUMMARY_BYTES);
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(text.length);
   });
 
   it("refuse a summary with an offset, an unknown source, and a grant without evidence.read", async () => {
