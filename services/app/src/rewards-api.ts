@@ -39,6 +39,23 @@ import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } fr
 
 const REWARDS_PREFIX = "/api/v2/rewards";
 
+/**
+ * The goal search's clock at `now` (epoch milliseconds): that day's civil
+ * date in Asia/Tokyo (UTC+9, no daylight saving time), named with its zone
+ * (ADR 0049, amendment of 2026-11-18). A UTC date is the previous Tokyo day
+ * from 00:00 to 09:00 JST, and a `null` zone would let an offer of another
+ * zone be judged against this date; with the zone named, such an offer's
+ * validity or deadline stays a review reason (`needs_rule_verification`).
+ */
+function searchClock(now: number) {
+  return {
+    kind: "local-date",
+    value: new Date(now + 9 * 3_600_000).toISOString().slice(0, 10),
+    zone: "Asia/Tokyo",
+    basis: "derived",
+  } as const;
+}
+
 interface BucketDto {
   bucketRef: string;
   kind: string;
@@ -258,21 +275,14 @@ export async function readRewardRoute(
         release: CONVERSION_SEARCH_RELEASE,
       };
     const quantity = decimalQuantity(unitRef ?? sourceUnits[0]!, quantityText);
+    const clock = searchClock(Date.now());
     // Every stored version is its own candidate here, named by its offerRef.
-    const result = findConversionPaths(
-      matching,
-      {
-        quantity,
-        clock: {
-          kind: "local-date",
-          value: new Date().toISOString().slice(0, 10),
-          zone: null,
-          basis: "derived",
-        },
-      },
-      goal,
-      { maxDepth: depth, maxCandidates: 8, maxExpansions: 500, requiredCompletionBy: null },
-    );
+    const result = findConversionPaths(matching, { quantity, clock }, goal, {
+      maxDepth: depth,
+      maxCandidates: 8,
+      maxExpansions: 500,
+      requiredCompletionBy: null,
+    });
     return {
       paths: result.paths,
       // The search is bounded by depth and candidate caps, so no path is
@@ -286,6 +296,9 @@ export async function readRewardRoute(
       expansions: result.expansions,
       stoppedBy: result.stoppedBy,
       budget: result.budget,
+      // The day and zone the search was judged from: the release names the
+      // traversal, not its input, so an answer names the clock it started on.
+      clock,
       basis: "policy-estimated",
       release: result.release,
     };

@@ -249,6 +249,13 @@ describe("sbi-domestic-cash-positions", () => {
   });
 });
 
+const MONEY_METRICS_WITHOUT_PROFIT_LOSS = [
+  "acquisition_cost",
+  "month_on_month",
+  "net_change",
+  "valuation",
+];
+
 describe("sbi-account-assets-current", () => {
   const meta = artifact("account-assets-current");
 
@@ -283,6 +290,67 @@ describe("sbi-account-assets-current", () => {
     expect(() => sbiAccountAssetsCurrent.parse(encoded(fractional), meta)).toThrow(
       "must be an exact decimal",
     );
+  });
+  test("the summaryDetailItems breakdown emits one subject per category and detail code", () => {
+    const body = parsedFixture(meta.dataset!);
+    const base = (body["summaryDetails"] as Record<string, unknown>[])[0]!;
+    const item = {
+      ...structuredClone(base),
+      category: "SYNTHETIC_CATEGORY",
+      categoryDetail: "SYNTHETIC_DETAIL",
+      compositionRatio: null,
+      percentChange: null,
+      profitLoss: null,
+      profitLossRate: null,
+      monthOnMonthRatio: null,
+      valuation: 2000,
+    };
+    body["summaryDetailItems"] = [item];
+    const result = sbiAccountAssetsCurrent.parse(encoded(body), meta);
+    const items = result.observations.filter(
+      (entry) =>
+        entry.kind === "valuation" &&
+        entry.subject === "portfolio:summaryDetailItems:SYNTHETIC_CATEGORY:SYNTHETIC_DETAIL",
+    );
+    expect(items.map((entry) => entry.kind === "valuation" && entry.metric).sort()).toEqual(
+      MONEY_METRICS_WITHOUT_PROFIT_LOSS,
+    );
+    expect(
+      items.find((entry) => entry.kind === "valuation" && entry.metric === "valuation"),
+    ).toMatchObject({
+      amountMinor: 2000,
+      rawLocator: "json:$.summaryDetailItems[0].valuation",
+      extra: {
+        _kogane: {
+          view: "summaryDetailItems",
+          category: "SYNTHETIC_CATEGORY",
+          categoryDetail: "SYNTHETIC_DETAIL",
+        },
+      },
+    });
+    // Artifacts retained before the breakdown existed keep their exact parse.
+    const legacy = sbiAccountAssetsCurrent.parse(fixture(meta.dataset!), meta);
+    expect(result.observations.length - items.length).toBe(legacy.observations.length);
+
+    for (const mutate of [
+      (b: any) => b.summaryDetailItems.push(structuredClone(b.summaryDetailItems[0])),
+      (b: any) => (b.summaryDetailItems[0].futureField = 1),
+      (b: any) => delete b.summaryDetailItems[0].categoryDetail,
+      (b: any) => (b.summaryDetailItems[0].categoryDetail = 1),
+      (b: any) => (b.summaryDetailItems[0].assetsErrorType = "SYNTHETIC"),
+      (b: any) => (b.summaryDetailItems[0].valuation = 1.5),
+      (b: any) => (b.summaryDetailItems = {}),
+      (b: any) =>
+        b.summaryDetailItems.push({
+          ...structuredClone(b.summaryDetailItems[0]),
+          category: "SYNTHETIC_CATEGORY:SYNTHETIC",
+          categoryDetail: "DETAIL",
+        }) && (b.summaryDetailItems[0].categoryDetail = "SYNTHETIC:DETAIL"),
+    ]) {
+      const changed = structuredClone(body);
+      mutate(changed);
+      expect(() => sbiAccountAssetsCurrent.parse(encoded(changed), meta)).toThrow();
+    }
   });
 });
 

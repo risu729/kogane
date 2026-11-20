@@ -68,6 +68,54 @@ describe("the read cursor", () => {
     ).toBe("context_expired");
   });
 
+  test("the same query at another offered page size continues (ADR 0119)", () => {
+    // The request asks at another size (`digest-100`); the cursor carries the
+    // digest of the size its page was read at, which the route lists.
+    const sizes = ["digest-50", "digest-1", "digest-200"];
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: sizes,
+        readInstanceId: "instance-1",
+        snapshotReadable: true,
+      }),
+    ).toBeNull();
+    // Without the list, or with a list that does not name the cursor's
+    // digest, it is still another query.
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        readInstanceId: "instance-1",
+        snapshotReadable: true,
+      }),
+    ).toBe("cursor_mismatch");
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: ["digest-50", "digest-200"],
+        readInstanceId: "instance-1",
+        snapshotReadable: true,
+      }),
+    ).toBe("cursor_mismatch");
+    // A size match never outweighs an expired context.
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: sizes,
+        readInstanceId: "instance-2",
+        snapshotReadable: true,
+      }),
+    ).toBe("context_expired");
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: sizes,
+        readInstanceId: "instance-1",
+        snapshotReadable: false,
+      }),
+    ).toBe("context_expired");
+  });
+
   test("a retired or deleted snapshot is context_expired; another query is a mismatch", () => {
     expect(
       checkReadCursor(cursor, {
