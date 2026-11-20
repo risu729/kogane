@@ -105,6 +105,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   // UI read pages (src/page-read-tools.ts): each the route's own reader.
   "/api/identity/connections": ["kogane.identity.read"],
   "/api/identity/accounts": ["kogane.identity.read"],
+  "/api/identity/account-list": ["kogane.identity.read"],
   "/api/identity/instruments": ["kogane.identity.read"],
   "/api/identity/coverage": ["kogane.identity.read"],
   "/api/meta": ["kogane.store.read"],

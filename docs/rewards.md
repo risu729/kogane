@@ -394,7 +394,7 @@ Each row's `quantity` is the amount at risk: `exact` with its decimal-v1 value, 
 
 `expiryBasis` is returned only when stored evidence satisfies `validRewardExpiryBasis`; otherwise it is `null`. `null` means either that evidence was not recorded by a build before `reward-projection-v2` or that the stored value fails validation, not that no computed expiry exists. Evidence is not reconstructed from other columns. Validation also rejects `date` / `no-expiry` for unverified rule versions, `no-expiry` for bounded rules or families other than `none`, and `agree`/`disagree` with an unreadable displayed expiry. If CORE rule `applicability_json` has unreadable `tiers` / `validPeriod`, they are treated as a tier no claim meets and a period containing no day, not all tiers or always valid. The shared response validator (`api-validation.ts`) checks `RewardReadExpiryRow.expiryBasis` with `optional(nullable(validRewardExpiryBasis))`. Responses containing damaged evidence are rejected; `null` and an absent field (an App predating it) are accepted. The screen performs the same validation before rendering.
 
-No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query is 400 `cursor_mismatch`; another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset.
+No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query (another route or `program`) is 400 `cursor_mismatch`, with `mustMatch` naming the inputs that must repeat (`["collection", "program"]` on expiry, `["collection"]` on simulations; [ADR 0123](adr/0123-summary-detail-for-large-reads.md)); another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset. The page size is not part of the query: a cursor read at one offered `limit` (25, 50, 100, 200) continues at another from where its page ended, and the next cursor is issued at the size asked now ([ADR 0119](adr/0119-cursor-page-size.md)).
 
 Retained snapshots: a cursor that still names an older, retained snapshot is refused with the same
 503 code as the published one when the CORE epoch or visibility revision that snapshot was captured
@@ -539,13 +539,19 @@ membership is unestablished and whose deadline has passed is `needs_rule_verific
 so a validity that ends while an earlier hop's credit is awaited is
 `offer_not_valid_at_clock`, not `reuse_before_credit` (a limit).
 
-The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
-with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
-any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
-00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day,
-and its application deadline, can be judged one day off at the boundary (a deadline
-of the previous JST day is still a route then). This is a limit of the route's clock,
-not of the search.
+The `/offers/simulate` goal search starts from today's Asia/Tokyo civil date as a
+`local-date` with zone `Asia/Tokyo` and basis `derived` (`searchClock` in
+`services/app/src/rewards-api.ts`), so the first hop's `appliedOn` is the Tokyo day
+at every hour, and an `Asia/Tokyo` offer's first and last day and its application
+deadline are judged on that day. An offer whose validity, or whose date or period
+deadline, names another zone is not compared with the Tokyo date
+(`needs_rule_verification`); one with a `null` zone is compatible and is judged on it.
+A computed goal-search answer carries that clock as `clock`, beside `budget`: the
+search release names the traversal, not the day it started on, so two answers of the
+same release that differ name the day each was judged from. Before the
+[ADR 0049 amendment of 2026-11-18](adr/0049-reward-expiry-basis.md#amendment-a-goal-searchs-clock-is-todays-asiatokyo-day)
+the clock was the UTC date with zone `null`: between 00:00 and 09:00 JST that was the
+previous Tokyo day, and an offer of any zone was judged against it.
 
 For a tier-limited offer, a provider membership claim must name the source program,
 an admitted tier and a validity date/period covering that same day. Missing,

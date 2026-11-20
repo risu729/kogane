@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 
 const LANES = ["incremental", "repair", "replay"];
@@ -23,7 +24,7 @@ else if (command === "catchup") {
   calls.push({ path: `replay/${first}`, method: "POST", body: JSON.stringify(JSON.parse(second)) });
 } else throw new Error(usage);
 const proxy = await getPlatformProxy<{ OBSERVATIONS: Fetcher }>({
-  configPath: new URL("../wrangler.ops.jsonc", import.meta.url).pathname,
+  configPath: fileURLToPath(new URL("../wrangler.ops.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });

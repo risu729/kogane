@@ -2,6 +2,38 @@
 
 A temporary PoC that logs into VCTRADE using an existing Bitwarden passkey entirely in a Cloudflare Worker, refreshes the session on a rolling basis and saves read-only data to R2. It uses no external Bun process, Container or Chrome.
 
+## Runtime profile
+
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or
+  external browser session is used; `wrangler.jsonc` declares no browser or
+  container binding.
+- The passkey login is signed with Workers Web Crypto (`src/passkey.ts`,
+  `src/crypto.ts`), and Worker `fetch` runs the keepalive and the fixed read
+  allowlist (`src/worker.ts`, `src/collector.ts`). There is no
+  browser-to-`fetch` handoff.
+- State: one SQLite Durable Object, `SbiVcSessionState` (binding
+  `SESSION_STATE`, name `singleton`), holds the encrypted session and its
+  health record and serializes keepalive, login and collection
+  (`src/worker.ts`).
+- Execution: entrypoint `src/schedule-entrypoint.ts`, whose
+  `ScheduledCollection.runScheduled` accepts only the `sbi-vc-keepalive`
+  (`*/15 * * * *`) and `sbi-vc-trade` (`5 21 * * *`) alarm jobs' crons
+  ([`config/alarm-jobs.json`](../../config/alarm-jobs.json)); `runOperation`
+  runs an accepted collection or session-refresh request. Keepalive, login and
+  collection each hold the `sbi-vc-trade` execution lease
+  (`withCollectionLease` in `src/worker.ts`, D1 `SCHEDULE_DB`), whose forced
+  stop aborts the Durable Object. Collection writes shared DATA
+  (`kogane-raw-evidence`) with the terminal last (`src/shared-collection.ts`).
+  There is no Cron Trigger.
+- Retries: a login is attempted only on HTTP 401/403, a gateway refusal, a
+  missing seed or, while a terms agreement is pending, a redirect, at most
+  every 6 hours, or every hour for 72 hours while a terms
+  agreement is pending (`src/session-policy.ts`); a requested session refresh
+  may skip that spacing once per hour (`FORCED_REAUTH_SPACING_MS`,
+  `src/worker.ts`).
+- Budgets: `wrangler.jsonc` sets no `limits`; the CPU and subrequest budgets in
+  effect are not recorded in the repository.
+
 <a id="secretと永続化"></a>
 
 ## Secrets and persistence

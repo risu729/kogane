@@ -4,6 +4,7 @@ import { containerClaim } from "./coverage.ts";
 import {
   amountToMinorUnits,
   csvWarningText,
+  minorUnitExponent,
   decodeUtf8,
   parseCsv,
   unitScopeAdmitted,
@@ -68,8 +69,8 @@ const CUSTOMER_DISPLAY_ORDER = "customerDispOrdr";
 
 export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
-  // Patch release: shared Sony module normalizes observed retained CSV exports.
-  version: "1.0.5",
+  // Patch release: shared Sony module keeps exact decimals for non-table currencies (issue 1231).
+  version: "1.0.6",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -196,8 +197,8 @@ export const sonyBankGrossBalance: Parser = {
 
 export const sonyBankHistoryJson: Parser = {
   name: "sony-bank-history-json",
-  // Observed retained CSV order and strict provider-encoding exception.
-  version: "1.0.4",
+  // Exact decimals for CAD/CHF/EUR/GBP/HKD/NZD/SEK/ZAR history, no invented minor units (issue 1231).
+  version: "1.0.5",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(artifact.dataset ?? ""),
@@ -240,7 +241,7 @@ export const sonyBankHistoryJson: Parser = {
         "additionAndSubtractionSegment",
       );
       const amount = exactUnsignedMoney(row.transactionAmt, currency, "transactionAmt");
-      const after = exactMoney(row.transactionAftBal, currency, "transactionAftBal");
+      const after = historyMoney(row.transactionAftBal, currency, "transactionAftBal");
       const asOf = normalizedDate(row.transactionDt, "transactionDt");
       requireWithinWindow(asOf, window, "transactionDt");
       const description = strictString(row.abridgmentObj, "abridgmentObj", { max: 512 });
@@ -249,16 +250,16 @@ export const sonyBankHistoryJson: Parser = {
       for (const field of ["currencyCdSpndl", "currencyCdStl", "otherPrtyCcyCd"] as const)
         if (Object.hasOwn(row, field)) enumText(row[field], CURRENCIES, field);
       const locator = `json:$.transactionHistInfo[${index}]`;
-      const signedMinor = direction === "1" ? amount.minor : -amount.minor;
-      const identity = historyIdentity(currency, asOf, signedMinor, after.minor);
+      const signed = signedHistoryAmount(amount, direction === "1");
+      const identity = historyIdentity(currency, asOf, signed, after);
       const occurrence = takeOccurrence(occurrences, identity);
       observations.push({
         kind: "transaction",
         sourceAccount: `sony-bank:deposit:${currency}`,
         externalId: `sony-bank-history:${identity}:${occurrence}`,
         status: "posted",
-        amountMinor: signedMinor,
-        amountText: signedMinor < 0 ? `-${amount.text}` : amount.text,
+        ...(signed.minor === undefined ? {} : { amountMinor: signed.minor }),
+        amountText: signed.text,
         amountScale: amount.scale,
         currency,
         description,
@@ -294,8 +295,8 @@ export const sonyBankHistoryJson: Parser = {
 
 export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
-  // Observed retained CSV order and strict provider-encoding exception.
-  version: "1.0.5",
+  // Exact decimals for CAD/CHF/EUR/GBP/HKD/NZD/SEK/ZAR history, no invented minor units (issue 1231).
+  version: "1.0.6",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
@@ -332,7 +333,7 @@ export const sonyBankHistoryCsv: Parser = {
         if (credit === (withdrawal !== ""))
           throw new Error("Sony history CSV direction is ambiguous");
         const money = exactUnsignedMoney(credit ? deposit : withdrawal, currency, "CSV amount");
-        const balanceMoney = exactMoney(after, currency, "CSV balance");
+        const balanceMoney = historyMoney(after, currency, "CSV balance");
         const japaneseDate = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/u.exec(date ?? "");
         const asOf = normalizedDate(
           japaneseDate
@@ -346,16 +347,16 @@ export const sonyBankHistoryCsv: Parser = {
         if (foreign && rate !== "") exactDecimal(rate, "CSV exchange rate");
         const extra = Object.fromEntries(header.map((name, offset) => [name, row[offset]]));
         const normalizedDescription = strictString(description, "CSV description", { max: 512 });
-        const signedMinor = credit ? money.minor : -money.minor;
-        const identity = historyIdentity(currency, asOf, signedMinor, balanceMoney.minor);
+        const signed = signedHistoryAmount(money, credit);
+        const identity = historyIdentity(currency, asOf, signed, balanceMoney);
         const occurrence = takeOccurrence(occurrences, identity);
         observations.push({
           kind: "transaction",
           sourceAccount: `sony-bank:deposit:${currency}`,
           externalId: `sony-bank-history:${identity}:${occurrence}`,
           status: "posted",
-          amountMinor: signedMinor,
-          amountText: signedMinor < 0 ? `-${money.text}` : money.text,
+          ...(signed.minor === undefined ? {} : { amountMinor: signed.minor }),
+          amountText: signed.text,
           amountScale: money.scale,
           currency,
           description: normalizedDescription,
@@ -423,8 +424,8 @@ const WALLET_HEADERS = [
 
 export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
-  // Patch release: shared Sony module normalizes observed retained CSV exports.
-  version: "1.0.6",
+  // Patch release: shared Sony module keeps exact decimals for non-table currencies (issue 1231).
+  version: "1.0.7",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
@@ -640,7 +641,7 @@ function validateMasterData(body: Record<string, unknown>): void {
 function balance(
   sourceAccount: string,
   metric: string,
-  money: { minor: number; text: string; scale: number },
+  money: { minor?: number | undefined; text: string; scale: number },
   currency: string,
   rawLocator: string,
   extra: Record<string, unknown>,
@@ -650,7 +651,7 @@ function balance(
     kind: "balance",
     sourceAccount,
     metric,
-    amountMinor: money.minor,
+    ...(money.minor === undefined ? {} : { amountMinor: money.minor }),
     amountText: money.text,
     amountScale: money.scale,
     instrument: currency,
@@ -730,21 +731,73 @@ function requireWithinWindow(
   if ((window.from !== null && date < window.from) || date > window.to)
     throw new Error(`${label} is outside the fetch window`);
 }
+/**
+ * A deposit-history amount. Kogane's minor-unit table (`money.ts`) names only
+ * JPY, USD and AUD; Sony also keeps CAD, CHF, EUR, GBP, HKD, NZD, SEK and ZAR
+ * ordinary deposits. For a currency with a known exponent the amount must be
+ * exact in its minor units, as before. For any other currency the exact
+ * provider decimal is kept and no minor-unit integer is invented, the way the
+ * SBI Shinsei parsers record foreign savings (1.0.5 / 1.0.6, issue 1231).
+ */
+function historyMoney(
+  value: unknown,
+  currency: string,
+  label: string,
+): { text: string; scale: number; minor: number | undefined } {
+  if (minorUnitExponent(currency) !== undefined) return exactMoney(value, currency, label);
+  return { ...exactDecimal(value, label), minor: undefined };
+}
 function exactUnsignedMoney(value: unknown, currency: string, label: string) {
   if (typeof value === "string" && /^[+-]/u.test(value.trim())) {
     throw new Error(`${label} must be unsigned`);
   }
-  const money = exactMoney(value, currency, label);
-  if (money.minor < 0) throw new Error(`${label} must be unsigned`);
+  const money = historyMoney(value, currency, label);
+  if ((money.minor ?? 0) < 0 || money.text.startsWith("-"))
+    throw new Error(`${label} must be unsigned`);
   return money;
 }
+function signedHistoryAmount(
+  money: { text: string; minor: number | undefined },
+  credit: boolean,
+): { text: string; minor: number | undefined } {
+  if (money.minor !== undefined) {
+    const minor = credit ? money.minor : -money.minor;
+    return { text: minor < 0 ? `-${money.text}` : money.text, minor };
+  }
+  const zero = /^0(?:\.0+)?$/u.test(money.text);
+  return { text: credit || zero ? money.text : `-${money.text}`, minor: undefined };
+}
+/**
+ * Row identity. Known-exponent currencies keep their published minor-unit
+ * fingerprint unchanged; the others use canonical exact decimals, so "1.50"
+ * in the CSV and "1.5" in a JSON page name the same row.
+ */
 function historyIdentity(
   currency: string,
   asOf: string,
-  amountMinor: number,
-  afterMinor: number,
+  amount: { text: string; minor: number | undefined },
+  after: { text: string; minor: number | undefined },
 ): string {
-  return stableFingerprint({ currency, asOf, amountMinor, afterMinor });
+  if (amount.minor !== undefined && after.minor !== undefined)
+    return stableFingerprint({
+      currency,
+      asOf,
+      amountMinor: amount.minor,
+      afterMinor: after.minor,
+    });
+  return stableFingerprint({
+    currency,
+    asOf,
+    amountDecimal: canonicalDecimal(amount.text),
+    afterDecimal: canonicalDecimal(after.text),
+  });
+}
+function canonicalDecimal(text: string): string {
+  const negative = text.startsWith("-");
+  let digits = text.replace(/^[+-]/u, "");
+  if (digits.includes(".")) digits = digits.replace(/0+$/u, "").replace(/\.$/u, "");
+  digits = digits.replace(/^0+(?=\d)/u, "");
+  return negative && digits !== "0" ? `-${digits}` : digits;
 }
 function takeOccurrence(occurrences: Map<string, number>, identity: string): number {
   const occurrence = occurrences.get(identity) ?? 0;
