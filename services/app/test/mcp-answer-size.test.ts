@@ -8,7 +8,15 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { scheduleRoute } from "../../processor/src/schedule-store";
 import { ScheduleAlarm } from "../../processor/src/schedule-alarm";
-import { scheduleSnapshotSummary } from "../../../packages/collection/src/schedule-model";
+import {
+  MAINTENANCE_SUMMARY_LINES,
+  type MaintenanceRead,
+  type MaintenanceReadSource,
+  maintenanceReadSummary,
+  scheduleSnapshotSummary,
+} from "../../../packages/collection/src/schedule-model";
+import { overviewSummary } from "../../../packages/application/src/query/overview-detail";
+import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
 import {
   balanceHistorySummary,
   latestBalanceSummary,
@@ -105,6 +113,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.identity.read", { collection: "coverage" }],
     ["kogane.store.read", { page: "meta" }],
     ["kogane.store.read", { page: "overview" }],
+    ["kogane.store.read", { page: "overview", detail: "full" }],
     ["kogane.store.read", { page: "filter-options", kind: "balances" }],
     ["kogane.observations.list", { kind: "transactions" }],
     ["kogane.observations.list", { kind: "balances" }],
@@ -128,13 +137,14 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.schedules.read", {}],
     ["kogane.schedules.read", { detail: "full" }],
     ["kogane.schedules.maintenance.read", {}],
+    ["kogane.schedules.maintenance.read", { detail: "full" }],
     ["kogane.schedules.survey.read", {}],
     ["kogane.purchases.explain", {}],
   ];
 }
 
 describe("MCP read answer sizes (ADR 0123)", () => {
-  it("measures every read tool's default answer, and keeps the three summaries under 8 KB", async () => {
+  it("measures every read tool's default answer, and keeps the five summaries under 8 KB", async () => {
     const listed = new Set(await page.listed());
     const rows: string[] = [];
     const sizes = new Map<string, number>();
@@ -161,8 +171,17 @@ describe("MCP read answer sizes (ADR 0123)", () => {
       "kogane.schedules.read {}",
       "kogane.collection-quality.read {}",
       'kogane.collection-quality.read {"source":"sony-bank"}',
+      'kogane.store.read {"page":"overview"}',
+      "kogane.schedules.maintenance.read {}",
     ])
       expect(sizes.get(call), call).toBeLessThan(CLIENT_BYTES);
+    // The two reads the amendment of 2026-11-19 summarizes were over it in full.
+    expect(sizes.get('kogane.store.read {"page":"overview","detail":"full"}')).toBeGreaterThan(
+      CLIENT_BYTES,
+    );
+    expect(sizes.get('kogane.schedules.maintenance.read {"detail":"full"}')).toBeGreaterThan(
+      CLIENT_BYTES,
+    );
     // The full answers are what #1414 measured: far past what a client shows.
     expect(
       sizes.get('kogane.balances.read {"collection":"latest","detail":"full"}'),
@@ -488,5 +507,531 @@ describe("kogane.collection-quality.read summary (ADR 0123)", () => {
       failureCodes: ["stated_total_mismatch"],
       coverageCauses: [],
     });
+  });
+});
+
+// ── The amendment of 2026-11-19: the overview and the maintenance read ──
+
+/** Two-digit index, for synthetic names. */
+const nn = (index: number) => String(index).padStart(2, "0");
+const instant = (minutes: number) =>
+  new Date(Date.UTC(2026, 10, 18, 21) - minutes * 60_000).toISOString();
+
+/**
+ * Every code the Processor writes to `parse_runs.error` today (its pipeline
+ * and metadata errors, the failing stage, `parse_interrupted`), and the
+ * `unclassified` the summary writes for a value that is not a code.
+ */
+const PARSE_FAILURE_CODES = [
+  "artifact_not_eligible",
+  "artifact_too_large",
+  "metadata_release_unknown",
+  "observation_limit_exceeded",
+  "observation_payload_too_large",
+  "observation_row_too_large",
+  "parse_contract_invalid",
+  "parse_lease_expired",
+  "parse_run_insert_failed",
+  "parser_no_longer_accepts",
+  "parser_release_conflict",
+  "parser_version_invalid",
+  "raw_checksum_mismatch",
+  "raw_object_missing",
+  "raw_size_mismatch",
+  "release_manifest_mismatch",
+  "manifest_artifact_ambiguous",
+  "manifest_artifact_mismatch",
+  "manifest_dataset_mismatch",
+  "manifest_media_type_mismatch",
+  "manifest_period_invalid",
+  "manifest_shape_invalid",
+  "manifest_state_invalid",
+  "metadata_manifest_missing",
+  "metadata_projection_missing",
+  "metadata_or_raw_read_failed",
+  "parser_rejected",
+  "persistence_failed",
+  "parse_interrupted",
+  "unclassified",
+] as const;
+
+/**
+ * A full overview at the worst its window allows: 38 sources (as many as the
+ * registry declares today), every one with artifacts and runs among the
+ * newest 500 fetch runs, `partialSources` of them with partial runs, and the
+ * newest 500 parse runs over 57 parsers (as many as the parser registry has),
+ * `failingParsers` of them failing (their runs taking `codes` in turn) and
+ * three pending, with warnings; and `unitLines` sources' datasets with three
+ * partial-unit updates each.
+ */
+function worstOverview(options: {
+  partialSources: number;
+  failingParsers: number;
+  unitLines: number;
+  codes: readonly string[];
+}): OverviewPage {
+  const sources = Array.from({ length: 38 }, (_, index) => `synthetic-source-${nn(index)}`);
+  const parsers = Array.from(
+    { length: 57 },
+    (_, index) => `synthetic-provider-${nn(index)}-statement-parser`,
+  );
+  return {
+    counts: [
+      "sources",
+      "fetch_runs",
+      "raw_objects",
+      "fetch_artifacts",
+      "parse_runs",
+      "transaction_observations",
+      "balance_observations",
+      "position_observations",
+      "valuation_observations",
+    ].map((table, index) => ({ table, rows: 1_000_000 + index * 7_919 })),
+    sources: sources.map((id, index) => ({
+      id,
+      provider: `Synthetic Provider ${index}`,
+      ingestion: "collector-r2",
+      artifact_count: 10_000 + index * 101,
+    })),
+    fetchRuns: Array.from({ length: 500 }, (_, index) => {
+      const source = index % sources.length;
+      const partial = source < options.partialSources && index % 3 === 0;
+      return {
+        id: 900_500 - index,
+        source_id: sources[source]!,
+        tool: "synthetic-collector",
+        external_run_id: crypto.randomUUID(),
+        status: partial ? "partial" : "success",
+        started_at: instant(index * 30 + 5),
+        completed_at: partial && index % 2 === 0 ? null : instant(index * 30),
+      };
+    }),
+    parseRuns: Array.from({ length: 500 }, (_, index) => {
+      const parser = index % parsers.length;
+      const failing = parser < options.failingParsers;
+      const pending = !failing && parser < options.failingParsers + 3;
+      const status =
+        failing && index % 2 === 0 ? "error" : pending && index % 5 === 0 ? "pending" : "ok";
+      return {
+        id: 700_500 - index,
+        fetch_artifact_id: 800_500 - index,
+        parser_name: parsers[parser]!,
+        parser_version: "3",
+        parsed_at: instant(index * 30),
+        status,
+        warnings:
+          index % 4 === 0
+            ? { list: ["synthetic warning text"], raw: '["synthetic warning text"]', parsed: true }
+            : { list: [], raw: "[]", parsed: true },
+        // The Processor writes a closed code here, never the parser's text.
+        error: status === "error" ? options.codes[(index / 2) % options.codes.length]! : null,
+        superseded_by_parse_run_id: index % 9 === 0 ? 700_600 - index : null,
+      };
+    }),
+    unitUpdates: Array.from({ length: options.unitLines * 3 }, (_, index) => ({
+      source_id: sources[index % options.unitLines]!,
+      dataset: `synthetic-dataset-${nn(index % options.unitLines)}`,
+      fetch_run_id: 900_500 - index * 3,
+      fetched_at: instant(index * 90),
+      updated_units: 3,
+      stale_units: 1,
+    })),
+    coverage: { limit: 500, truncated: true },
+  };
+}
+
+/**
+ * A full overview at the summary's bound: every part the caps leave growing
+ * at its largest. 38 sources, each with its own artifact count and with
+ * partial runs; every fetch run completed; all three parse statuses, every
+ * one of 57 parsers failing, the five newest lines each with the three
+ * longest codes and more, every code the Processor writes on the error
+ * line, three parsers' pending lines and the older failing ones left out;
+ * every run superseded and half of them with warnings, half unreadable; and
+ * 76 source and dataset lines of unit updates. Source ids, parser names and
+ * datasets are as long as the longest the source and parser registries and
+ * the collectors use today (17, 40 and 37 characters); counts and ids are as
+ * wide as `worstOverview`'s.
+ */
+function boundOverview(): OverviewPage {
+  const sources = Array.from({ length: 38 }, (_, index) => `synthetic-feed-${nn(index)}`);
+  const parsers = Array.from(
+    { length: 57 },
+    (_, index) => `synthetic-provider-${nn(index)}-card-statement-pdf`,
+  );
+  const longest = [...PARSE_FAILURE_CODES].sort((left, right) => right.length - left.length);
+  return {
+    counts: worstOverview({ partialSources: 0, failingParsers: 0, unitLines: 0, codes: [] }).counts,
+    sources: sources.map((id, index) => ({
+      id,
+      provider: `Synthetic Provider ${index}`,
+      ingestion: "collector-r2",
+      artifact_count: 10_000 + index * 101,
+    })),
+    fetchRuns: Array.from({ length: 500 }, (_, index) => ({
+      id: 900_500 - index,
+      source_id: sources[index % sources.length]!,
+      tool: "synthetic-collector",
+      external_run_id: crypto.randomUUID(),
+      status: index % 3 === 0 ? "success" : "partial",
+      started_at: instant(index * 30 + 5),
+      completed_at: instant(index * 30),
+    })),
+    parseRuns: Array.from({ length: 500 }, (_, index) => {
+      const parser = index % parsers.length;
+      // Seven rounds of every parser failing, then three pending and the rest ok.
+      const round = Math.floor(index / parsers.length);
+      const status = round < 7 ? "error" : parser < 3 ? "pending" : "ok";
+      return {
+        id: 700_500 - index,
+        fetch_artifact_id: 800_500 - index,
+        parser_name: parsers[parser]!,
+        parser_version: "3",
+        parsed_at: instant(index * 30),
+        status,
+        warnings:
+          index % 2 === 0
+            ? { list: ["synthetic warning text"], raw: '["synthetic warning text"]', parsed: true }
+            : { list: [], raw: "not json", parsed: false },
+        // The newest three rounds the longest codes, the older ones every code.
+        error:
+          status !== "error"
+            ? null
+            : round < 3
+              ? longest[round]!
+              : PARSE_FAILURE_CODES[index % PARSE_FAILURE_CODES.length]!,
+        superseded_by_parse_run_id: 700_600 - index,
+      };
+    }),
+    unitUpdates: Array.from({ length: 500 }, (_, index) => ({
+      source_id: sources[index % sources.length]!,
+      dataset: `synthetic-dataset-${nn(Math.floor(index / sources.length) % 2)}-statement-detail`,
+      fetch_run_id: 900_500 - index,
+      fetched_at: instant(index * 30),
+      updated_units: 3,
+      stale_units: 1,
+    })),
+    coverage: { limit: 500, truncated: true },
+  };
+}
+
+describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", () => {
+  it("is the full overview shaped by the one shared function, on the route and the tool alike", async () => {
+    const summary = await page.route("/api/overview");
+    const full = await page.route("/api/overview?detail=full");
+    expect(summary.status).toBe(200);
+    expect(full.status).toBe(200);
+    expect(full.body).not.toHaveProperty("detail");
+    expect(summary.body).toEqual(overviewSummary(full.body as OverviewPage));
+    expect(validApiResponse("/api/overview", summary.body, "summary")).toBe(true);
+    expect(validApiResponse("/api/overview", full.body, "full")).toBe(true);
+    expect(validApiResponse("/api/overview", summary.body, "full")).toBe(false);
+    expect(validApiResponse("/api/overview", full.body, "summary")).toBe(false);
+    expect(validApiResponse("/api/overview", summary.body)).toBe(true);
+    expect(validApiResponse("/api/overview", full.body)).toBe(true);
+    const envelope = (data: unknown) => ({ schemaVersion: "kogane-page-read-v1", data });
+    expect((await page.mcp("kogane.store.read", { page: "overview" })).body).toEqual(
+      envelope(summary.body),
+    );
+    expect(await page.http("kogane.store.read", { page: "overview" })).toEqual({
+      status: 200,
+      body: envelope(summary.body),
+    });
+    expect(
+      (await page.mcp("kogane.store.read", { page: "overview", detail: "full" })).body,
+    ).toEqual(envelope(full.body));
+    // Every fetch and parse run of the window is counted under its status.
+    const lines = summary.body as {
+      fetchRuns: { byStatus: { runs: number }[] };
+      parseRuns: { byStatus: { runs: number }[] };
+    };
+    const window = full.body as OverviewPage;
+    expect(lines.fetchRuns.byStatus.reduce((sum, line) => sum + line.runs, 0)).toBe(
+      window.fetchRuns.length,
+    );
+    expect(lines.parseRuns.byStatus.reduce((sum, line) => sum + line.runs, 0)).toBe(
+      window.parseRuns.length,
+    );
+  });
+
+  it("refuses a detail it does not offer, and a detail on the other pages", async () => {
+    expect(await page.route("/api/overview?detail=compact")).toEqual({
+      status: 400,
+      body: expect.objectContaining({ error: "invalid_detail" }),
+    });
+    const tool = await page.mcp("kogane.store.read", { page: "overview", detail: "compact" });
+    expect(tool.isError).toBe(true);
+    expect(tool.body.error).toBe("invalid_request");
+    // Only the overview has a detail: the other pages refuse it as the routes do.
+    for (const [path, args] of [
+      ["/api/meta?detail=full", { page: "meta", detail: "full" }],
+      [
+        "/api/filter-options?kind=balances&detail=full",
+        { page: "filter-options", kind: "balances", detail: "full" },
+      ],
+    ] as const) {
+      expect((await page.route(path)).body).toMatchObject({ error: "invalid_query" });
+      expect((await page.mcp("kogane.store.read", args)).body).toMatchObject({
+        error: "invalid_query",
+      });
+    }
+  });
+
+  it("stays under 7 KB at the window's realistic worst and under 8 KB at its bound", () => {
+    const worst = worstOverview({
+      partialSources: 10,
+      failingParsers: 10,
+      unitLines: 10,
+      codes: ["parser_rejected"],
+    });
+    expect(validApiResponse("/api/overview", worst, "full")).toBe(true);
+    expect(bytes(worst)).toBeGreaterThan(25 * CLIENT_BYTES);
+    const summary = overviewSummary(worst);
+    expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
+    const size = bytes({ schemaVersion: "kogane-page-read-v1", data: summary });
+    expect(size).toBeLessThan(7 * 1024);
+    // Every run is counted once, under its status; each status that is not a
+    // success names the five sources or parsers with the newest runs and
+    // counts the rest, with their runs.
+    expect(summary.fetchRuns.byStatus.map((line) => [line.status, line.runs])).toEqual([
+      ["partial", worst.fetchRuns.filter((run) => run.status === "partial").length],
+      ["success", worst.fetchRuns.filter((run) => run.status === "success").length],
+    ]);
+    expect(summary.fetchRuns.notSuccessful).toHaveLength(5);
+    expect(summary.fetchRuns.notSuccessfulOmitted).toEqual([
+      { status: "partial", lines: 5, runs: expect.any(Number) },
+    ]);
+    expect(summary.parseRuns.notOk).toHaveLength(5);
+    // Ten failing parsers and three pending ones: thirteen lines.
+    expect(
+      summary.parseRuns.notOk.length +
+        summary.parseRuns.notOkOmitted.reduce((lines, line) => lines + line.lines, 0),
+    ).toBe(13);
+    for (const line of summary.parseRuns.notOk)
+      expect(line.failureCodes).toEqual(line.status === "error" ? ["parser_rejected"] : []);
+    expect(summary.unitUpdates).toHaveLength(5);
+    expect(summary.unitUpdatesOmitted).toEqual({ lines: 5, runs: 15 });
+    expect(summary.sources).toHaveLength(38);
+    // The bound: every list full and every part the caps leave growing at
+    // its largest. Nothing grows further with the store; only the source
+    // registry, the Processor's codes, longer names and wider numbers would.
+    const boundFull = boundOverview();
+    expect(validApiResponse("/api/overview", boundFull, "full")).toBe(true);
+    const bound = overviewSummary(boundFull);
+    expect(validApiResponse("/api/overview", bound, "summary")).toBe(true);
+    expect(
+      [
+        boundFull.sources[0]!.id,
+        boundFull.parseRuns[0]!.parser_name,
+        boundFull.unitUpdates![0]!.dataset,
+      ].map((name) => name.length),
+    ).toEqual([17, 40, 37]);
+    expect(bound.sources).toHaveLength(38);
+    expect(bound.fetchRuns.notSuccessful).toHaveLength(5);
+    expect(bound.fetchRuns.notSuccessful.every((line) => line.newest.completedAt !== null)).toBe(
+      true,
+    );
+    expect(bound.parseRuns.byStatus.map((line) => line.status).sort()).toEqual([
+      "error",
+      "ok",
+      "pending",
+    ]);
+    expect(bound.parseRuns.byStatus.find((line) => line.status === "error")?.failureCodes).toEqual(
+      expect.arrayContaining([...PARSE_FAILURE_CODES]),
+    );
+    const longest = [...PARSE_FAILURE_CODES]
+      .sort((left, right) => right.length - left.length)
+      .slice(0, 3);
+    expect(bound.parseRuns.notOk).toHaveLength(5);
+    for (const line of bound.parseRuns.notOk) {
+      expect(line.failureCodes).toEqual(longest);
+      expect(line.moreFailureCodes).toBeGreaterThan(0);
+    }
+    expect(bound.parseRuns.notOkOmitted.map((entry) => entry.status).sort()).toEqual([
+      "error",
+      "pending",
+    ]);
+    expect(bound.unitUpdates).toHaveLength(5);
+    expect(bound.unitUpdatesOmitted?.lines).toBe(76 - 5);
+    const bounded = bytes({ schemaVersion: "kogane-page-read-v1", data: bound });
+    expect(bounded).toBeLessThan(CLIENT_BYTES);
+    console.log(
+      `overview summary at the realistic worst: ${size} bytes (full ${bytes(worst)}); at its bound: ${bounded} (full ${bytes(boundFull)})`,
+    );
+  });
+});
+
+/** One synthetic rule's revisions, newest first, as the Processor lists them (at most 20). */
+function revisions(
+  count: number,
+  weekly: boolean,
+): MaintenanceReadSource["rules"][number]["revisions"] {
+  const reasons = [
+    "official-notice-added",
+    "official-notice-changed",
+    "outage-observed",
+    null,
+  ] as const;
+  return Array.from({ length: count }, (_, index) => ({
+    revision: count - index,
+    timezone: "Asia/Tokyo",
+    pattern: weekly
+      ? { kind: "weekly" as const, weekdays: [0, 1, 2, 3, 4, 5, 6], start: "23:30", end: "06:00" }
+      : {
+          kind: "monthly" as const,
+          weekday: 2,
+          nth: 3,
+          offsetDays: 0,
+          start: "21:00",
+          end: "07:00",
+        },
+    enabled: index % 3 !== 2,
+    scope: "collection" as const,
+    referenceUrl: "https://maintenance.synthetic.test/notices/a-realistically-long-path/index.html",
+    verifiedAt: instant(index * 1_440),
+    createdAt: instant(index * 1_440 - 5),
+    actorKind:
+      index === count - 1 ? null : index % 2 === 0 ? ("delegated" as const) : ("operator" as const),
+    changeReason: reasons[index % reasons.length]!,
+    byCaller: index % 4 === 0,
+  }));
+}
+
+/**
+ * A full maintenance read with many sources and rules: `sourceCount` sources,
+ * each with two armed jobs whose newest receipt failed with a closed code,
+ * and `rulesPerSource` rules of 20 revisions each.
+ */
+function worstMaintenance(sourceCount: number, rulesPerSource: number): MaintenanceRead {
+  const sources: MaintenanceReadSource[] = Array.from({ length: sourceCount }, (_, index) => {
+    const source = `synthetic-source-${nn(index)}`;
+    return {
+      source,
+      reference: {
+        status: "confirmed",
+        referenceUrl:
+          "https://maintenance.synthetic.test/notices/a-realistically-long-path/index.html",
+        verifiedAt: instant(index),
+      },
+      schedules: ["", "-session-keepalive"].map((suffix, job) => ({
+        id: `${source}${suffix}`,
+        source,
+        kind: job === 0 ? ("collection" as const) : ("keepalive" as const),
+        enabled: true,
+        supported: true,
+        timezone: "Asia/Tokyo",
+        pattern: { kind: "daily" as const, time: "06:25", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+        revision: 12,
+        nextNominalAt: instant(-600),
+        nextRunAt: instant(-660),
+        actualAlarmAt: instant(-660),
+        reservation: "armed" as const,
+        latest: {
+          nominalAt: instant(840),
+          startedAt: instant(839),
+          finishedAt: instant(835),
+          status: "failed" as const,
+          failureCode: "collection_failed",
+        },
+      })),
+      rules: Array.from({ length: rulesPerSource }, (_, rule) => ({
+        id: `${source}-maintenance-window-${rule}`,
+        revisions: revisions(20, rule % 2 === 0),
+      })),
+    };
+  });
+  return {
+    sources,
+    limits: { maxDeferralHours: 168, writesPerDay: 30, writesUsedToday: 29 },
+  };
+}
+
+/** Every page of the maintenance summary, from offset 0. */
+function maintenancePages(read: MaintenanceRead) {
+  const pages = [];
+  for (let offset: number | null = 0; offset !== null;) {
+    const summary = maintenanceReadSummary(read, offset);
+    pages.push(summary);
+    offset = summary.coverage.nextOffset;
+  }
+  return pages;
+}
+
+describe("kogane.schedules.maintenance.read summary (ADR 0123, amendment 2026-11-19)", () => {
+  it("pages the full read by source, on the tool and the agent route alike, each page under 8 KB", async () => {
+    const full = await page.mcp("kogane.schedules.maintenance.read", { detail: "full" });
+    expect(full.isError).toBe(false);
+    expect(full.body).not.toHaveProperty("detail");
+    const read = full.body as MaintenanceRead;
+    const pages = [];
+    for (let offset: number | null = 0; offset !== null;) {
+      const args = offset === 0 ? {} : { offset };
+      const tool = await page.mcp("kogane.schedules.maintenance.read", args);
+      expect(tool.isError).toBe(false);
+      expect(tool.body).toEqual(maintenanceReadSummary(read, offset));
+      expect(await page.http("kogane.schedules.maintenance.read", args)).toEqual({
+        status: 200,
+        body: tool.body,
+      });
+      expect(bytes(tool.body)).toBeLessThan(CLIENT_BYTES);
+      pages.push(tool.body);
+      offset = tool.body.coverage.nextOffset;
+    }
+    // Every source in order (one whose lines continue is listed on both
+    // pages), with every job and rule once; no closed code dropped.
+    const sources = pages.flatMap((entry) => entry.sources);
+    expect(
+      sources
+        .map((entry: { source: string }) => entry.source)
+        .filter((source: string, index: number, all: string[]) => all[index - 1] !== source),
+    ).toEqual(read.sources.map((entry) => entry.source));
+    const jobs = sources.flatMap((entry: { schedules: unknown[] }) => entry.schedules) as {
+      latest: { failureCode: string | null } | null;
+    }[];
+    expect(jobs).toHaveLength(read.sources.flatMap((entry) => entry.schedules).length);
+    expect(jobs.some((job) => job.latest?.failureCode === "collection_failed")).toBe(true);
+    expect(sources.flatMap((entry: { rules: unknown[] }) => entry.rules)).toHaveLength(
+      read.sources.flatMap((entry) => entry.rules).length,
+    );
+    expect(pages[0].coverage).toMatchObject({
+      sources: read.sources.length,
+      limit: MAINTENANCE_SUMMARY_LINES,
+      offset: 0,
+    });
+    console.log(
+      `maintenance summary pages: ${pages.map((entry) => bytes(entry)).join(", ")} bytes; full: ${bytes(read)}`,
+    );
+  });
+
+  it("keeps every page under 8 KB with many sources and rules, and with one crowded source", () => {
+    const worst = worstMaintenance(30, 4);
+    expect(bytes(worst)).toBeGreaterThan(100 * CLIENT_BYTES);
+    const pages = maintenancePages(worst);
+    for (const summary of pages) expect(bytes(summary)).toBeLessThan(CLIENT_BYTES);
+    const sources = pages.flatMap((summary) => summary.sources);
+    expect(new Set(sources.map((source) => source.source)).size).toBe(30);
+    expect(sources.flatMap((source) => source.schedules)).toHaveLength(60);
+    const rules = sources.flatMap((source) => source.rules);
+    expect(rules).toHaveLength(120);
+    // A rule's revisions collapse to their count and distinct closed codes.
+    expect(rules[0]).toMatchObject({
+      revision: 20,
+      revisions: 20,
+      actorKinds: ["delegated", "operator", null],
+      changeReasons: ["official-notice-added", "official-notice-changed", "outage-observed", null],
+      byCaller: 5,
+    });
+    // One source with more lines than a page holds continues on the next
+    // page, listed again with its counts.
+    const crowded = maintenancePages(worstMaintenance(1, 30));
+    expect(crowded).toHaveLength(2);
+    for (const summary of crowded) {
+      expect(bytes(summary)).toBeLessThan(CLIENT_BYTES);
+      expect(summary.sources).toMatchObject([{ scheduleCount: 2, ruleCount: 30 }]);
+    }
+    expect(crowded.flatMap((summary) => summary.sources[0]!.rules)).toHaveLength(30);
+    console.log(
+      `maintenance summary at many sources and rules: largest page ${Math.max(...pages.map((summary) => bytes(summary)))} bytes over ${pages.length} pages (full ${bytes(worst)}); one source with 30 rules: ${crowded.map((summary) => bytes(summary)).join(", ")} bytes`,
+    );
   });
 });

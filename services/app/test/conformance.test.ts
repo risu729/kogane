@@ -141,6 +141,7 @@ describe("observation API conformance: local synthetic snapshot", () => {
 describe("shared contract pin", () => {
   it("matches the request schema pinned in the frontend package", () => {
     expect(LIST_REQUEST_SCHEMA).toEqual({
+      "/api/overview": { detail: "sharedQuery" },
       "/api/transactions": {
         source: "collectionFilters",
         account: "collectionFilters",

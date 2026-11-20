@@ -53,8 +53,8 @@ result's structured content (`test/mcp-answer-size.test.ts`, run with
 | `kogane.collection-quality.read` `{source}` (one synthetic cell)                                                                                                                                                                                                                                  |            1,044 |                       727 |                 1,044 |
 | the same, 301 cells shaped like Vpass's (pure, in the test)                                                                                                                                                                                                                                       |        > 163,840 |   < 8,192 a page, 3 pages |                     — |
 | `kogane.observations.list` `{kind: balances}`                                                                                                                                                                                                                                                     |          538,779 |                 unchanged |                     — |
-| `kogane.schedules.maintenance.read` `{}`                                                                                                                                                                                                                                                          |           15,258 |                 unchanged |                     — |
-| `kogane.store.read` `{page: overview}`                                                                                                                                                                                                                                                            |            9,234 |                 unchanged |                     — |
+| `kogane.schedules.maintenance.read` `{}`                                                                                                                                                                                                                                                          |           15,258 |             see amendment |                15,258 |
+| `kogane.store.read` `{page: overview}`                                                                                                                                                                                                                                                            |            9,234 |             see amendment |                 9,234 |
 | `kogane.audit.search` `{}`                                                                                                                                                                                                                                                                        |            6,915 |                 unchanged |                     — |
 | every other read tool's default (capabilities, context, explain, instrument candidates and coverage, account candidates, identity, card settlements, reported state, store meta and filter options, observations other than balances, rewards, events, reports, evidence meta, survey, purchases) |         65–4,764 |                 unchanged |                     — |
 
@@ -249,11 +249,13 @@ offered page size; what remains is that the refusal says nothing.
   The synthetic store configures every job the migrations configure, so a
   migration that adds one fails `mcp-answer-size.test.ts` once it does.
 - Left as they are, and over 8 KB at this scale: `kogane.observations.list`
-  `{kind: balances}` (the v1 grouped list, about 520 KB),
+  `{kind: balances}` (the v1 grouped list, about 520 KB) and the collection
+  quality account view (about 107 KB for Vpass in production, issue 1414's
+  proposal). Each is a follow-up of its own.
   `kogane.schedules.maintenance.read` (about 15 KB) and `kogane.store.read`
-  `{page: overview}` (about 9 KB); the collection quality account view (about
-  107 KB for Vpass in production, issue 1414's proposal). Each is a follow-up
-  of its own.
+  `{page: overview}` (about 9 KB) were too; the
+  [amendment below](#amendment-the-store-overview-and-the-maintenance-read-answer-a-summary-by-default-2026-11-19)
+  gives them a summary.
 - Unit B of the proposal (`collection-quality.read` `view: status`, its own
   branch) adds a view to the same tool and route. `detail` is defined only
   for the summary without a source and for `view: cells`; every other view
@@ -313,3 +315,300 @@ offered page size; what remains is that the refusal says nothing.
   `apps/web/test/api-schema.test.ts`) gain `detail`; the browser tests'
   synthetic servers answer the three pages only when asked for `full`; and
   `ui-mcp-parity.test.ts` passes unchanged: no route or tool was added.
+
+## Amendment: the store overview and the maintenance read answer a summary by default (2026-11-19)
+
+- Status: proposed. **Owner approval is needed before merge**, as for the
+  decision above: it changes the published input schema and the default
+  answer of `kogane.store.read` and `kogane.schedules.maintenance.read`, the
+  default answer of `GET /api/overview` and of
+  `POST /api/agent/v1/schedules.maintenance.read`, and the shared request
+  schema (`LIST_REQUEST_SCHEMA` gains `/api/overview` and the capability
+  requirement `sharedQuery`).
+- Date: 2026-11-19
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414),
+  the follow-ups this ADR's consequences list
+- Carried by: `packages/application/src/query/overview-detail.ts`,
+  `maintenanceReadSummary` in `packages/collection/src/schedule-model.ts`,
+  `services/app/src/observation-api.ts`, `services/app/src/page-read-tools.ts`,
+  `services/app/src/schedule-tools.ts`,
+  `packages/observation-shared/src/api-schema.ts`,
+  `packages/observation-shared/src/api-validation.ts`, `apps/web/src/api.ts`
+
+### Context
+
+Two reads this ADR left as they were are over the 8 KB a client shows on the
+synthetic store: `kogane.schedules.maintenance.read` (15,258 bytes) and
+`kogane.store.read` `{page: overview}` (9,234 bytes). The synthetic store
+understates the overview: its run lists hold the newest 500 fetch runs and
+the newest 500 parse runs of the whole store, and the synthetic store has 12
+of each. At the window's bound (500 and 500 over 38 sources and 57 parsers,
+the counts the source and parser registries declare today) the full overview
+is about 261 KB. The maintenance read grows with rules: each rule lists up to
+20 revisions, and a delegated principal that adds a `once` window adds a rule.
+At 30 sources with two jobs and four rules of 20 revisions each it is about
+1 MB.
+
+### Options considered
+
+1. **The decision's pattern: `detail`, `summary` the default, one pure
+   function from the full answer, the web UI asking for `full`; the
+   maintenance summary paged by line (chosen).**
+2. **The same, with the maintenance summary unpaged.** The synthetic store's
+   summary is already about 10 KB unpaged (16 jobs and 14 rules at about 300
+   bytes a line), so it does not fit.
+3. **The same, paged by whole source.** A source with more lines than a page
+   holds would need a page of its own, and one source with 30 rules is about
+   12 KB: an open limit that grows with every `once` window. Paging by line
+   bounds every page.
+4. **An overview paged as well.** Its unbounded parts are its per-source and
+   per-parser lines for failing statuses and its partial-unit lines. Paging
+   them would add `offset` to `kogane.store.read`, the route and the shared
+   request schema, and repeat the counts and sources (about 3.7 KB at the
+   worst) on every page.
+5. **The overview unpaged and uncapped.** At the realistic worst it was
+   7,981 bytes, about 200 under 8 KB with no unit updates in the measure; ten
+   partial-unit lines (about 180 bytes each), one more failing parser (about 200) or a second failure code on a few lines passed 8 KB, and every source
+   partial with twenty parsers failing was about 14.4 KB.
+6. **The overview's lists capped, each line's failure codes capped, what is
+   left out counted, and every failure code on its status's line (chosen).**
+   One answer, bounded whatever the store holds; the lines left out are
+   counted with their runs and listed by `full`.
+
+### Decision
+
+1. **`detail` on both reads.** `GET /api/overview` and `kogane.store.read`
+   take `detail`, `summary` or `full`, absent being `summary`, for
+   `page: overview`. Another value is `400 invalid_detail` on the route (as
+   on the balance routes, in the same reader) and `400 invalid_request` on
+   the tool's closed schema; `detail` on `meta` or `filter-options` is the
+   route's `400 invalid_query`, which the tool answers as its result.
+   `kogane.schedules.maintenance.read` and its agent route take `detail` and,
+   with `summary`, `offset` (an integer from 0 to 1,000); `offset` with
+   `full`, another detail, or either argument on
+   `kogane.schedules.survey.read` is `400 invalid_request`. `full` is each
+   read's answer as it was, byte for byte and without a `detail` key.
+2. **Where the parameter exists.** The overview's `detail` is in the shared
+   request schema under the requirement `sharedQuery`: the summary is shaped
+   by the shared application service, so the central store accepts it and the
+   local store (and the demo export, which is the local store's) answers its
+   full overview alone and refuses the parameter. The web overview builds its
+   request through `useListRequest`, so it sends `detail=full` exactly where
+   it is accepted and waits for the capabilities first.
+3. **One function per read.** The overview route builds its full page as
+   before and, for `summary`, passes it to `overviewSummary`
+   (`packages/application/src/query/overview-detail.ts`), which the route and
+   the tool share because the tool calls the route's reader
+   (ADR 0081). The maintenance tool relays the Processor's read as before and,
+   for `summary`, passes it to `maintenanceReadSummary`
+   (`packages/collection/src/schedule-model.ts`) in `readScheduleTool`, the
+   one function both agent paths call. The Processor and its route are
+   unchanged. Neither summary reads anything the full answer does not.
+4. **The overview summary.** `{ detail: "summary", counts, sources,
+   fetchRuns, parseRuns, unitUpdates?, coverage }`:
+   - `counts` and `coverage` as the full page has them.
+   - `sources`: `{ sourceIds, artifacts }`, sources with the same artifact
+     count sharing one line.
+   - `fetchRuns.byStatus`: per status of the window (`success`, `partial`,
+     the view's closed set) the number of runs, the number of sources, and the
+     newest run (`id`, `sourceId`, `startedAt`, `completedAt`, null while it
+     has not completed). `fetchRuns.notSuccessful`: per source and status
+     other than `success`, its number of runs and newest run.
+   - `parseRuns.byStatus`: per status (`ok`, `pending`, `error`, the closed
+     set of `parse_runs.status`) the number of runs, how many a later parse
+     superseded, how many carry warnings, how many carry warnings that could
+     not be read, the number of parsers, `failureCodes` (every distinct
+     `parse_runs.error` value of its runs, newest first: the Processor
+     writes that column as a closed code, so it is the failure code the full
+     answer carries; a value that is not code-shaped is `unclassified`; at
+     most the Processor's closed set, 29 codes today, and `unclassified`),
+     and the newest run (`id`, `artifactId`, `parser`, `parsedAt`).
+     `parseRuns.notOk`: per parser and status other than `ok`, its number of
+     runs, how many were superseded, `failureCodes` (the distinct codes of
+     its runs, newest first, at most three) with `moreFailureCodes` (how many
+     more it has, each on its status's line), and its newest run.
+   - `unitUpdates` (only when the full page has it): per source and dataset,
+     the number of partial runs and the newest one's run id, time and unit
+     counts.
+   - Bounded lists: `notSuccessful`, `notOk` and `unitUpdates` each hold the
+     five lines with the newest runs (`OVERVIEW_SUMMARY_LINES`), newest
+     first; lines whose newest run is the same run (one fetch run's
+     datasets) are ordered by source and dataset, so which of them is listed
+     does not depend on the order the reader returned them in. The lines
+     left out are counted, never dropped silently:
+     `fetchRuns.notSuccessfulOmitted` and `parseRuns.notOkOmitted` hold one
+     `{ status, lines, runs }` per status with lines left out (empty when
+     none is), and `unitUpdatesOmitted` is `{ lines, runs }`, present
+     exactly with `unitUpdates`. `detail: "full"` lists them, and their
+     failure codes stay on their status's `byStatus` line.
+   - A status outside the closed sets is refused (the summary throws), never
+     passed on as a code. The validator accepts each status once; requires
+     the per-source and per-parser lines of a status, with its omitted
+     entry, to count exactly its runs and its sources or parsers (the
+     status's `sources` or `parsers`, one line each); refuses a list over
+     five lines, lines counted as left out of a list that is not full, a
+     line over three failure codes or counting more than it may, and a
+     line's code missing from its status's line.
+   - Dropped: each source's provider name and ingestion; each fetch run's
+     producer (`tool`) and session id (`external_run_id`); each parse run's
+     parser version, warning text and superseding parse id; every run but
+     the newest of each line (their states and failure codes are counted);
+     and the lines past the fifth of each list (counted with their runs).
+5. **The maintenance summary.** `{ detail: "summary", sources, limits,
+   coverage }`:
+   - Per source on the page: `source`, `reference` (the registered
+     reference's status, `confirmed`, `no-applicable-rule` or `not-found`, or
+     null when none is registered), `scheduleCount` and `ruleCount` (its jobs
+     and rules in the whole read).
+   - Per job: `id`, `kind`, `enabled`, `supported`, `revision`,
+     `nextNominalAt`, `nextRunAt`, `reservation` (`armed`, `pending`,
+     `disabled`) and `latest` (`nominalAt`, `status`, `failureCode`, or null).
+   - Per rule: `id` and its current revision's `revision`, `timezone`,
+     `pattern`, `enabled` and `scope`; `revisions`, how many revisions the
+     full read lists for it (at most 20); `actorKinds` and `changeReasons`,
+     the distinct values among them, newest first, a revision written before
+     CORE 0078 kept as `null`; and `byCaller`, how many of them the reader
+     wrote. A rule listed without a revision is refused, never summarized.
+   - `limits` as the full read has them.
+   - Paged by line: each job and each rule is a line, and so is a source
+     with neither. A page holds 16 lines in the read's order (a source's jobs,
+     then its rules); a source whose lines continue on the next page is
+     listed on both, each with the lines that page holds. `coverage` is
+     `{ sources, lines, limit: 16, offset, nextOffset }`, `nextOffset` null
+     on the last page. Each page is a fresh read: an offset is not a cursor
+     over one snapshot, so a rule or job added or removed between two pages
+     moves the lines after it, and the next page can repeat or skip a line
+     there. `coverage.lines` and `coverage.sources` then differ between the
+     pages, which is how a reader sees it and reads again from `offset: 0`.
+   - Dropped: the reference's URL and verification time; each job's `source`
+     (the entry names it), `timezone`, `pattern` and actual alarm time
+     (`reservation` is the state read from it), and its newest receipt's start
+     and finish times; each rule's earlier revisions (their count, actor kinds,
+     change reasons and the reader's share are kept) and every revision's
+     reference URL, verification and creation times.
+6. **Owner approval.** As point 5 of the decision: the two tools' input
+   schemas, their default answers, the overview route's default answer and
+   the shared request schema are published changes, merged only with the
+   owner's approval.
+
+### Consequences
+
+Measured as the bytes of the MCP result's structured content
+(`test/mcp-answer-size.test.ts`, `--silent=false`):
+
+| Read                                                                                                                                                           |      Full | Summary                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------: | ------------------------------------- |
+| `kogane.store.read` `{page: overview}`, synthetic store                                                                                                        |     9,234 | 1,499                                 |
+| the same at the window's realistic worst (38 sources, 10 with partial runs; 57 parsers, 10 failing, 3 pending; 10 sources' datasets with partial-unit updates) |   266,375 | 6,882 (9,787 with the lists uncapped) |
+| the same at its bound (every list full; all three parse statuses; the longest codes on each line, all 30 on the error line; today's longest names)             |   370,304 | 8,081                                 |
+| `kogane.schedules.maintenance.read` `{}`, synthetic store (15 sources, 16 jobs, 14 rules)                                                                      |    15,258 | 4,909 and 4,172 (2 pages)             |
+| the same with 30 sources, each with two jobs and four rules of 20 revisions                                                                                    | 1,042,886 | at most 6,268 a page (12 pages)       |
+| one source with two jobs and 30 rules                                                                                                                          |         — | 6,173 and 6,321 (2 pages)             |
+
+- An agent's first overview or maintenance read fits what its client shows;
+  `detail: "full"` (and, for the overview, `kogane.observations.get` with a
+  line's `artifactId`, or `kogane.evidence.read` with a source) gives the
+  rest. The overview summary no longer lists every run, so the web overview,
+  which does, asks for `full`.
+- A client of `GET /api/overview` that relied on the full default must ask
+  for `detail=full`. The repository's clients are the web UI, which does, and
+  the conformance checks, which sample `detail=full` and validate it under
+  that detail.
+- The overview summary names at most five sources or parsers per list: at
+  the realistic worst above it lists five of the ten partial sources, five
+  of the thirteen failing or pending parsers and five of the ten unit-update
+  lines, and counts the rest with their runs. Which sources or parsers those
+  are, and their newest runs, is in `detail: "full"` (about 260 KB at that
+  scale, past what a client shows) or, per source, `kogane.evidence.read`;
+  no argument pages the summary's lists (an open limit). Every failure code
+  stays on its status's line.
+- Open limits. With every list full, the summary still grows with the
+  source registry (each further source with its own artifact count adds a
+  `sources` line, about 55 bytes), with the Processor's closed set of
+  failure codes (about 25 bytes a code on the status's line), and with
+  longer source ids, parser names and datasets than today's longest (17,
+  40 and 37 characters; the schema allows source ids of 100 characters,
+  datasets of 200 and parser names of any length); the bound above leaves
+  about 110 bytes under 8 KB for them, so three more sources with their own
+  artifact counts, five more codes, or three more characters on every
+  source id pass 8 KB (with 100-character source ids the bound is about
+  12 KB). A maintenance page is bounded by its 16 lines: a rule line is
+  about 300 bytes with its 20 revisions' codes, so a page passes 8 KB only
+  when most of its lines are rules whose revisions carry most of the eight
+  change reasons and each sits under its own source; nothing measured comes
+  near it.
+- The maintenance summary's type (`MaintenanceRead`) mirrors the Processor's
+  answer in `packages/collection`; the Processor does not import it, so
+  `schedule-tools.test.ts` and `mcp-answer-size.test.ts` check the summary
+  against the real Processor route's answer.
+
+### Verification
+
+- `packages/application/test/overview-detail.test.ts`: the summary of a
+  synthetic page, line for line (equal artifact counts sharing a line, every
+  status counted, the newest run's ids, a run that has not completed kept as
+  null, superseded, warning and unreadable-warning counts, each failing
+  parser's failure codes newest first, every code on its status's line);
+  provider names, producers, session ids, warnings and error text that is
+  not a code are not in it, and a summary carrying text where a failure code
+  belongs fails the validator; a line keeps its newest three codes and
+  counts the fourth, and a line over three codes, counting more than its
+  status has or with a code its status's line lacks fails the validator;
+  eight failing parsers, seven partial sources and seven unit-update lines
+  list the five with the newest runs each and count the rest with their
+  runs, and a summary that leaves lines out without counting them, lists a
+  sixth, or counts lines out of a list that is not full fails the validator;
+  unit updates collapse per source and dataset and stay absent (with their
+  count) when the page has none; on 1,500 seeded random full answers (no
+  lines, under five, exactly five, six and more per list, codes repeated
+  across statuses, datasets sharing a fetch run) the summary validates, lists
+  the five lines a reference ordering picks, its listed and left-out lines and
+  runs add up to the full answer's per status, each line's shown and counted
+  codes are its runs' distinct codes, each status's codes are exactly its
+  runs', the unit updates in another order give the same summary, and an
+  omitted entry that miscounts its lines with its runs right fails the
+  validator; a status outside the closed sets is refused; each shape passes
+  the validator only under its own detail, and a summary whose lines do not
+  count their status's runs, repeat a status, put
+  `success` on a not-successful line or name an unknown status fails it.
+- `packages/collection/test/maintenance-summary.test.ts`: a job keeps its
+  closed states, revision, run times and newest receipt's failure code, and
+  no provenance; a rule is its current revision with every actor kind and
+  change reason of its history, `null` kept; a source whose lines continue is
+  listed on both pages with its counts, every rule once; a source with
+  neither a job nor a rule is one line with its null reference; a rule
+  without a revision is refused.
+- `services/app/test/mcp-answer-size.test.ts`: both summaries under 8 KB on
+  the synthetic store and their full answers over it; the overview summary
+  equals `overviewSummary` of the full page on the route, `/api/agent/v1/*`
+  and `/mcp`, `full` equals the route's full page, each validates under its
+  own detail only, and every run of the window is counted; `compact` is
+  refused on the route and the tool, and `detail` on `meta` or
+  `filter-options` is `invalid_query` on both; the realistic worst above
+  validates in full and in summary, stays under 7 KB, and lists five lines
+  a list with the rest counted; the bound above validates in full and in
+  summary, has all three parse statuses, five lines a list each with its
+  newest run completed, the three longest codes and more on every failing
+  line, every one of the Processor's codes on the error line, pending and
+  failing lines left out, and the longest names in use today, and stays
+  under 8 KB; every maintenance page equals `maintenanceReadSummary` of the
+  full read on `/mcp` and the agent route, is under 8 KB, and together the
+  pages list every source in order and every job and rule once, a failure
+  code kept; the 30-source and crowded-source reads stay under 8 KB a page.
+- `services/app/test/schedule-tools.test.ts`: the summary pages on both
+  agent paths are the same object and each the full read's summary, every
+  page but the last holds 16 lines; `detail: full` is the Processor's read;
+  `compact`, `offset` with `full`, a negative or fractional `offset`, and
+  either argument on the survey read are `invalid_request` before anything
+  is relayed.
+- `services/app/test/page-read-observations.test.ts`: the route and the tool
+  give the same overview under no detail, `summary` and `full`.
+- The schema pins: `agent-api.test.ts` (the `kogane.store.read` properties),
+  `conformance.test.ts` and `apps/web/test/api-schema.test.ts`
+  (`LIST_REQUEST_SCHEMA`, `/api/overview` granted `detail` on the central
+  store and nothing on the local store); the shared conformance checks sample
+  `detail=full` on `/api/overview` and validate it under that detail.
+- `apps/web/test/api-transport.test.ts`: a page that asked for the full
+  overview refuses a summary; `apps/web/test/overview-counts.browser.test.ts`
+  answers the overview only when asked for `detail=full`, and the page still
+  renders every run.

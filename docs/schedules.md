@@ -512,7 +512,20 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   state and latest receipt outcome, each rule with up to 20 revisions (actor
   kind, closed reason, whether the reader wrote it as a delegated principal),
   and the writer's limits on delegated revisions with how many the reader wrote
-  today. It returns no run or evidence ids, no lease and no principal's
+  today. That is its `detail: "full"`; by default (`detail: "summary"`,
+  [ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+  2026-11-19) the App answers `maintenanceReadSummary` of it, 16 lines a page
+  (`offset`): per source the reference status and its job and rule counts;
+  per job its id, kind, enabled, supported, revision, original next
+  occurrence, due time, reservation state and newest receipt's nominal time,
+  status and failure code; per rule its current revision (timezone, pattern,
+  enabled, scope) with how many revisions are listed, their distinct actor
+  kinds and change reasons and how many the reader wrote; and the limits. A
+  source whose lines continue is listed on the next page too. Each page is a
+  fresh read, not a cursor: a rule or job added between two pages moves the
+  lines after it, so a page can repeat or skip one, and `coverage.lines`
+  differs between the pages when it does. It returns no
+  run or evidence ids, no lease and no principal's
   identity, and nothing about another source. The Processor serves it on
   `/internal/schedules/agent/read`, which refuses a request that also carries
   the operator header or a delegation reference; no write is reachable under

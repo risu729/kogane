@@ -26,6 +26,7 @@ import { capabilityState, clientFeatures, NO_FEATURES } from "../src/capabilitie
 describe("shared API schema", () => {
   test("the request schema and capability objects match their pinned contract", () => {
     expect(LIST_REQUEST_SCHEMA).toEqual({
+      "/api/overview": { detail: "sharedQuery" },
       "/api/transactions": {
         source: "collectionFilters",
         account: "collectionFilters",
@@ -200,8 +201,25 @@ describe("shared API schema", () => {
     expect(validIdentityReadMode("latest", LOCAL_STORE_CAPABILITIES)).toBe(false);
     for (const path of Object.keys(LIST_REQUEST_SCHEMA))
       expect(allowedQueryParameters(path, LOCAL_STORE_CAPABILITIES)).toEqual([]);
-    for (const path of ["/api/meta", "/api/overview", "/api/artifacts/1", "/api/raw/a"])
+    for (const path of ["/api/meta", "/api/artifacts/1", "/api/raw/a"])
       expect(allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES)).toEqual([]);
+    // The overview's one parameter is its detail (ADR 0123), where the shared
+    // service shapes the summary; the local store answers in full only.
+    expect(allowedQueryParameters("/api/overview", CENTRAL_STORE_CAPABILITIES)).toEqual(["detail"]);
+    expect(
+      listRequestSearch(
+        "/api/overview",
+        CENTRAL_STORE_CAPABILITIES,
+        new URLSearchParams("detail=full&page=2"),
+      ),
+    ).toBe("?detail=full");
+    expect(
+      listRequestSearch(
+        "/api/overview",
+        LOCAL_STORE_CAPABILITIES,
+        new URLSearchParams("detail=full"),
+      ),
+    ).toBe("");
     const params = new URLSearchParams(
       "cursor=1&source=demo-bank&account=x&unexpected=1&view=balances&source=other",
     );
