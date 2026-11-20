@@ -219,9 +219,14 @@ export function useFeatures(): ClientFeatures & { known: boolean } {
 }
 
 export function useOverview(): UseQueryResult<Overview, Error> {
+  // The page shows every run; the route's default is the summary (ADR 0123).
+  // A store without the summary (the local store) is sent no `detail` and
+  // answers in full.
+  const request = useListRequest("/api/overview", { detail: "full" });
   return useQuery({
-    queryKey: ["overview"],
-    queryFn: ({ signal }) => getJson<Overview>("/api/overview", signal),
+    queryKey: ["overview", request.suffix],
+    enabled: request.enabled,
+    queryFn: ({ signal }) => getJson<Overview>(`/api/overview${request.suffix}`, signal),
   });
 }
 

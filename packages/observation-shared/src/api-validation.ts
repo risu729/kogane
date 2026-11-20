@@ -82,7 +82,13 @@ import type {
   OrganizedAccount,
   OrganizedInstrument,
 } from "./organization-contract.ts";
-import { BALANCE_HISTORY_REASONS } from "./api-contract.ts";
+import {
+  BALANCE_HISTORY_REASONS,
+  OVERVIEW_FETCH_RUN_STATUSES,
+  OVERVIEW_LINE_FAILURE_CODES,
+  OVERVIEW_PARSE_RUN_STATUSES,
+  OVERVIEW_SUMMARY_LINES,
+} from "./api-contract.ts";
 import type {
   ApiMetadata,
   ArtifactDetail,
@@ -114,6 +120,7 @@ import type {
   ObservationKind,
   ObservationRef,
   Overview,
+  OverviewSummary,
   ParseRunDetail,
   PositionRow,
   PositionWithValuations,
@@ -447,6 +454,210 @@ const overview = object<Overview>({
     }),
   ),
 });
+// The summary detail of the overview (ADR 0123, amendment 2026-11-19): every
+// status is one of the closed set and listed once, a line per source or
+// parser names a status other than the success one, each list is capped, and
+// its lines with the ones it left out count exactly the runs of their status.
+type OverviewFetchLine = OverviewSummary["fetchRuns"]["byStatus"][number];
+/** A closed failure code, as `safeCode` in the collection quality read writes one. */
+const failureCode: Check<string> = (value): value is string =>
+  typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(value);
+type OverviewParseLine = OverviewSummary["parseRuns"]["byStatus"][number];
+const overviewSummaryShape = object<OverviewSummary>({
+  detail: literal("summary"),
+  counts: array(object<Overview["counts"][number]>({ table: text, rows: number })),
+  sources: array(
+    object<OverviewSummary["sources"][number]>({ sourceIds: array(text), artifacts: number }),
+  ),
+  fetchRuns: object<OverviewSummary["fetchRuns"]>({
+    byStatus: array(
+      object<OverviewFetchLine>({
+        status: literal(...OVERVIEW_FETCH_RUN_STATUSES),
+        runs: identifier,
+        sources: identifier,
+        newest: object<OverviewFetchLine["newest"]>({
+          id: identifier,
+          sourceId: text,
+          startedAt: text,
+          completedAt: nullableText,
+        }),
+      }),
+    ),
+    notSuccessful: array(
+      object<OverviewSummary["fetchRuns"]["notSuccessful"][number]>({
+        sourceId: text,
+        status: literal(...OVERVIEW_FETCH_RUN_STATUSES.filter((status) => status !== "success")),
+        runs: identifier,
+        newest: object<OverviewSummary["fetchRuns"]["notSuccessful"][number]["newest"]>({
+          id: identifier,
+          startedAt: text,
+          completedAt: nullableText,
+        }),
+      }),
+    ),
+    notSuccessfulOmitted: array(
+      object<OverviewSummary["fetchRuns"]["notSuccessfulOmitted"][number]>({
+        status: literal(...OVERVIEW_FETCH_RUN_STATUSES.filter((status) => status !== "success")),
+        lines: identifier,
+        runs: identifier,
+      }),
+    ),
+  }),
+  parseRuns: object<OverviewSummary["parseRuns"]>({
+    byStatus: array(
+      object<OverviewParseLine>({
+        status: literal(...OVERVIEW_PARSE_RUN_STATUSES),
+        runs: identifier,
+        superseded: number,
+        withWarnings: number,
+        unreadableWarnings: number,
+        parsers: identifier,
+        failureCodes: array(failureCode),
+        newest: object<OverviewParseLine["newest"]>({
+          id: identifier,
+          artifactId: identifier,
+          parser: text,
+          parsedAt: text,
+        }),
+      }),
+    ),
+    notOk: array(
+      object<OverviewSummary["parseRuns"]["notOk"][number]>({
+        parser: text,
+        status: literal(...OVERVIEW_PARSE_RUN_STATUSES.filter((status) => status !== "ok")),
+        runs: identifier,
+        superseded: number,
+        failureCodes: array(failureCode),
+        moreFailureCodes: identifier,
+        newest: object<OverviewSummary["parseRuns"]["notOk"][number]["newest"]>({
+          id: identifier,
+          artifactId: identifier,
+          parsedAt: text,
+        }),
+      }),
+    ),
+    notOkOmitted: array(
+      object<OverviewSummary["parseRuns"]["notOkOmitted"][number]>({
+        status: literal(...OVERVIEW_PARSE_RUN_STATUSES.filter((status) => status !== "ok")),
+        lines: identifier,
+        runs: identifier,
+      }),
+    ),
+  }),
+  unitUpdatesOmitted: optional(
+    object<NonNullable<OverviewSummary["unitUpdatesOmitted"]>>({
+      lines: identifier,
+      runs: identifier,
+    }),
+  ),
+  unitUpdates: optional(
+    array(
+      object<NonNullable<OverviewSummary["unitUpdates"]>[number]>({
+        sourceId: text,
+        dataset: text,
+        runs: identifier,
+        newest: object<NonNullable<OverviewSummary["unitUpdates"]>[number]["newest"]>({
+          fetchRunId: identifier,
+          fetchedAt: text,
+          updatedUnits: number,
+          staleUnits: number,
+        }),
+      }),
+    ),
+  ),
+  coverage: object<OverviewSummary["coverage"]>({ limit: number, truncated: boolean }),
+});
+/**
+ * Each status once; a capped list holds at most `OVERVIEW_SUMMARY_LINES`
+ * lines and leaves lines out only when full, each status's omitted entry
+ * once; and a status's per-source or per-parser lines with its omitted ones
+ * count exactly its runs and its sources or parsers (`distinct`), one line
+ * each.
+ */
+function linesCountStatus<Line extends { status: string; runs: number }>(
+  byStatus: readonly Line[],
+  distinct: (line: Line) => number,
+  lines: readonly { status: string; runs: number }[],
+  omitted: readonly { status: string; lines: number; runs: number }[],
+  success: string,
+): boolean {
+  const statuses = byStatus.map((line) => line.status);
+  if (new Set(statuses).size !== statuses.length) return false;
+  if (!capped(lines.length, omitted)) return false;
+  if (new Set(omitted.map((entry) => entry.status)).size !== omitted.length) return false;
+  const listed = (status: string) => lines.filter((entry) => entry.status === status);
+  const left = (status: string) => omitted.find((entry) => entry.status === status);
+  return (
+    byStatus.every(
+      (line) =>
+        line.status === success ||
+        (listed(line.status).reduce((sum, entry) => sum + entry.runs, 0) +
+          (left(line.status)?.runs ?? 0) ===
+          line.runs &&
+          listed(line.status).length + (left(line.status)?.lines ?? 0) === distinct(line)),
+    ) && [...lines, ...omitted].every((entry) => statuses.includes(entry.status))
+  );
+}
+/** At most the cap listed, and lines left out only from a full list, each counting its runs. */
+function capped(listed: number, omitted: readonly { lines: number; runs: number }[]): boolean {
+  return (
+    listed <= OVERVIEW_SUMMARY_LINES &&
+    omitted.every((entry) => entry.lines > 0 && entry.runs >= entry.lines) &&
+    (omitted.length === 0 || listed === OVERVIEW_SUMMARY_LINES)
+  );
+}
+/**
+ * A failing parser's line lists at most `OVERVIEW_LINE_FAILURE_CODES` codes,
+ * counts the rest only when it is full, and each of its codes is on its
+ * status's line, which lists each code once.
+ */
+function failureCodesKept(summary: OverviewSummary): boolean {
+  const byStatus = new Map(
+    summary.parseRuns.byStatus.map((line) => [line.status, line.failureCodes]),
+  );
+  return (
+    summary.parseRuns.byStatus.every(
+      (line) => new Set(line.failureCodes).size === line.failureCodes.length,
+    ) &&
+    summary.parseRuns.notOk.every(
+      (line) =>
+        line.failureCodes.length <= OVERVIEW_LINE_FAILURE_CODES &&
+        new Set(line.failureCodes).size === line.failureCodes.length &&
+        (line.moreFailureCodes === 0 || line.failureCodes.length === OVERVIEW_LINE_FAILURE_CODES) &&
+        line.failureCodes.every((code) => byStatus.get(line.status)?.includes(code)) &&
+        (byStatus.get(line.status)?.length ?? 0) >=
+          line.failureCodes.length + line.moreFailureCodes,
+    )
+  );
+}
+/** `unitUpdatesOmitted` is present exactly with `unitUpdates`, and bounds it as the run lists. */
+function unitUpdatesCapped(summary: OverviewSummary): boolean {
+  if (summary.unitUpdates === undefined) return summary.unitUpdatesOmitted === undefined;
+  if (summary.unitUpdatesOmitted === undefined) return false;
+  const { lines, runs } = summary.unitUpdatesOmitted;
+  return lines === 0
+    ? runs === 0 && summary.unitUpdates.length <= OVERVIEW_SUMMARY_LINES
+    : capped(summary.unitUpdates.length, [{ lines, runs }]);
+}
+const overviewSummary: Check<OverviewSummary> = (value): value is OverviewSummary =>
+  overviewSummaryShape(value) &&
+  linesCountStatus(
+    value.fetchRuns.byStatus,
+    (line) => line.sources,
+    value.fetchRuns.notSuccessful,
+    value.fetchRuns.notSuccessfulOmitted,
+    "success",
+  ) &&
+  linesCountStatus(
+    value.parseRuns.byStatus,
+    (line) => line.parsers,
+    value.parseRuns.notOk,
+    value.parseRuns.notOkOmitted,
+    "ok",
+  ) &&
+  failureCodesKept(value) &&
+  unitUpdatesCapped(value);
+
 const observationRef = object<ObservationRef>({
   kind: observationKind,
   id: identifier,
@@ -888,7 +1099,8 @@ const endpoints: Record<string, Check<unknown>> = {
     record(value) &&
     ("snapshot" in value ? rewardReadPage(value) : rewardPage(rewardExpiry)(value)),
   "/api/meta": metadata,
-  "/api/overview": overview,
+  "/api/overview": (value): value is Overview | OverviewSummary =>
+    fullPage(overview)(value) || overviewSummary(value),
   "/api/transactions": object<{
     transactions: TransactionRow[];
     interpretationContext?: InterpretationContext;
@@ -911,8 +1123,8 @@ const endpoints: Record<string, Check<unknown>> = {
     fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
 };
 
-/** Each detail's own check of the balance pages (ADR 0123). */
-const balancePagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
+/** Each detail's own check of the balance pages and the overview (ADR 0123). */
+const pagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
   "/api/v2/balances/latest": {
     full: fullPage(latestBalancePage),
     summary: latestBalanceSummaryPage,
@@ -921,6 +1133,7 @@ const balancePagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> =
     full: fullPage(balanceHistoryPage),
     summary: balanceHistorySummaryPage,
   },
+  "/api/overview": { full: fullPage(overview), summary: overviewSummary },
 };
 
 /**
@@ -964,13 +1177,13 @@ export function requestedDetail(search: string): ReadDetail | undefined {
 /**
  * Additive fields are allowed; required fields and their nullability are
  * checked. `detail` names the detail the request asked for (ADR 0123): the
- * paths that answer one (the v2 balance pages and the collection quality
- * summary and cells) then accept that shape only; without it they accept
- * either.
+ * paths that answer one (the v2 balance pages, the overview and the
+ * collection quality summary and cells) then accept that shape only; without
+ * it they accept either.
  */
 export function validApiResponse(path: string, value: unknown, detail?: ReadDetail): boolean {
-  if (detail !== undefined && Object.hasOwn(balancePagesByDetail, path))
-    return balancePagesByDetail[path]![detail](value);
+  if (detail !== undefined && Object.hasOwn(pagesByDetail, path))
+    return pagesByDetail[path]![detail](value);
   if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);

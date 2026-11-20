@@ -176,6 +176,214 @@ export function scheduleSnapshotSummary(snapshot: ScheduleSnapshot): ScheduleSum
     leases: snapshot.leases,
   };
 }
+/**
+ * `kogane.schedules.maintenance.read` in full (ADR 0046): the Processor's
+ * agent read of the granted sources, each with its registered maintenance
+ * reference, its jobs and its rules' newest revisions (at most 20 a rule,
+ * newest first), and the writer's limits on a delegated principal.
+ */
+export interface MaintenanceRead {
+  sources: MaintenanceReadSource[];
+  limits: { maxDeferralHours: number; writesPerDay: number; writesUsedToday: number };
+}
+export interface MaintenanceReadSource {
+  source: string;
+  reference: {
+    status: ScheduleView["maintenance"]["status"];
+    referenceUrl: string;
+    verifiedAt: string;
+  } | null;
+  schedules: (Pick<
+    ScheduleView,
+    | "id"
+    | "source"
+    | "kind"
+    | "enabled"
+    | "supported"
+    | "timezone"
+    | "pattern"
+    | "revision"
+    | "nextNominalAt"
+    | "nextRunAt"
+    | "actualAlarmAt"
+    | "reservation"
+  > & {
+    latest: Pick<
+      ScheduleOccurrence,
+      "nominalAt" | "startedAt" | "finishedAt" | "status" | "failureCode"
+    > | null;
+  })[];
+  rules: { id: string; revisions: MaintenanceReadRevision[] }[];
+}
+export interface MaintenanceReadRevision {
+  revision: number;
+  timezone: string;
+  pattern: MaintenancePattern;
+  enabled: boolean;
+  scope: MaintenanceRule["scope"];
+  referenceUrl: string;
+  verifiedAt: string;
+  createdAt: string;
+  /** `null` for revisions written before CORE 0078 recorded it. */
+  actorKind: "operator" | "delegated" | null;
+  /** A closed code (`MAINTENANCE_CHANGE_REASONS`), or `null` before CORE 0078. */
+  changeReason: MaintenanceChangeReason | null;
+  /** Whether the reading principal wrote it as a delegated principal. */
+  byCaller: boolean;
+}
+/**
+ * How many lines one page of the maintenance summary holds: each job and
+ * each rule is a line, and so is a source with neither.
+ */
+export const MAINTENANCE_SUMMARY_LINES = 16;
+/**
+ * The maintenance read in short (ADR 0123, amendment 2026-11-19): the
+ * `summary` detail of `kogane.schedules.maintenance.read`. Per source its
+ * maintenance reference status and how many jobs and rules it has; per job
+ * its closed states, revision, next nominal and maintenance-adjusted run
+ * times, and its newest receipt's status and failure code; per rule its
+ * current revision in full (timezone, pattern, enabled, scope) with how many
+ * revisions the full read lists, the distinct actor kinds and change reasons
+ * among them, and how many the reader wrote. Paged by line (`offset` counts
+ * lines, in the read's order: a source's jobs, then its rules): a source
+ * whose lines continue on the next page is listed on both, each with the
+ * lines that page holds, and its `scheduleCount` and `ruleCount` say how
+ * many it has in all.
+ */
+export interface MaintenanceSummary {
+  detail: "summary";
+  sources: {
+    source: string;
+    reference: ScheduleView["maintenance"]["status"] | null;
+    /** The source's jobs and rules in the whole read, on this page or another. */
+    scheduleCount: number;
+    ruleCount: number;
+    schedules: (Pick<
+      ScheduleView,
+      | "id"
+      | "kind"
+      | "enabled"
+      | "supported"
+      | "revision"
+      | "nextNominalAt"
+      | "nextRunAt"
+      | "reservation"
+    > & { latest: Pick<ScheduleOccurrence, "nominalAt" | "status" | "failureCode"> | null })[];
+    rules: {
+      id: string;
+      revision: number;
+      timezone: string;
+      pattern: MaintenancePattern;
+      enabled: boolean;
+      scope: MaintenanceRule["scope"];
+      /** How many revisions the full read lists for the rule (at most 20, the current one included). */
+      revisions: number;
+      /** The distinct actor kinds of those revisions, newest first; `null` is one recorded before CORE 0078. */
+      actorKinds: MaintenanceReadRevision["actorKind"][];
+      /** The distinct change reasons of those revisions, newest first; `null` is one recorded before CORE 0078. */
+      changeReasons: MaintenanceReadRevision["changeReason"][];
+      /** How many of those revisions the reading principal wrote. */
+      byCaller: number;
+    }[];
+  }[];
+  limits: MaintenanceRead["limits"];
+  coverage: {
+    /** Every source the read answers, and every job and rule line of them. */
+    sources: number;
+    lines: number;
+    limit: number;
+    offset: number;
+    /** The offset of the next page's first line, or null on the last page. */
+    nextOffset: number | null;
+  };
+}
+type MaintenanceSummarySource = MaintenanceSummary["sources"][number];
+function distinctValues<T>(values: readonly T[]): T[] {
+  const out: T[] = [];
+  for (const value of values) if (!out.includes(value)) out.push(value);
+  return out;
+}
+/** One source in short, all its lines; a page keeps the slice of them it holds. */
+function maintenanceSourceSummary(source: MaintenanceReadSource): MaintenanceSummarySource {
+  return {
+    source: source.source,
+    reference: source.reference?.status ?? null,
+    scheduleCount: source.schedules.length,
+    ruleCount: source.rules.length,
+    schedules: source.schedules.map((schedule) => ({
+      id: schedule.id,
+      kind: schedule.kind,
+      enabled: schedule.enabled,
+      supported: schedule.supported,
+      revision: schedule.revision,
+      nextNominalAt: schedule.nextNominalAt,
+      nextRunAt: schedule.nextRunAt,
+      reservation: schedule.reservation,
+      latest:
+        schedule.latest === null
+          ? null
+          : {
+              nominalAt: schedule.latest.nominalAt,
+              status: schedule.latest.status,
+              failureCode: schedule.latest.failureCode,
+            },
+    })),
+    rules: source.rules.map((rule) => {
+      const current = rule.revisions[0];
+      // The read lists a rule only with a revision; one without is not a rule to summarize.
+      if (current === undefined) throw new Error("maintenance_rule_without_revision");
+      return {
+        id: rule.id,
+        revision: current.revision,
+        timezone: current.timezone,
+        pattern: current.pattern,
+        enabled: current.enabled,
+        scope: current.scope,
+        revisions: rule.revisions.length,
+        actorKinds: distinctValues(rule.revisions.map((revision) => revision.actorKind)),
+        changeReasons: distinctValues(rule.revisions.map((revision) => revision.changeReason)),
+        byCaller: rule.revisions.filter((revision) => revision.byCaller).length,
+      };
+    }),
+  };
+}
+/**
+ * One page of the maintenance summary from the full read; derived from it
+ * alone, so it says nothing the read does not. `offset` counts lines; an
+ * offset past the last line answers a page with no source.
+ */
+export function maintenanceReadSummary(read: MaintenanceRead, offset = 0): MaintenanceSummary {
+  const end = offset + MAINTENANCE_SUMMARY_LINES;
+  const page: MaintenanceSummarySource[] = [];
+  let first = 0;
+  for (const source of read.sources) {
+    const whole = maintenanceSourceSummary(source);
+    // A source with neither a job nor a rule is still one line, never left out.
+    const count = Math.max(1, whole.schedules.length + whole.rules.length);
+    const from = Math.max(offset, first) - first;
+    const to = Math.min(end, first + count) - first;
+    first += count;
+    if (from >= to) continue;
+    const schedules = whole.schedules.length;
+    page.push({
+      ...whole,
+      schedules: whole.schedules.slice(from, to),
+      rules: whole.rules.slice(Math.max(0, from - schedules), Math.max(0, to - schedules)),
+    });
+  }
+  return {
+    detail: "summary",
+    sources: page,
+    limits: read.limits,
+    coverage: {
+      sources: read.sources.length,
+      lines: first,
+      limit: MAINTENANCE_SUMMARY_LINES,
+      offset,
+      nextOffset: end < first ? end : null,
+    },
+  };
+}
 export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
 export const ZONES = ["Asia/Tokyo", "UTC", "Australia/Sydney"] as const;
 const DAY = 86_400_000;
