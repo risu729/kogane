@@ -24,6 +24,7 @@ import {
   MISSING_ID,
   PARTIAL_ID,
   partialDetail,
+  truncatedCompleteDetail,
 } from "./report-fixture.ts";
 
 const LIST = "/api/v2/reports";
@@ -158,6 +159,33 @@ describe("report detail contract", () => {
       validApiResponse(
         path,
         mutated(detail, (copy) => (copy.netWorth = "1")),
+      ),
+    ).toBe(false);
+  });
+
+  test("the stated partition is the one the body implies, and a truncated body is never complete", () => {
+    const truncated = truncatedCompleteDetail();
+    const truncatedPath = detailPath(truncated.report.reportId);
+    // Stored `complete` with `truncated: true`: the reader states it partial.
+    expect(truncated.body.partition).toBe("complete");
+    expect(validApiResponse(truncatedPath, truncated)).toBe(true);
+    expect(
+      validApiResponse(
+        truncatedPath,
+        mutated(truncated, (copy) => (copy.partition = "complete")),
+      ),
+    ).toBe(false);
+    // An untruncated body states its own partition, and only that one.
+    expect(
+      validApiResponse(
+        path,
+        mutated(detail, (copy) => (copy.partition = "complete")),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(detail, (copy) => delete copy.partition),
       ),
     ).toBe(false);
   });

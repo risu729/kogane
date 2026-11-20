@@ -139,6 +139,7 @@ export {
 } from "./source-revision";
 export {
   DEFAULT_PROJECTION_PAGE_LIMIT,
+  DEFAULT_SUMMARY_PAGE_LIMIT,
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
   type ProjectionInputsRow,
@@ -172,6 +173,7 @@ export {
   CURRENT_REWARD_BUCKETS_SQL,
   expiryRule,
   EXPIRY_RULES_SQL,
+  HOLDING_CUT_BY_PAGE,
   membershipState,
   MEMBERSHIP_SQL,
   observedAtValue,

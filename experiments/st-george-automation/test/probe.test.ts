@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { parseArgs } from "../src/cli.ts";
 import { navigateGuarded } from "../src/navigation.ts";
@@ -13,6 +13,23 @@ import {
   observeStops,
   resolveAccountDetailsHref,
 } from "../src/probe.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
+
+// Launched while the module loads, never in a hook: a timeout kills a browser
+// a hook launched (apps/web/test/settle.ts). A failed launch is kept and
+// rethrown by the browser suite's `beforeAll`, so a missing Chromium fails that
+// suite alone, as it did when the hook launched it, and the route cases still
+// run.
+const launched: { browser: Browser } | { error: unknown } = await chromium
+  .launch({
+    headless: true,
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  })
+  .then(
+    (browser) => ({ browser }),
+    (error: unknown) => ({ error }),
+  );
+const test = settledTest();
 
 describe("route and command boundaries", () => {
   test("recognizes only exact HTTPS bank routes", () => {
@@ -71,14 +88,12 @@ describe("route and command boundaries", () => {
 
 describe("synthetic browser proof (no bank requests)", () => {
   let browser: Browser;
-  beforeAll(async () => {
-    browser = await chromium.launch({
-      headless: true,
-      ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
-    });
+  beforeAll(() => {
+    if ("error" in launched) throw launched.error;
+    browser = launched.browser;
   });
   afterAll(async () => {
-    await browser?.close();
+    if ("browser" in launched) await launched.browser.close();
   });
 
   const secret = "SYNTHETIC_PRIVATE_729";

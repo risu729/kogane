@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline } from "./harness";
 import {
@@ -6,12 +6,13 @@ import {
   collectionQualityAlarms,
 } from "../src/collection-quality-alarms";
 import { validCollectionQualityAlarms } from "../../../packages/observation-shared/src/collection-quality-contract";
+import { settledTest } from "./support/settle.ts";
 let mf: Miniflare, env: Env;
-beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = started.env;
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = started.env;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

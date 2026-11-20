@@ -14,6 +14,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import {
   DATED_POSITION_QUANTITIES_SQL,
   DATED_SNAPSHOT_UNITS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -122,6 +123,10 @@ describe("holdings changes on a scaled store without statistics", () => {
       expect(result.holdings).toEqual([]);
       expect(result.coverage.containersWithoutSnapshot.length).toBeGreaterThan(0);
       expect(sql.statements.map(([text]) => text)).toContain(DATED_SNAPSHOT_UNITS_SQL);
+      // The count of the statements before the payable window is skipped.
+      expect(sql.statements.map(([text]) => text)).not.toContain(
+        DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+      );
       for (const [text, args] of sql.statements)
         expect(
           // Ranking every captured statement total before the cutoff reads

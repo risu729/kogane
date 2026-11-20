@@ -10,6 +10,7 @@ import {
   REPORTED_STATE_EXCLUSIONS,
   REPORTED_STATE_SCHEMA,
   REPORTED_STATE_ZONE,
+  STATEMENTS_BEFORE_WINDOW_REASONS,
 } from "../../domain/src/reported-state.ts";
 import {
   AGGREGATION_RULES,
@@ -236,6 +237,7 @@ function validCoverage(value: unknown): boolean {
       "liabilitiesCoverage",
       "liabilitiesMissing",
       "payablesFromPaymentDate",
+      "statementsBeforeWindow",
       "netAssets",
     ]) &&
     list(
@@ -279,7 +281,43 @@ function validCoverage(value: unknown): boolean {
     list(value.liabilitiesMissing, member(LIABILITY_GAPS)) &&
     value.liabilitiesMissing.length > 0 &&
     date(value.payablesFromPaymentDate) &&
+    list<Record<string, unknown>>(
+      value.statementsBeforeWindow,
+      (entry) =>
+        record(entry) &&
+        exactKeys(entry, ["sourceId", "reasonCode", "count"]) &&
+        text(entry.sourceId) &&
+        member(STATEMENTS_BEFORE_WINDOW_REASONS)(entry.reasonCode) &&
+        count(entry.count) &&
+        entry.count > 0,
+    ) &&
+    // One entry per source and reason.
+    new Set(
+      value.statementsBeforeWindow.map((entry) =>
+        JSON.stringify([entry["sourceId"], entry["reasonCode"]]),
+      ),
+    ).size === value.statementsBeforeWindow.length &&
+    // The gap is named exactly when the answer leaves a statement out.
+    value.liabilitiesMissing.includes("statements_before_window") ===
+      value.statementsBeforeWindow.length > 0 &&
     value.netAssets === "not-computed"
+  );
+}
+
+const ROW_REF = /^(?:position|balance):[1-9][0-9]*$/u;
+const identity = member(IDENTITY_STATUSES);
+
+/** `[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]`. */
+function validManifestRow(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length === 5 &&
+    typeof value[0] === "string" &&
+    ROW_REF.test(value[0]) &&
+    nullableText(value[1]) &&
+    identity(value[2]) &&
+    nullableText(value[3]) &&
+    identity(value[4])
   );
 }
 
@@ -291,17 +329,77 @@ function validManifest(value: unknown): boolean {
       "date",
       "cutoff",
       "policies",
+      "metricRegistryRelease",
+      "filters",
       "snapshotRefs",
+      "containersWithoutSnapshot",
+      "rows",
       "statementRefs",
+      "statementAccounts",
       "settlementRefs",
+      "statementsBeforeWindow",
     ]) &&
     value.schemaVersion === REPORTED_STATE_SCHEMA &&
     date(value.date) &&
     validInstantText(value.cutoff) &&
     list(value.policies, text) &&
+    text(value.metricRegistryRelease) &&
+    record(value.filters) &&
+    exactKeys(value.filters, ["source", "account"]) &&
+    nullableText(value.filters.source) &&
+    nullableText(value.filters.account) &&
     list(value.snapshotRefs, ref) &&
+    list(value.containersWithoutSnapshot, text) &&
+    // Positions and balances are each bounded; both together, twice the bound.
+    Array.isArray(value.rows) &&
+    value.rows.length <= 2 * BOUND &&
+    value.rows.every(validManifestRow) &&
     list(value.statementRefs, ref) &&
-    list(value.settlementRefs, text)
+    list(
+      value.statementAccounts,
+      (entry) =>
+        Array.isArray(entry) && entry.length === 2 && ref(entry[0]) && nullableText(entry[1]),
+    ) &&
+    list(value.settlementRefs, text) &&
+    list<Record<string, unknown>>(
+      value.statementsBeforeWindow,
+      (entry) =>
+        record(entry) &&
+        exactKeys(entry, ["sourceId", "accountId", "reasonCode", "count"]) &&
+        text(entry.sourceId) &&
+        nullableText(entry.accountId) &&
+        member(STATEMENTS_BEFORE_WINDOW_REASONS)(entry.reasonCode) &&
+        count(entry.count) &&
+        entry.count > 0,
+    ) &&
+    // One entry per source, resolved account and reason.
+    new Set(
+      value.statementsBeforeWindow.map((entry) =>
+        JSON.stringify([entry["sourceId"], entry["accountId"], entry["reasonCode"]]),
+      ),
+    ).size === value.statementsBeforeWindow.length
+  );
+}
+
+/**
+ * The coverage's counts are the manifest's, added per source and reason: the
+ * context id records every count the answer shows.
+ */
+function countsAgree(coverage: unknown, manifest: unknown): boolean {
+  if (!record(coverage) || !record(manifest)) return false;
+  const shown = coverage.statementsBeforeWindow as Record<string, unknown>[];
+  const recorded = manifest.statementsBeforeWindow as Record<string, unknown>[];
+  const sums = new Map<string, number>();
+  for (const entry of recorded) {
+    const key = JSON.stringify([entry["sourceId"], entry["reasonCode"]]);
+    sums.set(key, (sums.get(key) ?? 0) + (entry["count"] as number));
+  }
+  return (
+    sums.size === shown.length &&
+    shown.every(
+      (entry) =>
+        sums.get(JSON.stringify([entry["sourceId"], entry["reasonCode"]])) === entry["count"],
+    )
   );
 }
 
@@ -337,6 +435,12 @@ export function validReportedState(value: unknown): boolean {
     list(value.payables, validPayable) &&
     validCoverage(value.coverage) &&
     validManifest(value.manifest) &&
+    countsAgree(value.coverage, value.manifest) &&
+    // The manifest pins the filters the body was answered under.
+    (value.manifest as { filters: Record<string, unknown> }).filters.source ===
+      value.filters.source &&
+    (value.manifest as { filters: Record<string, unknown> }).filters.account ===
+      value.filters.account &&
     typeof value.contextId === "string" &&
     /^[0-9a-f]{64}$/u.test(value.contextId)
   );

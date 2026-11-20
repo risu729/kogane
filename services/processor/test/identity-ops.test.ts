@@ -1,25 +1,27 @@
 // Exercise the actual bundled private Worker locally; no live service binding.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
-beforeAll(async () => {
-  const bundle = await Bun.build({
-    entrypoints: [new URL("../src/worker.ts", import.meta.url).pathname],
-    target: "browser",
-    format: "esm",
-  });
-  if (!bundle.success) throw new Error("Private identity Worker test bundle failed");
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: await bundle.outputs[0]!.text(),
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
-}, 30_000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const bundle = await Bun.build({
+  entrypoints: [new URL("../src/worker.ts", import.meta.url).pathname],
+  target: "browser",
+  format: "esm",
+});
+if (!bundle.success) throw new Error("Private identity Worker test bundle failed");
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: await bundle.outputs[0]!.text(),
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

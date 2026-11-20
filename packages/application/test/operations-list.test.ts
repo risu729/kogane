@@ -28,6 +28,7 @@ import {
   type OperationStatus,
 } from "../src/index.ts";
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
+import { validOperationListPage } from "../../observation-shared/src/operation-contract.ts";
 
 beforeAll(() => {
   migratedDatabase().close();
@@ -130,6 +131,13 @@ async function pageThrough(
     if (!outcome.ok) throw new Error(outcome.error);
     pages++;
     expect(outcome.page.operations.length).toBeLessThanOrEqual(query.limit);
+    // Every page is one the 依頼の一覧 page accepts for the filters it sent.
+    expect(
+      validOperationListPage(outcome.page, {
+        kind: query.kind ?? undefined,
+        status: query.status ?? undefined,
+      }),
+    ).toBe(true);
     ids.push(...outcome.page.operations.map((operation) => operation.operationId));
     if (outcome.page.nextCursor === null) return { ids, pages };
     expect(outcome.page.operations.length).toBe(query.limit);
@@ -202,12 +210,14 @@ describe("listOperations", () => {
     expect(outcome).toEqual({
       ok: true,
       page: {
-        schemaVersion: "kogane-operation-list-v1",
+        schemaVersion: "kogane-operation-list-v2",
+        statusFilterMatches: "storedStatus",
         operations: [
           {
             operationId: `op_${hex64(9)}`,
             kind: "projection",
             status: "accepted",
+            storedStatus: "accepted",
             source: null,
             dispatch: { state: "dispatch_pending", attempts: 0 },
             failureCode: null,

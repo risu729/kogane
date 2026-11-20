@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   LATE_UNAVAILABLE_REASONS,
+  RECONSTRUCTION_ACCOUNTS_MAX,
   RECONSTRUCTED_STATE_QUERY_SCHEMA,
   RECONSTRUCTED_STATE_REASONS,
   RECONSTRUCTED_STATE_STATUS_REASONS,
@@ -22,6 +23,8 @@ import {
   WORLD_FROM,
   WORLD_NO_GUARD,
   WORLD_PRE_LOG,
+  WORLD_SCOPE_BANK,
+  WORLD_SCOPE_SAVINGS,
   WORLD_TO,
 } from "../../../packages/application/test/reconstructed-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -32,6 +35,7 @@ import {
 import {
   RECONSTRUCTED_STATE_LATE_UNAVAILABLE,
   RECONSTRUCTED_STATE_STATUS_GROUPS,
+  RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX,
   RECONSTRUCTED_STATE_QUERY_SCHEMA as WIRE_SCHEMA,
   RECONSTRUCTED_STATE_WIRE_REASONS,
   RECONSTRUCTED_STATE_WIRE_STATUSES,
@@ -50,12 +54,12 @@ import { matchRoute } from "../src/router.tsx";
 const PATH = "/api/v2/reconstructed-state";
 const NOW = "2026-04-30T00:00:00.000Z";
 
-async function answer(account: string) {
-  const outcome = await reconstructedStateOutcome(
-    reconstructedStateWorlds(),
-    new URLSearchParams({ account, from: WORLD_FROM, to: WORLD_TO }),
-    NOW,
-  );
+async function answer(...accounts: string[]) {
+  const search = new URLSearchParams();
+  for (const account of accounts) search.append("account", account);
+  search.set("from", WORLD_FROM);
+  search.set("to", WORLD_TO);
+  const outcome = await reconstructedStateOutcome(reconstructedStateWorlds(), search, NOW);
   if (!outcome.ok) throw new Error(outcome.refusal);
   return outcome.body;
 }
@@ -64,6 +68,32 @@ describe("reconstructed state HTTP contract", () => {
   test("every world's answer is valid", async () => {
     for (const account of [WORLD_BANK, WORLD_CARD, WORLD_PRE_LOG, WORLD_EMPTY_LOG, WORLD_NO_GUARD])
       expect([account, validApiResponse(PATH, await answer(account))]).toEqual([account, true]);
+    for (const scope of [
+      [WORLD_SCOPE_BANK, WORLD_SCOPE_SAVINGS],
+      [WORLD_BANK, WORLD_CARD],
+    ])
+      expect([scope, validApiResponse(PATH, await answer(...scope))]).toEqual([scope, true]);
+  });
+
+  test("a scope is named once, sorted, the same in the answer, the fold and the manifest", async () => {
+    const body = await answer(WORLD_SCOPE_SAVINGS, WORLD_SCOPE_BANK);
+    expect(body.accounts).toEqual([WORLD_SCOPE_BANK, WORLD_SCOPE_SAVINGS]);
+    const mutate = (change: (copy: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy);
+      return validReconstructedState(copy);
+    };
+    expect(mutate(() => {})).toBe(true);
+    expect(mutate((copy) => copy["accounts"].reverse())).toBe(false);
+    expect(mutate((copy) => (copy["accounts"] = [WORLD_SCOPE_BANK, WORLD_SCOPE_BANK]))).toBe(false);
+    expect(mutate((copy) => (copy["accounts"] = []))).toBe(false);
+    expect(mutate((copy) => (copy["accounts"] = WORLD_SCOPE_BANK))).toBe(false);
+    expect(mutate((copy) => (copy["account"] = WORLD_SCOPE_BANK))).toBe(false);
+    // The answer, the fold and the manifest name the same accounts.
+    expect(mutate((copy) => copy["accounts"].pop())).toBe(false);
+    expect(mutate((copy) => copy["manifest"]["accounts"].pop())).toBe(false);
+    expect(mutate((copy) => copy["reconstruction"]["accounts"].pop())).toBe(false);
+    expect(RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX).toBe(RECONSTRUCTION_ACCOUNTS_MAX);
   });
 
   test("a figure, a code or a shape the contract does not name is refused", async () => {
@@ -236,10 +266,17 @@ describe("reconstructed state HTTP contract", () => {
       name: "notFound",
       path: "/reconstruction/acct",
     });
-    const base = { account: WORLD_BANK, from: WORLD_FROM, to: WORLD_TO };
+    const base = { accounts: [WORLD_BANK], from: WORLD_FROM, to: WORLD_TO };
     expect(reconstructedStateSearch({ ...base, cut: { kind: "latest" } }).toString()).toBe(
       `account=${WORLD_BANK}&from=${WORLD_FROM}&to=${WORLD_TO}`,
     );
+    expect(
+      reconstructedStateSearch({
+        ...base,
+        accounts: [WORLD_CARD, WORLD_BANK],
+        cut: { kind: "latest" },
+      }).toString(),
+    ).toBe(`account=${WORLD_CARD}&account=${WORLD_BANK}&from=${WORLD_FROM}&to=${WORLD_TO}`);
     expect(
       reconstructedStateSearch({
         ...base,
@@ -258,10 +295,10 @@ describe("reconstructed state HTTP contract", () => {
     const today = "2026-04-30";
     const latest = { kind: "latest" } as const;
     expect(
-      formProblem({ account: "acct", from: "2026-03-01", to: "2026-03-31", cut: latest }, today),
+      formProblem({ accounts: ["acct"], from: "2026-03-01", to: "2026-03-31", cut: latest }, today),
     ).toBeNull();
     expect(
-      formProblem({ account: "acct", from: "2024-02-29", to: "2024-03-01", cut: latest }, today),
+      formProblem({ accounts: ["acct"], from: "2024-02-29", to: "2024-03-01", cut: latest }, today),
     ).toBeNull();
     const impossible: [string, string][] = [
       ["2026-02-30", "2026-03-10"],
@@ -272,7 +309,7 @@ describe("reconstructed state HTTP contract", () => {
       ["2026-03-01", "2026-13-01"],
     ];
     for (const [from, to] of impossible)
-      expect(formProblem({ account: "acct", from, to, cut: latest }, today)).toBe(
+      expect(formProblem({ accounts: ["acct"], from, to, cut: latest }, today)).toBe(
         "日付を 2026-03-31 のように指定してください。",
       );
   });

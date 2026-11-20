@@ -8,6 +8,14 @@ shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
 
+To ask whether any job is failing or stuck, read the collection quality
+status view instead of combining this page's receipts by hand:
+`kogane.collection-quality.read` with `{ view: "status" }`, or the table at
+the top of `/collection-quality`. It reads the same receipts from CORE, counts
+failures since the newest success, and treats a failed receipt that a
+successful collection (fetch run) of the same source followed before the next
+receipt as recovered ([collection](collection.md#is-anything-stuck-the-collection-status-view)).
+
 Save a daily time/weekdays or an interval and enable/disable the job. A version
 conflict requires refreshing before another edit. A successful database save with
 pending reservation is not an armed alarm. The five-minute processor job repairs
@@ -430,8 +438,13 @@ login or render with JavaScript cannot be read this way.
 
 ## Settings API
 
-- `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
-  and receipts.
+- `GET /api/ops/v1/schedules?detail=full`: settings, maintenance provenance,
+  reservations and receipts, as the Processor's snapshot has them; the page
+  asks for it. Without `detail`, or with `detail=summary`, one line per job
+  with its closed states and newest receipt, each source's maintenance
+  status and rule count, and the held leases
+  ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
+  parameter is accepted.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
@@ -444,9 +457,31 @@ ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the
 `applied` record — a job revision, a maintenance revision with its provenance
 update, a survey decision with the revision it accepted, a lease release (whose
 only durable trace this record is) — and the App records each refusal once.
-The maintenance edit, the survey acceptance and the lease release are each one
-batch: an accepted proposal's revision and decision exist together or not at
-all. The page's `GET` is not recorded.
+The job edit, the maintenance edit, the survey acceptance and the lease
+release are each one batch: a job's settings and its history row in
+`collection_schedule_revisions`, or an accepted proposal's revision and
+decision, exist together or not at all. The page's `GET` is not recorded.
+
+A write that loses its version check — another edit saved the job or the rule
+first, including one by the same operator in the same millisecond — writes
+nothing and answers `409 revision_conflict`. The history row and the
+maintenance revision are plain `INSERT` statements, never `INSERT OR IGNORE`
+(which SQLite also applies to CHECK, NOT NULL and UNIQUE failures): a row the
+schema refuses raises, nothing of its batch is written, and the Processor
+answers its closed `503 scheduling_unavailable` (an accepted survey proposal:
+`503 decision_record_failed`), never `409`. The SQLite text is neither
+answered nor logged. The private delegated job and maintenance routes answer
+the same `503 scheduling_unavailable` unless the batch's delegation guard
+explains the failure (an expired delegation, a used confirmation, a spent
+budget), and the MCP tools relay the Processor's answer, as the page's route
+does (ADR 0081). Every constraint of the two tables restates what the writers
+already validate (a history row copies the job row, whose own constraints are
+the same), so a valid request reaches this only on a store that disagrees with
+the code; the tests rebuild the table with one more CHECK to show it
+(`services/processor/test/schedule-write-refusal.test.ts`). The history row is
+copied only when the job's `UPDATE`, the statement before it in the batch,
+changed a row (`changes()=1`); the same file runs the same-millisecond race and
+the refused history row on Miniflare D1 as well as on `bun:sqlite`.
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation
@@ -486,7 +521,8 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   `"*"`, and `evidence.read` over the whole store because the page's
   occurrences carry run and evidence ids and it lists held leases; on `/mcp`
   and `POST /api/agent/v1/schedules.read`) answers this page's
-  `GET /api/ops/v1/schedules` snapshot without its `survey` part, read from
+  `GET /api/ops/v1/schedules` snapshot without its `survey` part, at the same
+  `detail` (`summary` by default), read from
   the Processor with no operator or agent header
   ([ADR 0081](adr/0081-ui-parity-through-mcp.md);
   [UI read pages](agent-api.md#ui-read-pages)).
@@ -498,7 +534,20 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   state and latest receipt outcome, each rule with up to 20 revisions (actor
   kind, closed reason, whether the reader wrote it as a delegated principal),
   and the writer's limits on delegated revisions with how many the reader wrote
-  today. It returns no run or evidence ids, no lease and no principal's
+  today. That is its `detail: "full"`; by default (`detail: "summary"`,
+  [ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+  2026-11-19) the App answers `maintenanceReadSummary` of it, 16 lines a page
+  (`offset`): per source the reference status and its job and rule counts;
+  per job its id, kind, enabled, supported, revision, original next
+  occurrence, due time, reservation state and newest receipt's nominal time,
+  status and failure code; per rule its current revision (timezone, pattern,
+  enabled, scope) with how many revisions are listed, their distinct actor
+  kinds and change reasons and how many the reader wrote; and the limits. A
+  source whose lines continue is listed on the next page too. Each page is a
+  fresh read, not a cursor: a rule or job added between two pages moves the
+  lines after it, so a page can repeat or skip one, and `coverage.lines`
+  differs between the pages when it does. It returns no
+  run or evidence ids, no lease and no principal's
   identity, and nothing about another source. The Processor serves it on
   `/internal/schedules/agent/read`, which refuses a request that also carries
   the operator header or a delegation reference; no write is reachable under
@@ -538,8 +587,11 @@ The reference is stored whole in `decision_ref`, so no delegated revision is
 ever written without the audit record behind it. The writer answers a closed
 code: `invalid_request`, `invalid_reference`, `invalid_reason`,
 `maintenance_rule_not_found` (a delegated principal naming another source's
-rule is answered like a missing one), `revision_conflict`,
-`maintenance_deferral_too_long` or `maintenance_write_budget_exceeded`. For a
+rule is answered like a missing one), `revision_conflict` (a stale expected
+revision, or an INSERT whose version check matched nothing in the batch),
+`maintenance_deferral_too_long` or `maintenance_write_budget_exceeded`. A
+revision the schema refuses is none of these: the batch raises and the writer
+throws, [as above](#settings-api). For a
 delegated principal only, it also requires the rule to be the named source's
 or new, refuses a revision after which the source has a joined deferral
 longer than its bound that its rules did not already cause (every such union
