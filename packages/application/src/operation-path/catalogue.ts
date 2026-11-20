@@ -315,6 +315,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // What was recorded since a time, per source (ADR 0127): runs, captures,
+  // parse runs, observation rows and event revisions, counted.
+  "changes.since": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "card-settlements.ownership": {
     risk: ["R0"],
     effect: null,

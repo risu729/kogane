@@ -81,7 +81,10 @@ async function extractVersioned(
  * The compatibility extractor. Behaviour is byte-for-byte the pre-A04
  * `hydrateMeta`: a stored MyJCB value wins over the manifest, the Sony Bank
  * media type is verified on every run, and `observation_artifact_metadata`
- * receives the same `INSERT OR IGNORE`.
+ * receives the same row, kept only the first time: a later run skips the
+ * existing artifact key (`ON CONFLICT(fetch_artifact_id) DO NOTHING`). The
+ * table has no CHECK or NOT NULL, so that is the pre-A04 `INSERT OR IGNORE`'s
+ * behaviour for every row the table accepts; a constraint added later raises.
  */
 async function extractLegacy(
   context: ExtractorContext,
@@ -115,7 +118,7 @@ async function extractLegacy(
   }
   await context.db
     .prepare(
-      "INSERT OR IGNORE INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period,metadata_manifest_artifact_id) VALUES(?,?,?,?)",
+      "INSERT INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period,metadata_manifest_artifact_id) VALUES(?,?,?,?) ON CONFLICT(fetch_artifact_id) DO NOTHING",
     )
     .bind(row.id, output.statementState, output.period, manifestArtifactId)
     .run();
@@ -184,7 +187,14 @@ function outputJson(release: MetadataExtractorRelease, extraction: MetadataExtra
 /**
  * Appends the projection and its inputs, and returns its id. Idempotent: the
  * unique key (artifact, release, input digest) means the same evidence read
- * by the same extractor is one row, however often it is recomputed.
+ * by the same extractor is one row, however often it is recomputed, and an
+ * input is one row per (projection, artifact, role). Only those keys are
+ * skipped (`ON CONFLICT(<key>) DO NOTHING`; the projection's `id` is never
+ * supplied): a projection or an input the schema refuses (a CHECK or NOT NULL
+ * failure) raises. `OR IGNORE` skipped a refused input without an error, so
+ * the projection was kept without that input and read as complete. Limit: the
+ * inputs are written after the projection, so after a refused input the
+ * projection row stays without its inputs, and each later call raises again.
  */
 export async function persistProjection(
   db: D1Database,
@@ -196,9 +206,10 @@ export async function persistProjection(
   const json = outputJson(release, extraction);
   await db
     .prepare(
-      `INSERT OR IGNORE INTO metadata_projections
+      `INSERT INTO metadata_projections
         (fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at)
-        VALUES(?,?,?,?,?,?,?)`,
+        VALUES(?,?,?,?,?,?,?)
+        ON CONFLICT(fetch_artifact_id,extractor_release,input_digest) DO NOTHING`,
     )
     .bind(
       row.id,
@@ -222,7 +233,7 @@ export async function persistProjection(
       extraction.inputs.map((input) =>
         db
           .prepare(
-            "INSERT OR IGNORE INTO metadata_projection_inputs(projection_id,input_artifact_id,role,raw_sha256) VALUES(?,?,?,?)",
+            "INSERT INTO metadata_projection_inputs(projection_id,input_artifact_id,role,raw_sha256) VALUES(?,?,?,?) ON CONFLICT(projection_id,input_artifact_id,role) DO NOTHING",
           )
           .bind(id, input.artifactId, input.role, input.rawSha256),
       ),
