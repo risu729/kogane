@@ -10,6 +10,9 @@ import { addDays, daysBetween, formatLocalDate, parseLocalDate, type CivilDate }
 import type { Quantity } from "./values.ts";
 
 /**
+ * v3: the coverage and the manifest count the statements the payable window
+ * leaves out (`statementsBeforeWindow`; ADR 0019's statements-before-window
+ * amendment of 2026-11-18, released after v2 and so a version of its own).
  * v2: the manifest pins every input the answer reads (INV09; ADR 0019's
  * context amendment of 2026-11-19): the filters, the metric registry release,
  * the containers without a snapshot, each listed or counted row with the
@@ -18,7 +21,7 @@ import type { Quantity } from "./values.ts";
  * ids, so a mapping correction, a review decision, a parse activated over the
  * same artifact or another account filter kept the context id.
  */
-export const REPORTED_STATE_SCHEMA = "reported-state-v2";
+export const REPORTED_STATE_SCHEMA = "reported-state-v3";
 /** `same-day` / `recent` (captured at most `RECENT_DAYS` before the date) / `stale`; `collection-freshness-v1` uses the same thresholds. */
 export const DATED_STATE_FRESHNESS_POLICY = "dated-state-freshness-v1";
 /** Which containers and rows a reported state lists (ADR 0019, decision 2). */

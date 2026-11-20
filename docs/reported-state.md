@@ -139,8 +139,10 @@ A perimeter container with no snapshot before the cutoff is listed in
   under 一覧にない期間外の請求 in its coverage notes;
   `kogane.reported-state.read` answers the same body.
 - `manifest` and `contextId = canonicalDigest(manifest)`. Under
-  `reported-state-v2` the manifest pins every input the answer reads (INV09;
-  [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)):
+  `reported-state-v3` the manifest pins every input the answer reads (INV09;
+  [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)
+  and
+  [statements-before-window amendment](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)):
   the schema, date and cutoff; the policy ids and `metricRegistryRelease`; the
   request's `filters`; the chosen `snapshotRefs` and the
   `containersWithoutSnapshot` (`source/parser/dataset`); `rows`, every
@@ -159,10 +161,11 @@ A perimeter container with no snapshot before the cutoff is listed in
   what a row shows, a review decision, an activated parse, a registry
   release, a changed count, or a statement left out whose resolved account
   changes is therefore a new context id; an unchanged store keeps its id.
-  Since the
-  [ADR 0019 amendment of 2026-11-18](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)
-  every manifest carries `statementsBeforeWindow` (`[]` when nothing is left
-  out), so every reported-state `contextId` changed once with it.
+  `reported-state-v2` (the context amendment of 2026-11-19, released first)
+  has no `statementsBeforeWindow`; since `reported-state-v3` (the
+  [ADR 0019 amendment of 2026-11-18](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18))
+  every manifest carries it (`[]` when nothing is left out) and names v3, so
+  every reported-state `contextId` changed once more with it.
 
 `queryDatedState` counts the statements before the window unless it is called
 with `includeStatementsBeforeWindow: false`. The holdings change below, the
@@ -172,10 +175,12 @@ with `includeStatementsBeforeWindow: false`. The holdings change below, the
 they build on has no `statementsBeforeWindow` in its coverage or manifest and
 names every liability gap. The reported context ids they pin are the digests
 of that manifest without the count: they record no count they did not read,
-they differ from the `/state` answer's `contextId` for the same date and
-filters, and the 2026-11-18 amendment left them as they were (the context
-amendment of 2026-11-19 changed them once, as it changed every reported-state
-context id).
+and they differ from the `/state` answer's `contextId` for the same date and
+filters. The context amendment of 2026-11-19 (`reported-state-v2`) changed
+them once, as it changed every reported-state context id, and
+`reported-state-v3` changed them once more: their manifest gains no count but
+names the schema version, so those ids, and the context ids of the reads that
+pin them, are new under v3. Nothing stores them, so nothing is rebuilt.
 
 `source` narrows accounts, payables and coverage to one source; `account` to
 one resolved account id. The answer has no total, subtotal or net worth, and

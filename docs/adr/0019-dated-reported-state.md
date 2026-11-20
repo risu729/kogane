@@ -351,6 +351,15 @@ their dated manifest has no `statementsBeforeWindow` key, decision 6.
    they claim no input that was not read, they are not the `/state` answer's
    `contextId` for the same date and filters, and a statement left out
    changes neither them nor the reads' own context ids.
+7. `reported-state-v3`. The context amendment of 2026-11-19 below was
+   released first, as `reported-state-v2` without `statementsBeforeWindow`,
+   and the wire contract's exact keys refuse a body with a key it does not
+   know or without one it requires. Adding the key under the same version
+   would make the released v2 contract and this one refuse each other's
+   bodies under one version string, so the counts ship as a new version (as
+   ADR 0015 and the context amendment did when the manifest changed). A
+   client that validates `reported-state-v2` refuses a v3 body instead of
+   displaying it.
 
 **Consequences.**
 
@@ -365,12 +374,18 @@ their dated manifest has no `statementsBeforeWindow` key, decision 6.
   507 ms today and 455 ms a year back (`bun:sqlite`, a shared machine;
   [reported state, cost](../reported-state.md#cost)), under the one-second
   target.
-- Every reported-state `contextId` changes once with this amendment, because
-  every manifest gains `statementsBeforeWindow` (`[]` when nothing is left
-  out). The context ids of the holdings change, the reconstructed state and
-  the valuation on a date, and the reported context ids they pin, do not
-  change: their dated manifests keep the shape they had. No test or fixture
-  pinned a literal context id of any of these reads.
+- Every reported-state `contextId` changes once more with this amendment,
+  after the context amendment of 2026-11-19 changed it: every manifest
+  gains `statementsBeforeWindow` (`[]` when nothing is left out) and names
+  `reported-state-v3`. The dated manifests of the holdings change, the
+  reconstructed state and the valuation on a date gain no count, but they
+  name the schema version too, so the reported context ids they pin
+  (`reportedContextIds`, the valuation's reported `contextId`, and
+  `startContextId` and `endContextId`), and with them those reads' own
+  context ids, also change once more; until this amendment, the context
+  amendment of 2026-11-19 had been the last to change them. Nothing stores a
+  reported-state context id or one that embeds it, so nothing is rebuilt. No
+  test or fixture pinned a literal context id of any of these reads.
 - The count says nothing about settlement: an older statement that was
   settled long ago is counted as one that never was. It bounds how many
   older captured statements could still be unpaid; it is not a figure of what
@@ -462,11 +477,13 @@ decision: chosen.
 order; a row id names its parse run) and `statementAccounts`
 (`[statementRef, accountId]`), and each `settlementRefs` entry becomes
 `card-settlement:<id>@decision:<decision revision id>`, or `@proposed` before
-any decision. The `statementsBeforeWindow` counts of the statements-before-window
-amendment above stay the manifest's last key, after `settlementRefs`; a state
-read without the count (its decision 6) has the new keys and no counts. The
-wire contract checks the new keys and that the manifest's filters are the
-body's.
+any decision. The wire contract checks the new keys and that the manifest's
+filters are the body's. This amendment was released before the
+statements-before-window amendment above: `reported-state-v2` has no
+`statementsBeforeWindow`. From `reported-state-v3` (that amendment's seventh
+decision) the counts are the manifest's last key, after `settlementRefs`; a
+state read without the count (its decision 6) has the keys of this amendment
+and no counts.
 
 **Consequences.** Every reported-state context id changes once, and with it
 the `reportedContextIds` of the holdings change between two dates, the
