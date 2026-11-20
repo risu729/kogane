@@ -11,10 +11,11 @@ import {
   OPERATION_KINDS,
   OPERATION_STAGES,
   OPERATION_STATUSES,
+  RECORD_STATUSES_MAX_ROWS,
   STAGE_STATES,
   STAGES_BY_KIND,
 } from "../src/operations/requests.ts";
-import { OPERATION_LIST_MAX_LIMIT } from "../src/operations/list.ts";
+import { OPERATION_LIST_MAX_LIMIT, STATUS_FILTER_MATCHES } from "../src/operations/list.ts";
 import {
   COLLECTOR_ACTIONS,
   COLLECTOR_EXECUTION_STATES,
@@ -22,6 +23,7 @@ import {
 } from "../src/operations/collector-trail.ts";
 import {
   OPERATION_LIST_MAX_ROWS,
+  OPERATION_PROJECTED_KINDS,
   OPERATION_RECORD_COLLECTOR_ACTIONS,
   OPERATION_RECORD_DISPATCH_STATES,
   OPERATION_RECORD_EXECUTION_STATES,
@@ -44,7 +46,16 @@ describe("operation record vocabulary", () => {
     expect([...OPERATION_RECORD_COLLECTOR_ACTIONS]).toEqual([...COLLECTOR_ACTIONS]);
     expect([...OPERATION_RECORD_EXECUTION_STATES]).toEqual([...COLLECTOR_EXECUTION_STATES]);
     expect([...OPERATION_RECORD_RUN_STATES]).toEqual([...RUN_TRAIL_STATES]);
-    // The list's page bound (ADR 0086).
+    // The list's page bound (ADR 0086), and the batch the page's statuses are derived in.
     expect(OPERATION_LIST_MAX_ROWS).toBe(OPERATION_LIST_MAX_LIMIT);
+    expect(RECORD_STATUSES_MAX_ROWS).toBe(OPERATION_LIST_MAX_LIMIT);
+    // The kinds whose listed status may read completed through `projected`.
+    expect([...OPERATION_PROJECTED_KINDS]).toEqual(
+      OPERATION_KINDS.filter(
+        (kind) =>
+          STAGES_BY_KIND[kind].includes("adopted") && STAGES_BY_KIND[kind].includes("projected"),
+      ),
+    );
+    expect(STATUS_FILTER_MATCHES).toBe("storedStatus");
   });
 });

@@ -1,20 +1,24 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFileSync } from "node:fs";
 import { retireReplacedJobsSql } from "../src/job-retirement-sql.ts";
 import { retireReplacedJobs } from "../src/worker.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let db: D1Database;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {fetch(){return new Response('local')}}",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {fetch(){return new Response('local')}}",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-    }),
-  );
   const binding: unknown = await mf.getD1Database("DB");
   if (!binding || typeof binding !== "object" || !("prepare" in binding))
     throw new Error("missing DB");

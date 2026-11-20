@@ -171,8 +171,10 @@ export {
   pendingDispatches,
   type ProjectionRequest,
   readOperation,
+  RECORD_STATUSES_MAX_ROWS,
   recordDispatch,
   recordOperationStage,
+  recordStatuses,
   type ReplayRequest,
   requestCollection,
   previewProviderOperation,
@@ -184,6 +186,7 @@ export {
   type SessionRefreshMode,
   sessionRefreshPolicy,
   type SessionRefreshRequest,
+  SELECT_STAGES_OF_PAGE,
   STAGE_STATES,
   STAGES_BY_KIND,
   type StageReport,
@@ -198,6 +201,7 @@ export {
   type OperationListPage,
   type OperationListQuery,
   type OperationSummary,
+  STATUS_FILTER_MATCHES,
 } from "./operations/list.ts";
 
 // ── collector execution of operations (issue #544, ADR 0048) ─────────
@@ -338,6 +342,7 @@ export {
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
 } from "./query/reconstructed-state-read.ts";
+export { RECONSTRUCTION_ACCOUNTS_MAX } from "./query/reconstructed-state.ts";
 export {
   parseReportedStateRequest,
   readReportedStateRequest,

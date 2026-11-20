@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -9,13 +9,19 @@ import {
   readOwnershipDeclaration,
   type OwnershipDeclarationReading,
 } from "../../../packages/domain/src/ownership-declaration.ts";
+import { settledTest } from "./settle.ts";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable && process.env["CI"] === "true") process.exitCode = 1;
 const PLAN = "c".repeat(64);
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("explicit card ownership review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let review = ownershipReview();
@@ -151,7 +157,6 @@ describe.if(runnable)("explicit card ownership review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60000);
   afterAll(async () => {
     await browser?.close();

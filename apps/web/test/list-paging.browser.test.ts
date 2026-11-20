@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -7,6 +7,7 @@ import type {
   TransactionRow,
 } from "../../../packages/observation-shared/src/api-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 // Synthetic rows only: invented sources, accounts, amounts and dates.
 const client = join(import.meta.dir, "../dist-production");
@@ -62,8 +63,13 @@ function window<T>(offset: string | null, make: (id: number) => T) {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("in-memory pages follow the server window", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   beforeAll(async () => {
@@ -101,7 +107,6 @@ describe.if(runnable)("in-memory pages follow the server window", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

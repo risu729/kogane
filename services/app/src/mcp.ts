@@ -28,6 +28,7 @@ import {
 } from "@modelcontextprotocol/server";
 import {
   PURCHASES_EXPLAIN_MAX_OFFSET,
+  RECONSTRUCTION_ACCOUNTS_MAX,
   RECONSTRUCTED_STATE_ACCOUNT,
   RECONSTRUCTED_STATE_DATE,
   RECONSTRUCTED_STATE_EPOCH,
@@ -217,20 +218,29 @@ export const PURCHASES_MCP_TOOLS = [
  * serves the reconstructed state (`reconstructedStateOnDate`), as its GET
  * route is. The patterns are the service's own; the range bound, today's
  * date and the grant are checked by the service, which answers the route's
- * closed refusal codes (as the first ref, `refusal:<code>`).
+ * closed refusal codes (as the first ref, `refusal:<code>`). Exactly one of
+ * `account` and `accounts` names the scope (ADR 0116); a root combinator
+ * cannot say so (mcp-input-schema.ts), so the description does and the
+ * service refuses anything else.
  */
 export const RECONSTRUCTED_STATE_MCP_TOOLS = [
   {
     name: "kogane.reconstructed-state.read",
-    title: "Reconstructed balances of one account beside the reported ones",
-    description:
-      "One account's balances reconstructed from adopted events over a range (at most 366 days, not after today in Tokyo, cash basis), beside what its provider reported at both ends, at one cut of the economic commit log (default: the latest commit). Returns the status, closed reason codes, each cell's reported and reconstructed figures and their difference with its explanation, the knowledge used (cut, standing, set version, identity epoch) and the manifest. Read-only: it adopts nothing, and an unexplained difference stays unexplained.",
+    title: "Reconstructed balances of one or several accounts beside the reported ones",
+    description: `The balances of one account (\`account\`) or of a scope of up to ${String(RECONSTRUCTION_ACCOUNTS_MAX)} distinct accounts (\`accounts\`; give exactly one of the two) reconstructed from adopted events over a range (at most 366 days, not after today in Tokyo, cash basis), beside what their providers reported at both ends, at one cut of the economic commit log (default: the latest commit). Returns the status and closed reason codes of the whole scope, each (account, unit) cell's reported and reconstructed figures and their difference with its explanation, the knowledge used (cut, standing, set version, identity epoch) and the manifest. Nothing is added across accounts. Read-only: it adopts nothing, and an unexplained difference stays unexplained.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      required: ["account", "from", "to"],
+      required: ["from", "to"],
       properties: {
         account: { type: "string", pattern: RECONSTRUCTED_STATE_ACCOUNT.source },
+        accounts: {
+          type: "array",
+          minItems: 1,
+          maxItems: RECONSTRUCTION_ACCOUNTS_MAX,
+          uniqueItems: true,
+          items: { type: "string", pattern: RECONSTRUCTED_STATE_ACCOUNT.source },
+        },
         from: { type: "string", pattern: RECONSTRUCTED_STATE_DATE.source },
         to: { type: "string", pattern: RECONSTRUCTED_STATE_DATE.source },
         basis: { type: "string", enum: ["cash"] },
