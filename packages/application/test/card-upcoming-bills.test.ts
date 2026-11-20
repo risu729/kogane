@@ -16,6 +16,7 @@ import {
   DATED_BALANCES_SQL,
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOTS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -648,6 +649,7 @@ describe("cost and authority", () => {
         DATED_BALANCES_SQL,
         DATED_SNAPSHOTS_SQL,
         DATED_STATEMENTS_SQL,
+        DATED_STATEMENTS_BEFORE_WINDOW_SQL,
         SETTLEMENT_SQL,
         ACCOUNT_LABELS_SQL,
       ]),
