@@ -180,6 +180,14 @@ describe("the holdings change summary over the route and MCP", () => {
       const refused = await page.expectSameAnswer(query, CHANGE, args);
       expect(refused.status, query).toBe(status);
       expect((refused.body as { error: string }).error, query).toBe(code);
+      // A cursor of other dates or filters names what must repeat (ADR 0123).
+      if (code === "cursor_mismatch")
+        expect((refused.body as { mustMatch?: string[] }).mustMatch, query).toEqual([
+          "from",
+          "to",
+          "source",
+          "account",
+        ]);
     }
     // A detail outside the closed schema is the tool's own refusal.
     const bad = await page.http(CHANGE, { ...ARGS, detail: "compact" });

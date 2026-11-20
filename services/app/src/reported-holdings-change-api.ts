@@ -54,6 +54,12 @@ const CURSOR_REFUSALS: Record<HoldingsChangeCursorRefusal, number> = {
   context_expired: 410,
 };
 
+/**
+ * The argument names a summary cursor is bound to besides its comparison: a
+ * `cursor_mismatch` names them as `mustMatch` (ADR 0123), names only.
+ */
+const HOLDINGS_CHANGE_CURSOR_INPUTS = ["from", "to", "source", "account"] as const;
+
 /** Served exactly where `/api/v2/reported-state` is: both dated reads need its views. */
 export async function reportedHoldingsChangeAvailable(env: Env): Promise<boolean> {
   return reportedStateAvailable(env);
@@ -124,6 +130,12 @@ export async function readHoldingsChange(
     limit: limit === null ? HOLDINGS_CHANGE_SUMMARY_DEFAULT_LIMIT : Number(limit),
     cursor: params.get("cursor"),
   });
-  if (!page.ok) throw new HttpError(CURSOR_REFUSALS[page.code], page.code);
+  if (!page.ok)
+    throw new HttpError(
+      CURSOR_REFUSALS[page.code],
+      page.code,
+      [],
+      page.code === "cursor_mismatch" ? { mustMatch: HOLDINGS_CHANGE_CURSOR_INPUTS } : {},
+    );
   return { apiVersion: 2, ...page.summary };
 }

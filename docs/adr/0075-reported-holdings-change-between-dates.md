@@ -503,7 +503,9 @@ The owner's store measured 20–250 KB for this read (issue 1414's audit).
    and the filters, `t` the next offset), bound to neither the page size nor
    the detail (ADR 0119's rule). A cursor that does not decode, names a
    position outside the lines or carries a read instance or sort key is
-   `400 invalid_cursor`; one of other dates or filters `400 cursor_mismatch`;
+   `400 invalid_cursor`; one of other dates or filters `400 cursor_mismatch`
+   with `mustMatch` naming `from`, `to`, `source` and `account` (ADR 0123's
+   body for a refused cursor);
    one of the same request whose comparison has another `contextId` (a new
    capture, mapping, parse or reported context) `410 context_expired`, never
    a page of the new comparison. Every page computes the comparison again.

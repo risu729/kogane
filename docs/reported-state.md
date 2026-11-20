@@ -233,7 +233,8 @@ manifest are not. Ten lines a page by default (`limit` 10, 25, 50 or 100);
 `page.nextCursor` continues at any size and is bound to the comparison's
 `contextId` and the request's dates and filters: `400 invalid_cursor` for a
 cursor that does not decode or names no line, `400 cursor_mismatch` for one
-of other dates or filters, and `410 context_expired` once the comparison has
+of other dates or filters (its `mustMatch` names `from`, `to`, `source` and
+`account`, as ADR 0123's reads do), and `410 context_expired` once the comparison has
 moved. Every page computes the comparison again.
 
 `validReportedHoldingsChange` (the full answer) and
