@@ -406,6 +406,18 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
   const [chosen, setChosen] = useState<WindowKey>("day");
   const span = WINDOWS.find((entry) => entry.key === chosen)!;
   const query = useChangesSince(span.key, span.hours);
+  // `isFetchNextPageError` reads the running fetch's direction, so a reread
+  // started after a failed continuation (its retry, a refocused tab) clears
+  // it while the continuation's error is still the query's. The window whose
+  // continuation failed is kept until a read settles, so the answer read and
+  // the error beside the button stay while the reread runs (decision 6).
+  const [continuationFailed, setContinuationFailed] = useState<WindowKey | null>(null);
+  const settledContinuation = query.isFetchNextPageError ? span.key : null;
+  if (!query.isFetching && continuationFailed !== settledContinuation)
+    setContinuationFailed(settledContinuation);
+  const failedOnContinuation =
+    query.isError &&
+    (query.isFetching ? continuationFailed === span.key : query.isFetchNextPageError);
   // A caller the route refuses (it is the reader's), or a deployment without
   // the route (the local store): the panel is not shown.
   if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
@@ -419,7 +431,7 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
       <p className="footnote">
         一覧は続きます。一度に読み込める量に上限があるため、分けて読み込みます。
       </p>
-      {query.isFetchNextPageError ? (
+      {failedOnContinuation ? (
         <ErrorState
           error={query.error!}
           label="最近の変化の続き"
@@ -431,7 +443,7 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
               ? query.refetch()
               : query.fetchNextPage())
           }
-          retrying={query.isFetchingNextPage}
+          retrying={query.isFetching}
         />
       ) : (
         <button
@@ -482,7 +494,7 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
           </button>
         ))}
       </div>
-      {query.isError && !query.isFetchNextPageError ? (
+      {query.isError && !failedOnContinuation ? (
         <div className="panel-body">
           <ErrorState
             error={query.error}

@@ -531,8 +531,28 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
         },
         { timeout: 10_000 },
       );
+      // The reread is held until the panel is checked: while it runs, the
+      // answer read and the error beside the button stay, not a whole-panel
+      // error in their place.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await page.route(`**${CHANGES_SINCE_PATH}?*`, async (request) => {
+        await held;
+        await request.continue();
+      });
       await failed.getByRole("button", { name: "再試行" }).click();
       await reread;
+      await failed
+        .getByRole("button", { name: "最近の変化の続きを再試行中…" })
+        .waitFor({ timeout: 10_000 });
+      expect(await panel.locator("li.changes-source").count()).toBe(2);
+      expect(
+        await panel
+          .getByRole("alert")
+          .filter({ hasText: "最近の変化を読み込めませんでした" })
+          .count(),
+      ).toBe(0);
+      release();
       await panel.locator(`time[datetime="${again}"]`).waitFor();
       const continued = page.waitForResponse((response) => response.url().includes("after="));
       await panel.getByRole("button", { name: "続きを読み込む" }).click();
