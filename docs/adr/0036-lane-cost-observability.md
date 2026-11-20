@@ -78,7 +78,7 @@ lane tests use the repository's native mise environment.
 
 ## Amendment 2026-11-12: Observe platform-limit rejections before recovery
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1334](https://github.com/risu729/kogane/pull/1334))
 - Tracking: [recovered platform-limit observation](https://github.com/risu729/kogane/issues/1333)
 
 ### Context and options
