@@ -372,6 +372,45 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
     }
   }, 30_000);
 
+  test("a refetch reads the window from the clock again, and a continuation keeps its page's since", async () => {
+    mode = "paged";
+    const page = await browser.newPage();
+    try {
+      const start = Date.now();
+      await page.clock.setFixedTime(start);
+      const panel = await open(page);
+      await panel.getByText("一覧は続きます", { exact: false }).waitFor();
+      const chosen = page.waitForResponse((response) =>
+        response.url().includes(`${CHANGES_SINCE_PATH}?`),
+      );
+      await panel.getByRole("button", { name: "30日間" }).click();
+      const first = new URL((await chosen).url()).searchParams.get("since")!;
+      expect(first).toBe(new Date(start - 30 * 24 * HOUR).toISOString());
+      await panel.getByRole("button", { name: "続きを読み込む" }).waitFor();
+      const continued = page.waitForResponse((response) => response.url().includes("after="));
+      await panel.getByRole("button", { name: "続きを読み込む" }).click();
+      expect(new URL((await continued).url()).searchParams.get("since")).toBe(first);
+      // A day later the tab is focused again: the same since would now be
+      // more than 31 days back (`since:too_old`), so both pages are read again
+      // from 30 days before the clock, the continuation with the first page's.
+      const later = start + 25 * HOUR;
+      await page.clock.setFixedTime(later);
+      const again = new Date(later - 30 * 24 * HOUR).toISOString();
+      const refetched = page.waitForResponse(
+        (response) =>
+          response.url().includes("after=") &&
+          new URL(response.url()).searchParams.get("since") === again,
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await refetched;
+      await panel.locator(`time[datetime="${again}"]`).waitFor();
+      expect(await panel.locator(`time[datetime="${first}"]`).count()).toBe(0);
+      expect(await panel.getByRole("alert").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
   test("an answer the byte bound stopped continues on request", async () => {
     mode = "paged";
     const page = await browser.newPage();

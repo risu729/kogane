@@ -65,15 +65,32 @@ function changesPath(since: string, after: string | null): string {
   return `${CHANGES_SINCE_PATH}?${query.toString()}`;
 }
 
-function useChangesSince(since: string) {
+/**
+ * Where a continuation starts: the `since` its first page was answered for and
+ * the source the byte bound stopped after. A first page has none.
+ */
+type ChangesPageParam = { since: string; after: string } | null;
+
+/**
+ * The digest for a window. A first page asks from `hours` before the browser's
+ * clock when it is read, so a refetch (a refocused tab, a retry) keeps the
+ * window it names instead of drifting past the digest's bound
+ * (`since:too_old`); a continuation asks with its first page's `since`, so
+ * the pages of one answer never mix two instants.
+ */
+function useChangesSince(key: WindowKey, hours: number) {
   return useInfiniteQuery({
-    queryKey: ["changes-since", since],
-    initialPageParam: null as string | null,
+    queryKey: ["changes-since", key],
+    initialPageParam: null as ChangesPageParam,
     // getJson checks the shape (`validChangesSince`) before anything renders.
     queryFn: ({ pageParam, signal }) =>
-      getJson<ChangesSinceAnswer>(changesPath(since, pageParam), signal),
+      getJson<ChangesSinceAnswer>(
+        changesPath(pageParam?.since ?? changesSinceInstant(hours), pageParam?.after ?? null),
+        signal,
+      ),
     // The same request with `after` continues an answer the byte bound cut.
-    getNextPageParam: (last) => last.next?.after ?? null,
+    getNextPageParam: (last): ChangesPageParam =>
+      last.next === null ? null : { since: last.since, after: last.next.after },
   });
 }
 
@@ -386,11 +403,9 @@ function Answer({
 }
 
 export function ChangesSincePanel({ sources }: { sources: Overview["sources"] }): ReactNode {
-  const [chosen, setChosen] = useState<{ key: WindowKey; since: string }>(() => ({
-    key: "day",
-    since: changesSinceInstant(24),
-  }));
-  const query = useChangesSince(chosen.since);
+  const [chosen, setChosen] = useState<WindowKey>("day");
+  const span = WINDOWS.find((entry) => entry.key === chosen)!;
+  const query = useChangesSince(span.key, span.hours);
   // A caller the route refuses (it is the reader's), or a deployment without
   // the route (the local store): the panel is not shown.
   if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
@@ -434,8 +449,16 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
       }
       note={
         <>
-          <Time value={chosen.since} />
-          以降に新しく記録されたものを、取得元ごとに数えています。値がどう変わったかは比べていません。
+          {/* The instant the answer shown was read for, as the digest echoes it. */}
+          {pages === undefined ? (
+            `直近${span.label}`
+          ) : (
+            <>
+              <Time value={pages[0]!.since} />
+              以降
+            </>
+          )}
+          に新しく記録されたものを、取得元ごとに数えています。値がどう変わったかは比べていません。
         </>
       }
     >
@@ -445,8 +468,8 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
             key={entry.key}
             type="button"
             className="button"
-            aria-pressed={chosen.key === entry.key}
-            onClick={() => setChosen({ key: entry.key, since: changesSinceInstant(entry.hours) })}
+            aria-pressed={chosen === entry.key}
+            onClick={() => setChosen(entry.key)}
           >
             {entry.label}
           </button>

@@ -261,9 +261,10 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
    answers "since yesterday" the same way at any hour; "since 00:00 in
    Asia/Tokyo" would show a few minutes just after midnight. 30 days, not 31,
    leaves a day for a browser clock behind the server's before
-   `since:too_old`. The instant is fixed when the window is chosen and shown
-   in the panel's note (Asia/Tokyo); choosing a window again reads from a new
-   instant.
+   `since:too_old`. Each first read of a window (choosing it, a refetch on
+   focus, a retry) takes the instant from the clock at that read, and the
+   panel's note shows the instant the answer on screen was read for
+   (Asia/Tokyo), as the digest echoes it.
 3. **Shown, per source.** Its name from the overview's source list beside the
    id; new runs by state (the evidence pages' outcome labels, and 結果未確定
    for `open`), captures, parse runs by state (現行の解析, 旧解析（置換済み）,
@@ -310,10 +311,11 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
   call, not per route read), so the panel adds no audit rows.
 - Each continuation is a fresh read (decision 8): a source registered between
   two reads before `after` appears only on a new first read, as for an agent.
-- A window's `since` is fixed when it is chosen, so a page left open and
-  refetched (on focus) answers from the same instant, which the note shows.
-  A 30-day window left open for more than about a day is then refused as
-  `since:too_old` and shows the error state until a window is chosen again.
+- A page left open and refetched (on focus) reads its window from the clock
+  again, so the window keeps its length and a 30-day window is not refused
+  as `since:too_old` a day later. A continuation sends its first answer's
+  `since`, and a refetch reads every page again from the new first answer,
+  so the pages on screen always share one instant.
 - The panel links only to the artifact of the newest parse and to 収集の状況.
   The runs handler (`kogane.evidence.read`) serves only the configured
   evidence source, and the observation lists take no recorded-time filter, so
@@ -324,9 +326,11 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
 - `apps/web/test/changes-since.browser.test.ts`, against a synthetic server
   whose answers the contract admits (checked in the file): per-source labels
   and counts and the artifact link; the default 24-hour `since` and the
-  7-day window; cut counts and the events line as 以上 with the badge, the
-  states and kinds they do not list as そのほか 0件以上, and なし only for uncut
-  sections; unchanged sources collapsed until opened;
+  7-day window; a refetch a day later that reads the 30-day window from the
+  clock again, with its continuation on the same `since`; cut counts and the
+  events line as 以上 with the badge, the states and kinds they do not list
+  as そのほか 0件以上, and なし only for uncut sections; unchanged sources
+  collapsed until opened;
   `notCovered` with its reasons; a continued answer with `after`, its header
   and unchanged counts as 以上 until the last answer; the unauthorized run
   sections and an events line that is not served; no panel on `403` and on

@@ -212,7 +212,9 @@ The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) re
 `GET /api/v2/changes`, the service of `kogane.changes.since`
 ([ADR 0127, amendment of 2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)).
 It sends `since` as the browser's clock minus the chosen window (24時間 by
-default, 7日間, 30日間), checks every answer with `validChangesSince`, and
+default, 7日間, 30日間), taken again on each first read (a refetch on focus or
+a retry included), and a continuation sends its first answer's `since`. It
+checks every answer with `validChangesSince`, and
 shows the digest's counts per source by closed state, with labels typed by the
 domain's closed lists. A count the digest cut, and every count of an
 incomplete events line, reads 以上, and the states or kinds such a section or
