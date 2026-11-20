@@ -7,13 +7,19 @@
 // every row of both lists once. Every name, amount and date is invented.
 import { beforeAll, describe, expect, it } from "vitest";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
-import { BALANCE_LIST_SUMMARY_LINES } from "../../../packages/observation-shared/src/api-contract";
+import {
+  BALANCE_LIST_SUMMARY_BYTES,
+  BALANCE_LIST_SUMMARY_LINES,
+} from "../../../packages/observation-shared/src/api-contract";
 import { pageReadHarness } from "./page-read-harness";
 import { seedRegistry } from "./fixtures";
 import { routeSources, seedAccount } from "./realistic-store";
 
 /** What the owner's client shows of a tool result (#1414). */
 const CLIENT_BYTES = 8 * 1024;
+/** The page read envelope around a page: `{"schemaVersion":"kogane-page-read-v1","data":` and `}`. */
+const ENVELOPE_BYTES = 47;
+const utf8 = (text: string) => new TextEncoder().encode(text).length;
 const ACCOUNTS = 60;
 const METRICS_PER_ACCOUNT = 3;
 const page = pageReadHarness("observation-list-summary");
@@ -44,13 +50,20 @@ async function call(args: Record<string, unknown>) {
   });
   expect(message["result"].isError).toBe(false);
   const text = message["result"].content[0].text as string;
-  return {
-    bytes: new TextEncoder().encode(text).length,
-    data: message["result"].structuredContent.data,
-  };
+  const data = message["result"].structuredContent.data;
+  // The budget is measured on `data`; the text a client is shown is that
+  // page inside the envelope, exactly 47 bytes more, so a page at its
+  // budget stays under 8 KB.
+  expect(utf8(text)).toBe(utf8(JSON.stringify(data)) + ENVELOPE_BYTES);
+  expect(utf8(JSON.stringify(data))).toBeLessThanOrEqual(BALANCE_LIST_SUMMARY_BYTES);
+  return { bytes: utf8(text), data };
 }
 
 describe("kogane.observations.list balances summary at its realistic worst", () => {
+  it("leaves a page at its byte budget under 8 KB inside the /mcp envelope", () => {
+    expect(BALANCE_LIST_SUMMARY_BYTES + ENVELOPE_BYTES).toBeLessThan(CLIENT_BYTES);
+  });
+
   it("shows a client under 8 KB a page, cutting lines rather than names, and reads every row once", async () => {
     const full = (await page.route("/api/balances?detail=full")).body as {
       latest: { id: number }[];

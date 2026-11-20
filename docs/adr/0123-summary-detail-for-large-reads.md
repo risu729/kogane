@@ -836,14 +836,18 @@ which `content`'s text serializes):
   `invalid_query` on both.
 - `services/app/test/observation-list-summary.test.ts`: the 60-account store
   above through `/mcp`: the first page is cut by its byte budget before the
-  line cap, every page's text is under 8 KB, and paging by `coverage.next`
-  alone reads every row of both lists once.
+  line cap, every page's text is under 8 KB and is its structured content's
+  `data` at or under `BALANCE_LIST_SUMMARY_BYTES` plus exactly the 47-byte
+  envelope (and the budget plus 47 is under 8 KB), and paging by
+  `coverage.next` alone reads every row of both lists once.
 - `services/app/test/observation-list-limit.test.ts`: a line whose account
   label alone passes the budget is `413 result_limit_exceeded` with
   `retryWith: { detail: "full" }` on the route, `/api/agent/v1/*` and
   `/mcp` alike, `full` answers its row, another account's summary is
-  unaffected, and paging the whole list answers every page under 8 KB until
-  the page where that line is first, which is refused.
+  unaffected, and paging the whole list (the ordinary account's lines
+  first) answers at least one page under 8 KB, the oversized line ending it
+  rather than refusing it, until the page where that line is first, which
+  is refused.
 - `services/app/test/page-read-observations.test.ts`: the route and the tool
   give the same list under no detail, `summary` and `full`, and refuse
   `detail` on transactions and positions alike; `compact` is outside the

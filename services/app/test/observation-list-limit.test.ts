@@ -18,13 +18,15 @@ const page = pageReadHarness("observation-list-limit");
 beforeAll(async () => {
   await seedRegistry();
   await routeSources();
-  await seedAccount(0, {
+  // Index 1's source sorts before index 0's, so the ordinary account's lines
+  // come first in both lists and the oversized line is a later one.
+  await seedAccount(1, {
     rawAccount: ORDINARY,
     label: "合成普通預金口座",
     metrics: ["利用可能額"],
   });
   // Over 7,680 bytes in UTF-8 on its own: 2,700 three-byte characters.
-  await seedAccount(1, { rawAccount: OVERSIZED, label: "合".repeat(2_700), metrics: ["残高"] });
+  await seedAccount(0, { rawAccount: OVERSIZED, label: "合".repeat(2_700), metrics: ["残高"] });
 }, 120_000);
 
 describe("kogane.observations.list balances summary over its byte budget", () => {
@@ -56,6 +58,7 @@ describe("kogane.observations.list balances summary over its byte budget", () =>
   it("answers every page under 8 KB up to the line that does not fit, then refuses", async () => {
     let at: { offset: number; latestOffset: number } | null = { offset: 0, latestOffset: 0 };
     let refused = 0;
+    let answered = 0;
     for (let pages = 0; at !== null && pages < 10; pages++) {
       const message = await page.mcpMessage({
         method: "tools/call",
@@ -71,8 +74,13 @@ describe("kogane.observations.list balances summary over its byte budget", () =>
         break;
       }
       expect(new TextEncoder().encode(text).length).toBeLessThan(CLIENT_BYTES);
+      answered++;
       at = message["result"].structuredContent.data.coverage.next;
     }
+    // The oversized line, coming after the ordinary account's lines, ends the
+    // page before it rather than refusing it; only the page where it is
+    // first is refused.
+    expect(answered).toBeGreaterThan(0);
     expect(refused).toBe(1);
   });
 });
