@@ -623,8 +623,13 @@ async function executeParseJob(
     parseId = inserted.id;
     // The input identity of this attempt, recorded whatever the outcome:
     // H(raw digest, parser-visible metadata, transform manifest digest).
+    // A plain INSERT: its key is the parse run inserted just above, and
+    // parse runs are never deleted, so no earlier row can hold it. A reference
+    // the schema refuses (a NOT NULL or CHECK failure, or a key already taken)
+    // raises and fails the attempt as `persistence_failed`; `OR IGNORE` would
+    // skip it and publish a parse with no input reference.
     await env.DB.prepare(
-      "INSERT OR IGNORE INTO parse_input_references(parse_run_id,metadata_projection_id,parser_release_id,input_fingerprint) VALUES(?,?,?,?)",
+      "INSERT INTO parse_input_references(parse_run_id,metadata_projection_id,parser_release_id,input_fingerprint) VALUES(?,?,?,?)",
     )
       .bind(
         parseId,
@@ -793,6 +798,11 @@ function jobInsert(
 ): D1PreparedStatement {
   // Explicit replay may claim untouched repair work without resetting retries,
   // stealing a lease, or changing the normal/candidate publication target.
+  // Every other lane skips only a job that exists (its primary key, the only
+  // key of the table): a re-issued page after an interrupted sweep. A job the
+  // schema refuses (a CHECK or NOT NULL failure) raises and fails the sweep
+  // before the cursor moves; `OR IGNORE` would skip it and move the cursor
+  // past an artifact that then has no job.
   const replay = lane === "replay" && plan !== undefined;
   const conflict = replay
     ? `ON CONFLICT(fetch_artifact_id,parser_name,parser_version) DO UPDATE
@@ -805,9 +815,9 @@ function jobInsert(
          WHERE p.fetch_artifact_id=observation_parse_jobs.fetch_artifact_id
           AND p.parser_name=observation_parse_jobs.parser_name
           AND p.parser_version=observation_parse_jobs.parser_version AND p.status='ok')`
-    : "";
+    : "ON CONFLICT(fetch_artifact_id,parser_name,parser_version) DO NOTHING";
   return env.DB.prepare(
-    `${replay ? "INSERT" : "INSERT OR IGNORE"} INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release)
+    `INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release)
      VALUES(?,?,?,'pending',?,?,?,?) ${conflict}`,
   ).bind(
     artifactId,
@@ -865,6 +875,8 @@ function laneParsers(
   });
 }
 
+// `changes` is the jobs each statement wrote: 0 for a skipped existing job,
+// and `observation_parse_jobs` has no trigger that would add to it.
 async function insertJobs(env: Env, inserts: D1PreparedStatement[]): Promise<number> {
   let created = 0;
   for (let offset = 0; offset < inserts.length; offset += 50)

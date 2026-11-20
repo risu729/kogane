@@ -297,6 +297,15 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
+      // The full answers the summaries are shaped from (ADR 0123).
+      ["/api/collection-quality?detail=full", { detail: "full" }],
+      ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
+      [
+        "/api/collection-quality/sony-bank?offset=0&detail=full",
+        { source: "sony-bank", offset: 0, detail: "full" },
+      ],
+      // The status view (ADR 0045, amendment 2026-11-19): its one query, which takes no `detail`.
+      ["/api/collection-quality?view=status", { view: "status" }],
     ] as const) {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
@@ -369,6 +378,12 @@ describe("collection quality page reads", () => {
       { source: "sony-bank", view: "accounts", offset: 0 },
       { source: "sony-bank", view: "unknown" },
       { source: "sony-bank/accounts" },
+      // The status view is the summary's: it names no source and no page.
+      { view: "status", source: "sony-bank" },
+      { view: "status", offset: 0 },
+      // It is compact already, so it takes no `detail` (ADR 0123).
+      { view: "status", detail: "full" },
+      { view: "status", detail: "summary" },
     ]) {
       const overHttp = await page.http(QUALITY, args);
       expect(overHttp.status, JSON.stringify(args)).toBe(400);
@@ -435,11 +450,14 @@ describe("the audit rows of the report and collection quality reads", () => {
     expect(
       (await page.mcp(REPORTS, { reportId: "rpt:synthetic-open", view: "explanation" })).isError,
     ).toBe(false);
-    const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
+    const cells = await page.http(QUALITY, { source: "sony-bank", detail: "full" }, EVIDENCE_GRANT);
     expect(cells.status).toBe(200);
     const accounts = await page.mcp(QUALITY, { source: "sony-bank", view: "accounts" });
     expect(accounts.isError).toBe(false);
     expect(accounts.body.data.cells).toBe(cells.body.data.cells.length);
+    const status = await page.mcp(QUALITY, { view: "status" });
+    expect(status.isError).toBe(false);
+    expect(status.body.data.sources.length).toBeGreaterThan(0);
     const rows = (
       await env.DB.prepare(
         "SELECT path,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
@@ -468,6 +486,8 @@ describe("the audit rows of the report and collection quality reads", () => {
       ),
       // The cells the account view read, never its accounts.
       read("mcp", "collection-quality.read", cells.body.data.cells.length),
+      // The status view counts its job lines.
+      read("mcp", "collection-quality.read", status.body.data.sources.length),
     ]);
   });
 });

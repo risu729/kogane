@@ -261,6 +261,72 @@ describe("the reward build", () => {
     ).toThrow(/rule in the snapshot input refs/u);
   });
 
+  test("an estimate is stored exact exactly when both decimal-v1 columns are set", async () => {
+    // The App's expiry read refuses any other pairing as a store this table
+    // never admits (services/app/src/rewards-read.ts); this is that CHECK.
+    const { db, sqlite, instanceId } = await claimed();
+    const started = await beginRewardSnapshot(db, instanceId, await plan(), NOW);
+    const projection = buildRewardProjection(rewardInput({ evaluatedAt: EVALUATED_AT }).content);
+    const first = projection.estimates[0]!;
+    const lease = "lease-amount";
+    await claimRewardWriterLease(db, started!.snapshotId, lease, 1_000, 60_000);
+    const fence = (await rewardWriterFence(db, started!.snapshotId, lease)) as number;
+    const context = { lease, fence, now: NOW, rowsWritten: 0 };
+    const pairings = [
+      ["exact", null, null],
+      ["exact", "500", null],
+      ["exact", null, 0],
+      ["missing", "500", 0],
+    ] as const;
+    for (const [n, [status, coefficient, scale]] of pairings.entries()) {
+      expect(() =>
+        sqlite
+          .query(
+            `INSERT INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,holding_ref,
+              bucket_ref,rule_id,rule_version,bucket_kind,state,deadline_basis,expires_on,
+              amount_coefficient,amount_scale,amount_status,unit_ref,provider_observed_json,
+              policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,
+              row_digest)
+             VALUES(?1,?2,?3,'program:x','holding:x','bucket:x',?4,?5,'regular','partial',
+               'unknown',NULL,?6,?7,?8,'points:x',NULL,NULL,'[]','[]','[]',?9)`,
+          )
+          .run(
+            started!.snapshotId,
+            `amount-check-${n}`,
+            1000 + n,
+            first.ruleId,
+            first.ruleVersion,
+            coefficient,
+            scale,
+            status,
+            "a".repeat(64),
+          ),
+      ).toThrow(/CHECK constraint failed/u);
+      // The writer's own statement (`INSERT OR IGNORE`) stores nothing either.
+      const row = {
+        ...first,
+        amountStatus: status,
+        amountCoefficient: coefficient,
+        amountScale: scale,
+        rowKey: `amount-check-${n}`,
+        rowSeq: 1000 + n,
+      };
+      await writeRewardEstimateChunk(
+        db,
+        started!.snapshotId,
+        [{ row, digest: await rewardEstimateDigest(row) }],
+        context,
+      );
+    }
+    expect(
+      sqlite
+        .query(
+          "SELECT count(*) AS n FROM reward_expiry_estimates_v2 WHERE row_key GLOB 'amount-check-*'",
+        )
+        .get(),
+    ).toEqual({ n: 0 });
+  });
+
   test("a second start of the same content is refused while one is under way", async () => {
     const { db, instanceId } = await claimed();
     const snapshotPlan = await plan();

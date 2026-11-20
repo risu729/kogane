@@ -6,6 +6,7 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
 import { DatedStateLimitError, queryDatedState } from "../src/query/dated-state.ts";
@@ -233,6 +234,47 @@ describe("coverage", () => {
       account: "acct-sbi",
     });
     expect(byAccount.accounts.map((a) => a.accountId)).toEqual(["acct-sbi"]);
+  });
+
+  test("a provider account whose containers map to two accounts is listed under each, never under the other", async () => {
+    // The foreign container's identity maps the same provider account to
+    // another resolved account; its positions have lower row ids than the
+    // domestic ones, so a first-row label would name it for both.
+    const store = new DatedStore();
+    const foreign = store.capture({
+      source: SBI.source,
+      dataset: "foreign-cash-positions",
+      parser: "sbi-foreign-cash-positions",
+      version: FOREIGN_POSITION_SNAPSHOT_VERSION,
+      fetchedAt: "2026-09-05T01:00:00Z",
+      positions: [{ account: "sbi-a", code: "VTX", quantity: "2", currency: "USD" }],
+    });
+    store.identify(foreign, SBI.source, "acct-sbi-usd", "identified");
+    const domestic = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-06T01:00:00Z",
+      positions: [{ account: "sbi-a", code: "1001", quantity: "10" }],
+    });
+    store.identify(domestic, SBI.source, "acct-sbi", "identified");
+    const executorFor = executor(store);
+    const state = await queryDatedState(executorFor, { date: "2026-09-10" });
+    expect(
+      state.accounts.map((a) => [
+        a.sourceAccount,
+        a.accountId,
+        a.identityStatus,
+        a.positions.map((p) => p.securityCode),
+        a.snapshots.map((s) => s.parserName),
+      ]),
+    ).toEqual([
+      ["sbi-a", "acct-sbi", "identified", ["1001"], ["sbi-domestic-cash-positions"]],
+      ["sbi-a", "acct-sbi-usd", "identified", ["VTX"], ["sbi-foreign-cash-positions"]],
+    ]);
+    // Each account's entry is what the account filter lists for it.
+    for (const account of ["acct-sbi", "acct-sbi-usd"]) {
+      const narrowed = await queryDatedState(executorFor, { date: "2026-09-10", account });
+      expect(narrowed.accounts).toEqual(state.accounts.filter((a) => a.accountId === account));
+    }
   });
 
   test("the context id is a digest of the manifest", async () => {

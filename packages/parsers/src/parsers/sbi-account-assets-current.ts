@@ -32,6 +32,13 @@ const SUMMARY_KEYS = [
   "valuation",
 ] as const;
 const DETAIL_KEYS = [...SUMMARY_KEYS, "category", "compositionRatio"] as const;
+/**
+ * Observed from 2026-11 on: one breakdown list, keyed by a category code that
+ * is not one of the `summaryDetails` categories plus a `categoryDetail` code.
+ * Earlier artifacts lack it, so it is the only optional root key.
+ */
+const ITEM_VIEW = "summaryDetailItems";
+const ITEM_KEYS = [...DETAIL_KEYS, "categoryDetail"] as const;
 const MONEY_FIELDS = [
   ["valuation", "valuation"],
   ["netChange", "net_change"],
@@ -51,10 +58,20 @@ function observationsForSummary(
   view: string,
   locator: string,
   category?: string,
+  categoryDetail?: string,
 ): ValuationObservation[] {
-  const label = category === undefined ? view : `${view}[${category}]`;
+  const label =
+    category === undefined
+      ? view
+      : categoryDetail === undefined
+        ? `${view}[${category}]`
+        : `${view}[${category}/${categoryDetail}]`;
   const object = strictObject(value, label);
-  exactKeys(object, category === undefined ? SUMMARY_KEYS : DETAIL_KEYS, label);
+  exactKeys(
+    object,
+    category === undefined ? SUMMARY_KEYS : categoryDetail === undefined ? DETAIL_KEYS : ITEM_KEYS,
+    label,
+  );
   if (object["assetsErrorType"] !== null) {
     throw new Error(`${label}.assetsErrorType is not a successful valuation`);
   }
@@ -66,8 +83,18 @@ function observationsForSummary(
     if (actualCategory !== category) throw new Error(`${label}.category changed during parsing`);
     validateNullableFinite(object["compositionRatio"], `${label}.compositionRatio`);
   }
+  if (categoryDetail !== undefined) {
+    const actual = strictString(object["categoryDetail"], `${label}.categoryDetail`, { max: 128 });
+    if (actual !== categoryDetail)
+      throw new Error(`${label}.categoryDetail changed during parsing`);
+  }
 
-  const subject = category === undefined ? `portfolio:${view}` : `portfolio:${view}:${category}`;
+  const subject =
+    category === undefined
+      ? `portfolio:${view}`
+      : categoryDetail === undefined
+        ? `portfolio:${view}:${category}`
+        : `portfolio:${view}:${category}:${categoryDetail}`;
   const result: ValuationObservation[] = [];
   for (const [field, metric] of MONEY_FIELDS) {
     const value = object[field];
@@ -83,7 +110,14 @@ function observationsForSummary(
       amountScale: amount.scale,
       currency: "JPY",
       rawLocator: `${locator}.${field}`,
-      extra: { ...object, _kogane: { view, ...(category === undefined ? {} : { category }) } },
+      extra: {
+        ...object,
+        _kogane: {
+          view,
+          ...(category === undefined ? {} : { category }),
+          ...(categoryDetail === undefined ? {} : { categoryDetail }),
+        },
+      },
     });
   }
   return result;
@@ -91,7 +125,7 @@ function observationsForSummary(
 
 export const sbiAccountAssetsCurrent: Parser = {
   name: "sbi-account-assets-current",
-  version: "1.0.1",
+  version: "1.0.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "account-assets-current";
@@ -99,7 +133,8 @@ export const sbiAccountAssetsCurrent: Parser = {
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const body = strictObject(JSON.parse(decodeUtf8(bytes)), "account-assets-current");
-    exactKeys(body, ROOT_KEYS, "account-assets-current");
+    const hasItems = Object.hasOwn(body, ITEM_VIEW);
+    exactKeys(body, hasItems ? [...ROOT_KEYS, ITEM_VIEW] : ROOT_KEYS, "account-assets-current");
     const observations: Observation[] = [];
     const summaryViews = [
       "summary",
@@ -134,6 +169,33 @@ export const sbiAccountAssetsCurrent: Parser = {
         );
       });
     }
+    if (hasItems) {
+      const rows = body[ITEM_VIEW];
+      if (!Array.isArray(rows)) throw new Error(`${ITEM_VIEW} must be an array`);
+      if (rows.length > 1_000) throw new Error(`${ITEM_VIEW} exceeds the parser bound`);
+      const keys = new Set<string>();
+      rows.forEach((value, index) => {
+        const label = `${ITEM_VIEW}[${index}]`;
+        const row = strictObject(value, label);
+        const category = strictString(row["category"], `${label}.category`, { max: 128 });
+        const detail = strictString(row["categoryDetail"], `${label}.categoryDetail`, {
+          max: 128,
+        });
+        // Keyed like the subject, so two code pairs that join to one subject are refused.
+        const key = `${category}:${detail}`;
+        if (keys.has(key)) throw new Error(`${ITEM_VIEW} repeats category ${category}/${detail}`);
+        keys.add(key);
+        observations.push(
+          ...observationsForSummary(
+            value,
+            ITEM_VIEW,
+            `json:$.${ITEM_VIEW}[${index}]`,
+            category,
+            detail,
+          ),
+        );
+      });
+    }
     // Every view is validated to its exact key set or rejected, so a parse
     // that returns is a complete container; null summaries are the provider's
     // own statement of absence.
@@ -146,7 +208,9 @@ export const sbiAccountAssetsCurrent: Parser = {
           artifact,
           issues: [],
           observedCount: observations.length,
-          evidenceRefs: [...summaryViews, ...detailViews].map((view) => `json:$.${view}`),
+          evidenceRefs: [...summaryViews, ...detailViews, ...(hasItems ? [ITEM_VIEW] : [])].map(
+            (view) => `json:$.${view}`,
+          ),
         }),
       ],
     };

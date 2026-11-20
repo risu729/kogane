@@ -122,7 +122,7 @@ test("the real local parser runner publishes independent Vpass card units and re
   expect(latestBalances(store)).toHaveLength(28);
 });
 
-test("reopening advances the shipped 0092 policy through 0102 and preserves an operator's rollback and version pin", () => {
+test("reopening advances the shipped 0092 policy through 0104 and preserves an operator's rollback and version pin", () => {
   const store = database();
   const policy = () =>
     store.db
@@ -132,7 +132,7 @@ test("reopening advances the shipped 0092 policy through 0102 and preserves an o
       .get();
   expect(policy()).toEqual({
     policy_id: "coverage-v1",
-    required_parser_version: "1.0.2",
+    required_parser_version: "1.1.0",
     replaces_previous_on_complete_empty: 0,
     unit_scope: "unit",
     snapshot_selection: 1,
