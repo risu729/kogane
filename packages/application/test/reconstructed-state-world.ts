@@ -4,8 +4,10 @@
 // (read-model/test/dated-state-fixture.ts) and an economic history written
 // through CORE 0070's triggers (economic-history-fixture.ts), so the client is
 // tested against what the server really says. One world per account, because
-// each world's bank account owns the one SMBC balance container. Every
-// account, amount and date is invented.
+// each world's bank account owns the one SMBC balance container; the scope
+// world adds a second provider's account beside it. A query string is asked
+// of the world of its first account. Every account, amount and date is
+// invented.
 import type { Grant } from "../src/grants.ts";
 import { KNOWN_WRITER_RELEASES } from "../../domain/src/reconstruction-adapter.ts";
 import { CARD_PURCHASE_WRITER_RELEASE } from "../../domain/src/card-purchase.ts";
@@ -22,6 +24,11 @@ import {
 } from "../src/query/reconstructed-state-read.ts";
 
 const SMBC = { source: "smbc-bank", dataset: "balance-normalized", parser: "smbc-direct-balance" };
+const SHINSEI = {
+  source: "sbi-shinsei-bank",
+  dataset: "top-accounts-balance-and-activity",
+  parser: "sbi-shinsei-top-balances-and-activity",
+};
 const SETTLEMENT_RELEASE = KNOWN_WRITER_RELEASES["card-settlement-review"][0]!;
 
 /** A bank account with logged history: reconstructed 9,000 against a reported 8,500. */
@@ -36,6 +43,14 @@ export const WORLD_EMPTY_LOG = "acct-empty-log";
 export const WORLD_NO_TIME = "acct-no-time";
 /** A bank account in a store without CORE 0070: `unavailable`, nothing computed. */
 export const WORLD_NO_GUARD = "acct-no-guard";
+/**
+ * A scope of two accounts at two providers (ADR 0116): a bank account
+ * reconstructed 9,000 against a reported 9,000, beside a savings account
+ * reconstructed 49,900 against a reported 49,800. Ask them with `account`
+ * repeated, the bank account first.
+ */
+export const WORLD_SCOPE_BANK = "acct-scope-bank";
+export const WORLD_SCOPE_SAVINGS = "acct-scope-savings";
 export const WORLD_FROM = "2026-03-01";
 export const WORLD_TO = "2026-03-31";
 
@@ -126,7 +141,29 @@ export function reconstructedStateWorlds(): Map<string, EconomicHistory> {
   noGuard.db.exec(
     "DROP VIEW unlogged_economic_revisions; DROP VIEW consumption_claim_conflicts; DROP VIEW live_consumption_claims; DROP VIEW economic_revision_claims",
   );
+  // The scope world: the savings account's provider captures at the bank's instants.
+  const scope = bankWorld(WORLD_SCOPE_BANK, 9_000);
+  for (const [fetchedAt, minor] of [
+    ["2026-03-01T03:00:00Z", 50_000],
+    ["2026-03-31T03:00:00Z", 49_800],
+  ] as const) {
+    const capture = scope.store.capture({
+      ...SHINSEI,
+      fetchedAt,
+      balances: [{ account: "shinsei-a", metric: "account_balance", instrument: "JPY", minor }],
+    });
+    scope.store.identify(capture, SHINSEI.source, WORLD_SCOPE_SAVINGS, "identified");
+  }
+  settle(scope, WORLD_SCOPE_BANK, "ev-scope-bank");
+  settle(scope, WORLD_SCOPE_SAVINGS, "ev-scope-savings", {
+    legs: [
+      { subject: WORLD_SCOPE_SAVINGS, amount: "100", role: "decrease", basis: "cash-movement" },
+      { subject: WORLD_CARD, amount: null, role: "unresolved", basis: "obligation-change" },
+    ],
+  });
   return new Map([
+    [WORLD_SCOPE_BANK, scope],
+    [WORLD_SCOPE_SAVINGS, scope],
     [WORLD_BANK, bank],
     [WORLD_CARD, bank],
     [WORLD_PRE_LOG, preLog],

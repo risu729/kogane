@@ -67,6 +67,14 @@ export interface DatedStateInput {
   source?: string;
   /** Only this resolved account id. */
   account?: string;
+  /**
+   * Only these resolved account ids (the reconstructed state's scope, ADR
+   * 0116); not with `account`. A provider account is then listed once per
+   * resolved account its rows map to, so no row of one account is listed
+   * under another. Not part of the manifest, like the other filters: a
+   * one-account list answers what `account` answers.
+   */
+  accounts?: readonly string[];
 }
 
 interface SettlementRow {
@@ -136,6 +144,8 @@ export async function queryDatedState(
   ).toISOString();
   const source = input.source ?? null;
   const account = input.account ?? null;
+  if (account !== null && input.accounts !== undefined) throw new Error("invalid_query");
+  const scope = input.accounts === undefined ? null : new Set(input.accounts);
 
   const [positionRows, balanceRows, perimeter, statementRows] = await Promise.all([
     sql.all<DatedPositionRow>(DATED_POSITIONS_SQL, [cutoff]),
@@ -148,7 +158,9 @@ export async function queryDatedState(
   bounded(statementRows);
 
   const wanted = (sourceId: string, accountId: string | null): boolean =>
-    (source === null || sourceId === source) && (account === null || accountId === account);
+    (source === null || sourceId === source) &&
+    (account === null || accountId === account) &&
+    (scope === null || (accountId !== null && scope.has(accountId)));
 
   // Every chosen snapshot, a complete-empty one included.
   const snapshots = new Map<string, ReportedSnapshot>();

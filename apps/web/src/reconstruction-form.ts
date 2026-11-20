@@ -7,6 +7,13 @@ const SEQ = /^[1-9][0-9]{0,15}$/u;
 const INSTANT = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z$/u;
 /** The route's bound (`RECONSTRUCTION_RANGE_MAX_DAYS`); the server checks it again. */
 const MAX_DAYS = 366;
+/** The route's bound (`RECONSTRUCTION_ACCOUNTS_MAX`); the server checks it again. */
+const MAX_ACCOUNTS = 20;
+
+/** The account ids typed in the field: separated by spaces or commas, empty parts dropped. */
+export function accountsOf(text: string): string[] {
+  return text.split(/[\s,、]+/u).filter((part) => part !== "");
+}
 
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -14,7 +21,11 @@ function daysBetween(from: string, to: string): number {
 
 /** A form problem, in words, or null when the request may be sent. */
 export function formProblem(draft: ReconstructedStateQuery, today: string): string | null {
-  if (!ACCOUNT.test(draft.account)) return "口座 ID を選ぶか入力してください。";
+  if (draft.accounts.length === 0 || !draft.accounts.every((account) => ACCOUNT.test(account)))
+    return "口座 ID を選ぶか入力してください。";
+  if (draft.accounts.length > MAX_ACCOUNTS) return "口座は20件まで指定できます。";
+  if (new Set(draft.accounts).size !== draft.accounts.length)
+    return "同じ口座 ID が2回以上入力されています。";
   // A calendar day by the route's own rule: 2026-02-30 fits the pattern but
   // is no day, and the route would refuse it as invalid_date. (Date.parse
   // rolls it over to March rather than failing, so the checks below would
