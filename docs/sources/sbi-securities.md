@@ -433,6 +433,37 @@ behavior remain limits. The catalogue therefore changes only to `partial`,
 not complete. The 67-row browser proof establishes the list contract, not a
 stored production archive.
 
+### 2026-11-20: main-to-mobile hand-off before the mailbox
+
+Seven scheduled mailbox attempts through 2026-11-19, after the archive
+shipped in [#1281](https://github.com/risu729/kogane/pull/1281), each ended in a
+mailbox terminal with `sbi_mailbox_transport_failed`, while the financial
+terminal of the same run published. The owner's ordinary Chrome session showed
+a likely cause, with only paths, statuses and form shapes read; later steps
+share the same code, so the next scheduled run decides whether it was the only
+one. The main-site report link
+answers with an HTTP redirect (a `fetch` with `redirect: "manual"` returned an
+opaque redirect) to the mobile site's one-time hand-off
+`https://m.sbisec.co.jp/switchnavi?page=Edeliv&parm=<one-time>&SwitchFromSite=site4.sbisec.co.jp&...`,
+which redirects again to `https://m.sbisec.co.jp/switchnaviMain` with no
+query. A sandboxed frame without scripts landed on `switchnaviMain`, so neither
+hop is a script or meta-refresh navigation. The collector admitted only a
+direct redirect to `switchnaviMain` and refused the hand-off. It now admits
+that hand-off as an intermediate redirect only (HTTPS, host `m.sbisec.co.jp`,
+path `/switchnavi`, exactly one `page=Edeliv`, no fragment, no port or user
+information); a 200 there is still refused, and the one-time hand-off URL is
+not sent as the landing's referer.
+
+The rest of the chain matched the earlier observations in the same session:
+the entry `deisw070.jsp?ePoboxFlag=true` is 200 `text/html; charset=Shift_JIS`
+with the HTML 4.01 Transitional doctype and one POST form to `/deisw081` with
+the field `ePoboxFlag`; `deisw081` is 200 Shift_JIS HTML with one POST form to
+the mailbox SSO carrying the seven fields `sfn`, `ric`, `ked`, `epr`, `itv`,
+`hav` and `spm`; the SSO redirects to `DPAW010501000`, which leads to the
+application, whose summary (`DPAW010501030`) and list (`DPAW010501010`)
+answered 200. The application also posts `DPAW010601020`, which the collector
+does not need.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
@@ -980,9 +1011,10 @@ was not observable with the current one-page data and remains unsupported.
 shapes and exact labels. The normal collector requests all retained yen pages
 and the retained USD statement, preserving per-page raw inputs. Unknown labels,
 positive transfer controls, unknown currencies, changed totals or missing pages
-keep coverage partial. The catalogue remains partial under #1226 until foreign
-continuation/transfer semantics and actual scheduled retained publication,
-freshness and the execution budget are verified. Dividend-labelled cash rows
+keep coverage partial. Scheduled runs now publish every retained yen page and
+the USD statement with complete coverage; the catalogue remains partial under
+#446 because a USD statement longer than one page has not been observed and is
+refused. Dividend-labelled cash rows
 publish settlement cash only; they establish no separate income dataset.
 
 ## 2026-11-10: My Assets income and realised gains
@@ -1063,3 +1095,48 @@ production page (10 rows; character masks only, no values copied) showed every
 statement uses for `payDepDate`. The foreign parser now accepts only that bare
 form and still rejects non-calendar dates; the yen statement keeps
 `YYYY/MM/DD`. Tracked under #1226.
+
+## 2026-11-19: `summaryDetailItems` in current account assets
+
+From mid-November the current My Assets response carries a ninth root key,
+`summaryDetailItems`, and the strict parser refused every artifact. A
+read-only shape check of one retained production artifact (types, lengths and
+booleans only, no values copied) showed one element with exactly the
+`summaryDetails` keys plus a string `categoryDetail`. Its `category` code is
+not one of the same artifact's `summaryDetails` categories. `valuation`,
+`netChange`, `monthOnMonth` and `acquisitionCost` were numbers; `profitLoss`,
+`profitLossRate`, `percentChange`, `monthOnMonthRatio`, `compositionRatio` and
+`assetsErrorType` were null.
+
+The parser accepts the key as optional (older artifacts lack it), validates
+each element to that exact key set, and emits provider valuations under
+`portfolio:summaryDetailItems:<category>:<categoryDetail>`, refusing two
+elements that would give the same subject. Whether those amounts are a breakdown of a `summaryDetails` category was
+not established, so nothing sums them with other subjects; the container stays
+an aggregate excluded from the dated-state perimeter.
+
+## 2026-11-19: US dividend summary without yen gross and tax
+
+Every scheduled income collection since 2026-11-12 stopped with
+`sbi_income_history_schema` before retaining anything. A read-only check in the
+owner's signed-in Chrome on 2026-11-19 (normal `配当金・分配金履歴` menu, same
+summary and row requests as above; types, codes and counts only, no values
+copied) found:
+
+- Summary: `countTotal` 15, categories `DOMESTIC_STOCK_SPOT` (12, currency
+  null, all yen totals numeric) and `FOREIGN_STOCK_US` (3, currency USD).
+  For the US category `dividendTotal` and `taxTotal` are now **null**, while
+  `receivedTotal` and the three `Lc` totals are numbers.
+- Rows: 15, dates `YYYYMMDD`. US rows (`SPECIFIC_NORMAL` 1, `NISA_GROWTH` 2)
+  have null yen `dividendUnitCost`, `dividendTotal`, `taxTotal`, `incomeTax`,
+  `residentTax`, numeric yen `receivedAmount`, and numeric `Lc` values.
+  Domestic rows are as before.
+
+The summary audit admitted null only for the `Lc` totals, so the first
+response was refused. Null yen `dividendTotal` and `taxTotal` are now accepted
+only for `FOREIGN_STOCK_US`, only both together, and only while all three USD
+totals are present; the yen `receivedTotal` stays required, and a domestic
+null is still refused. The parsers move to 0.1.3, and migration 0103 moves the
+two snapshot-policy pins from 0.1.2 to 0.1.3 so their parses can become current. The
+parser already publishes US payments in USD from the `Lc` fields, so nothing
+it emits changes. Tracked under #1236.
