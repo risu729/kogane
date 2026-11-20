@@ -1,7 +1,8 @@
 // Read-only production coverage counters. Never emit observation values.
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 const proxy = await getPlatformProxy<{ DB: D1Database }>({
-  configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
+  configPath: fileURLToPath(new URL("../wrangler.diagnostic.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });

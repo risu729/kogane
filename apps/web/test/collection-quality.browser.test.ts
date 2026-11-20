@@ -10,6 +10,7 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
+import { queryCollectionQualityStatus } from "../../../packages/application/src/query/collection-quality-status.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settledTest } from "./settle.ts";
 /** Every age is counted to this instant: two Tokyo days after the synthetic capture. */
@@ -103,6 +104,16 @@ describe.if(runnable)("collection quality browser", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
+        if (url.pathname === "/api/collection-quality" && url.search === "?view=status")
+          return Response.json(await queryCollectionQualityStatus(executor, { asOf: AS_OF }));
+        // The page reads the full summary and cells; the routes' default is the summary (ADR 0123).
+        // The status view, matched above, takes no `detail`.
+        if (
+          url.pathname.startsWith("/api/collection-quality") &&
+          !url.pathname.endsWith("/accounts") &&
+          url.searchParams.get("detail") !== "full"
+        )
+          return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
         if (url.pathname === "/api/collection-quality")
           return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (
@@ -266,6 +277,44 @@ describe.if(runnable)("collection quality browser", () => {
             (request.path.includes("collect") && !request.path.includes("collection-quality")),
         ),
       ).toBe(false);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("the status table at the top lists every configured job's state, failures and datasets that do not publish", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 375, height: 812 });
+      const before = requests.length;
+      await page.goto(`${origin}/collection-quality`);
+      const region = page.getByRole("region", { name: "収集の状況" });
+      await region.waitFor();
+      expect(
+        requests.slice(before).filter((request) => request.path.includes("view=status")),
+      ).toEqual([{ path: "/api/collection-quality?view=status", method: "GET" }]);
+      // Vpass's newest receipt failed with no stored code and nothing recovered it.
+      const vpass = region.locator('tr[data-state="failing"]').filter({
+        has: page.getByRole("rowheader", { name: "vpass", exact: true }),
+      });
+      expect(await vpass.getByText("失敗が続いています", { exact: false }).count()).toBe(1);
+      expect(await vpass.getByText("1件", { exact: false }).count()).toBe(1);
+      expect(await vpass.getByText("unclassified", { exact: true }).count()).toBe(1);
+      // GLOBAL PASS has a month whose newest capture is still waiting for its parse.
+      const globalPass = region.locator("tr").filter({
+        has: page.getByRole("rowheader", { name: /^prestia-globalpass/ }),
+      });
+      expect(await globalPass.getAttribute("data-state")).toBe("ok");
+      expect(await globalPass.getByText("globalpass-activity", { exact: true }).count()).toBe(1);
+      expect(await globalPass.getByText("解析待ち・解析中です", { exact: false }).count()).toBe(1);
+      // A disabled job says its datasets were not read, never that none is stuck.
+      const disabled = region.locator('tr[data-state="disabled"]').filter({
+        has: page.getByRole("rowheader", { name: "prestia-bank", exact: true }),
+      });
+      expect(await disabled.getByText("停止中のため未確認", { exact: true }).count()).toBe(1);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      expect(await auditView(page)).toEqual([]);
     } finally {
       await page.close();
     }

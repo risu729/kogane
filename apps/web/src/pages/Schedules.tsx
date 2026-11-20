@@ -865,7 +865,11 @@ function MaintenanceEditor({
   );
 }
 export function SchedulesPage(): ReactNode {
-  const query = useQuery({ queryKey: ["schedules"], queryFn: () => request<ScheduleSnapshot>() }),
+  // The page shows every occurrence and rule; the route's default is the summary (ADR 0123).
+  const query = useQuery({
+      queryKey: ["schedules"],
+      queryFn: () => request<ScheduleSnapshot>("?detail=full"),
+    }),
     client = useQueryClient();
   const [editor, setEditor] = useState<MaintenanceRule | null | undefined>(),
     [filter, setFilter] = useState("collection"),

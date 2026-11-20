@@ -28,6 +28,7 @@ import {
   isRewardPath,
   rewardQueryParameters,
 } from "../../../packages/observation-shared/src/api-schema";
+import { tokyoToday } from "../../../packages/application/src/index";
 import { d1Executor } from "../../../packages/read-model/src/d1";
 import {
   createRewardReader,
@@ -50,7 +51,8 @@ const REWARDS_PREFIX = "/api/v2/rewards";
 function searchClock(now: number) {
   return {
     kind: "local-date",
-    value: new Date(now + 9 * 3_600_000).toISOString().slice(0, 10),
+    // The expiry window's default `from` is the same day (`tokyoToday`).
+    value: tokyoToday(now),
     zone: "Asia/Tokyo",
     basis: "derived",
   } as const;

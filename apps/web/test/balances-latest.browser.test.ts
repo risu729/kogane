@@ -85,6 +85,9 @@ describe.if(runnable)("latest balance read model paging", () => {
           return Response.json({ sources: [], accounts: [], instruments: [], metrics: [] });
         if (url.pathname === "/api/balances") return Response.json({ latest: [], history: [] });
         if (url.pathname === "/api/v2/balances/latest") {
+          // The page reads each row in full; the route's default is the summary (ADR 0123).
+          if (url.searchParams.get("detail") !== "full")
+            return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
           latestReads += 1;
           return Response.json(snapshotPage(latestReads, latestReads > 1));
         }

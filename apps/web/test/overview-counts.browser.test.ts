@@ -53,7 +53,12 @@ describe.if(runnable)("overview summary counts from the shared query service", (
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
-        if (url.pathname === "/api/overview") return Response.json(overview);
+        // The page lists every run, so it asks for the full overview; the
+        // route's default is the summary (ADR 0123), which it must not render.
+        if (url.pathname === "/api/overview")
+          return url.search === "?detail=full"
+            ? Response.json(overview)
+            : Response.json({ error: "invalid_query" }, { status: 400 });
         if (url.pathname === "/api/v2/query") {
           await held;
           return Response.json({ error: "unavailable" }, { status: 503 });

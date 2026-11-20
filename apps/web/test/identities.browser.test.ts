@@ -12,6 +12,7 @@ import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import type {
+  IdentityAccountListRow,
   IdentityAccountRow,
   IdentityCoverageRow,
   IdentityInstrumentRow,
@@ -72,6 +73,20 @@ const ACCOUNTS: IdentityAccountRow[] = [
     origin: { kind: "transaction", id: 12 },
   },
 ];
+const ACCOUNT_LIST: IdentityAccountListRow[] = [
+  {
+    account: "synthetic-account-1",
+    label: "合成銀行（MoneyForward連携）（個別口座未確定）",
+    labelOrigin: "connection",
+    role: "aggregator-mirror",
+    status: "provider-local",
+    sources: ["synthetic-aggregator"],
+    references: 2,
+    observedCount: 5,
+    connection: "unresolved",
+    lastFetchedAt: "2099-01-02T03:04:05.000Z",
+  },
+];
 const INSTRUMENTS: IdentityInstrumentRow[] = [
   {
     referenceId: "synthetic-identifier-1",
@@ -116,6 +131,7 @@ describe.if(runnable)("identity coverage page", () => {
     bodies["/api/identity/connections"] = { connections: [] };
     bodies["/api/identity/coverage"] = page(COVERAGE);
     bodies["/api/identity/accounts"] = page(ACCOUNTS);
+    bodies["/api/identity/account-list"] = page(ACCOUNT_LIST);
     bodies["/api/identity/instruments"] = page(INSTRUMENTS);
     // The fixtures are answers the client's own validator accepts.
     for (const [path, body] of Object.entries(bodies))
@@ -221,6 +237,28 @@ describe.if(runnable)("identity coverage page", () => {
       .first();
     await instrument.getByText("合成銘柄").waitFor();
     expect(await instrument.innerText()).toContain("要確認");
+    await tab.close();
+  }, 30_000);
+
+  test("the account list shows one line per account with its name and where the name came from", async () => {
+    const tab = await open();
+    await tab.getByRole("button", { name: "口座一覧", exact: true }).click();
+    await tab.getByRole("heading", { name: "口座一覧", exact: true }).waitFor();
+    const rows = tab.getByRole("region", { name: "口座一覧の表", exact: true }).locator("tbody tr");
+    await rows.first().waitFor();
+    expect(await rows.count()).toBe(1);
+    const text = await rows.first().innerText();
+    for (const part of [
+      "合成銀行（MoneyForward連携）（個別口座未確定）",
+      "連携先の名前",
+      "synthetic-aggregator",
+      "個別口座は未確定",
+      "2099-01-02T03:04:05.000Z",
+    ])
+      expect(text).toContain(part);
+    expect(requests.some((entry) => entry.url.pathname === "/api/identity/account-list")).toBe(
+      true,
+    );
     await tab.close();
   }, 30_000);
 

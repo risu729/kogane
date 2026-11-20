@@ -324,10 +324,10 @@ describe("non-SBI account identification", () => {
       });
   });
 
-  test("the SMBC AUD ordinary deposit stays the unrecognized default, one reference for every run", () => {
-    // `smbc-foreign-ordinary-balance` emits this constant; no rule classifies
-    // it, so it takes the default plan, including the source's yen-deposit
-    // label (a display limit, docs/identity-sources.md).
+  test("under policy 1 the SMBC AUD ordinary deposit stays the unrecognized default, one reference for every run", () => {
+    // `smbc-foreign-ordinary-balance` emits this constant. Under policy 1 no
+    // rule classifies it, so it takes the default plan, including the source's
+    // yen-deposit label; policy 2 classifies it (ADR 0118).
     const aud = (fetchRunId: number) =>
       otherIdentity(
         input("smbc-bank", "smbc-bank:ordinary-foreign-aud", {
@@ -335,6 +335,7 @@ describe("non-SBI account identification", () => {
           currency: null,
           instrument: "AUD",
           fetchRunId,
+          policyVersion: 1,
         }),
       );
     const plan = aud(4);
@@ -413,8 +414,6 @@ describe("non-SBI account identification", () => {
     ["vpass", "vpass:root"],
     ["vpass", "vpass:card-1"],
     ["smbc-bank", "smbc-bank:ordinary-aud"],
-    // The AUD ordinary-deposit parser's constant: no rule classifies it yet.
-    ["smbc-bank", "smbc-bank:ordinary-foreign-aud"],
     ["sbi-shinsei", "sbi-shinsei:synthetic-ref"],
     ["moneyforward-me", "moneyforward-me:account-001"],
     ["moneyforward-me", `moneyforward-me:moneyforward-account-v3-${"a".repeat(64)}`],
