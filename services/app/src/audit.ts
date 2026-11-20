@@ -353,9 +353,16 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     };
   }
   // Cards listed; truncated when more cards exist than the answer lists.
+  // The upcoming view counts its bills and the cards it does not list.
   if (operation === "card-settlements.debit-accounts")
     return {
-      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      rows:
+        value["view"] === "upcoming"
+          ? (Array.isArray(value["bills"]) ? value["bills"].length : 0) +
+            (Array.isArray(value["notListed"]) ? value["notListed"].length : 0)
+          : Array.isArray(value["items"])
+            ? value["items"].length
+            : 0,
       truncated: value["cardsTruncated"] === true,
     };
   if (operation === "instruments.candidates" || operation === "accounts.candidates") {
