@@ -1139,8 +1139,8 @@ the production reader chooses one revision per logical id across overlapping
 runs. Both statements use the domestic main-site session; their units are
 `cash-history-yen` and `cash-history-foreign`. Registration
 v7 adds only the new USD derivative; raw pages stay unmapped and earlier
-mappings stay frozen. Catalogue status remains partial under #1226 pending
-unobserved semantics and scheduled proof
+mappings stay frozen. Catalogue status remains partial under #446 pending
+unobserved semantics (a USD statement longer than one page is refused)
 ([ADR 0102](adr/0102-sbi-retained-cash-history.md)).
 
 Except for the exact weekly/cash-history source bytes above, the bytes are
