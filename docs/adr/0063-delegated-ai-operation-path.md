@@ -369,7 +369,9 @@ matrix of thirteen items), on synthetic data, with an independent review per
 slice. Not verified: anything in production; no delegation, grant or Access
 setting exists.
 
-## S3 execution amendment — 2026-10-10 (proposed)
+## S3 execution amendment — 2026-10-10
+
+Status: accepted (merged 2026-10-10 in [#660](https://github.com/risu729/kogane/pull/660)).
 
 This amendment replaces the pre-execution count's concurrent overshoot with a
 strict rolling-day limit. Only `principal_kind = delegated` records with
@@ -422,7 +424,9 @@ transport tests cover import/replay, revocation, receipt scope, HTTP/MCP history
 and audit parity, and unchanged browser audience separation. This does not
 prove a real MCP client's authentication, a production grant, or deployment.
 
-## R2 adapter amendment — 2026-10-10 (proposed)
+## R2 adapter amendment — 2026-10-10
+
+Status: accepted (merged 2026-10-10 in [#660](https://github.com/risu729/kogane/pull/660)).
 
 A separate slice exposes command approve/commit for the three closed delegated
 families and collection/session-refresh requests. Every adapter uses the common
@@ -464,7 +468,9 @@ Remaining implementation: maintenance/job/survey adapters through #564's sole
 shared writer, including audit-linked provenance and bounded long-deferral
 confirmation. No settings write is advertised before that integration is reviewed.
 
-## Amendment 2026-10-10 — persisted decision origin presentation (proposed)
+## Amendment 2026-10-10 — persisted decision origin presentation
+
+Status: accepted (merged 2026-10-10 in [#660](https://github.com/risu729/kogane/pull/660)).
 
 The instrument history and observation organization readers now return a closed
 `decisionOrigin`: delegated, operator, automatic, legacy, or unknown. A manual
@@ -502,7 +508,9 @@ the old mapping's actor. The preferred-name query uses the same exact
 assignment classifier and has its own frozen-SQL differential and indexed
 plan checks. No raw actor is returned.
 
-## Cross-boundary replay amendment — 2026-10-10 (proposed)
+## Cross-boundary replay amendment — 2026-10-10
+
+Status: accepted (merged 2026-10-10 in [#660](https://github.com/risu729/kogane/pull/660)).
 
 Completed provider confirmations reuse their own stored receipt before current
 source activation or session-policy checks. Current delegated capability and

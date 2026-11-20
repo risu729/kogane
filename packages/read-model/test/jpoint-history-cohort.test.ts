@@ -13,12 +13,20 @@ import { syntheticJPointHistory } from "../../parsers/test/myjcb-jpoint-history-
 import type { JPointHistory } from "../../domain/src/myjcb-jpoint-history";
 import { summarizeHolding } from "../../domain/src/rewards";
 
+/** The coverage the history parse records: the parser's own complete
+ * container claim, or a synthetic shape the cohort must refuse. */
+type HistoryClaim =
+  | "complete-container"
+  | "none"
+  | "partial"
+  | "membership-incomplete"
+  | "complete-window";
 function captured(
   s: QualityStore,
   index: number,
   total: string,
   history?: JPointHistory,
-  options: { conn?: string; promote?: number } = {},
+  options: { conn?: string; promote?: number; historyClaim?: HistoryClaim } = {},
 ) {
   const conn = options.conn ?? "synthetic";
   const at = new Date(Date.UTC(2099, 0, 1, 0, 0, index)).toISOString();
@@ -77,13 +85,38 @@ function captured(
   const remaining: { fact: number; amount: string; account: string }[] = [];
   let historyParse: number | undefined;
   if (history) {
+    const historyClaim = options.historyClaim ?? "complete-container";
+    const observed = history.rows.length * 4;
     const publishedHistory = s.parse(r.artifacts[1]!, myJcbJPointHistory.name, {
       kind: "published",
       version: myJcbJPointHistory.version,
-      claim: { completeness: "complete", observed: history.rows.length * 4 },
+      ...(historyClaim === "complete-container" || historyClaim === "partial"
+        ? {
+            claim: {
+              completeness: historyClaim === "partial" ? "partial" : "complete",
+              observed,
+            },
+          }
+        : {}),
     });
     if (publishedHistory === null) throw new Error("synthetic_history_parse_missing");
     historyParse = publishedHistory;
+    // Shapes the schema admits but the fixture cannot write: a complete claim
+    // whose membership is not proven, and a complete claim of another mode.
+    if (historyClaim === "membership-incomplete" || historyClaim === "complete-window")
+      s.db.run(
+        `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,
+          evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count)
+         VALUES(?,?,?,?,'complete',?,?,'[]','coverage-v1',NULL,'not-applicable','success',0)`,
+        [
+          publishedHistory,
+          `claim-${publishedHistory}`,
+          `myjcb/jpoint-history/unit=${conn}:j-point-history`,
+          historyClaim === "complete-window" ? "window" : "complete-container",
+          historyClaim === "complete-window" ? 1 : 0,
+          observed,
+        ],
+      );
     const parsed = myJcbJPointHistory.parse(new TextEncoder().encode(JSON.stringify(history)), {
       id: r.artifacts[1]!,
       sourceId: "myjcb",
@@ -221,3 +254,53 @@ test("scaled seeded captures without history equal the frozen reader and use ind
     s.db.close();
   }
 }, 30000);
+const historyColumns = (rows: RewardBucketSqlRow[]) =>
+  rows.map((r) => [
+    r.quantity_coefficient,
+    r.jpoint_history_state,
+    r.jpoint_history_observed_at,
+    r.jpoint_history_fact_id,
+  ]);
+for (const historyClaim of ["none", "partial", "membership-incomplete", "complete-window"] as const)
+  test(`a history without a complete container claim (${historyClaim}) is no capture of the cohort, even with every bucket claimed`, () => {
+    const s = new QualityStore();
+    try {
+      // Same capture and reported total as the newest total, and every
+      // remaining bucket claimed: only the coverage claim keeps this set from
+      // replacing the total or being reported as the latest history capture.
+      captured(s, 1, "100", syntheticJPointHistory(), { historyClaim });
+      expect(historyColumns(current(s))).toEqual([["100", "unavailable", null, null]]);
+    } finally {
+      s.db.close();
+    }
+  });
+test("an uncovered newer history neither becomes current nor replaces the covered capture's time", async () => {
+  const s = new QualityStore();
+  try {
+    const old = captured(s, 1, "100", syntheticJPointHistory());
+    const covered = current(s)[0]!.jpoint_history_fact_id;
+    expect(historyColumns(current(s))).toEqual([
+      ["0", "current", old.at, covered],
+      ["40", "current", old.at, covered],
+      ["60", "current", old.at, covered],
+    ]);
+    captured(s, 2, "100", syntheticJPointHistory(), { historyClaim: "partial" });
+    expect(historyColumns(current(s))).toEqual([["100", "stale", old.at, covered]]);
+    const reader = createRewardReader({
+      all: async <T>(sql: string, args: readonly unknown[]) =>
+        s.db.query(sql).all(...(args as SQLQueryBindings[])) as T[],
+      first: async <T>(sql: string, args: readonly unknown[]) =>
+        s.db.query(sql).get(...(args as SQLQueryBindings[])) as T | null,
+    });
+    const holding = (await reader.holdings({ programId: "program:j-point", offset: 0 })).rows[0]!;
+    expect(holding.holding.buckets).toHaveLength(1);
+    expect(holding.pointHistoryCoverage).toEqual({
+      state: "stale",
+      reasonCode: "history_not_current",
+      observedAt: old.at,
+      sourceFactRefs: [`balance:${covered}`],
+    });
+  } finally {
+    s.db.close();
+  }
+});

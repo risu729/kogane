@@ -105,6 +105,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.accounts.candidates", {}],
     ["kogane.card-settlements.unmatched", {}],
     ["kogane.card-settlements.debit-accounts", {}],
+    ["kogane.decisions.pending", {}],
     ["kogane.card-settlements.read", {}],
     ["kogane.card-settlements.statements", {}],
     ["kogane.audit.search", {}],
@@ -176,6 +177,7 @@ describe("MCP read answer sizes (ADR 0123)", () => {
       'kogane.store.read {"page":"overview"}',
       "kogane.schedules.maintenance.read {}",
       'kogane.observations.list {"kind":"balances"}',
+      "kogane.decisions.pending {}",
     ])
       expect(sizes.get(call), call).toBeLessThan(CLIENT_BYTES);
     // The v1 grouped list in full (ADR 0123, amendment 2026-11-20) is what it was.

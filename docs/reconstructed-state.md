@@ -58,7 +58,9 @@ stored.
   balances with their metric id, measurement kind, sign meaning, decimal-v1
   value or its absence, snapshot ref and capture instant; positions with the
   instrument id (or none) and quantity; the requested accounts no reported
-  container lists; the reported-state `contextId`.
+  container lists; the reported-state `contextId` (of the dated read without
+  the count of statements before the payable window, so not the `/state`
+  answer's).
 - **Request**: accounts, start and end date, basis `cash`, `trade-date` or
   `settlement-date`, `knowledgeAt` and the cut it was resolved to.
 
@@ -134,7 +136,10 @@ by precedence `indeterminate` (`log_empty`, `cut_before_log_start`,
 `incomplete` (every other cell gap, `nothing_to_reconstruct` when an account
 has no cell, `positions_not_folded`) or `complete`, listing every reason. It
 returns the scope (`accounts`), the
-cut, the selector's diagnostics, both reported context ids, the fold's state,
+cut, the selector's diagnostics, both reported context ids (of dated reads
+without the count of statements before the payable window, so not the
+`/state` answer's; [reported state](reported-state.md#the-answer)), the fold's
+state,
 the late part (at the cut of the end capture, when every end balance of the
 scope comes from captures of one instant), and an outer manifest
 (`reconstructed-state-query-v2`) pinning the scope, the releases, the cut, the

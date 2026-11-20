@@ -5,7 +5,10 @@
 //
 //   start, end   queryDatedState at the range's two dates, narrowed to the
 //                scope (their context ids are pinned): one read per date,
-//                however many accounts;
+//                however many accounts, without the count of the statements
+//                before the payable window, which the fold never reads (so
+//                the pinned ids record no count: ADR 0019, amendment of
+//                2026-11-18);
 //   knowledge    the knowledge selector over the whole scope at the asked cut
 //                (default: the latest commit of the current core epoch), and
 //                at the cut of the end capture for the late part: one load;
@@ -52,7 +55,7 @@ import {
   type ReconstructionReportedBalance,
   type ReconstructionReportedSide,
 } from "../../../domain/src/reconstruction.ts";
-import { captureDate, type ReportedState } from "../../../domain/src/reported-state.ts";
+import { captureDate, type UncountedReportedState } from "../../../domain/src/reported-state.ts";
 import { daysFromCivil, parseLocalDate, validInstantText } from "../../../domain/src/time.ts";
 import {
   ACCOUNTS_SOURCES_SQL,
@@ -281,7 +284,7 @@ function checkInput(input: ReconstructedStateInput): void {
 
 /** The scope's balances on one reported side, in the fold's terms. */
 function reportedSide(
-  state: ReportedState,
+  state: UncountedReportedState,
   accounts: readonly string[],
   withoutContainer: readonly string[],
 ): { side: ReconstructionReportedSide; positions: number } {
@@ -407,8 +410,8 @@ export async function queryReconstructedState(
   const now = await select(meta, cut, scope, rows);
 
   const [startState, endState, sources] = await Promise.all([
-    queryDatedState(sql, { date: input.from, accounts }),
-    queryDatedState(sql, { date: input.to, accounts }),
+    queryDatedState(sql, { date: input.from, accounts, includeStatementsBeforeWindow: false }),
+    queryDatedState(sql, { date: input.to, accounts, includeStatementsBeforeWindow: false }),
     sql.all<{ account_id: string; source_id: string }>(ACCOUNTS_SOURCES_SQL, [
       JSON.stringify(accounts),
     ]),
