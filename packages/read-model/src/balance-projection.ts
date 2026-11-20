@@ -51,8 +51,27 @@ export const BALANCE_PROJECTION_RELEASE = "balance-projection-v1";
  * (INV06; ADR 0001's amendment of 2026-11-18).
  */
 export const SCOPE_RELATION_RELEASE = "scope-relations-v3";
-/** The disjointness the policy asserts, and the evidence it rests on. */
-export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v2";
+/**
+ * The disjointness the policy asserts, and the evidence it rests on.
+ *
+ * v3: two scopes the current identity mapping maps to one account entity are
+ * never declared disjoint, whatever else the policy would say of them. v2
+ * declared two references of one source disjoint (or two identified
+ * references of two sources) without reading the entity, so a second
+ * reference of one account was adopted beside the first and counted twice
+ * (INV06; ADR 0001's amendment of 2026-11-20). The release is part of the
+ * build digest, so the first tick after a deploy builds a new snapshot.
+ */
+export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v3";
+
+/**
+ * The reason a candidate is left unresolved when another contender of its
+ * target is a different reference the current identity mapping maps to the
+ * same account entity, and no decision says whether the two are one
+ * measurement (ADR 0001's amendment of 2026-11-20). It replaces the generic
+ * `overlap_unknown` only for that cause, so the entity is shown, not counted.
+ */
+const ACCOUNT_ENTITY_SHARED = "account_entity_shared";
 
 /**
  * Build budget: distinct measurement scopes considered together for one
@@ -124,6 +143,15 @@ export interface ProjectionCandidate {
   measureView: MeasureView;
   /** Whether the row is the latest witness of its group; see the view predicate. */
   latestInGroup: boolean;
+  /**
+   * The account entity the current identity mapping gives the candidate's
+   * reference (`account_mappings.account_id`), or null when no mapping
+   * organizes it. It never makes two scopes one measurement; it only keeps
+   * the disjointness policy from declaring two references of one entity
+   * apart. An input captured before this field existed has no value here and
+   * builds as v2 did.
+   */
+  accountEntity: string | null;
 }
 
 /**
@@ -341,6 +369,13 @@ interface Subject {
   status: SubjectStatus;
   sourceId: string;
   depositInstitution: string | null;
+  /** Every account entity a witness of this scope is mapped to. */
+  accountEntities: Set<string>;
+}
+
+function shareAccountEntity(left: Subject, right: Subject): boolean {
+  for (const entity of left.accountEntities) if (right.accountEntities.has(entity)) return true;
+  return false;
 }
 
 // Only banks whose own deposit readings are in the deposit.balance registry
@@ -363,6 +398,12 @@ const DEPOSIT_INSTITUTIONS = new Map([
  * from the metric registry at different listed institutions. The latter
  * excludes aggregate and unresolved scopes and changes no identity mapping.
  *
+ * Never between two scopes the current identity mapping maps to one account
+ * entity: being listed apart, being identified or sitting at two
+ * institutions says nothing when identity says both references are one
+ * account, so their overlap stays unknown until a decision accepts them as
+ * the same account or a mapping revision separates them (v3).
+ *
  * Everything else is deliberately absent. An aggregate or total scope, an
  * aggregator line with no terminal account, and a provider-local label seen
  * through a second route all keep an unknown overlap, which is what makes
@@ -373,6 +414,7 @@ function policyDisjointness(subjects: Map<string, Subject>): DerivedScopeRelatio
   const relations: DerivedScopeRelation[] = [];
   for (const [index, [left, leftSubject]] of entries.entries())
     for (const [right, rightSubject] of entries.slice(index + 1)) {
+      if (shareAccountEntity(leftSubject, rightSubject)) continue;
       const sameSource = leftSubject.sourceId === rightSubject.sourceId;
       const listedApart =
         sameSource && leftSubject.status !== "aggregate" && rightSubject.status !== "aggregate";
@@ -416,6 +458,11 @@ function adoptionOutcomes(
         ? (DEPOSIT_INSTITUTIONS.get(candidate.sourceId) ?? null)
         : null;
     const previous = subjects.get(candidate.subjectScopeKey);
+    // Every entity any witness of the scope is mapped to: a scope whose
+    // witnesses disagree shares an entity with each of them. `typeof` and
+    // not `!== null`: an input captured before the field existed lacks it.
+    const accountEntities = new Set(previous?.accountEntities);
+    if (typeof candidate.accountEntity === "string") accountEntities.add(candidate.accountEntity);
     subjects.set(candidate.subjectScopeKey, {
       status: candidate.subjectStatus,
       sourceId: candidate.sourceId,
@@ -424,6 +471,7 @@ function adoptionOutcomes(
       // merely by appearing before a listed witness in the input.
       depositInstitution:
         previous === undefined || previous.depositInstitution === institution ? institution : null,
+      accountEntities,
     });
   }
   if (subjects.size > ADOPTION_SUBJECT_BOUND) {
@@ -450,12 +498,57 @@ function adoptionOutcomes(
     outcomes.set(adopted.ref, { state: "adopted", reasonCode: null });
   for (const excluded of result.excluded)
     outcomes.set(excluded.ref, { state: "excluded", reasonCode: excluded.reasonCode });
+  const sharesEntity = entitySharingCandidates(
+    candidates,
+    subjects,
+    declared,
+    new Set(result.excluded.map((excluded) => excluded.ref)),
+  );
   for (const unresolved of result.unresolved)
     outcomes.set(unresolved.ref, {
       state: unresolved.reasonCode === "conflicting_evidence" ? "conflict" : "unresolved",
-      reasonCode: unresolved.reasonCode,
+      reasonCode:
+        unresolved.reasonCode === "overlap_unknown" && sharesEntity.has(unresolved.ref)
+          ? ACCOUNT_ENTITY_SHARED
+          : unresolved.reasonCode,
     });
   return { outcomes, relations: policy };
+}
+
+/**
+ * The candidates step 7 of `selectAdoptedSet` leaves unresolved at least
+ * because of a contender that is another reference of the same account
+ * entity: a candidate of another scope, not excluded, of no worse authority
+ * rank (the side step 7 compares against), with no declared relation to it,
+ * whose scope shares an entity with this one. Only such a candidate's
+ * `overlap_unknown` is named `account_entity_shared`; every other unknown
+ * overlap keeps its code.
+ */
+function entitySharingCandidates(
+  candidates: readonly ProjectionCandidate[],
+  subjects: ReadonlyMap<string, Subject>,
+  declared: readonly DerivedScopeRelation[],
+  excluded: ReadonlySet<string>,
+): Set<string> {
+  const pair = (a: string, b: string) => JSON.stringify(a < b ? [a, b] : [b, a]);
+  const related = new Set(
+    declared.map((relation) => pair(relation.fromScopeKey, relation.toScopeKey)),
+  );
+  const found = new Set<string>();
+  for (const candidate of candidates) {
+    const subject = subjects.get(candidate.subjectScopeKey)!;
+    if (subject.accountEntities.size === 0) continue;
+    const contender = candidates.some(
+      (other) =>
+        other.subjectScopeKey !== candidate.subjectScopeKey &&
+        !excluded.has(other.scopeKey) &&
+        other.authorityRank <= candidate.authorityRank &&
+        !related.has(pair(candidate.subjectScopeKey, other.subjectScopeKey)) &&
+        shareAccountEntity(subject, subjects.get(other.subjectScopeKey)!),
+    );
+    if (contender) found.add(candidate.scopeKey);
+  }
+  return found;
 }
 
 /**

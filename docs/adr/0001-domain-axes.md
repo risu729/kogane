@@ -4,8 +4,10 @@
   [2026-11-06 amendment](#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
   is accepted (owner approved 2026-11-07 13:39 UTC); the
   [2026-11-18 amendment](#amendment-2026-11-18-same-is-an-equivalence-in-adoption)
-  is proposed
-- Date: 2026-09-09; amended 2026-11-06 and 2026-11-18
+  is proposed; the
+  [2026-11-20 amendment](#amendment-2026-11-20-two-references-of-one-account-entity-are-not-disjoint)
+  is proposed and needs the owner's approval
+- Date: 2026-09-09; amended 2026-11-06, 2026-11-18 and 2026-11-20
 - Review basis: whole-architecture addendum 00, 04 (AR01–AR18), 05, 06, 13 §1–§3
   of the design review of commit `130912af`
 
@@ -455,3 +457,135 @@ claimed both `same` and `disjoint` joins nothing.
 projection from two accepted `same_account` rows of two lines of one source
 (which the policy declares disjoint) and fails on the first-match rule, which
 adopted one route next to the direct account.
+
+## Amendment 2026-11-20: two references of one account entity are not disjoint
+
+- Status: proposed. It changes published answers (the latest balance page,
+  its known-assets subtotal and `holdings`), so it takes effect only once the
+  owner approves it; the approval is recorded here with its time in UTC.
+- Date: 2026-11-20
+- Carried by: `policyDisjointness` and `adoptionOutcomes` in
+  `packages/read-model/src/balance-projection.ts`,
+  `DISJOINT_ACCOUNTS_POLICY` (`distinct-identified-accounts-v3`) in the same
+  file, `ProjectionCandidate.accountEntity` and its writer
+  `collectCandidates` in `services/processor/src/balance-projection-job.ts`,
+  [balance read model](../balance-read-model.md#how-a-row-gets-its-state)
+
+### Context
+
+The balance projection's adoption subject is the provider reference:
+`subjectScopeFor` gives `source_account:<reference id>`, so a decision
+recorded against a reference lines up with it. The disjointness policy
+(`distinct-identified-accounts-v2`, [ADR 0093](0093-direct-bank-deposit-disjointness.md))
+declares two subjects disjoint when they share a source and neither is an
+aggregate (the provider listed them apart), when both are `identified`, or
+when both are direct `deposit.balance` readings at two listed institutions.
+None of the three reads the account entity the identity mapping gives each
+reference (`account_mappings.account_id`). Two references the current
+mapping sends to one entity were therefore declared disjoint, both were
+adopted, and every reader of the adopted set added both amounts: the
+known-assets subtotal (`knownAssetSubtotals` in `services/app/src/balances-v2.ts`)
+and `holdings` (`packages/application/src/query/execute.ts`) count once per
+`subtotalCountKey` (subject and unit), and the two subjects differ. One
+account was counted twice with `completeness: "complete"` (INV06).
+
+A reviewer reproduced it on `main` with a synthetic store: an SMBC capture of
+eight exact yen deposits plus a ninth reference whose mapping names the
+entity of one of them gave a JPY `adoptedCount` of 9 on
+`/api/v2/balances/latest?source=smbc-bank` and in `holdings`. The identity
+store gives one entity per reference except where a rule shares one on
+purpose (a trusted Vpass card token across producers, a MoneyForward account
+reference across the importer and collector producers), and a manual mapping
+may send any reference to any entity. Whether production holds such a pair
+in one adoption target was not checked.
+
+### Options considered
+
+1. **Key the subtotal and `holdings` on the account entity.** Rejected as
+   the fix: it repairs two readers and leaves the adopted set itself
+   claiming two adopted measurements of one account, which the latest page
+   rows, their coverage reasons and any later reader of adopted state would
+   still report. It would also need the entity on every READ row (a schema
+   and query change) and a rule for which of two adopted amounts to count,
+   which is an adoption decision made in a reader.
+2. **Let the policy not declare two references of one entity disjoint.**
+   Chosen. Adoption is the one place every reader takes its adopted set
+   from, so fixing the input to adoption fixes all of them at once, and the
+   overlap of the two references becomes what it is: unknown until a
+   decision says otherwise.
+3. **Read a shared entity as `same`.** Rejected: a mapping may come from a
+   rule, and a rule only proposes (INV07); bundling two references into one
+   measurement is what an accepted `same_account` relation does.
+
+### Decision
+
+- `policyDisjointness` declares no relation between two subjects that share
+  an account entity, whichever of its three rules would otherwise apply. A
+  subject's entities are those of every witness of it, so a scope whose
+  witnesses disagree shares an entity with each.
+- The overlap of such a pair is unknown, so step 7 of `selectAdoptedSet`
+  decides it as it decides every unknown overlap: the worse-ranked side is
+  unresolved and the better-ranked side is adopted; at equal ranks both are
+  unresolved. Nothing is adopted or merged by the rule.
+- The projection names the cause: an `overlap_unknown` candidate that has
+  such a contender (another subject sharing its entity, not excluded, of no
+  worse rank, with no declared relation to it) is recorded as
+  `unresolved` / `account_entity_shared` instead. Every other unknown
+  overlap keeps `overlap_unknown`. The entity is shown with that closed
+  reason, its subtotal is `partial`, and nothing becomes zero (INV05).
+- The way out is a decision: accepting `same_account` between the two
+  references makes them one measurement (one adopted, the other
+  `duplicate_evidence`; under v2 the same acceptance read as a
+  `relation_conflict` against the policy's `disjoint`), and a mapping
+  revision that separates them restores the disjointness.
+- The build reads the entity from the organization read it already makes
+  (`account_target`, the current mapping) into `ProjectionCandidate.accountEntity`.
+  A candidate without it (an input captured before the field existed) has no
+  entity and builds as v2 did.
+- The rule changes what the projection makes of an input, so the policy
+  release moves to `distinct-identified-accounts-v3`. It is part of the build
+  digest and is written on every policy relation the snapshot stores.
+
+### Consequences
+
+- No migration, no SQL change and no operator step. After deploy the build
+  digest differs, so the first projection tick captures a new input (whose
+  candidates carry the entity) and builds a new snapshot; no stored snapshot,
+  input or relation row is rewritten. An unfinished build that started before
+  the deploy continues from its own input, which has no entities, and so
+  builds as v2 did; the next capture corrects it.
+- A store with no shared entity in one target adopts exactly what it adopted
+  before. A store with one loses the doubled amount from the latest
+  subtotal and from `holdings`, which turn `partial` with
+  `unresolved:account_entity_shared`, until the owner decides the pair.
+- Open limit: adoption compares scopes only within one target (metric and
+  unit). Two references of one entity under two different summable metrics
+  of one unit are both adopted and both counted, as before.
+- Open limit: two references of one entity that are genuinely two
+  measurements (for example two pockets mapped to one account) stay
+  unresolved until a mapping revision separates them; no decision kind
+  declares two scopes disjoint.
+
+### Verification
+
+Synthetic data only. `packages/read-model/test/balance-projection.test.ts`
+("two references identity maps to one account entity") builds eight
+provider-local references of one source plus a ninth sharing the first's
+entity, in both input orders: seven are adopted, the entity's two
+references are `account_entity_shared`, no policy relation joins them and
+every policy relation names `distinct-identified-accounts-v3`; it fails on
+v2, which adopted nine. The same block shows that eight references of eight
+entities adopt eight, that an input without the field builds as v2, that an
+accepted `same_account` between the two references adopts one (it fails on
+v2 as a `relation_conflict`), that a cross-source identified pair at two
+listed banks sharing an entity adopts neither while a lower-ranked route of
+the entity leaves the direct reading adopted, that SC01's aggregate beside
+its members gives the same states and reasons with and without entities,
+and that an unknown overlap with no shared entity keeps `overlap_unknown`.
+`services/app/test/entity-double-count.test.ts` builds the snapshot through
+the Processor's own job and reads it as the readers do: the latest page with
+its subtotal over the route and `kogane.balances.read`, and `holdings` over
+`/api/v2/query` and `kogane.financial.query`. The reviewer's SMBC case gives
+`adoptedCount` 7 (9 on v2) with both references `account_entity_shared`, a
+`partial` coverage and the reason in the `holdings` gaps; an identified SBI
+Shinsei and Mizuho pair sharing an entity counts neither (2 on v2).

@@ -83,7 +83,7 @@ writer fencing and captured CORE references; the contract is in
    still reads unknown (scope
    relation release `scope-relations-v3`,
    [ADR 0001's amendment of 2026-11-18](adr/0001-domain-axes.md#amendment-2026-11-18-same-is-an-equivalence-in-adoption)).
-5. **Disjointness policy** (`distinct-identified-accounts-v2`). Within one
+5. **Disjointness policy** (`distinct-identified-accounts-v3`). Within one
    source, two distinct non-aggregate scopes are disjoint, because the
    provider listed them as separate accounts. Across sources, identified
    accounts are disjoint. Also, rank-zero readings resolved by the metric
@@ -93,6 +93,16 @@ writer fencing and captured CORE references; the contract is in
    based on each bank's own deposit readings, not legacy balance labels;
    Sony transaction balances and Prestia term-deposit principals are other
    metrics. No identity mapping is changed ([ADR 0093](adr/0093-direct-bank-deposit-disjointness.md)).
+   None of these rules applies to two scopes whose current account mappings
+   (`account_mappings.account_id`, read by the build as each candidate's
+   `accountEntity`) name one account entity: their overlap stays unknown, so
+   step 7 leaves the worse-ranked side unresolved, or both sides at equal
+   rank, with `account_entity_shared` instead of `overlap_unknown`. The
+   entity is then shown and not counted until a decision accepts the two
+   references as `same_account` (one is adopted, the other is
+   `duplicate_evidence`) or a mapping revision separates them
+   ([ADR 0001's amendment of 2026-11-20](adr/0001-domain-axes.md#amendment-2026-11-20-two-references-of-one-account-entity-are-not-disjoint)).
+   Version 2 declared such pairs disjoint and adopted both.
 6. **Authority.** `packages/read-model/src/authority.ts`
    (`source-authority-v3`, [ADR 0042](adr/0042-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
    supplies the caller policy `selectAdoptedSet` takes. It names sources by
@@ -119,13 +129,13 @@ writer fencing and captured CORE references; the contract is in
 
 ### States and reason codes
 
-| State        | Meaning                                                                                                                                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `adopted`    | In the adopted set for its metric and unit.                                                                                                                                                                    |
-| `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                    |
-| `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
-| `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                      |
-| `stale`      | The newest published attempt over the same source and dataset did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                        |
+| State        | Meaning                                                                                                                                                                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adopted`    | In the adopted set for its metric and unit.                                                                                                                                                                                             |
+| `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                                             |
+| `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `account_entity_shared`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
+| `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                                               |
+| `stale`      | The newest published attempt over the same source and dataset did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                                                 |
 
 Freshness is recorded separately (`current` / `stale` / `unknown`) with the
 `snapshotEligibility` reason code of the failing claim, so "we could not
@@ -219,7 +229,14 @@ amounts, period totals, reward units and balances restated after a
 transaction are excluded by their registry entries. The sum is exact integer
 arithmetic outside SQL, over the whole filter scope rather than the page, and
 a subject that appears twice in the same unit makes the subtotal unavailable
-(`subject_reported_twice`) instead of double counting it. A subject that holds
+(`subject_reported_twice`) instead of double counting it. The guard keys on
+the subject, which is a provider reference; two references of one account
+entity are kept apart upstream, where the projection leaves them unresolved
+(`account_entity_shared`, step 5 above), so the subtotal and `holdings`
+never receive two adopted amounts of one entity from one adoption target
+(metric and unit). Adoption compares scopes only within a target, so two
+references of one entity under two different summable metrics of one unit
+are still both counted; that is an open limit. A subject that holds
 several units (an exchange account's cash per asset, a broker's foreign cash
 per currency) counts once in each unit's figure: the subtotal is per unit, so
 that is not a second count of anything. Above 5,000 adopted rows the subtotal
