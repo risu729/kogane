@@ -97,9 +97,9 @@ function tool<Schema extends z.ZodType>(definition: PageReadTool<Schema>) {
 
 const TOOLS = {
   "kogane.identity.read": tool({
-    title: "Identity pages: connections, account and instrument mappings, coverage",
+    title: "Identity pages: connections, accounts, account and instrument mappings, coverage",
     description:
-      "One page of the owner UI's identity read: `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only.",
+      "One page of the owner UI's identity read: `account-list` (one line per account with its readable label and where the label came from, its role, status, sources, reference and observation counts, aggregator connection state and newest capture time; start here to name accounts), `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only.",
     schema: z.strictObject({
       collection: z.enum(IDENTITY_COLLECTIONS),
       source: ROUTE_TEXT.optional(),
