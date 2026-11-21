@@ -757,11 +757,16 @@ After a commit the receipt panel distinguishes `受理` (accepted) from
 replaces a later one. A committed plan is not simulated again: its own commit
 moves the revisions it pinned, so the server would answer it `stale` with
 another re-simulated plan id, or refuse it (`stale_context`: a card
-settlement no longer proposed, a pending-to-posted review already decided).
-Once the receipt is on screen the screen says the plan is committed
+settlement no longer proposed, a pending-to-posted review already decided;
+`target_missing`: an identity protection already released). The re-read
+stops when the commit is sent, and one already in flight is cancelled; a
+refused commit reads the plan again. Once a receipt the server reports
+`accepted` or `published` is on screen the screen says the plan is committed
 (`確定済み`), that the plan it shows was read before the commit, and drops the
 warnings that guard approval and commit: the stale plan, the re-simulated plan
-id, and a pin that moved or an action no longer offered. The commit reads the
+id, and a pin that moved or an action no longer offered. A receipt in any
+other status (`failed`) is not shown as committed: the plan says its commit
+did not complete and points to the receipt, and the warnings stay. The commit reads the
 reviewed item (the settlement candidate, the ownership review, the purchases)
 again, so its panel shows it after the decision, at a revision newer than the
 plan pinned and without a warning. A refusal from any step (simulate,

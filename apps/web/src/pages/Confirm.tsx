@@ -113,6 +113,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   // One operation id per approval: a resend of the same confirmation is the
   // same operation, so a lost response never commits twice (addendum 10 §6).
   const [operationId, setOperationId] = useState<string | null>(null);
+  // Set from the moment a commit is sent until it is refused: a re-read the
+  // server answers after the commit landed would be the stale answer below.
+  const [commitSent, setCommitSent] = useState(false);
 
   // A committed plan is not simulated again: its own commit moved the
   // revisions it pinned, so the server would answer it stale, or refuse it
@@ -121,7 +124,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   // before the commit; the receipt below says what the commit did.
   const report = useQuery({
     queryKey: ["command", "simulate", planId],
-    enabled: receipt === null,
+    enabled: receipt === null && !commitSent,
     queryFn: ({ signal }) =>
       postCommand<{ report: SimulationReportView }>("simulate", { planId }, signal).then(
         (value) => value.report,
@@ -276,10 +279,16 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       );
       return value.receipt;
     },
+    onMutate: () => {
+      setCommitSent(true);
+      // A re-read already in flight (a refocused window) could be answered
+      // after the commit lands, and would show that stale answer.
+      void client.cancelQueries({ queryKey: ["command", "simulate", planId] });
+    },
+    // A refused commit changed nothing; the plan is read again as before.
+    onError: () => setCommitSent(false),
     onSuccess: (value) => {
       setReceipt(value);
-      // A re-read already in flight (a refocused window) would land the stale answer.
-      void client.cancelQueries({ queryKey: ["command", "simulate", planId] });
       // Read the item the plan reviewed again, so its panel shows it after
       // the decision rather than the answer read before it.
       for (const queryKey of [["card-settlements"], ["card-ownership"], ["card-purchases"]])
@@ -316,8 +325,10 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   // reviewed item, read again after the commit, no longer matches the plan's
   // pins or offers its action. The checks below guard approval and commit;
   // once the receipt is on screen they are done, and their warnings would
-  // misstate the commit as refused.
-  const committed = receipt !== null;
+  // misstate the commit as refused. Only a receipt the server reports
+  // accepted or published reads as committed; any other status (`failed`)
+  // is left to the receipt panel, and the warnings stay.
+  const committed = receipt?.status === "accepted" || receipt?.status === "published";
   const stale = report.data?.stale === true;
   const canAct =
     report.data !== undefined &&
@@ -352,6 +363,10 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                 <Notice role="status">
                   この計画は確定しました。この画面の計画の内容は確定前に読んだものです。確定の結果は下の操作の記録で確認してください。
                 </Notice>
+              ) : receipt !== null ? (
+                <Notice tone="bad" role="status">
+                  この計画の確定は完了していません。この画面の計画の内容は確定前に読んだものです。下の操作の記録を確認してください。
+                </Notice>
               ) : data.stale ? (
                 <Notice tone="bad" role="alert">
                   この計画が読み取った版から対象が変わりました。古い承認は適用されません。再試算した計画で
@@ -366,13 +381,15 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   <KvRow label="状態">
                     {committed ? (
                       <Badge tone="ok">確定済み</Badge>
+                    ) : receipt !== null ? (
+                      <Badge tone="bad">操作の記録を確認してください</Badge>
                     ) : data.stale ? (
                       <Badge tone="bad">対象が変更されています</Badge>
                     ) : (
                       <Badge tone="ok">確認した内容のまま</Badge>
                     )}
                   </KvRow>
-                  {data.stale && !committed ? (
+                  {data.stale && receipt === null ? (
                     <KvRow label="再試算後の計画ID">
                       <code>{data.resimulatedPlanId}</code>
                     </KvRow>
@@ -574,7 +591,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                 <div className="table-scroll" role="region" aria-label="変更の対象" tabIndex={0}>
                   <table className="settlement-targets">
                     <caption>
-                      {committed
+                      {receipt !== null
                         ? "対象ごとの版と対応先。版は計画時と、確定前に読んだサーバーの値です。"
                         : "対象ごとの版と対応先。版は計画時とサーバーの現在の値です。"}
                     </caption>

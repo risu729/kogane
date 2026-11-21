@@ -82,6 +82,10 @@ describe.if(runnable)("change confirmation screen", () => {
   // the plan reports the pinned subject at the revision the commit wrote, so
   // the plan reads as stale.
   let committed = false;
+  /** Holds the commit's answer until it resolves; the decision is written on arrival. */
+  let commitHeld: Promise<void> | null = null;
+  /** A receipt status other than the accepted/published pair the outbox drives. */
+  let receiptStatus: "failed" | null = null;
   const posted: string[] = [];
   /**
    * A pending-to-posted review plan: its kind, its pins, the proposal status
@@ -101,6 +105,8 @@ describe.if(runnable)("change confirmation screen", () => {
   const purchaseReads: string[] = [];
   beforeEach(() => {
     committed = false;
+    commitHeld = null;
+    receiptStatus = null;
     link = null;
     purchaseAdvertised = true;
     purchaseReads.length = 0;
@@ -193,12 +199,15 @@ describe.if(runnable)("change confirmation screen", () => {
                 usesRemaining: 1,
               },
             });
-          if (operation === "commit") committed = true;
+          if (operation === "commit") {
+            committed = true;
+            if (commitHeld) await commitHeld;
+          }
           const receipt = {
             operationId: "op-synthetic",
             operationKind: "identity.assign",
             planId: PLAN_ID,
-            status: published ? "published" : "accepted",
+            status: receiptStatus ?? (published ? "published" : "accepted"),
             acceptedAt: "2098-01-01T00:00:00.000Z",
             publishedAt: published ? "2098-01-01T00:05:00.000Z" : null,
             decisionRevisionId: `dr_${"d".repeat(64)}`,
@@ -304,6 +313,54 @@ describe.if(runnable)("change confirmation screen", () => {
       "/api/command/v1/commit",
       "/api/command/v1/operation",
     ]);
+    await page.close();
+  }, 30_000);
+
+  test("a window refocused while the commit is in flight does not read the plan again", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    posted.length = 0;
+    let release = (): void => {};
+    commitHeld = new Promise((resolve) => {
+      release = resolve;
+    });
+    const page = await open();
+    await page.getByRole("button", { name: "承認する" }).click();
+    await page.getByRole("button", { name: "承認済み" }).waitFor();
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page.getByRole("button", { name: "確定中…" }).waitFor();
+    // The server has written the decision; a re-read now would be answered stale.
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForTimeout(300);
+    release();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((path) => path.endsWith("/simulate"))).toHaveLength(1);
+    await page.close();
+  }, 30_000);
+
+  test("a receipt that is neither accepted nor published is not shown as committed", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    receiptStatus = "failed";
+    const page = await open();
+    await page.getByRole("button", { name: "承認する" }).click();
+    await page.getByRole("button", { name: "承認済み" }).waitFor();
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page
+      .getByRole("region", { name: "操作の記録" })
+      .getByText("失敗", { exact: true })
+      .waitFor();
+    const main = await page.locator("main").innerText();
+    expect(main).not.toContain("確定済み");
+    expect(main).not.toContain("この計画は確定しました");
+    expect(main).toContain("この計画の確定は完了していません");
+    expect(main).toContain("操作の記録を確認してください");
     await page.close();
   }, 30_000);
 
