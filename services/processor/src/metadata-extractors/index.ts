@@ -184,6 +184,15 @@ function outputJson(release: MetadataExtractorRelease, extraction: MetadataExtra
   return canonicalJson(extraction.output);
 }
 
+/** One input of the projection the same batch wrote or skipped, found by its
+ * unique key. The `WHERE` also keeps SQLite from reading `ON CONFLICT` as a
+ * join constraint of the `SELECT`. */
+const PROJECTION_INPUT_INSERT_SQL = `INSERT INTO metadata_projection_inputs
+    (projection_id,input_artifact_id,role,raw_sha256)
+  SELECT id,?4,?5,?6 FROM metadata_projections
+  WHERE fetch_artifact_id=?1 AND extractor_release=?2 AND input_digest=?3
+  ON CONFLICT(projection_id,input_artifact_id,role) DO NOTHING`;
+
 /**
  * Appends the projection and its inputs, and returns its id. Idempotent: the
  * unique key (artifact, release, input digest) means the same evidence read
@@ -192,9 +201,13 @@ function outputJson(release: MetadataExtractorRelease, extraction: MetadataExtra
  * skipped (`ON CONFLICT(<key>) DO NOTHING`; the projection's `id` is never
  * supplied): a projection or an input the schema refuses (a CHECK or NOT NULL
  * failure) raises. `OR IGNORE` skipped a refused input without an error, so
- * the projection was kept without that input and read as complete. Limit: the
- * inputs are written after the projection, so after a refused input the
- * projection row stays without its inputs, and each later call raises again.
+ * the projection was kept without that input and read as complete.
+ *
+ * The projection and its inputs are one D1 batch, and each input finds its
+ * projection by that unique key inside the batch, so a refused input rolls
+ * back the projection it belongs to: no projection is written without its
+ * inputs. A projection an earlier call already wrote is the key the batch
+ * skips, so a refused input then adds nothing to it either.
  */
 export async function persistProjection(
   db: D1Database,
@@ -204,23 +217,29 @@ export async function persistProjection(
   now: string,
 ): Promise<number> {
   const json = outputJson(release, extraction);
-  await db
-    .prepare(
-      `INSERT INTO metadata_projections
-        (fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at)
-        VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(fetch_artifact_id,extractor_release,input_digest) DO NOTHING`,
-    )
-    .bind(
-      row.id,
-      release,
-      extraction.inputDigest,
-      json,
-      await sha256Hex(json),
-      extraction.status,
-      now,
-    )
-    .run();
+  const outputDigest = await sha256Hex(json);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO metadata_projections
+          (fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at)
+          VALUES(?1,?2,?3,?4,?5,?6,?7)
+          ON CONFLICT(fetch_artifact_id,extractor_release,input_digest) DO NOTHING`,
+      )
+      .bind(row.id, release, extraction.inputDigest, json, outputDigest, extraction.status, now),
+    ...extraction.inputs.map((input) =>
+      db
+        .prepare(PROJECTION_INPUT_INSERT_SQL)
+        .bind(
+          row.id,
+          release,
+          extraction.inputDigest,
+          input.artifactId,
+          input.role,
+          input.rawSha256,
+        ),
+    ),
+  ]);
   const id = await db
     .prepare(
       "SELECT id FROM metadata_projections WHERE fetch_artifact_id=? AND extractor_release=? AND input_digest=?",
@@ -228,15 +247,5 @@ export async function persistProjection(
     .bind(row.id, release, extraction.inputDigest)
     .first<number>("id");
   if (id === null || id === undefined) throw new MetadataError("metadata_projection_missing");
-  if (extraction.inputs.length)
-    await db.batch(
-      extraction.inputs.map((input) =>
-        db
-          .prepare(
-            "INSERT INTO metadata_projection_inputs(projection_id,input_artifact_id,role,raw_sha256) VALUES(?,?,?,?) ON CONFLICT(projection_id,input_artifact_id,role) DO NOTHING",
-          )
-          .bind(id, input.artifactId, input.role, input.rawSha256),
-      ),
-    );
   return id;
 }
