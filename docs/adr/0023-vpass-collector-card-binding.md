@@ -675,7 +675,7 @@ binds nor displaces the importer-era snapshot of its card-month.
 - Date: 2026-11-19
 - Issue: the cause of [#1415](https://github.com/risu729/kogane/issues/1415)
 - Decided by: the owner's decision D1 ("on finalized pages, don't count the
-  `45` and `4C` header rows"), pending until this PR merges
+  `45` and `4C` header rows")
 - Amends: option 8 above and the
   [counts-only shape diagnostic amendment (2026-10-10)](#counts-only-shape-diagnostic-amendment-2026-10-10)
 - Carried by: `services/collector-vpass/src/statement-rows.ts`

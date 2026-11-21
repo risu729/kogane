@@ -405,7 +405,7 @@ command or catalogue operation is added.
   accounts: the price of reusing its snapshot rules rather than restating
   them.
 - The published schema of `kogane.card-settlements.debit-accounts` gains an
-  optional `view` and its description a paragraph. This is an owner approval
+  optional `view` and its description a paragraph. This was an owner approval
   item before merge (D3); no catalogue entry changes.
 
 ### Verification

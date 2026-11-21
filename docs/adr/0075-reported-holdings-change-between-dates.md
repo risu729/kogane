@@ -396,13 +396,14 @@ checks the shared request rule; the route's refusal tests in
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414) (MCP
   everyday questions: one or two calls, each answer under 8 KB), question Q12
   "How did my holdings change since last month?" and gap G6 of the plan
-  `docs/plans/2026-11-mcp-everyday-questions.md` (on its own branch)
+  [MCP everyday questions](../plans/2026-11-mcp-everyday-questions.md)
 - Follows: the `detail` pattern of
-  [ADR 0123](https://github.com/risu729/kogane/pull/1458) (the balance,
-  schedule and collection quality reads answer a summary by default; open, its
-  proposal D2 not decided yet), and the cursor conventions of
-  [ADR 0119](https://github.com/risu729/kogane/pull/1446) (a cursor continues
-  at another offered page size; open). Neither is needed to build this one:
+  [ADR 0123](0123-summary-detail-for-large-reads.md) (the balance,
+  schedule and collection quality reads answer a summary by default; merged
+  2026-11-20 in [#1458](https://github.com/risu729/kogane/pull/1458)), and the
+  cursor conventions of [ADR 0119](0119-cursor-page-size.md) (a cursor
+  continues at another offered page size; merged 2026-11-20 in
+  [#1446](https://github.com/risu729/kogane/pull/1446)). Neither is needed to build this one:
   the summary is shaped in `packages/domain` and pages with the keyset cursor
   format already in `packages/domain/src/paging.ts`.
 - Carried by: `packages/domain/src/holdings-change-summary.ts`,
@@ -544,13 +545,12 @@ The owner's store measured 20–250 KB for this read (issue 1414's audit).
   are short.
 - A client of the route that relied on the full default must ask for
   `detail=full`. The repository's only client, the web page, does.
-- If the owner decides ADR 0123's D2 the other way (`full` the default), this
-  read follows the same default, a one-line change in
-  `reported-holdings-change-api.ts` and the page's request unchanged.
+- ADR 0123 merged with its D2 as proposed (`summary` the default on the
+  routes too), the same default as this read.
 - [#1445](https://github.com/risu729/kogane/pull/1445) (the reported state's
-  context id v2, open) pins more inputs in the reported context ids this
+  context id v2, merged 2026-11-20) pins more inputs in the reported context ids this
   comparison's manifest carries (mappings, the account filter, containers
-  without a snapshot). It touches no file of this amendment; once it merges,
+  without a snapshot). It touches no file of this amendment; since it merged,
   a summary cursor also expires on a mapping correction that leaves every
   key's status and reasons as they were, which is the stricter, correct
   answer.

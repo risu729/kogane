@@ -8,8 +8,8 @@
   may add new tools if needed"); that allows the proposal, not this tool.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap G3
-  of the MCP everyday-questions audit (`docs/plans/2026-11-mcp-everyday-questions.md`,
-  proposed in its own pull request; question Q15, "what changed since
+  of the MCP everyday-questions audit ([its plan](../plans/2026-11-mcp-everyday-questions.md),
+  merged in [#1449](https://github.com/risu729/kogane/pull/1449); question Q15, "what changed since
   yesterday?")
 - Related: [ADR 0081](0081-ui-parity-through-mcp.md) (UI/MCP parity, one
   service), [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (MCP
