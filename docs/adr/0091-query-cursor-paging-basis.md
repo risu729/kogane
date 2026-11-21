@@ -1,7 +1,9 @@
 # ADR 0091: A query cursor is bound to its context's pinned inputs, not to the request's clock
 
-- Status: accepted (merged 2026-11-08 in [#1172](https://github.com/risu729/kogane/pull/1172))
-- Date: 2026-11-08
+- Status: accepted (merged 2026-11-08 in [#1172](https://github.com/risu729/kogane/pull/1172));
+  the [2026-11-21 amendment](#amendment-2026-11-21-an-empty-holdings-or-coverage-scope-is-a-gap-not-a-complete-answer)
+  is proposed
+- Date: 2026-11-08; amended 2026-11-21
 - Carried by: `packages/application/src/context/open.ts` (`pagingBasisRef`),
   `packages/application/src/query/cursor.ts`,
   `packages/application/src/query/spec.ts` (`querySpecDigest`),
@@ -110,3 +112,63 @@ intent or filter, or a stated knowledge cutoff that differs.
 - `services/app/test/agent-api.test.ts`: over the real Worker, the page after
   `{"intent":"activity","limit":1}`, asked two seconds later, is `200` with
   the next row and its own `contextId`.
+
+## Amendment 2026-11-21: an empty `holdings` or `coverage` scope is a gap, not a complete answer
+
+- Status: proposed
+- Date: 2026-11-21
+- Carried by: `packages/application/src/query/execute.ts` (`executeQuery`:
+  `unheldGranted`, the `holdings` and `coverage` branches),
+  [agent API](../agent-api.md) (the coverage and holdings paragraphs)
+
+**Context.** The decision above names `no_rows_in_scope` for an `activity` or
+`reported-state` source read to its end with no row. `holdings` and
+`coverage` had no such rule, and answered `complete` when nothing was known:
+`holdings` returned `units: []` for an `account` filter the snapshot never
+measured, an empty snapshot, or a listed grant whose sources the store holds
+none of; `coverage` returned no scope and every count 0 for a `source` filter
+the store does not hold, and left a listed grant's unheld sources out without
+a gap. Each reads as a known nothing (INV05).
+
+**Options considered.**
+
+1. Keep the empty `complete` answer. Rejected: INV05.
+2. Refuse the query (`not_found` or `evidence_restricted`). Rejected: a
+   refusal for an unheld but granted value would differ from the answer for a
+   held one with nothing in it, and an `evidence_restricted` for a granted
+   value would be untrue.
+3. Answer `partial` with a closed gap. Chosen.
+
+**Decision.** In `holdings`, a scope pair the snapshot holds neither a
+summable row nor a coverage row of, and a source a listed grant names that the
+store does not hold, is the gap `no_measures_in_scope` (scope `null`, like the
+other holdings gaps), and the answer is `partial`. An account whose
+measurements are adopted but none of them a summable currency stock is
+measured and stays `complete`. In `coverage`, a `source` filter the store does
+not hold, and without a filter each source a listed grant names that the
+store does not hold, is the existing gap `no_artifacts_collected` on
+`source:<id>`, and the answer is `partial`.
+
+**Consequences.**
+
+- Only values the caller sent or its own grant names are named; a filter
+  outside the grant is still `evidence_restricted` before anything is read, so
+  an existing-but-denied source or account and an unheld one answer the same
+  (SC18). Since [ADR 0084](0084-mcp-operator-authority-without-delegation.md) every caller holds the
+  whole-store grant, so the listed-grant cases are reached only by tests until
+  a narrower grant returns.
+- Answers for measured scopes are unchanged byte for byte. `contextId` and the
+  paging basis do not change: the context pins inputs, not the result, and
+  neither intent pages.
+- `no_measures_in_scope` is a new published reason code; the gap reason
+  vocabulary stays open text checked only for length
+  (`validFinancialResult`).
+
+**Verification.** `packages/application/test/query.test.ts`, "an empty scope
+is a reason, never a complete empty answer (INV05)": an unmeasured `account`
+filter, an empty snapshot, a listed account never measured beside a measured
+one, an unheld `source` filter on the whole-store and on a listed grant (a
+denied one stays `evidence_restricted`), and a listed grant's unheld sources
+without a filter are `partial` with the gap; a points-only account and a held
+`source` filter stay `complete`. Six of these fail against the previous
+`execute.ts`.

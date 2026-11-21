@@ -278,7 +278,10 @@ store does not hold: that answer has no scope and every count is 0, so it is
 `partial` with the gap on `source:<filter>`, never a `complete` empty answer
 (INV05). The filter is inside the grant already (a denied one is
 `evidence_restricted` before anything is read), so the gap names nothing the
-caller did not send. The run counts are read by one query restricted to
+caller did not send. Without a filter, each source a listed grant names that
+the store does not hold is the same gap: those are the grant's own values,
+and leaving them out would make a grant whose sources the store holds none of
+a `complete` answer with no scope. The run counts are read by one query restricted to
 the in-scope sources before it counts anything
 (`SOURCE_FETCH_RUN_COUNTS_SQL`, through `idx_fetch_runs_source`), so a run of
 a source outside the scope is never read and never moves an in-scope count.
@@ -337,7 +340,9 @@ A scope the read asks the snapshot for (one per granted source and account
 pair, or the whole filter scope under a whole-store grant) that the
 snapshot holds no measurement of at all — neither a summable row nor a
 coverage row, as for an `account` filter the store never observed or an empty
-snapshot — is the gap `no_measures_in_scope` and makes the answer `partial`:
+snapshot — is the gap `no_measures_in_scope` and makes the answer `partial`,
+and so is a source a listed grant names that the store does not hold (the
+read leaves it out of its pairs):
 nothing is known there, and an empty `units` list would read as a known
 nothing (INV05). An account whose measurements are all adopted but none of
 them a summable currency stock (points only, for example) is measured, so it

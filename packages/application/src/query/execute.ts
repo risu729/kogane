@@ -326,6 +326,16 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
   if (!sourceScope.ok) return fail("evidence_restricted", ["scope:source"]);
   const accountScope = scopeAccounts(grant, request.filters.account);
   if (!accountScope.ok) return fail("evidence_restricted", ["scope:account"]);
+  // Sources a listed grant names that the store does not hold. Reads leave
+  // them out of the scope, so `holdings` and `coverage` name them as a gap:
+  // otherwise a grant whose sources the store holds none of answers a
+  // complete empty result (INV05). They are the grant's own values, so naming
+  // them says nothing about anything outside it (SC18).
+  const granted = grantedSources(grant);
+  const unheldGranted =
+    request.filters.source === undefined && granted !== null
+      ? granted.filter((id) => !visible.includes(id)).sort()
+      : [];
 
   const limit = requestedLimit(request);
   const digest = await querySpecDigest(opened.resolvedQuery);
@@ -449,6 +459,10 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         gaps.push({ reasonCode: "no_measures_in_scope", scopeRef: null });
       }
     }
+    if (unheldGranted.length > 0) {
+      empty = true;
+      gaps.push({ reasonCode: "no_measures_in_scope", scopeRef: null });
+    }
     const units: HoldingUnit[] = [...totals.entries()]
       .map(([unitRef, total]) => ({ unitRef, ...total }))
       .sort((a, b) => (a.unitRef < b.unitRef ? -1 : 1));
@@ -526,9 +540,14 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     // A `source` filter the store holds no source for has collected nothing:
     // it is the same gap as a source without artifacts, never an empty answer
     // that reads complete (INV05). The filter is inside the grant already, so
-    // naming it tells the caller nothing it did not send.
+    // naming it tells the caller nothing it did not send. Without a filter, a
+    // listed grant's unheld sources are named the same way.
     const unheld =
-      request.filters.source !== undefined && inScope.length === 0 ? [request.filters.source] : [];
+      request.filters.source === undefined
+        ? unheldGranted
+        : inScope.length === 0
+          ? [request.filters.source]
+          : [];
     const gaps = [
       ...scopes.filter((scope) => scope.artifactCount === 0).map((scope) => scope.sourceRef),
       ...unheld,

@@ -1041,6 +1041,31 @@ describe("an empty scope is a reason, never a complete empty answer (INV05)", ()
     expect(denied.error.code).toBe("evidence_restricted");
   });
 
+  test("a listed grant's unheld sources are named without a filter too", async () => {
+    const unheldOnly = grant({ scopes: { sources: ["fixture-unknown"], accounts: "*" } });
+    const holdings = await run(unheldOnly, request({ intent: "holdings" }), reader(), projection);
+    expect(holdings.ok).toBe(true);
+    if (!holdings.ok) return;
+    if (holdings.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(holdings.result.data.units).toEqual([]);
+    expect(holdings.result.completeness).toBe("partial");
+    expect(holdings.result.coverage.gaps).toEqual([
+      { reasonCode: "no_measures_in_scope", scopeRef: null },
+    ]);
+    const mixed = grant({ scopes: { sources: ["fixture-a", "fixture-unknown"], accounts: "*" } });
+    const coverage = await run(mixed, request({ intent: "coverage" }));
+    expect(coverage.ok).toBe(true);
+    if (!coverage.ok) return;
+    if (coverage.result.data.intent !== "coverage") throw new Error("unreachable");
+    expect(coverage.result.data.scopes.map((scope) => scope.sourceRef)).toEqual(["fixture-a"]);
+    expect(coverage.result.completeness).toBe("partial");
+    expect(coverage.result.coverage.gaps).toEqual([
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-unknown" },
+    ]);
+    // Only the grant's own values are named: the held source outside it is not.
+    expect(JSON.stringify(coverage.result)).not.toContain("fixture-b");
+  });
+
   test("coverage filtered to a held source is unchanged", async () => {
     const outcome = await run(
       grant(),
