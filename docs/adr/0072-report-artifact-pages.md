@@ -459,7 +459,13 @@ current, and the rows read are exactly the current rows up to the last one,
 so none was skipped and no holding came back under a second id. When they
 disagree, the job reads every page again from the first; when the second
 read is not one cut either, it stores nothing and returns
-`skipped: "snapshot_changed"`, and the next sweep tries again.
+`skipped: "snapshot_changed"`, and the next sweep tries again. The check is
+on the set of ids, not on the order the pages returned them: rows published
+before the next offset and gone again by the check can bring a row onto a
+later page than rows that sort behind it while the set passes. The job
+therefore sorts a passing read back into the page order (source, account,
+code, id, compared as SQLite compares TEXT) before it applies `maxRows`, so a
+truncated report keeps the cut's first rows.
 
 ### Consequences
 
@@ -490,7 +496,11 @@ sorts first: before this amendment the report held 502 rows for 501
 holdings, one of them twice; now the job reads again and stores the report a
 read of the republished store alone gives (502 holdings, each once). A store
 republished between every two reads is refused as `snapshot_changed` and no
-report is stored. `packages/read-model/test/position-cut.test.ts` checks
+report is stored. Rows published before the second read and re-parsed away
+before the check bring an in-scope row onto the second page behind rows that
+sort after it; with a bound of 485 the report is the one a read of the
+settled store gives, and with the read kept in arrival order that test
+fails. `packages/read-model/test/position-cut.test.ts` checks
 `POSITION_CUT_SQL` against an oracle (the final cut read with nothing moving)
 on 40 seeded random stores where a re-parse, a newer complete capture, a new
 parse or nothing lands between two page reads: the check passes exactly when

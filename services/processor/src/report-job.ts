@@ -195,6 +195,12 @@ async function recordedAfterCutoff(
  * exactly the current positions up to the last one read, and all of them when
  * the store ended. When they are not, the whole read starts again from the
  * first page; a cut that moves on every attempt is refused, never merged.
+ *
+ * The check is on the set read, not on the order it arrived in: a row
+ * published between two reads can arrive on a later page than rows that sort
+ * after it while the set still passes (rows added before the offset and gone
+ * again by the check). A passing set is sorted back into page order, so the
+ * first `maxRows` are the ones a read of that one cut keeps.
  */
 async function readPositionCut(
   db: D1Database,
@@ -232,9 +238,30 @@ async function readPositionCut(
       cut.prefix_rows === seen.size &&
       (!ended || cut.current_rows === seen.size)
     )
-      return kept;
+      return kept.sort(pageOrder);
   }
   return null;
+}
+
+const utf8 = new TextEncoder();
+
+/** SQLite `BINARY` order of two TEXT values: their UTF-8 bytes, compared bytewise. */
+function binaryText(left: string, right: string): number {
+  if (left === right) return 0;
+  const a = utf8.encode(left);
+  const b = utf8.encode(right);
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) if (a[i] !== b[i]) return a[i]! - b[i]!;
+  return a.length - b.length;
+}
+
+/** The reader's position page order (`ORDER_KEYS.positionsByScope`): source, account, code, id. */
+function pageOrder(left: PositionWithValuations, right: PositionWithValuations): number {
+  return (
+    binaryText(left.position.source_id, right.position.source_id) ||
+    binaryText(left.position.source_account, right.position.source_account) ||
+    binaryText(left.position.security_code, right.position.security_code) ||
+    left.position.id - right.position.id
+  );
 }
 
 /**

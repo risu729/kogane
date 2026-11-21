@@ -248,3 +248,73 @@ test("a cut that moves on every read is refused as snapshot_changed and stores n
   }>();
   expect(after!.n).toBe(before!.n);
 }, 120_000);
+
+test("rows read out of page order are kept in page order, so the bound keeps the cut's first rows", async () => {
+  // The store now holds 15 late rows (accounts "a-late", "a-mid"), then
+  // account "b-known"'s 502 in-scope holdings. With a bound of 485 the first
+  // page keeps 485 rows, exactly the bound. Between the first and second
+  // read, account "a-0" (500 rows, sorting first) and account "a-x" (one
+  // in-scope row, sorting before "b-known") are published, so the second page
+  // starts on "a-late" and returns the "a-x" row after rows that sort behind
+  // it. Before the check, "a-0" is re-parsed with no rows. The set read is
+  // then exactly the cut's rows up to the last one read, so the check passes;
+  // kept in arrival order, the bound would drop the "a-x" row and keep a
+  // "b-known" row the cut's first 485 do not hold.
+  let between = true;
+  let beforeCheck = true;
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property);
+      if (property !== "prepare") return typeof value === "function" ? value.bind(target) : value;
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (beforeCheck && sql.includes("AS prefix_rows")) {
+          beforeCheck = false;
+          return {
+            bind: (...args: unknown[]) => ({
+              first: async <T>() => {
+                const parse = await env.DB.prepare(
+                  `INSERT INTO parse_runs (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+                   VALUES (7004,'synthetic-positions','2','2026-09-08T00:00:00Z','ok','[]') RETURNING id`,
+                ).first<{ id: number }>();
+                await publishParse(env.DB, parse!.id, "2026-09-08T00:00:00.000Z");
+                return statement.bind(...args).first<T>();
+              },
+            }),
+          };
+        }
+        if (!between || !sql.includes("coalesce(a.recorded_at_ms, a.fetched_at_ms) > ?"))
+          return statement;
+        between = false;
+        return {
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            return {
+              all: async <T>() => {
+                const rows = await bound.all<T>();
+                await seedPositions(
+                  7004,
+                  "a-0",
+                  500,
+                  Date.parse("2026-09-05T00:00:00.000Z"),
+                  "ZERO",
+                );
+                await seedPositions(7005, "a-x", 1, Date.parse("2026-09-05T00:00:00.000Z"), "XTRA");
+                return rows;
+              },
+            };
+          },
+        };
+      };
+    },
+  });
+  const moved = await runReportJob({ ...jobEnv, DB: db }, { ...options, maxRows: 485 });
+  expect(beforeCheck).toBe(false);
+  expect(moved.skipped).toBeNull();
+  expect(moved.truncated).toBe(true);
+  const rows = await bodyRows(moved.reportId!);
+  expect(rows.some((row) => row.subjectRef.includes("XTRA-0000"))).toBe(true);
+  // The report is the one a read of the settled store gives under the bound.
+  const settled = await runReportJob(jobEnv, { ...options, maxRows: 485 });
+  expect(settled.contextId).toBe(moved.contextId);
+}, 120_000);

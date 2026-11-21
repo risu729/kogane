@@ -578,6 +578,9 @@ id is the digest of that manifest, so:
   page again, and when the second read moved too it stores nothing and
   returns `skipped: "snapshot_changed"`
   ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21)).
+  A passing read is sorted back into the page order before `maxRows` applies,
+  so a truncated report keeps the cut's first rows even when a row arrived on
+  a later page than rows that sort behind it.
   A read that was one cut names the same ids as before, so no release
   changes. Decimals, prices and the knowledge boundary are read after the
   check, as before.
@@ -698,8 +701,9 @@ would discard later collection and later decisions (docs/operations.md).
   positions with and without positions past the bound give two reports;
   `services/processor/test/report-job-page.test.ts` — positions past the
   first reader page, a row shifted onto the next page read once, a snapshot
-  republished between two page reads read again as one cut, and a cut that
-  keeps moving refused as `snapshot_changed`;
+  republished between two page reads read again as one cut, a cut that
+  keeps moving refused as `snapshot_changed`, and a row read out of page
+  order kept in page order under the bound;
   `packages/read-model/test/position-cut.test.ts` — `POSITION_CUT_SQL`
   against an oracle on seeded random stores, and its plan without
   statistics.
