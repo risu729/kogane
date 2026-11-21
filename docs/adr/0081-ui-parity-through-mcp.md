@@ -690,3 +690,105 @@ guard and the proposal passed. `test/mcp-client.test.ts` (G3-08) now throws thro
 both eras and on the HTTP path, and checks a read's tool result in both eras.
 `test/audit.test.ts` records the proposal's exception once and the read's
 `catalogue_read_failed` once.
+
+## Amendment: explain reads the detail route's organization (2026-11-21)
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context
+
+`kogane.explain` (`packages/application/src/explain.ts`) builds a graph of
+ids for a result ref. For an observation it writes `account_mapping:`,
+`instrument_mapping:` (`adopted-claim`, depth 2) and `identity-decision:`
+(depth 3) nodes from the organization on the observation detail its reader
+returns. The Worker passed the evidence reader, whose `getObservation`
+returns no organization (`packages/read-model/src/observation-reader.ts`), so
+a served graph never had those levels; only a stub test reader produced them.
+The observation detail route adds the organization beside the same reader,
+with `observationOrganizations`, the function point 2 moved into
+`packages/application` so every route and tool organizes rows through one
+read. `explain` was the one answer that names organization levels without
+reading them that way.
+
+The answer's `contextId` pins `identity:latest:current-mappings-v1` and a
+whole-second clock, never a mapping revision. Reading the organization raises
+the question whether `explain` must now pin the revisions it reads (INV09).
+
+### Options considered
+
+1. **Keep the limit and document it.** The graph shape the code and the
+   published node kinds promise is never served, and the reader the code is
+   written against does not exist outside a test.
+2. **Teach the evidence reader to return the organization.** A second read of
+   the organization, inside `packages/read-model`, beside the one the routes
+   use; the detail route would then have two.
+3. **Give `explain` an organization read that is the detail route's function
+   (chosen),** called only after the grant has allowed the row, under the
+   context's identity mode.
+
+On INV09:
+
+a. **Pin the revisions read in the `contextId`.** Every other `latest` read
+(the shared query, balance pages, the observation routes) pins the
+identity mode and release and re-reads the current revisions; an
+`explain` context with extra pins would no longer equal the
+`kogane.context.open` context for the same inputs, which is what a caller
+hands from one answer to the next. It would also need the revisions before
+the context is opened, a read of a row that has not been authorized yet.
+b. **Pin nothing more, and let the graph name what it read (chosen).** Each
+mapping ref carries the revision it was built from, so two graphs under one
+`contextId` that differ say how. `explain` issues no cursor and no
+`resultRef`, so nothing resumes or is handed off on a revision it did not
+read.
+
+### Decision
+
+Option 3 with b. `ExplainReader` gains `getOrganization(ref, mode)`.
+`organizedExplainReader(reader, sql)` serves it with
+`observationOrganizations(sql, [ref], mode)`, and `explain` calls it after
+`grantAllowsRow` with the opened context's identity mode, which is always
+`latest` on the served paths (`identityRead` stays refused). The Worker's
+`kogane.explain` passes `organizedExplainReader(evidenceReader, d1Executor)`
+on `/api/agent/v1/explain` and `/mcp` alike. The grant, scope and budget
+checks are unchanged, and so is the graph's schema
+(`explanation-graph-v1`) and its node kinds. The organization contributes
+ids and revisions only: a mapping's label and reason, the account entity or
+instrument it maps to (which another source's account may share) and an
+identifier's namespace, scope and value stay out of the graph.
+
+### Consequences
+
+- A served graph of a mapped observation has its `adopted-claim` and
+  `identity-decision` nodes. Its shape changes for every existing ref that
+  is organized; the owner approves the changed answer before this merges.
+- Under `latest`, a mapping corrected between two calls in the same second
+  changes the graph's refs and not its `contextId`, as on every other
+  `latest` read ([agent API](../agent-api.md#explain-and-the-identity-read)).
+- The levels are shown under `summary.read`, like the parse run beside them;
+  no level checks `records.read`. Every served caller holds the whole-store
+  grant (ADR 0084), so this changes nothing served today; a narrower grant
+  would see its own row's mapping ids.
+- A row outside the grant is refused before its organization is read, so its
+  refusal and cost are an absent ref's.
+- An `explain` call runs the organization read's statements for one row
+  (the organization, the preferred instrument names, the account connection
+  and the entity labels), of which it keeps only ids and revisions: the
+  statements the detail route runs to organize the same row.
+
+### Verification
+
+- `services/app/test/explain-organization.test.ts`, over the served Worker on
+  a synthetic store: agent HTTP and MCP answer the same graph for a mapped
+  observation, its levels sit at depths 2 and 3, and its mapping refs equal
+  the detail route's `organization` for the same row; `depth: 2` keeps the
+  claims and cuts the decision; a correction moves the account ref to
+  `@2` and `manual` while the `contextId` stays; no label, reason, entity or
+  identifier value appears; a grant scoped to one source account sees that
+  account's mapping, nothing of a second source account mapped onto the same
+  entity, and that account's row answers exactly as an absent ref. With the
+  served reader's organization removed, the three served-shape tests fail.
+- `packages/application/test/explain-propose.test.ts`: the levels' refs and
+  depths, the mode they are read under, that labels, reasons, entities and
+  identifier values stay out, and that a row outside the grant is refused
+  before any organization read.

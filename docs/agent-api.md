@@ -1782,6 +1782,49 @@ hand to each other: the receiver reads them back under its own authority
 instead of trusting the sender's figures (addendum 11 §8). The Overview page
 shows both under a disclosure for exactly that purpose.
 
+### Explain and the identity read
+
+`kogane.explain` takes `ref` and `depth` and nothing else: any other key,
+`identityRead` included, is `400 unsupported_semantics` with that key as a ref
+(`parseExplainRequest`, `packages/application/src/explain.ts`), on the route
+and the tool alike. Its context is always opened under the latest identity
+(`contextInputs`, `services/app/src/agent-service.ts`), so its `contextId`
+pins the identity release (`identity:latest:current-mappings-v1`) and the
+evaluation clock, which the Worker cuts to whole seconds
+(`services/app/src/agent-api.ts`), and no mapping revision.
+
+For an observation ref, the graph's organization levels come from the
+organization the observation detail route shows: `organizedExplainReader`
+reads it with `observationOrganizations`
+(`packages/application/src/query/observation-organization.ts`), the function
+`GET /api/observations/<kind>/<id>` calls, under the context's identity mode,
+and only after the grant has allowed the row. A mapped observation's graph
+then holds, below the result row:
+
+| Depth | Node                                                                            | Kind                |
+| ----- | ------------------------------------------------------------------------------- | ------------------- |
+| 2     | `account_mapping:<referenceId>@<revision>`                                      | `adopted-claim`     |
+| 2     | `instrument_mapping:<referenceId>@<revision>`                                   | `adopted-claim`     |
+| 3     | `identity-decision:<method>:<referenceId>@<revision>` (under the account claim) | `identity-decision` |
+
+`referenceId` is the source account or instrument identifier id the mapping is
+keyed by, `method` is `rule` or `manual`, and `revision` is the revision that
+was read. An observation no sealed identity run organizes has none of these
+nodes. The levels are shown under `summary.read`, like the parse run beside
+them; only the raw locators need `evidence.read`.
+
+Under `latest` a mapping corrected between two calls in the same second
+leaves the `contextId` as it was and changes the graph's refs to the new
+revision. That is the rule every `latest` read follows: the context pins the
+identity mode and release, not revisions, the `identity` quality dimension of
+a `latest` query says `mappings_may_change_under_latest`
+([result contract](#result-contract)), and balance pages re-read the
+organization overlay. A graph is self-describing instead: each mapping ref
+names the revision it was built from, so two graphs that differ under one
+`contextId` say how. `explain` issues no cursor and no `resultRef`, so nothing
+resumes or hands off on a revision it did not read
+([ADR 0081 amendment 2026-11-21](adr/0081-ui-parity-through-mcp.md#amendment-explain-reads-the-detail-routes-organization-2026-11-21)).
+
 ## Result contract
 
 Every successful query returns
@@ -1861,9 +1904,13 @@ Converting them to JSON does not make them instructions.
 - No tool accepts a free-form URL, host, table name, ordering or SQL. Every
   input schema is closed (`additionalProperties: false`) and every string is
   an enum or a bounded identifier pattern; the test asserts that too.
-- `explain` returns identifiers only — `account_mapping:`, `parse_run:`,
+- `explain` returns identifiers only — `account_mapping:`,
+  `instrument_mapping:`, `identity-decision:`, `parse_run:`,
   `fetch_artifact:`, `raw:<sha256>`. The provider URL an artifact was fetched
-  from is never in a graph, at any capability.
+  from is never in a graph, at any capability, and neither is a mapping's
+  label or reason, the account entity or instrument it maps to, or an
+  identifier's namespace, scope or value
+  ([explain and the identity read](#explain-and-the-identity-read)).
 - Errors carry a code, a fixed remedy sentence and safe refs. No provider
   content, token, SQL text or raw exception string reaches a caller.
 - Bank credentials, sessions and keys are never in a response, and no Access
