@@ -98,6 +98,51 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 - `/api/artifacts` walks an immutable descending id cursor; derived lists use
   deterministic total orderings (each ends in `id`) with an offset.
 
+### Order of `as_of` across shapes
+
+`listTransactions` orders by the text of `as_of` (`COALESCE(as_of, '') DESC,
+id DESC`), and `listBalanceHistory` by the text of `as_of` or `observed_at`.
+The text is not one shape. Transaction parsers write a calendar date
+(`2026-03-04`: MyJCB, Sony Bank, SBI Securities and most others), an instant
+with the `+09:00` offset (PayPay CSV; Mizuho ordinary history at
+`T00:00:00+09:00`; SBI VC Trade's slash-form timestamps), an instant in UTC
+with milliseconds (`2026-03-03T23:00:00.000Z`: V Point Pay notification
+events), or SBI VC Trade's ISO timestamps verbatim with the offset the
+provider wrote. So the order is newest text first, not newest time first:
+
+- Two instants written in different offsets order by their text, not by
+  absolute time: an instant at 05:00 `+09:00` lists above one at 10:00
+  `+09:00` written as `01:00:00.000Z`. Between the `Z` and `+09:00` shapes
+  the error is at most nine hours.
+- A date lists below every instant whose text starts with that date and
+  above every instant whose text starts with an earlier one; an instant in
+  UTC starts with its UTC date. A missing `as_of` lists last.
+- The `from` and `to` filters read the date an `as_of` starts with, so an
+  instant in UTC falls on its UTC date: a V Point Pay event at 08:00
+  `+09:00` on 2026-03-04 is in `to=2026-03-03`. The Transactions page's
+  column sort and date filter in the browser read the same text the same
+  way.
+
+None of this skips or repeats a row: the order is total and ends in `id`,
+so offset pages over a fixed store return every row once. No read picks a
+"latest" transaction from this order. The `activity` intent of
+`kogane.financial.query` merges its per-scope reads with a comparator of
+the same text and id (`compareActivity` in
+`packages/application/src/query/execute.ts`), so its merge takes exactly the
+rows each scope's read put first. `test/transaction-order.test.ts` pins the
+three points above and the paging over mixed shapes.
+
+Ordering by absolute time is an owner decision, not made: instants alone
+could be ordered by their UTC instant, but every total order must also
+place a date among instants, and the domain leaves that open.
+`compareTemporal` (`packages/domain/src/time.ts`) orders an instant against
+a date only when the instant's own calendar date lies wholly outside the
+date (`within_day` otherwise), and `temporalOrderingKey`, the domain's total
+key for paging, sorts every instant before every date rather than among
+them ([domain contracts](domain-contracts.md#timets--role-typed-time)).
+Normalizing the instants alone would also move each date against the
+`+09:00` instants of its own day, which is the same undecided question.
+
 ### Coverage run counts
 
 `fetchRunCounts` is the `coverage` intent's `collectionRunCount`: each listed

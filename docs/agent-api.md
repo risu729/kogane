@@ -267,7 +267,10 @@ request, the operator's browser requests and other MCP clients' included
 
 `activity`'s `from` and `to` are calendar days (`YYYY-MM-DD`; `2026-02-30` is
 not one) and `from` is not after `to`, as the v1 activity route reads them;
-anything else is `invalid_query` (`parseQueryRequest`).
+anything else is `invalid_query` (`parseQueryRequest`). Rows are ordered,
+and matched to `from` and `to`, by the text of their `as_of`, which mixes
+calendar dates with instants in UTC and in `+09:00`: a limit described in
+[read model: order of `as_of` across shapes](read-model.md#order-of-as_of-across-shapes).
 
 `coverage` lists each in-scope source — the grant's sources, narrowed by the
 `source` filter — with its `artifactCount` and `collectionRunCount`: the
