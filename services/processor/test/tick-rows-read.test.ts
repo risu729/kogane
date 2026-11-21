@@ -1,7 +1,9 @@
 // What the Processor tick's heaviest reads cost on D1, measured with workerd's
-// own `meta.rows_read` (issue #1491). Two synthetic CORE stores hold
-// the same current state over a history of N and 2N capture days: the card
-// store of `card-usage-scale-fixture.ts` (Vpass cards with their trusted
+// own `meta.rows_read` (issue #1491). Two synthetic CORE stores hold the same
+// current balances, positions, reward buckets and stale card purchase keys over
+// a history of N and 2N capture days (the current card usage page also returns
+// the older statement months the longer history still holds as current): the
+// card store of `card-usage-scale-fixture.ts` (Vpass cards with their trusted
 // binding runs, a MyJCB connection, SMBC, St.George and SBI Shinsei, statement
 // history and settlement reviews) plus, on each capture day, a V Point run of
 // its three page datasets (the history page empty, as a page with no entries
@@ -399,8 +401,12 @@ beforeAll(async () => {
   [small, large] = results as [Measured, Measured];
 }, 600_000);
 
-test("the stores hold the same current state over twice the history", () => {
+test("the stores hold the same current balances, positions, reward buckets and stale keys over twice the history", () => {
   expect(large.artifacts).toBeGreaterThan(1.9 * small.artifacts);
+  const staleKeys = (measured: Measured) =>
+    measured.named.staleKeys.rowsReturned / measured.named.staleKeys.executions;
+  expect(small.named.staleKeys.rowsReturned).toBeGreaterThan(0);
+  expect(staleKeys(large)).toBe(staleKeys(small));
   expect(small.currentBalances).toBeGreaterThan(0);
   expect(large.currentBalances).toBe(small.currentBalances);
   expect(small.currentPositions).toBe(3);

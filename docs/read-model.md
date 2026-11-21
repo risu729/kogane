@@ -358,7 +358,8 @@ on every CORE migration):
 
 `services/processor/test/tick-rows-read.test.ts` measures workerd's own
 `meta.rows_read` per call through each statement's real caller, on two
-synthetic stores with the same current state over 30 and 60 capture days
+synthetic stores with the same current balances, positions, reward buckets and
+stale keys over 30 and 60 capture days
 (972 and 1,942 artifacts: the card store of `card-usage-scale-fixture.ts` at
 `STATEMENT_CI_SCALE`, plus a V Point run, an SBI Securities positions run and
 their reward claims per day), copied into Miniflare D1:
