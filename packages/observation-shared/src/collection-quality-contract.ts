@@ -19,6 +19,7 @@
 // already pins), strict objects throughout, and the TypeScript types are
 // inferred from them, so the shape is stated once.
 import * as z from "zod/mini";
+import { PAGE_READ_SCHEMA_VERSION } from "./api-contract.ts";
 import {
   COLLECTION_FRESHNESS_POLICY,
   COLLECTION_FRESHNESS_STATES,
@@ -1140,9 +1141,6 @@ export const ACCOUNT_SUMMARY_LINE_PAGE = 20;
  * writes it, which is what an MCP client shows (issue 1414).
  */
 export const ACCOUNT_SUMMARY_BYTES = 8_192;
-/** The page reads' result envelope (`services/app/src/page-read-tools.ts`). */
-const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
-
 /** The bytes of `data` as a page read tool answers it (`{ schemaVersion, data }`, serialized). */
 export function pageReadAnswerBytes(data: unknown): number {
   return new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))

@@ -594,7 +594,7 @@ Synthetic data only; no production data, remote D1 or deployed Worker.
 
 ## Amendment 2026-11-12: SBI Shinsei settlement posting dates
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1328](https://github.com/risu729/kogane/pull/1328))
 - Scope: [state reconstruction issue 550](https://github.com/risu729/kogane/issues/550),
   future acceptances only; no migration, financial matching policy or activation.
 

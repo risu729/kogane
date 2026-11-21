@@ -210,6 +210,22 @@ describe("the grant and the request", () => {
     expect(
       await refusal({ grant: { ...READER, scopes: { sources: ["vpass"], accounts: "*" } } }),
     ).toEqual({ code: "evidence_restricted", refs: ["scope:source"] });
+    // What the deployment serves is a schema read: not asked before a refusal.
+    for (const [grant, since] of [
+      [{ ...READER, capabilities: ["summary.read"] }, SINCE],
+      [READER, "yesterday"],
+    ] as const) {
+      const outcome = await readChangesSince({
+        grant,
+        sql: untouched,
+        served: async () => {
+          throw new Error("served asked before the refusal");
+        },
+        request: { since },
+        now: NOW,
+      });
+      expect(outcome.ok).toBe(false);
+    }
     expect(
       await refusal({ grant: { ...READER, scopes: { sources: "*", accounts: ["acct-1"] } } }),
     ).toEqual({ code: "evidence_restricted", refs: ["scope:account"] });

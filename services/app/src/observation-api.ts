@@ -33,7 +33,10 @@ import {
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
 import { readDetail } from "../../../packages/application/src/query/read-detail.ts";
-import { overviewSummary } from "../../../packages/application/src/query/overview-detail.ts";
+import {
+  OverviewSummaryLimitError,
+  overviewSummary,
+} from "../../../packages/application/src/query/overview-detail.ts";
 import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
@@ -215,7 +218,16 @@ export async function readObservationRoute(
     const detail = readDetail(url.searchParams.get("detail"));
     if (detail === null) throw new HttpError(400, "invalid_detail");
     const page = boundedPage({ ...(await reader.overview()) }) as unknown as OverviewPage;
-    return { body: detail === "full" ? page : overviewSummary(page) };
+    if (detail === "full") return { body: page };
+    try {
+      return { body: overviewSummary(page) };
+    } catch (error) {
+      // Its status lines alone pass the byte budget (amendment 2026-11-20):
+      // refused, never answered past it or with a status line cut.
+      if (error instanceof OverviewSummaryLimitError)
+        throw new HttpError(413, "result_limit_exceeded", [], { retryWith: { detail: "full" } });
+      throw error;
+    }
   }
   if (path === "/api/transactions") {
     const transactions = await organizeRows(

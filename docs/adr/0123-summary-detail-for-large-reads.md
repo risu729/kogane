@@ -538,7 +538,9 @@ Measured as the bytes of the MCP result's structured content
   about 110 bytes under 8 KB for them, so three more sources with their own
   artifact counts, five more codes, or three more characters on every
   source id pass 8 KB (with 100-character source ids the bound is about
-  12 KB). A maintenance page is bounded by its 16 lines: a rule line is
+  12 KB). The
+  [amendment of 2026-11-20](#amendment-the-overview-summary-is-held-to-8-kb-by-construction-2026-11-20)
+  closes this limit for the overview. A maintenance page is bounded by its 16 lines: a rule line is
   about 300 bytes with its 20 revisions' codes, so a page passes 8 KB only
   when most of its lines are rules whose revisions carry most of the eight
   change reasons and each sits under its own source; nothing measured comes
@@ -618,6 +620,174 @@ Measured as the bytes of the MCP result's structured content
   overview refuses a summary; `apps/web/test/overview-counts.browser.test.ts`
   answers the overview only when asked for `detail=full`, and the page still
   renders every run.
+
+## Amendment: the overview summary is held to 8 KB by construction (2026-11-20)
+
+- Status: proposed. **Owner approval is needed before merge**: it changes
+  the default answer of `kogane.store.read` `{page: overview}` and of
+  `GET /api/overview` (two new keys, lists that can hold fewer lines than
+  their cap, and a new refusal), as the amendment above did.
+- Date: 2026-11-20
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
+  (point 1, "Responses are huge and get truncated"), the open limit the
+  amendment above records
+- Carried by: `packages/application/src/query/overview-detail.ts`,
+  `packages/observation-shared/src/api-contract.ts`
+  (`OVERVIEW_SUMMARY_BYTES`, `PAGE_READ_SCHEMA_VERSION`),
+  `packages/observation-shared/src/api-validation.ts`,
+  `services/app/src/observation-api.ts`, `services/app/src/http.ts`,
+  `services/app/src/page-read-tools.ts`
+
+### Context
+
+The amendment above caps the overview summary's lists and per-line codes,
+which bounds how many lines it has but not how long they are. Its own open
+limit measures the bound at 8,081 bytes with today's names, about 110 bytes
+under the 8 KB a client shows: three more sources with their own artifact
+counts, three more characters on every source id, or 100-character source
+ids (the schema's maximum, about 12 KB) pass it, and parser names have no
+bound at all. The summary did not guarantee 8 KB, which is what issue 1414
+asked for.
+
+### Options considered
+
+1. **Lower the caps.** Fewer lines a list still have no byte bound while
+   names do not.
+2. **Cut long names.** A cut source id, dataset or parser name no longer
+   names its row, so it cannot be read further; never.
+3. **Refuse whenever the capped summary is over 8 KB.** Three more sources
+   would refuse the default answer.
+4. **Measure the answer and trim it: lines, then per-line codes, then the
+   per-source `sources` lines; refuse past that.** Trimming lines until the
+   answer fits leaves no line whose codes the second step could trim, and
+   at the schema's longest names (measured below) it answers 36 of 38
+   sources' artifact counts and not one failing source or parser.
+5. **Measure the answer and trim it: sources, then per-line codes, then
+   lines; refuse past that (chosen).** A source's artifact count is neither
+   a state, a reason nor a code, and `detail: "full"` and
+   `kogane.evidence.read` hold every one; a code moved off a line stays on
+   its status's line, so only which line it was on is lost; a line moved
+   into its list's count loses which source or parser it was, so it goes
+   last. At the same names it answers every failing line.
+
+### Decision
+
+1. **The budget.** `OVERVIEW_SUMMARY_BYTES` is 8,192: the UTF-8 bytes of
+   the tool's answer `{ schemaVersion: "kogane-page-read-v1", data }`
+   serialized as the tool's text content (`JSON.stringify`, as the MCP
+   adapter writes it). The route answers `data` alone, 47 bytes shorter.
+   `PAGE_READ_SCHEMA_VERSION` moves to `packages/observation-shared` so the
+   summary measures the very envelope the tool sends.
+2. **Untrimmed first.** `overviewSummary` builds the summary under the
+   caps as before. When its answer fits, it is the answer, with
+   `sourcesOmitted: 0` and `budget: { bytes: 8192, trimmed: false }`.
+3. **Then trimmed, one step at a time in a fixed order, stopping at the
+   first answer that fits** (`budget.trimmed: true`):
+   1. sources, the last in the full answer's order (by id) first, counted
+      in `sourcesOmitted` (leaving one more out never lengthens the answer,
+      so the most that fit are found by halving, as one at a time would);
+   2. per-line failure codes, the oldest listed `notOk` line's first and
+      each line's oldest code first, counted in its `moreFailureCodes`;
+   3. lines, the oldest line of the list holding the most first (a tie goes
+      `unitUpdates`, `notSuccessful`, `notOk`), counted in its status's
+      `notSuccessfulOmitted` or `notOkOmitted` entry or in
+      `unitUpdatesOmitted`.
+4. **Never trimmed:** `counts`, `coverage`, and the `byStatus` lines, each
+   with its counts, its newest run and every distinct failure code of its
+   runs; and every omitted count. When these alone are over the budget, the
+   summary throws `OverviewSummaryLimitError`, and the route and both agent
+   transports answer `413 result_limit_exceeded` with the closed hint
+   `retryWith: { detail: "full" }` (`HttpErrorHints` gains `retryWith`).
+   How large this part can grow: `counts` is the reader's fixed list of
+   nine tables; `fetchRuns.byStatus` holds at most two lines, each naming
+   one source id (at most 100 characters); `parseRuns.byStatus` at most
+   three, each naming one parser (no schema bound) and every distinct code
+   of its runs (at most 64 characters each, as `safeCode` passes them on;
+   the Processor writes a closed set of 29 and `unclassified`). Measured
+   with every one of today's 30 codes on the error line, it is 2,856 bytes
+   at today's names, 3,022 with 100-character source ids and 4,102 with
+   400-character parser names; it passes 8 KB only past parser names of
+   about 1,800 characters on all three status lines, or about 80 more
+   distinct codes of 64 characters.
+5. **Said in the answer.** `budget: { bytes, trimmed }` and
+   `sourcesOmitted` are always present. `trimmed` is true exactly when the
+   summary shows what only the budget does: a list that leaves lines out
+   while holding fewer than five, a `notOk` line that counts codes while
+   listing fewer than three, or `sourcesOmitted` above 0.
+6. **The validator** refuses a summary whose answer passes the budget, one
+   whose `budget.bytes` is another number, and one whose `budget.trimmed`
+   disagrees with what it shows. It drops the rules that a list leaves
+   lines out only when full and that a line counts codes only when it lists
+   three (each now holds exactly when `trimmed` is false), and keeps every
+   rule that refuses a miscount.
+
+### Consequences
+
+Measured as the bytes of the tool's answer
+(`test/mcp-answer-size.test.ts`, `--silent=false`):
+
+| Read                                                                                    | Summary | What the budget trimmed                                  |
+| --------------------------------------------------------------------------------------- | ------: | -------------------------------------------------------- |
+| `kogane.store.read` `{page: overview}`, synthetic store                                 |   1,558 | nothing                                                  |
+| the realistic worst of the amendment above                                              |   6,941 | nothing                                                  |
+| its bound (today's names)                                                               |   8,140 | nothing                                                  |
+| the bound with three more sources                                                       |   8,191 | 2 of 41 sources                                          |
+| the bound with three more characters on every source id                                 |   8,175 | 2 of 38 sources                                          |
+| the bound at 100-character source ids, 200-character datasets and 120-character parsers |   8,172 | all 38 sources and 12 of 15 line codes; every line kept  |
+| the same over 120 sources                                                               |   8,172 | all 120 sources and 12 of 15 line codes; every line kept |
+| a failed parse under a 9,000-character parser name                                      |       — | refused: `413 result_limit_exceeded`                     |
+
+- The default overview answer fits what a client shows whatever the store
+  holds, or is refused with a closed code; a client never cuts it. The
+  bound at today's names leaves 52 bytes, so a little growth of the source
+  registry already leaves a source or two out: `budget.trimmed` and
+  `sourcesOmitted` say so, and `detail: "full"` lists them.
+- Which sources a trimmed summary leaves out is fixed (the last by id), not
+  chosen by relevance; their number is in the answer and their ids are in
+  `full` (an open limit). The failing lines are kept longest.
+- Every summary carries two keys more (59 bytes), and a reader that relied
+  on a list being full before it leaves lines out reads `budget.trimmed`.
+- An untrimmed summary is serialized once; a trimmed one at most about 30
+  times more plus the halving over sources, each an answer a few kilobytes
+  over the budget (more with many long source ids), over the 500-row window.
+
+### Verification
+
+- `packages/application/test/overview-detail.test.ts`: a full answer at
+  the schema's longest source ids and datasets, widened 16 bytes at a time,
+  is untrimmed, then leaves sources out (the last by id first; the first
+  step one source), then moves per-line codes (the fifth line's oldest
+  first, then the fourth's), then lines (`unitUpdates` first on a tie, then
+  `notSuccessful`, then `notOk`, each its oldest), and then is refused,
+  never trimmed less as it grows; each answer is at most 8,192 bytes and
+  validates, and its error line keeps every code. Three 3,000-character
+  parser names are refused, with or without sources. The validator refuses
+  a trimmed summary that says it was not, an untrimmed one that says it
+  was, another budget, an answer over 8,192 bytes, and lines or codes left
+  out uncounted or miscounted. The seeded property test runs its 1,500 full
+  answers as before (none trimmed) and 600 more at up to 120 sources,
+  100-character source ids, 200-character datasets, 400-character parser
+  names, 64-character codes and safe-integer counts: every summary is at
+  most 8,192 bytes and validates, each list is the reference's newest lines
+  (all five when untrimmed), each line's codes are its newest, every line,
+  run and code is counted, the sources listed are the first by id, each
+  budget step comes only after the one before it, and every step comes up.
+- `services/app/test/mcp-answer-size.test.ts`: the realistic worst and the
+  bound are untrimmed and under 7 KB and 8 KB; the four extremes above are
+  trimmed to at most 8,192 bytes, validate, count every run, line and
+  source, and keep every Processor code on the error line; a failed parse
+  under a parser name of 1,500 three-byte characters (4,500 bytes, 1,500
+  UTF-16 code units) is trimmed so that the text `/mcp` sends is at most
+  8,192 UTF-8 bytes, and `/api/agent/v1/*` answers the same and the route
+  the same `data`, 47 bytes shorter; a failed parse
+  under a 9,000-character parser name is `413 result_limit_exceeded` with
+  `retryWith: { detail: "full" }` on the route, `/mcp` and
+  `/api/agent/v1/*`, and `detail=full` still answers it.
+- `services/app/test/ui-mcp-parity.test.ts`: the `kogane.store.read`
+  description names the budget, what it trims, the flag and the refusal,
+  within 2,048 characters.
+- `apps/web/test/api-transport.test.ts`: the summary fixture carries the two
+  new keys.
 
 ## Amendment: the collection quality account view answers a paged summary by default (2026-11-20)
 
