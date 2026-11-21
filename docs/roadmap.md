@@ -519,7 +519,10 @@ observations map to: per account and data type (dataset, parser, observation
 kind) the periods that are current, held back by a newer capture that is not
 current, or only in a capture that is not current, each with the cell's closed
 reasons, and apart from them the cells no observation attributes to an
-account ([ADR 0088](adr/0088-collection-quality-per-account.md)). A period no
+account ([ADR 0088](adr/0088-collection-quality-per-account.md); the tool's
+default is a summary of one line per account, paged within 8 KB, and
+`detail: "full"` lists the periods,
+[ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)). A period no
 capture has is not listed and not claimed missing; an account two sources name
 is shown under each; whether an account is the owner's is not decided there.
 It was read in production on 2026-11-09 ([Phase 3 outcome](#phase-3-outcome)).

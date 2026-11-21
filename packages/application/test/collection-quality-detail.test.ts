@@ -6,19 +6,29 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
+  ACCOUNT_SUMMARY_BYTES,
+  ACCOUNT_SUMMARY_LINE_PAGE,
+  type AccountCoverage,
+  type AccountCoverageSummary,
+  CELL_REASONS,
+  OBSERVATION_KINDS,
+  pageReadAnswerBytes,
   validCollectionQualityResponse,
   type CollectionQualityCell,
 } from "../../observation-shared/src/collection-quality-contract.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { QualityStore } from "../../read-model/test/collection-quality-fixture.ts";
 import {
+  CollectionQualityLimitError,
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../src/query/collection-quality.ts";
 import {
+  accountCoverageSummary,
   collectionQualityCellSummary,
   collectionQualitySummaryLines,
 } from "../src/query/collection-quality-detail.ts";
+import { REALISTIC_ACCOUNT_SCALE, syntheticAccountCoverage } from "./account-coverage-scale.ts";
 
 /** Every age is counted to this instant (collection-freshness-v1); after every synthetic capture. */
 const AS_OF = "2099-03-01T00:00:00.000Z";
@@ -208,5 +218,311 @@ describe("the summary's lines", () => {
     for (const cell of page.cells)
       expect(codes[cell.unitKey!]).toEqual(nonNull([cell.newest.unitFailureCode]));
     expect(codes["synthetic-card-a"]).toEqual(["stated_total_mismatch"]);
+  });
+});
+
+// ── The account view's summary (ADR 0123, amendment 2026-11-20) ──
+
+const ACCOUNTS_PATH = "/api/collection-quality/synthetic-source/accounts";
+
+/** Every page of the account view's summary, from offset 0, each checked against the wire contract. */
+function summaryPages(full: AccountCoverage): AccountCoverageSummary[] {
+  const pages: AccountCoverageSummary[] = [];
+  for (let offset = 0; ;) {
+    const page = accountCoverageSummary(full, offset);
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, page, "summary")).toBe(true);
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, page, "full")).toBe(false);
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, page)).toBe(true);
+    expect(pageReadAnswerBytes(page)).toBeLessThanOrEqual(ACCOUNT_SUMMARY_BYTES);
+    expect(page.coverage.offset).toBe(offset);
+    pages.push(page);
+    if (page.coverage.nextOffset === null) break;
+    expect(page.coverage.nextOffset).toBe(offset + page.accounts.length + page.unattributed.length);
+    offset = page.coverage.nextOffset;
+  }
+  return pages;
+}
+
+const counted = <T>(values: readonly T[], value: T) =>
+  values.filter((entry) => entry === value).length;
+
+/** The pages list every account and unattributed cell once, each line saying what its full entries say. */
+function expectCollapsed(full: AccountCoverage, pages: readonly AccountCoverageSummary[]): void {
+  const accounts = pages.flatMap((page) => page.accounts);
+  expect(accounts.map((line) => line.accountId)).toEqual(
+    full.accounts.map((account) => account.accountId),
+  );
+  for (const [index, account] of full.accounts.entries()) {
+    const line = accounts[index]!;
+    const periods = account.dataTypes.flatMap((type) => type.periods);
+    const named = nonNull(periods.map((entry) => entry.period.value)).sort();
+    const standings = periods.map((entry) => entry.standing);
+    const states = periods.map((entry) => entry.cellState);
+    expect(line).toEqual({
+      accountId: account.accountId,
+      label: account.label,
+      statuses: account.statuses,
+      freshness: account.freshness,
+      kinds: OBSERVATION_KINDS.filter((kind) =>
+        account.dataTypes.some((type) => type.kind === kind),
+      ),
+      dataTypes: account.dataTypes.length,
+      providerTypes: expect.any(Array),
+      periods: { count: periods.length, first: named[0] ?? null, last: named.at(-1) ?? null },
+      standings: {
+        current: counted(standings, "current"),
+        olderCurrent: counted(standings, "older-current"),
+        newestNotCurrent: counted(standings, "newest-not-current"),
+      },
+      cellStates: {
+        current: counted(states, "current"),
+        olderCurrent: counted(states, "older-current"),
+        noCurrent: counted(states, "no-current"),
+      },
+      newestCapturedAt: expect.any(String),
+      reasons: expect.any(Array),
+    });
+    // Every reason and provider type of what the line collapses, once.
+    expect([...line.reasons].sort()).toEqual(
+      [...new Set(periods.flatMap((entry) => entry.reasons))].sort(),
+    );
+    expect([...line.providerTypes].sort()).toEqual(
+      [...new Set(account.dataTypes.flatMap((type) => type.providerTypes))].sort(),
+    );
+    expect(Date.parse(line.newestCapturedAt)).toBe(
+      Math.max(...periods.map((entry) => Date.parse(entry.capture.capturedAt))),
+    );
+  }
+  const apart = pages.flatMap((page) => page.unattributed);
+  expect(apart.reduce((sum, line) => sum + line.cells, 0)).toBe(full.unattributed.length);
+  for (const cell of full.unattributed) {
+    const line = apart.find(
+      (entry) =>
+        entry.dataset === cell.dataset &&
+        entry.parser === cell.parser &&
+        entry.unitKey === cell.unitKey,
+    )!;
+    for (const reason of cell.reasons) expect(line.reasons).toContain(reason);
+  }
+  for (const line of apart)
+    expect(line.current + line.olderCurrent + line.noCurrent).toBe(line.cells);
+  for (const page of pages)
+    expect(page.coverage).toMatchObject({
+      accounts: full.accounts.length,
+      unattributedCells: full.unattributed.length,
+      lines: full.accounts.length + apart.length,
+      limit: ACCOUNT_SUMMARY_LINE_PAGE,
+    });
+}
+
+describe("the account view's summary", () => {
+  test("pages a source with 62 accounts under 8 KB, every account and cell counted once", () => {
+    const full = syntheticAccountCoverage(REALISTIC_ACCOUNT_SCALE);
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "full")).toBe(true);
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "summary")).toBe(false);
+    expect(full.cells).toBe(2_000);
+    const pages = summaryPages(full);
+    expectCollapsed(full, pages);
+    expect(pages[0]!.coverage.lines).toBe(62 + 28);
+    // The measurement, for the amendment's table.
+    console.log(
+      `account summary, realistic worst: full ${pageReadAnswerBytes(full)} bytes; pages ${pages
+        .map(
+          (page) =>
+            `${pageReadAnswerBytes(page)} (${page.accounts.length + page.unattributed.length} lines)`,
+        )
+        .join(", ")}`,
+    );
+    expect(pageReadAnswerBytes(full)).toBeGreaterThan(100 * ACCOUNT_SUMMARY_BYTES);
+    // The catalogue keeps every type under its status, without parsers or issues.
+    const typed = (status: string) =>
+      full.dataTypes!.filter((entry) => entry.status === status).map((entry) => entry.type);
+    expect(pages[0]!.dataTypes).toEqual({
+      collected: typed("collected"),
+      partial: typed("partial"),
+      notCollected: typed("not_collected"),
+    });
+  });
+
+  test("holds every page to 8 KB when every line carries every code and a long label", () => {
+    const full = syntheticAccountCoverage({
+      ...REALISTIC_ACCOUNT_SCALE,
+      accounts: 25,
+      typesPerAccount: 4,
+      periodsPerType: 12,
+      statuses: 4,
+      kinds: 4,
+      labelChars: 200,
+      providerTypesPerParser: 12,
+      reasons: [...CELL_REASONS],
+      unattributedReasons: [...CELL_REASONS],
+    });
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "full")).toBe(true);
+    const pages = summaryPages(full);
+    expectCollapsed(full, pages);
+    // The bytes, not the line limit, end these pages.
+    for (const page of pages.slice(0, -1)) {
+      const listed = page.accounts.length + page.unattributed.length;
+      expect(listed).toBeGreaterThan(0);
+      expect(listed).toBeLessThan(ACCOUNT_SUMMARY_LINE_PAGE);
+    }
+    console.log(
+      `account summary, every code and 200-character labels: ${pages
+        .map(
+          (page) =>
+            `${pageReadAnswerBytes(page)} (${page.accounts.length + page.unattributed.length} lines)`,
+        )
+        .join(", ")}`,
+    );
+  });
+
+  test("holds a page of short lines to its line limit, and answers an offset past the end empty", () => {
+    // An unattributed line with no reason is about 250 bytes, so 20 fit; an
+    // account line (a 64-hex id) is about 470 bytes at least, so the bytes
+    // end a page of accounts first.
+    const full = syntheticAccountCoverage({
+      ...REALISTIC_ACCOUNT_SCALE,
+      accounts: 0,
+      unattributed: { units: 45, datasets: 1, periods: 1 },
+      unattributedReasons: [],
+    });
+    const pages = summaryPages(full);
+    expect(pages.map((page) => page.unattributed.length)).toEqual([20, 20, 5]);
+    expectCollapsed(full, pages);
+    const past = accountCoverageSummary(full, 200);
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, past, "summary")).toBe(true);
+    expect(past).toMatchObject({
+      accounts: [],
+      unattributed: [],
+      coverage: { lines: 45, offset: 200, truncated: false, nextOffset: null },
+    });
+  });
+
+  test("keeps an uncataloged source's data types null, and a source with no account as its cells", () => {
+    const full = {
+      ...syntheticAccountCoverage({ ...REALISTIC_ACCOUNT_SCALE, accounts: 0 }),
+      dataTypes: null,
+    } as AccountCoverage;
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "full")).toBe(true);
+    const pages = summaryPages(full);
+    expect(pages[0]!.dataTypes).toBeNull();
+    expect(pages.flatMap((page) => page.accounts)).toEqual([]);
+    expectCollapsed(full, pages);
+    // Seven units of four datasets: 28 lines over two pages, 140 cells.
+    expect(pages.flatMap((page) => page.unattributed)).toHaveLength(28);
+    expect(pages.map((page) => page.unattributed.length)).toEqual([20, 8]);
+    expect(pages[0]!.coverage).toMatchObject({ accounts: 0, unattributedCells: 140, lines: 28 });
+  });
+
+  test("refuses a page whose one line cannot fit, never cutting it", () => {
+    const long = "長".repeat(512);
+    const full = syntheticAccountCoverage({
+      ...REALISTIC_ACCOUNT_SCALE,
+      accounts: 0,
+      unattributed: { units: 1, datasets: 1, periods: 2 },
+    });
+    full.unattributed = full.unattributed.map((cell, index) => ({
+      ...cell,
+      dataset: long,
+      parser: long,
+      unitKey: long,
+      period: { ...cell.period, value: `${long.slice(1)}${String(index)}` },
+    }));
+    expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "full")).toBe(true);
+    expect(() => accountCoverageSummary(full, 0)).toThrow(CollectionQualityLimitError);
+  });
+
+  test("fails the wire check when a page miscounts, misorders, mispages or passes 8 KB", () => {
+    const page = accountCoverageSummary(syntheticAccountCoverage(REALISTIC_ACCOUNT_SCALE), 0);
+    const passes = (change: (value: AccountCoverageSummary) => void) => {
+      const value = structuredClone(page);
+      change(value);
+      return validCollectionQualityResponse(ACCOUNTS_PATH, value, "summary");
+    };
+    expect(passes(() => {})).toBe(true);
+    expect(passes((value) => (value.accounts[0]!.standings.current += 1))).toBe(false);
+    expect(passes((value) => (value.accounts[0]!.cellStates.noCurrent += 1))).toBe(false);
+    expect(passes((value) => value.accounts.reverse())).toBe(false);
+    expect(passes((value) => (value.coverage.nextOffset! += 1))).toBe(false);
+    expect(passes((value) => (value.coverage.truncated = false))).toBe(false);
+    expect(passes((value) => value.accounts.pop())).toBe(false);
+    expect(passes((value) => (value.accounts[0]!.freshness.ageDays! += 1))).toBe(false);
+    expect(passes((value) => (value.accounts[0]!.label = "テ".repeat(500)))).toBe(false);
+    expect(passes((value) => (value.accounts[0]!.reasons = ["not_a_reason" as never]))).toBe(false);
+    expect(passes((value) => (value.coverage.limit = 10 as never))).toBe(false);
+    // An unattributed line on a page that has not listed every account it holds.
+    expect(
+      passes((value) => {
+        value.accounts.pop();
+        value.unattributed.push({
+          dataset: null,
+          parser: null,
+          unitKey: null,
+          cells: 1,
+          periods: { first: null, last: null },
+          current: 0,
+          olderCurrent: 0,
+          noCurrent: 1,
+          reasons: [],
+        });
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("the account view's summary over random sources", () => {
+  test("walks every page of each to the full answer's lines, once each, in order", () => {
+    // A fixed seed, so a failure names the same source on every run.
+    let seed = 20_261_120;
+    const random = () => (seed = (seed * 1_103_515_245 + 12_345) & 0x7f_ff_ff_ff) / 0x7f_ff_ff_ff;
+    const below = (n: number) => Math.floor(random() * n);
+    const some = <T>(values: readonly T[]) => values.filter(() => random() < 0.3);
+    // Multi-byte, four-byte and JSON-escaped characters, so bytes differ from characters.
+    const letters = ["a", "テ", "長", "😀", '"', "\\", "\u0001", "\n", " "];
+    const text = (max: number) =>
+      Array.from({ length: below(max) }, () => letters[below(letters.length)]!)
+        .join("")
+        .slice(0, max);
+    for (let source = 0; source < 150; source++) {
+      const full = syntheticAccountCoverage({
+        ...REALISTIC_ACCOUNT_SCALE,
+        accounts: below(30),
+        typesPerAccount: 1 + below(3),
+        periodsPerType: 1 + below(5),
+        statuses: 1 + below(4),
+        kinds: 1 + below(4),
+        providerTypesPerParser: 1 + below(12),
+        unattributed: { units: below(8), datasets: 1 + below(3), periods: 1 + below(4) },
+      });
+      for (const account of full.accounts) {
+        account.label = text(random() < 0.1 ? 512 : 60);
+        for (const type of account.dataTypes)
+          for (const entry of type.periods) {
+            entry.reasons = some(CELL_REASONS);
+            if (random() < 0.2) entry.period = { kind: "latest", value: null, state: null };
+          }
+      }
+      for (const cell of full.unattributed) {
+        if (random() < 0.2) cell.dataset = null;
+        if (random() < 0.3) cell.unitKey = text(40) || null;
+        cell.reasons = some(CELL_REASONS);
+      }
+      expect(validCollectionQualityResponse(ACCOUNTS_PATH, full, "full"), String(source)).toBe(
+        true,
+      );
+      const pages = summaryPages(full);
+      expectCollapsed(full, pages);
+      const lines = pages.flatMap((page) => [...page.accounts, ...page.unattributed]);
+      const units = new Set(
+        full.unattributed.map((cell) => JSON.stringify([cell.dataset, cell.parser, cell.unitKey])),
+      );
+      expect(lines, String(source)).toHaveLength(full.accounts.length + units.size);
+      // A page from any offset lists the lines the walk from 0 has there.
+      const offset = below(lines.length + 1);
+      const page = accountCoverageSummary(full, offset);
+      expect([...page.accounts, ...page.unattributed], String(source)).toEqual(
+        lines.slice(offset, offset + page.accounts.length + page.unattributed.length),
+      );
+    }
   });
 });
