@@ -1440,7 +1440,7 @@ async function status(env: Env): Promise<Response> {
     replay: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
   };
   for (const row of laneRows.results) {
-    const lane = lanes[row.lane];
+    const lane = Object.hasOwn(lanes, row.lane) ? lanes[row.lane] : undefined;
     if (!lane) continue;
     if (
       row.status === "pending" ||
