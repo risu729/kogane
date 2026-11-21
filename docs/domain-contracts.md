@@ -212,7 +212,10 @@ policy it applies; none has a default.
 
 ## `context.ts` — fixing the inputs of a result
 
-- `FinancialContext` (schema `financial-context-v1`): query semantics
+- `FinancialContext` (schema `financial-context-v2`; v2's publication marker
+  also moves with an activation, a rollback, a run exclusion or a dataset
+  policy update,
+  [ADR 0091 amendment](adr/0091-query-cursor-paging-basis.md#amendment-2026-11-21-a-publication-marker-that-moves-with-every-publication-change)): query semantics
   version, perimeter, effective time, knowledge cutoff, publication and the
   manifest references for source selection, parser build, metadata build,
   identity decisions, event decisions, reference data, calculation policy and

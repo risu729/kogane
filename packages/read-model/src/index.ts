@@ -49,6 +49,7 @@ export {
   type ObservationReference,
   type ParsingHealth,
   type PositionQuery,
+  type PublicationMarks,
   type RawDownload,
   type RawDownloadReference,
   type ReaderOptions,
