@@ -68,8 +68,12 @@ export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v3";
  * The reason a candidate is left unresolved when another contender of its
  * target is a different reference the current identity mapping maps to the
  * same account entity, and no decision says whether the two are one
- * measurement (ADR 0001's amendment of 2026-11-20). It replaces the generic
- * `overlap_unknown` only for that cause, so the entity is shown, not counted.
+ * measurement (ADR 0001's amendment of 2026-11-20), or when the mapping is
+ * what forces the two to overlap. It replaces the generic `overlap_unknown`
+ * only for that cause, so the entity is shown, not counted. A pair accepted
+ * decisions alone force to overlap keeps `overlap_unknown` even when the
+ * policy withheld its disjointness because a mapped scope lies on the way:
+ * no entity is shared there, and the reason must not say one is.
  */
 const ACCOUNT_ENTITY_SHARED = "account_entity_shared";
 
@@ -400,9 +404,14 @@ interface ScopeOrder {
   entities: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
+/**
+ * `readEntities: false` gives the order accepted decisions alone make, which
+ * only names the cause of an unknown overlap (`entityTakesPart`).
+ */
 function scopeOrder(
   candidates: readonly ProjectionCandidate[],
   decisions: readonly DerivedScopeRelation[],
+  readEntities = true,
 ): ScopeOrder {
   const parent = new Map<string, string>();
   const classOf = (key: string): string => {
@@ -422,7 +431,7 @@ function scopeOrder(
   for (const candidate of candidates)
     // `typeof` and not `!== null`: an input captured before the field
     // existed lacks it.
-    if (typeof candidate.accountEntity === "string") {
+    if (readEntities && typeof candidate.accountEntity === "string") {
       const held = entities.get(candidate.subjectScopeKey) ?? new Set<string>();
       held.add(candidate.accountEntity);
       entities.set(candidate.subjectScopeKey, held);
@@ -621,6 +630,38 @@ function entitySharing(
   };
 }
 
+/**
+ * Whether the current identity mapping is what keeps two subjects from being
+ * declared disjoint, so the reason may name it: the two share an entity of
+ * their own, or `entitySharing` withholds the pair and accepted decisions
+ * alone (`decided`, the order read without entities) would not force it to
+ * overlap. A pair decisions alone force to overlap is withheld only because a
+ * mapped scope lies on the way, and no entity is shared there, so its unknown
+ * overlap keeps `overlap_unknown`. The decided lower sets are built only when
+ * a withheld pair is asked about.
+ */
+function entityTakesPart(
+  subjects: Iterable<string>,
+  order: ScopeOrder,
+  decided: ScopeOrder,
+  sharesEntity: (left: string, right: string) => boolean,
+): (left: string, right: string) => boolean {
+  const starts = [...subjects];
+  let sets: LowerSets | undefined;
+  return (left, right) => {
+    if (!sharesEntity(left, right)) return false;
+    if (shareAccountEntity(order.entities.get(left), order.entities.get(right))) return true;
+    sets ??= lowerSets(
+      starts.map((key) => decided.classOf(key)),
+      decided,
+    );
+    const l = sets.position.get(decided.classOf(left));
+    const r = sets.position.get(decided.classOf(right));
+    if (l === undefined || r === undefined) return true;
+    return !bitsMeet(sets.below[l]!, sets.below[r]!);
+  };
+}
+
 // Only banks whose own deposit readings are in the deposit.balance registry
 // entry qualify. An unknown source stays outside this policy (ADR 0093).
 const DEPOSIT_INSTITUTIONS = new Map([
@@ -696,6 +737,7 @@ function adoptionOutcomes(
   candidates: readonly ProjectionCandidate[],
   declared: readonly DerivedScopeRelation[],
   order: ScopeOrder,
+  decided: ScopeOrder,
 ): { outcomes: Map<string, Outcome>; relations: DerivedScopeRelation[] } {
   const outcomes = new Map<string, Outcome>();
   const subjects = new Map<string, Subject>();
@@ -746,7 +788,7 @@ function adoptionOutcomes(
   const namedShared = entitySharingCandidates(
     candidates,
     declared,
-    sharesEntity,
+    entityTakesPart(subjects.keys(), order, decided, sharesEntity),
     new Set(result.excluded.map((excluded) => excluded.ref)),
   );
   for (const unresolved of result.unresolved)
@@ -765,14 +807,14 @@ function adoptionOutcomes(
  * because of a contender that is another reference of the same account
  * entity: a candidate of another scope, not excluded, of no worse authority
  * rank (the side step 7 compares against), with no declared relation to it,
- * whose scope shares an entity with this one (`entitySharing`). Only such a candidate's
- * `overlap_unknown` is named `account_entity_shared`; every other unknown
- * overlap keeps its code.
+ * whose overlap with this one the mapping takes part in (`entityTakesPart`).
+ * Only such a candidate's `overlap_unknown` is named `account_entity_shared`;
+ * every other unknown overlap keeps its code.
  */
 function entitySharingCandidates(
   candidates: readonly ProjectionCandidate[],
   declared: readonly DerivedScopeRelation[],
-  sharesEntity: (left: string, right: string) => boolean,
+  namesEntity: (left: string, right: string) => boolean,
   excluded: ReadonlySet<string>,
 ): Set<string> {
   const related = relatedPairs(declared);
@@ -784,7 +826,7 @@ function entitySharingCandidates(
         !excluded.has(other.scopeKey) &&
         other.authorityRank <= candidate.authorityRank &&
         !related(candidate.subjectScopeKey, other.subjectScopeKey) &&
-        sharesEntity(candidate.subjectScopeKey, other.subjectScopeKey),
+        namesEntity(candidate.subjectScopeKey, other.subjectScopeKey),
     );
     if (contender) found.add(candidate.scopeKey);
   }
@@ -827,6 +869,7 @@ export function buildBalanceProjection(
   const outcomes = new Map<string, Outcome>();
   const policyRelations: DerivedScopeRelation[] = [];
   const order = scopeOrder(candidates, declaredRelations);
+  const decided = scopeOrder(candidates, declaredRelations, false);
   for (const [, bucket] of [...targets.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const first = bucket[0]!;
     const target: AdoptionTarget = {
@@ -843,7 +886,7 @@ export function buildBalanceProjection(
     // The target's own relations decide; every decision and every
     // candidate's entity feed the scope order, so a chain through scopes
     // outside the target still counts.
-    const resolved = adoptionOutcomes(target, bucket, relevant, order);
+    const resolved = adoptionOutcomes(target, bucket, relevant, order, decided);
     for (const [ref, outcome] of resolved.outcomes) outcomes.set(ref, outcome);
     policyRelations.push(...resolved.relations);
   }

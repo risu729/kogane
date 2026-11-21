@@ -282,6 +282,8 @@ function oracle({ candidates, relations }: Graph) {
   return {
     forced,
     mappingTakesPart,
+    related,
+    ownShared,
     withheld: (a: string, b: string) => (related(a, b) ? ownShared(a, b) : mappingTakesPart(a, b)),
   };
 }
@@ -346,6 +348,54 @@ describe("the policy's entity rule over random decided graphs", () => {
         }
     }
     expect(failures.slice(0, 10)).toEqual([]);
+  });
+
+  test("the reason names an entity exactly where the mapping, not decisions alone, forces the overlap", () => {
+    // A pair accepted decisions alone force to overlap is withheld when a
+    // mapped scope lies on the way, but no entity is shared there: its
+    // unknown overlap keeps `overlap_unknown`. `account_entity_shared` needs
+    // a contender (another subject, not excluded, of no worse rank, with no
+    // decision between the two) that shares the candidate's entity, or whose
+    // overlap with it the mapping forces.
+    const failures: string[] = [];
+    let named = 0;
+    let decisionOnly = 0;
+    for (let seed = 1; seed <= RUNS; seed += 1) {
+      const input = graph(seed);
+      const full = oracle(input);
+      const decided = oracle({
+        candidates: input.candidates.map((entry) => ({ ...entry, accountEntity: null })),
+        relations: input.relations,
+      });
+      const byKey = new Map(input.candidates.map((entry) => [entry.scopeKey, entry]));
+      const rows = buildBalanceProjection(input.candidates, input.relations).rows;
+      for (const row of rows) {
+        if (row.reasonCode !== "overlap_unknown" && row.reasonCode !== "account_entity_shared")
+          continue;
+        const self = byKey.get(row.scopeKey)!;
+        const contenders = rows.filter(
+          (other) =>
+            other.unitRef === row.unitRef &&
+            other.subjectScopeKey !== row.subjectScopeKey &&
+            other.state !== "excluded" &&
+            byKey.get(other.scopeKey)!.authorityRank <= self.authorityRank &&
+            !full.related(row.subjectScopeKey, other.subjectScopeKey) &&
+            full.withheld(row.subjectScopeKey, other.subjectScopeKey),
+        );
+        const expected = contenders.some(
+          (other) =>
+            full.ownShared(row.subjectScopeKey, other.subjectScopeKey) ||
+            !decided.forced(row.subjectScopeKey, other.subjectScopeKey),
+        );
+        if (expected) named += 1;
+        else if (contenders.length > 0) decisionOnly += 1;
+        if ((row.reasonCode === "account_entity_shared") !== expected)
+          failures.push(`seed ${String(seed)}: ${row.scopeKey} ${String(row.reasonCode)}`);
+      }
+    }
+    expect(failures.slice(0, 10)).toEqual([]);
+    expect(named).toBeGreaterThan(RUNS / 10);
+    expect(decisionOnly).toBeGreaterThan(RUNS / 10);
   });
 
   test("without entities the build equals v2, row by row", () => {

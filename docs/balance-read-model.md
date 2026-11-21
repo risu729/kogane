@@ -111,7 +111,15 @@ writer fencing and captured CORE references; the contract is in
    target. A pair a decision relates directly is read against its own
    entities. A forced overlap with no mapped scope on the way keeps the v2
    answer, and a scope known only from a decision carries no entity (the
-   ADR's open limits). The
+   ADR's open limits). Every subject keyed by its reference
+   (`source_account:<reference>`) has a current mapping, so in practice the
+   second rule withholds disjointness from every pair of such subjects that
+   accepted decisions force to overlap without relating them directly (a
+   sub-account accepted as a part of two accounts, say), shared entity or
+   not; v2 declared such a pair disjoint and adopted both. Such a pair's
+   unknown overlap keeps `overlap_unknown`: `account_entity_shared` names
+   only a contender that shares the entity, or whose overlap the mapping and
+   not decisions alone forces. The
    entity is then shown and not counted until a decision accepts the two
    references as `same_account` (one is adopted, the other is
    `duplicate_evidence`) or a mapping revision separates them

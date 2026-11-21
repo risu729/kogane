@@ -860,6 +860,42 @@ describe("balance projection builder", () => {
         });
       expect(stateOf(build, "m-line-usd").state).toBe("adopted");
     });
+
+    test("a common part decisions alone give is withheld but not named a shared entity", () => {
+      // Two bank accounts, each mapped to an entity of its own (as every
+      // organized reference is), and a sub-account with no candidate accepted
+      // as a part of both. The decisions force the two to overlap and a
+      // mapped scope lies on the way, so the policy no longer declares them
+      // disjoint (v2 did, and adopted both). No entity is shared, so the
+      // reason stays `overlap_unknown`; it was `account_entity_shared`.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        subjectStatus: "provider-local",
+        accountEntity: "account:synthetic:first",
+      });
+      const other = deposit("m-other", "source_account:smbc:other", "1000", {
+        subjectStatus: "provider-local",
+        accountEntity: "account:synthetic:other",
+      });
+      const decisions = [
+        relation("source_account:other:sub", "source_account:smbc:first", "subset"),
+        relation("source_account:other:sub", "source_account:smbc:other", "subset"),
+      ];
+      const build = buildBalanceProjection([first, other], decisions);
+      expect(build.relations.filter((entry) => entry.source === "policy")).toEqual([]);
+      for (const scopeKey of ["m-first", "m-other"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "overlap_unknown",
+        });
+      expect(build.reasons).toEqual(["unresolved:overlap_unknown"]);
+      // With the second account sharing the first's entity, the mapping is
+      // what makes them one account, and the reason names it.
+      const shared = buildBalanceProjection(
+        [first, { ...other, accountEntity: "account:synthetic:first" }],
+        decisions,
+      );
+      expect(shared.reasons).toEqual(["unresolved:account_entity_shared"]);
+    });
   });
 
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {
