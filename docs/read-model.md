@@ -123,6 +123,12 @@ provider wrote. So the order is newest text first, not newest time first:
   column sort and date filter in the browser read the same text the same
   way.
 
+Balance history mixes more shapes than these: a year-month (`2026-03`:
+MyJCB statement payment amounts), which lists below every date and instant
+of its month; a local date-time with no zone (Sony Bank gross balance); an
+instant in UTC with milliseconds (Vpass credit availability); and a row
+without `as_of` sorts by its `observed_at`. It takes no `from` or `to`.
+
 None of this skips or repeats a row: the order is total and ends in `id`,
 so offset pages over a fixed store return every row once. No read picks a
 "latest" transaction from this order. The `activity` intent of
