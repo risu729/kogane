@@ -370,6 +370,32 @@ test("an approval whose pin moves between its reads and its batch is refused as 
   expect((await loadPlan(store, plan.planId))!.status).toBe("stale");
 });
 
+test("an approval whose plan is committed between its reads and its batch is refused plan_not_open and the plan stays committed", async () => {
+  const mapping = await seedParse(300, "smbc-bank:approve-race-commit");
+  const plan = await planFor(mapping.ref, await target("target-approve-race-commit"));
+  const before = await counts();
+  // Another approval of the same plan commits it after this `approve` read it
+  // and before its batch runs. The commit moves the pin too, so the re-check
+  // must name the closed plan before the moved pin, and mark nothing stale.
+  const raced = racedBeforeBatch(db, async () => {
+    const other = await approveFor(plan, later(1));
+    const committed = await commitWith("op-approve-race-commit", plan, other.approvalId, later(1));
+    expect(committed.ok).toBe(true);
+  });
+  const result = await approve(d1CommandStore(raced), {
+    planId: plan.planId,
+    planDigest: plan.planDigest,
+    actor: operator,
+    scope: [],
+    ttlSeconds: 600,
+    now: NOW,
+  });
+  expect(result).toEqual({ ok: false, error: "plan_not_open", refs: [plan.planId] });
+  // Only the concurrent approval was written, and the plan never moves back.
+  expect((await counts()).approvals).toBe(before.approvals + 1);
+  expect((await loadPlan(store, plan.planId))!.status).toBe("committed");
+});
+
 test("a stale plan is refused at commit too, and the failed guard writes nothing at all", async () => {
   const mapping = await seedParse(202, "smbc-bank:guard");
   const plan = await planFor(mapping.ref, await target("target-guard"));
