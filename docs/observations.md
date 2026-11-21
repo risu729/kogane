@@ -283,9 +283,11 @@ can take a column an expected label names. The expected labels are the ones
 the synthetic fixtures use; [the source notes](sources/paypay.md#csv-granularity-and-omissions)
 list the 13 columns by meaning, and the current export's exact labels are
 unverified. Neither JPY amount field matches a label containing `海外` (the
-overseas amount is a foreign-currency figure, not yen). A header with all 13
-expected labels in the documented order is read exactly as in 0.2.3, with the
-same warnings. A header that reads differently is one whose overseas column
+overseas amount is a foreign-currency figure, not yen); the position fallback
+does not read labels, so a JPY field no label matches still takes its
+documented column if no other field took it, whatever its label, with the
+fallback warning. A header with all 13 expected labels in the documented
+order is read exactly as in 0.2.3, with the same warnings. A header that reads differently is one whose overseas column
 precedes the yen outflow, whose labels differ from the expected ones, or that
 lacks a column: 0.2.3 let a field with no label take its documented position
 before later fields looked for their labels, so without `入金金額（円）` the
