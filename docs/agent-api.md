@@ -470,8 +470,7 @@ agent principal (`403 operator_required`).
 #### Per-card view (ADR 0125)
 
 `view: cards` answers "how much was each card used" in one compact read
-([ADR 0125](adr/0125-card-purchases-per-card-view.md); proposed, a published
-tool change awaiting the owner's approval). It takes exactly one of `period`
+([ADR 0125](adr/0125-card-purchases-per-card-view.md)). It takes exactly one of `period`
 (a statement month) and `usageMonth` (a month of provider usage dates, so
 purchases not yet on a statement count too), and no `eventId` or `offset`;
 anything else is `400 invalid_query` naming the keys. It is the operator
@@ -556,8 +555,8 @@ route's `GET /api/v2/card-purchases?view=cards` answer, from the same
 
 `view: lines` answers "what did I spend on card X this month, on what" and "my
 largest purchases this month"
-([ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19);
-proposed, a published tool change awaiting the owner's approval). It takes
+([ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19)).
+It takes
 exactly one of `period` and `usageMonth`, optionally `account` (an `accountId`
 from `view: cards`), `sort` and `cursor`, and no `eventId` or `offset`;
 anything else, or a cursor another request issued, is `400 invalid_query`
@@ -859,8 +858,7 @@ It is the `カード照合` page's `次回の引落` section's service
 (`reviewUpcomingCardBills`, route
 `GET /api/v2/reconciliation/card-debit-accounts?view=upcoming`), graded as
 above. The view is a published tool schema change (decision D3 of the
-2026-11-19 MCP proposal v2), an owner approval item before merge; no
-catalogue operation is added.
+2026-11-19 MCP proposal v2); no catalogue operation is added.
 
 Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
 
@@ -1171,8 +1169,8 @@ the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
 `view: "accounts"`),
 `kogane.store.read` with `page: "overview"` and `kogane.observations.list`
 with `kind: "balances"` take `detail`, `summary` (the
-default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19
-(the balance list: before 2026-11-20), unchanged; the web UI asks for it. A `summary` is derived from that same
+default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before their summaries merged
+(2026-11-20, #1458 and #1471; the account view and the balance list: 2026-11-21, #1486 and #1488), unchanged; the web UI asks for it. A `summary` is derived from that same
 answer by one function in `packages/application` or
 `packages/collection`, so the route and the tool give the same summary, and
 it keeps every id that reads a row in full (`observationId`, a job id, a
@@ -1430,8 +1428,8 @@ Until 2026-11-18 every read tool outside the page reads answered a store
 failure inside its read with `500 internal_error`.
 
 `kogane.rewards.read` with `collection: "expiry"` also takes `from`, `before`
-and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read),
-proposed; [rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
+and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read);
+[rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
 `from` (inclusive, default today's Asia/Tokyo date) and `before` (exclusive)
 are `YYYY-MM-DD` and window each row's `expiresOn`. With neither there is no
 window: a summary then counts every dated bucket inside, past deadlines too.
@@ -1456,7 +1454,7 @@ default 50-row page.
 `kogane.reported-holdings-change.read` takes `{ from, to, source?, account?,
 detail?, limit?, cursor? }`, the route's parameters
 ([reported state](reported-state.md#http-contract-and-page); ADR 0075,
-amendment 2026-11-19, proposed). `detail` is `summary` (the default) or
+amendment 2026-11-19). `detail` is `summary` (the default) or
 `full`. The summary answers "how did my holdings change" in one call: it
 lists only the holdings whose change is not an exact zero (`compared` with a
 nonzero change, `listed_at_start_only`, `listed_at_end_only`, then
@@ -1512,8 +1510,8 @@ parser and fetch unit, collapsed over periods, with the union of the cells'
 reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
 (`offset` then counts lines, and `coverage` gives the cell and line counts).
 The account view's summary
-([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20);
-proposed, needs the owner's approval) is one line per account, in id order:
+([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20))
+is one line per account, in id order:
 its id (which `detail: "full"` and the identity reads take), stored label,
 mapping statuses, freshness, observation kinds, number of data types, provider
 data types, periods (count, first and last named), the periods counted by

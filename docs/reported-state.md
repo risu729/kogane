@@ -270,8 +270,8 @@ is after today in Tokyo, `404 unknown_source` and `404 unknown_account`, and
 `dated_state_limit_exceeded`) rather than a cut answer. With `detail=full` the
 body is `{ apiVersion: 2, …HoldingsChange }`, unpaged.
 
-Without `detail`, or with `detail=summary` (ADR 0075, amendment 2026-11-19;
-proposed), the body is one page of `summarizeHoldingsChange` in
+Without `detail`, or with `detail=summary` (ADR 0075, amendment 2026-11-19),
+the body is one page of `summarizeHoldingsChange` in
 `packages/domain/src/holdings-change-summary.ts`
 (`reported-holdings-change-summary-v1`) over the same comparison: the
 holdings whose change is not an exact zero, in status order (`compared`,
