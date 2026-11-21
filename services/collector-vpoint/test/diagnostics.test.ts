@@ -175,6 +175,28 @@ describe("V Point safe diagnostics", () => {
     });
   }
 
+  test("counts are absent when there is no session and reauthentication is pending", async () => {
+    const logs = captureLogs();
+    const fetch = spyOn(globalThis, "fetch").mockImplementation((async () => {
+      throw new Error("unexpected fetch");
+    }) as unknown as typeof globalThis.fetch);
+    const env = fixture(
+      { getSession: async () => null, ensureEmailChallenge: async () => ({ status: "pending" }) },
+      new FakeR2Bucket(),
+    );
+    const outcome = await runCollection(env);
+    const persisted = logs
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.event === "vpoint-collection-persisted");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(outcome.manifest.status).toBe("failed");
+    expect(persisted).toHaveLength(1);
+    for (const field of COUNT_FIELDS) {
+      expect(Object.hasOwn(outcome.manifest, field)).toBe(false);
+      expect(Object.hasOwn(persisted[0], field)).toBe(false);
+    }
+  });
+
   test("forwarding failure is logged once with safe message and no email address or body", async () => {
     const logs = captureLogs();
     const env = Object.assign({} as Env, {

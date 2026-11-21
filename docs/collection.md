@@ -972,7 +972,8 @@ and `reasonCode` when the terminal was not written). `historyTotal`,
 both only when both history walks finished. A run that stopped earlier (no
 session, a refused read, a stopped walk) never learned them, so they are
 absent, not 0 (INV05); its failure codes are the reason. Until 2026-11-21
-such a run reported all four as 0. Verified with mocked `fetch` responses in
+such a run reported all four as 0. Verified with mocked `fetch` responses and
+a session stub with no session in
 `services/collector-vpoint/test/diagnostics.test.ts`.
 
 Not carried over: the V Point Pay email reconciliation report. It was built by
