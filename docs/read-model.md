@@ -119,6 +119,52 @@ The same file is the differential: on 8 random stores inside the window it
 returns the window's count for every scope, and on 8 random stores and a
 fixed one past it the exact count, unmoved by an unlisted source's runs.
 
+### Latest witness ranking
+
+`listLatestBalances` ranks the witnesses of one group (source, parser family,
+unit, account, metric, instrument) by the text of
+`COALESCE(as_of, observed_at, '')`, greatest first, then by `id`. Two
+families rank differently in `src/sql.ts`: MyJCB past-month balances by
+`detailMonth`, and Sony Bank history by capture and then the CSV, after the
+text. Text order is time order only while every key of a group has one
+shape. Which shapes reach one group, from every parser that writes
+`balance_observations` (read from the parsers on 2026-11-21; production was
+not read):
+
+- A parser with a snapshot policy (`SNAPSHOT_DATASETS` and
+  `ARTIFACT_SNAPSHOT_CONTAINERS` in `packages/parsers/src/snapshot-query.ts`)
+  contributes only its current complete capture, so every key of a group
+  comes from one response: the fetch instant, which the
+  `observation_fetch_artifacts` view always writes in UTC with milliseconds
+  (Mizuho, Prestia, SBI Shinsei, Money Forward, MyJCB J-POINT history); one
+  provider time for the whole response (SBI VC Trade `statusDate`, else
+  `meta.timestamp`; Sony Bank `updateDttm`; the SMBC and St.George recorded
+  instant; Vpass `shokaiDate`); or SBI foreign cash balances' per-row
+  `businessDate`.
+- Every other group spans captures, and its parser writes one shape: a
+  calendar date (Mobile Suica, the MyJCB statement total, Vpass statement
+  months as `YYYY-MM-01`, Sony Bank history in JSON and CSV), the fetch
+  instant as `observed_at` (MyJCB J-POINT balance; V Point, read from its
+  newest complete run only), a canonical UTC instant (V Point Pay events), or
+  SBI VC Trade's `eventDatetime` (cashflow balances), which the audited
+  captures carry only in the slash form, read as `+09:00`.
+
+So no group of today's parsers mixes a calendar date with an instant, or two
+offsets, and the ranking picks the greatest key in time. Limits, in shapes
+the code accepts and nobody has observed:
+
+- SBI VC Trade's `providerTimestamp` keeps an ISO date-time verbatim with the
+  offset the provider wrote. Cashflow balances span captures, so an
+  `eventDatetime` sent in UTC would put `Z` and `+09:00` text in one group,
+  and the ranking could then be up to nine hours wrong.
+- SBI foreign cash balances keep `businessDate` verbatim as any string; only
+  `YYYY-MM-DD` is seen. Rows of one capture with differently shaped dates
+  would rank by their text.
+
+Where a parser leaves `as_of` empty, `observed_at` (when the source displayed
+a value) stands in for `as_of` (the time the value describes), and the two
+are ranked as one kind of time.
+
 ### Raw download
 
 `getRawDownload` re-checks, for the one requested hash and after the Access
