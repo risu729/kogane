@@ -159,6 +159,33 @@ describe.if(runnable)("reported state on a date", () => {
     await page.close();
   }, 30_000);
 
+  test("scheduled skip payments are listed per capture with their due status, never added", async () => {
+    const page = await open();
+    await choose(page, "2026-09-10");
+    const panel = page.getByRole("region", { name: "スキップ払いの予定", exact: true });
+    const listed = await page
+      .getByRole("region", {
+        name: "myjcb:conn-1:rootのスキップ払いの予定（2026-09-07 取得）",
+        exact: true,
+      })
+      .innerText();
+    expect(listed).toContain("4500 JPY");
+    expect(listed).toContain("-300 JPY");
+    expect(listed).toContain("基準日より後に支払予定");
+    expect(listed).toContain("支払予定日が基準日以前（支払は未確認）");
+    const text = await panel.innerText();
+    // The other connection's page listed none, and says so.
+    expect(text).toContain("この取得では、スキップ払いの予定は表示されていませんでした。");
+    expect(text).toContain("負債には数えていません");
+    // Two rows, never their sum.
+    expect(text).toContain("2件");
+    expect(text).not.toContain("4200");
+    // Before any capture of the page, nothing is listed and that is not "none scheduled".
+    await choose(page, "2026-09-01");
+    expect(await panel.innerText()).toContain("予定がないという意味ではありません。");
+    await page.close();
+  }, 30_000);
+
   test("coverage names containers without a capture and the missing liabilities", async () => {
     const page = await open();
     await choose(page, "2026-09-10");

@@ -201,6 +201,91 @@ export class DatedStore {
   }
 
   /**
+   * A MyJCB skip-payment page as `myjcb-skip-payment-schedule` stores it
+   * (ADR 0005, amendment e): a `credit-schedule` artifact of the connection's
+   * fetch unit at `fetchedAt`, published, with one `scheduled_payment` row
+   * per payment (none for a page that lists none). `run` puts the page into
+   * an earlier page's fetch run (and unit) instead of a new one; `published`
+   * false leaves the parse unpublished.
+   */
+  scheduledPage(input: {
+    fetchedAt: string;
+    connection?: string;
+    position?: number;
+    payments?: readonly {
+      usageDate: string;
+      dueDate: string;
+      amount: string;
+      asOf: string;
+      counterparty?: string;
+    }[];
+    run?: { run: number; unit: number };
+    published?: boolean;
+  }): { artifact: number; parse: number; run: number; unit: number; payments: number[] } {
+    const connection = input.connection ?? "conn-1";
+    let run: number;
+    let unit: number;
+    if (input.run === undefined) {
+      run = this.run("myjcb", "success");
+      unit = this.id();
+      this.db.run(
+        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'account')",
+        [unit, run, connection],
+      );
+      this.db.run("INSERT INTO fetch_unit_reports VALUES(?,'terminal','success',NULL)", [unit]);
+    } else {
+      ({ run, unit } = input.run);
+    }
+    const artifact = this.id();
+    const at = Date.parse(input.fetchedAt);
+    const position = String(input.position ?? 8).padStart(2, "0");
+    this.db.run(
+      `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role)
+       VALUES(?,?,'myjcb','credit-schedule',?,?,'text/html',?,?,?,'provider_response')`,
+      [
+        artifact,
+        run,
+        `${connection}/credit-skip-payment-${position}.html`,
+        unit,
+        at,
+        at,
+        artifact.toString(16).padStart(64, "0"),
+      ],
+    );
+    let parse: number;
+    if (input.published === false) {
+      parse = this.id();
+      this.db.run(
+        "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'myjcb-skip-payment-schedule','0.1.2','2026-09-01','ok','[]')",
+        [parse, artifact],
+      );
+    } else parse = this.publish(artifact, "myjcb-skip-payment-schedule", "0.1.2");
+    const payments: number[] = [];
+    for (const [index, payment] of (input.payments ?? []).entries())
+      payments.push(
+        Number(
+          this.db.run(
+            `INSERT INTO scheduled_payment_observations(parse_run_id,source_account,external_id,schedule_kind,usage_date,due_date,amount_text,amount_scale,currency,counterparty,as_of,observed_at,raw_locator,extra_json)
+             VALUES(?,?,?,'card-skip-payment',?,?,?,0,'JPY',?,?,NULL,?,?)`,
+            [
+              parse,
+              `myjcb:${connection}:root`,
+              `myjcb-skip-payment:synthetic-${artifact}-${index}:0`,
+              payment.usageDate,
+              payment.dueDate,
+              payment.amount,
+              payment.counterparty ?? `Synthetic merchant ${index}`,
+              payment.asOf,
+              `$.rows[${index}]`,
+              JSON.stringify({ _kogane: { amountBasis: "future-payment-amount" } }),
+            ],
+          ).lastInsertRowid,
+        ),
+      );
+    return { artifact, parse, run, unit, payments };
+  }
+
+  /**
    * A provider statement total as the Vpass statement parser stores it: the
    * `credit_statement_payment_amount` of `period` (`YYYY-MM`) due on
    * `paymentDate` (or with none), captured at `fetchedAt`.

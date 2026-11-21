@@ -15,6 +15,7 @@ import { reportedStateCutoff, payablesFromPaymentDate } from "../../domain/src/r
 import {
   DATED_BALANCES_SQL,
   DATED_POSITIONS_SQL,
+  DATED_SCHEDULED_PAYMENTS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
@@ -259,6 +260,11 @@ describe("reported state on a scaled store without statistics", () => {
           ["b"],
         ),
       ).toEqual([]);
+      // The scheduled payments read walks the publication pointers once,
+      // filtered by parser name, and reaches each page and its rows by key.
+      expect(
+        unboundedScans(explain(db, DATED_SCHEDULED_PAYMENTS_SQL, [cutoff]), ["pub", "r"]),
+      ).toEqual([]);
       expect(unboundedScans(explain(db, SETTLEMENT_SQL, [keys]))).toEqual([]);
     },
     TIMEOUT,
@@ -285,6 +291,7 @@ describe("reported state on a scaled store without statistics", () => {
               .query(DATED_STATEMENTS_BEFORE_WINDOW_SQL)
               .all(cutoff, payablesFromPaymentDate(OPTIONS.today), cutoff),
           ),
+          scheduledPayments: await timed(() => db.query(DATED_SCHEDULED_PAYMENTS_SQL).all(cutoff)),
         };
         console.log(JSON.stringify({ counts: built.counts, today, past, reads }, null, 2));
       }

@@ -7,10 +7,15 @@ import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { METRIC_REGISTRY_RELEASE } from "../../domain/src/metrics.ts";
-import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import {
+  payableStatus,
+  scheduledPaymentDueStatus,
+  snapshotFreshness,
+} from "../../domain/src/reported-state.ts";
 import { validReportedState } from "../../observation-shared/src/reported-state-contract.ts";
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 import {
+  DATED_SCHEDULED_PAYMENTS_SQL,
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
@@ -844,8 +849,15 @@ describe("card payables on the date", () => {
     expect(uncounted.contextId).toBe(await canonicalDigest(uncounted.manifest));
     // Everything else is the counted answer's.
     const counted = await queryDatedState(executor(store), { date: "2026-09-10" });
-    const { statementsBeforeWindow: _manifestCounts, ...countedManifest } = counted.manifest;
+    const {
+      statementsBeforeWindow: _manifestCounts,
+      scheduledPaymentCaptures: _captures,
+      scheduledPaymentRefs: _refs,
+      ...countedManifest
+    } = counted.manifest;
     expect(uncounted.manifest).toEqual(countedManifest);
+    expect("scheduledPayments" in uncounted).toBe(false);
+    expect("scheduledPayments" in uncounted.coverage).toBe(false);
     expect(uncounted.payables).toEqual(counted.payables);
     expect(uncounted.accounts).toEqual(counted.accounts);
     expect(uncounted.contextId).not.toBe(counted.contextId);
@@ -860,7 +872,7 @@ describe("card payables on the date", () => {
       t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
       return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
     };
-    const seen = { answers: 0, counted: 0, split: 0, refused: 0 };
+    const seen = { answers: 0, counted: 0, split: 0, refused: 0, scheduled: 0 };
     for (let round = 0; round < 8; round += 1) {
       const store = new DatedStore();
       store.capture({
@@ -868,6 +880,21 @@ describe("card payables on the date", () => {
         fetchedAt: `2026-0${1 + random(9)}-10T02:00:00Z`,
         balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 1 }],
       });
+      // Skip-payment pages of two connections, some empty, some unpublished.
+      for (let index = 0; index < 6; index += 1) {
+        const month = String(1 + random(11)).padStart(2, "0");
+        store.scheduledPage({
+          fetchedAt: `2026-${month}-0${1 + random(9)}T0${random(10)}:00:00Z`,
+          connection: `conn-${random(2)}`,
+          published: random(4) !== 0,
+          payments: Array.from({ length: random(3) }, () => ({
+            usageDate: `2026-${month}-01`,
+            dueDate: `2026-${String(1 + random(12)).padStart(2, "0")}-10`,
+            amount: String(random(2) === 0 ? -1 - random(99) : 1 + random(9_000)),
+            asOf: `2026-${month}-01`,
+          })),
+        });
+      }
       for (let index = 0; index < 24; index += 1) {
         const month = String(1 + random(11)).padStart(2, "0");
         const card = `card-${random(4)}`;
@@ -911,6 +938,8 @@ describe("card payables on the date", () => {
           expect(validReportedState(wire)).toBe(true);
           expect(state.contextId).toBe(await canonicalDigest(state.manifest));
           seen.answers += 1;
+          if (state.scheduledPayments.some((capture) => capture.payments.length > 0))
+            seen.scheduled += 1;
           const recorded = state.manifest.statementsBeforeWindow;
           if (recorded.length > 0) seen.counted += 1;
           if (new Set(recorded.map((entry) => entry.accountId)).size > 1) seen.split += 1;
@@ -927,7 +956,12 @@ describe("card payables on the date", () => {
             ...filter,
             includeStatementsBeforeWindow: false,
           });
-          const { statementsBeforeWindow: _counts, ...rest } = state.manifest;
+          const {
+            statementsBeforeWindow: _counts,
+            scheduledPaymentCaptures: _captures,
+            scheduledPaymentRefs: _refs,
+            ...rest
+          } = state.manifest;
           expect(uncounted.manifest).toEqual(rest);
           expect(uncounted.payables).toEqual(state.payables);
           expect(uncounted.contextId).toBe(await canonicalDigest(rest));
@@ -938,6 +972,7 @@ describe("card payables on the date", () => {
     expect(seen.counted).toBeGreaterThan(20);
     expect(seen.split).toBeGreaterThan(5);
     expect(seen.refused).toBe(seen.counted);
+    expect(seen.scheduled).toBeGreaterThan(10);
   });
 
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {
@@ -960,6 +995,147 @@ describe("card payables on the date", () => {
     expect(payableStatus("2026-09-27", null, null)).toBe("payment_date_unknown");
     expect(payableStatus("2026-09-27", "not-a-date", null)).toBe("payment_date_unknown");
     expect(payableStatus("2026-09-27", null, accepted)).toBe("settled_on_or_before_date");
+  });
+});
+
+describe("scheduled payments on the date", () => {
+  const row = { usageDate: "2026-08-03", asOf: "2026-09-05" };
+
+  test("each capture's payments as stored, with the due status of the date, never added", async () => {
+    const store = new DatedStore();
+    const page = store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [
+        { ...row, dueDate: "2026-09-10", amount: "4500" },
+        { ...row, dueDate: "2026-10-10", amount: "-30" },
+      ],
+    });
+    const empty = store.scheduledPage({ fetchedAt: "2026-09-09T12:00:00Z", connection: "conn-2" });
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(state.coverage.scheduledPayments).toBe("listed");
+    expect(state.scheduledPayments).toEqual([
+      {
+        ref: `artifact:${page.artifact}`,
+        sourceId: "myjcb",
+        parserName: "myjcb-skip-payment-schedule",
+        capturedAt: "2026-09-05T12:00:00.000Z",
+        captureDate: "2026-09-05",
+        ageDays: 5,
+        freshness: "stale",
+        payments: [
+          {
+            ref: `scheduled-payment:${page.payments[0]}`,
+            sourceAccount: "myjcb:conn-1:root",
+            scheduleKind: "card-skip-payment",
+            usageDate: "2026-08-03",
+            dueDate: "2026-09-10",
+            amount: {
+              unitRef: "JPY",
+              value: {
+                status: "exact",
+                value: { coefficient: "4500", scale: 0 },
+                normalizationVersion: "exact-arith-v1",
+              },
+            },
+            providerText: "4500",
+            counterparty: "Synthetic merchant 0",
+            asOf: "2026-09-05",
+            dueStatus: "due_on_or_before_date",
+          },
+          expect.objectContaining({
+            ref: `scheduled-payment:${page.payments[1]}`,
+            dueDate: "2026-10-10",
+            dueStatus: "due_after_date",
+            amount: expect.objectContaining({
+              value: expect.objectContaining({ value: { coefficient: "-30", scale: 0 } }),
+            }),
+          }),
+        ],
+      },
+      // A page that listed none is shown as such, not dropped.
+      expect.objectContaining({ ref: `artifact:${empty.artifact}`, payments: [] }),
+    ]);
+    // Nothing about them is a payable, a total or a liability figure.
+    expect(state.payables).toEqual([]);
+    expect(state.coverage.netAssets).toBe("not-computed");
+    expect(state.coverage.liabilitiesMissing).toContain("unbilled_card_usage");
+    expect(state.manifest.scheduledPaymentCaptures).toEqual([
+      [`artifact:${page.artifact}`, `parse_run:${page.parse}`],
+      [`artifact:${empty.artifact}`, `parse_run:${empty.parse}`],
+    ]);
+    expect(state.manifest.scheduledPaymentRefs).toEqual(
+      page.payments.map((id) => `scheduled-payment:${id}`).sort(),
+    );
+    expect(validReportedState({ apiVersion: 2, ...state })).toBe(true);
+    // A newer capture is a new input: a new context id.
+    store.scheduledPage({ fetchedAt: "2026-09-10T01:00:00Z", payments: [] });
+    const later = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(later.scheduledPayments.map((capture) => capture.payments.length)).toEqual([0, 0]);
+    expect(later.contextId).not.toBe(state.contextId);
+    expect(later.contextId).toBe(await canonicalDigest(later.manifest));
+  });
+
+  test("a source filter keeps its own; an account filter lists none and says so, without the read", async () => {
+    const store = new DatedStore();
+    store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [{ ...row, dueDate: "2026-10-10", amount: "100" }],
+    });
+    const vpass = await queryDatedState(executor(store), { date: "2026-09-10", source: "vpass" });
+    expect(vpass.scheduledPayments).toEqual([]);
+    expect(vpass.manifest.scheduledPaymentCaptures).toEqual([]);
+    expect(vpass.coverage.scheduledPayments).toBe("listed");
+    const myjcb = await queryDatedState(executor(store), { date: "2026-09-10", source: "myjcb" });
+    expect(myjcb.scheduledPayments.map((capture) => capture.payments.length)).toEqual([1]);
+    const statements: string[] = [];
+    const inner = executor(store);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: inner.first,
+    };
+    const filtered = await queryDatedState(recording, { date: "2026-09-10", account: "acct-card" });
+    expect(statements).not.toContain(DATED_SCHEDULED_PAYMENTS_SQL);
+    expect(filtered.scheduledPayments).toEqual([]);
+    expect(filtered.coverage.scheduledPayments).toBe("not_listed_account_filter");
+    expect(filtered.manifest.scheduledPaymentRefs).toEqual([]);
+    expect(validReportedState({ apiVersion: 2, ...filtered })).toBe(true);
+    // A state the other reads build on never reads them.
+    statements.length = 0;
+    const uncounted = await queryDatedState(recording, {
+      date: "2026-09-10",
+      includeStatementsBeforeWindow: false,
+    });
+    expect(statements).not.toContain(DATED_SCHEDULED_PAYMENTS_SQL);
+    expect("scheduledPayments" in uncounted).toBe(false);
+  });
+
+  test("the pure rule: due after the date, or due on or before it", () => {
+    expect(scheduledPaymentDueStatus("2026-09-10", "2026-09-11")).toBe("due_after_date");
+    expect(scheduledPaymentDueStatus("2026-09-10", "2026-09-10")).toBe("due_on_or_before_date");
+    expect(scheduledPaymentDueStatus("2026-09-10", "2026-08-31")).toBe("due_on_or_before_date");
+  });
+
+  test("the wire contract refuses a scheduled payment the manifest does not pin, and a total", async () => {
+    const store = new DatedStore();
+    store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [{ ...row, dueDate: "2026-10-10", amount: "100" }],
+    });
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const wire = JSON.parse(JSON.stringify({ apiVersion: 2, ...state })) as Record<string, any>;
+    expect(validReportedState(wire)).toBe(true);
+    const unpinned = structuredClone(wire);
+    unpinned["manifest"]["scheduledPaymentRefs"] = [];
+    expect(validReportedState(unpinned)).toBe(false);
+    const totalled = structuredClone(wire);
+    totalled["scheduledPayments"][0]["total"] = "100";
+    expect(validReportedState(totalled)).toBe(false);
+    const listedUnderFilter = structuredClone(wire);
+    listedUnderFilter["coverage"]["scheduledPayments"] = "not_listed_account_filter";
+    expect(validReportedState(listedUnderFilter)).toBe(false);
   });
 });
 

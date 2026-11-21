@@ -85,6 +85,8 @@ describe("storeHasFeature", () => {
     );
     expect(await storeHasFeature(executor(empty), "datedState")).toBe(false);
     empty.exec("CREATE VIEW card_settlement_reviews AS SELECT 1");
+    expect(await storeHasFeature(executor(empty), "datedState")).toBe(false);
+    empty.exec("CREATE TABLE scheduled_payment_observations(x)");
     expect(await storeHasFeature(executor(empty), "datedState")).toBe(true);
     // A table where a view is expected is not the view.
     empty.exec("CREATE TABLE card_settlement_readiness(x)");

@@ -349,6 +349,60 @@ GROUP BY s.source_id,ownership.account_id,s.reason_code
 ORDER BY s.source_id,ownership.account_id,s.reason_code
 LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
 
+/** The parser whose rows are `scheduled_payment_observations` (ADR 0005, amendment e). */
+export const SCHEDULED_PAYMENT_PARSER = "myjcb-skip-payment-schedule";
+
+/** One scheduled payment of a chosen capture, or the capture alone when its page listed none. */
+export interface DatedScheduledPaymentRow {
+  artifact_id: number;
+  source_id: string;
+  fetched_at: string;
+  parse_run_id: number;
+  id: number | null;
+  source_account: string | null;
+  schedule_kind: string | null;
+  usage_date: string | null;
+  due_date: string | null;
+  amount_text: string | null;
+  amount_scale: number | null;
+  currency: string | null;
+  counterparty: string | null;
+  as_of: string | null;
+}
+
+/**
+ * The provider's scheduled payments as of the cutoff (`?1`; ADR 0019,
+ * amendment of 2026-11-21): per source and fetch unit, every published
+ * capture of `SCHEDULED_PAYMENT_PARSER` in the newest sealed fetch run that
+ * has one captured before the cutoff, each with the rows its parse stored.
+ * The page carries no snapshot policy that selects (its policy row only
+ * names eligibility), so the newest published run is the capture, as
+ * `card_statement_facts` takes the newest published statement. A capture
+ * whose page listed nothing is one row with a null `id`: listed as empty,
+ * never dropped. Rows leave as stored text; nothing is summed.
+ */
+export const DATED_SCHEDULED_PAYMENTS_SQL = `WITH dated_schedule_parses AS MATERIALIZED (
+ SELECT a.id AS artifact_id,a.source_id,a.fetch_run_id,a.fetch_unit_key,a.fetched_at,pub.parse_run_id
+ FROM published_parse_runs pub
+ CROSS JOIN observation_fetch_artifacts a ON a.id=pub.fetch_artifact_id
+ WHERE pub.parser_name='${SCHEDULED_PAYMENT_PARSER}' AND a.fetched_at<?1
+), dated_schedule_runs AS MATERIALIZED (
+ SELECT source_id,fetch_unit_key,fetch_run_id,
+  row_number() OVER(PARTITION BY source_id,fetch_unit_key ORDER BY max(fetched_at) DESC,fetch_run_id DESC) AS position
+ FROM dated_schedule_parses
+ GROUP BY source_id,fetch_unit_key,fetch_run_id
+)
+SELECT p.artifact_id,p.source_id,p.fetched_at,p.parse_run_id,
+ s.id,s.source_account,s.schedule_kind,s.usage_date,s.due_date,s.amount_text,s.amount_scale,
+ s.currency,s.counterparty,s.as_of
+FROM dated_schedule_runs r
+CROSS JOIN dated_schedule_parses p ON p.source_id=r.source_id AND p.fetch_unit_key IS r.fetch_unit_key
+ AND p.fetch_run_id=r.fetch_run_id
+LEFT JOIN scheduled_payment_observations s ON s.parse_run_id=p.parse_run_id
+WHERE r.position=1
+ORDER BY p.source_id,p.artifact_id,s.due_date,s.id
+LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
+
 /** The decimal policy a dated position's quantity is read under. */
 export const DATED_POSITION_QUANTITY_POLICY = "decimal-v1";
 

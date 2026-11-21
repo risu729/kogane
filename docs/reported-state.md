@@ -1,7 +1,8 @@
 # Reported state on a date
 
 What each provider last reported, per account, on a date the owner chooses,
-beside the card statements due around that date. This is phase 8's first
+beside the card statements due around that date and the payments the card
+company's skip-payment page still scheduled. This is phase 8's first
 slice ([roadmap](roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)),
 decided in [ADR 0019](adr/0019-dated-reported-state.md). It is a list of
 provider figures, never a total: nothing is added, converted or netted, and a
@@ -121,12 +122,16 @@ A perimeter container with no snapshot before the cutoff is listed in
 
   A proposed, rejected or withdrawn review settles nothing.
 
+- `scheduledPayments`: the provider's scheduled card payments as of the
+  cutoff, per captured page ([below](#scheduled-payments)), never added and
+  never matched with a payable.
 - `coverage`: containers without a snapshot, stale snapshots, the excluded
   perimeter and excluded row counts, `liabilitiesCoverage: "partial"` with
   `liabilitiesMissing` (`unbilled_card_usage`, `installment_remaining` and
   `loan_balances` always; `statements_before_window` when the answer leaves a
   statement out), the payable window (`payablesFromPaymentDate`),
-  `statementsBeforeWindow`, and `netAssets: "not-computed"`.
+  `statementsBeforeWindow`, `scheduledPayments` (`listed`, or
+  `not_listed_account_filter`) and `netAssets: "not-computed"`.
   `statementsBeforeWindow` counts the statements as of the cutoff that the
   window leaves out, per source and reason: `due_before_window` (a readable
   due date before `D − 31` days) or `undated_captured_before_window` (no
@@ -140,7 +145,7 @@ A perimeter container with no snapshot before the cutoff is listed in
   under 一覧にない期間外の請求 in its coverage notes;
   `kogane.reported-state.read` answers the same body.
 - `manifest` and `contextId = canonicalDigest(manifest)`. Under
-  `reported-state-v3` the manifest pins every input the answer reads (INV09;
+  `reported-state-v3` and later the manifest pins every input the answer reads (INV09;
   [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)
   and
   [statements-before-window amendment](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)):
@@ -166,26 +171,75 @@ A perimeter container with no snapshot before the cutoff is listed in
   has no `statementsBeforeWindow`; since `reported-state-v3` (the
   [ADR 0019 amendment of 2026-11-18](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18))
   every manifest carries it (`[]` when nothing is left out) and names v3, so
-  every reported-state `contextId` changed once more with it.
+  every reported-state `contextId` changed once more with it. Since
+  `reported-state-v4` ([scheduled payments amendment](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21))
+  the manifest also carries `scheduledPaymentCaptures`, each listed page as
+  `[artifact:<id>, parse_run:<id>]`, and `scheduledPaymentRefs`, each listed
+  payment, both sorted, so a newer page, another parse of the same page or
+  another row is a new context id; every reported-state `contextId` changed
+  once more with v4.
 
-`queryDatedState` counts the statements before the window unless it is called
-with `includeStatementsBeforeWindow: false`. The holdings change below, the
+`queryDatedState` counts the statements before the window and lists the
+scheduled payments unless it is called with
+`includeStatementsBeforeWindow: false`. The holdings change below, the
 [reconstructed state](reconstructed-state.md) and the
 [valuation on a date](calculation-and-reports.md#valuation-on-a-date) pass
-`false`: they do not run `DATED_STATEMENTS_BEFORE_WINDOW_SQL`, and the state
-they build on has no `statementsBeforeWindow` in its coverage or manifest and
-names every liability gap. The reported context ids they pin are the digests
-of that manifest without the count: they record no count they did not read,
-and they differ from the `/state` answer's `contextId` for the same date and
-filters. The context amendment of 2026-11-19 (`reported-state-v2`) changed
+`false`: they run neither `DATED_STATEMENTS_BEFORE_WINDOW_SQL` nor
+`DATED_SCHEDULED_PAYMENTS_SQL`, and the state they build on has no
+`statementsBeforeWindow` or `scheduledPayments` in its body, coverage or
+manifest and names every liability gap. The reported context ids they pin are
+the digests of that manifest without them: they record no input they did not
+read, and they differ from the `/state` answer's `contextId` for the same date
+and filters. The context amendment of 2026-11-19 (`reported-state-v2`) changed
 them once, as it changed every reported-state context id, and
-`reported-state-v3` changed them once more: their manifest gains no count but
-names the schema version, so those ids, and the context ids of the reads that
-pin them, are new under v3. Nothing stores them, so nothing is rebuilt.
+`reported-state-v3` and `reported-state-v4` each changed them once more: their
+manifest gains nothing but names the schema version, so those ids, and the
+context ids of the reads that pin them, are new under each. Nothing stores
+them, so nothing is rebuilt.
 
-`source` narrows accounts, payables and coverage to one source; `account` to
-one resolved account id. The answer has no total, subtotal or net worth, and
-the wire contract refuses one.
+`source` narrows accounts, payables, scheduled payments and coverage to one
+source; `account` to one resolved account id, under which no scheduled
+payment is listed. The answer has no total, subtotal or net worth, and the
+wire contract refuses one.
+
+## Scheduled payments
+
+`scheduledPayments` lists what MyJCB's ショッピングスキップ払い page (the
+`myjcb-skip-payment-schedule` parser, [ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments))
+said was still to be paid, as of the cutoff
+([ADR 0019, scheduled payments amendment](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)).
+`DATED_SCHEDULED_PAYMENTS_SQL` chooses, per source and fetch unit (one MyJCB
+connection), the newest sealed fetch run with a published parse of that
+parser on a page captured before the cutoff, and returns each such page with
+its rows. The page has no selecting snapshot policy, so the newest published
+run is its capture, as the payables take the newest published statement; a
+newer page whose parse is not published leaves the older one current.
+
+Each entry is one page: `ref` (`artifact:<id>`), `sourceId`, `parserName`,
+`capturedAt`, `captureDate`, `ageDays` and `freshness`
+(`dated-state-freshness-v1`), and its `payments` in due-date order. An empty
+`payments` means the page listed none, not that nothing was scheduled after
+the capture. A payment is `ref` (`scheduled-payment:<id>`), `sourceAccount`,
+`scheduleKind` (`card-skip-payment`), `usageDate`, `dueDate`, `amount` (the
+stored canonical integer as an exact decimal in its currency; any other text
+stays `unparsed`, never zero), `providerText`, `counterparty` (the merchant
+text), `asOf` (the page's own as-of date) and `dueStatus`:
+
+| `dueStatus`             | When                                               |
+| ----------------------- | -------------------------------------------------- |
+| `due_after_date`        | The due date is after `D`                          |
+| `due_on_or_before_date` | The due date is on or before `D`; payment not read |
+
+What the amount covers (one deferred payment or the rest of it) and whether a
+later statement month carries it are not confirmed (ADR 0004), so a scheduled
+payment is never a payable, never matched with a statement, a settlement or a
+purchase, never added and not counted as a liability: `liabilitiesMissing`
+is unchanged. The rows have no identity run, so no resolved account: under
+an `account` filter the read is skipped, nothing is listed and
+`coverage.scheduledPayments` is `not_listed_account_filter`; otherwise it is
+`listed`. The `/state` page shows the pages in the panel スキップ払いの予定
+after the card statements; `kogane.reported-state.read` answers the same
+body.
 
 ## HTTP
 
@@ -196,8 +250,9 @@ other, repeated or empty parameter or a malformed `source` or `account`,
 `400 invalid_date` for a missing, malformed or impossible date,
 `400 date_in_future` after today in Tokyo, `413
 result_limit_exceeded` past 5,000 rows in one read (refused, never cut), and
-`404` where the store lacks `dataset_snapshot_policies`, `card_statement_facts`
-or `card_settlement_reviews`; `/api/meta` advertises `reportedStateOnDate` on
+`404` where the store lacks `dataset_snapshot_policies`,
+`scheduled_payment_observations`, `card_statement_facts` or
+`card_settlement_reviews`; `/api/meta` advertises `reportedStateOnDate` on
 the same condition.
 `GET /api/v2/reconstructed-state` reads this state at both ends of a range
 and sets it beside the balances reconstructed from adopted events; it is
@@ -375,6 +430,19 @@ smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
 
+Since `reported-state-v4` a sixth read, `DATED_SCHEDULED_PAYMENTS_SQL`, is
+issued with the five. It walks the publication pointers
+(`published_parse_runs`) once, filtered by parser name, and reaches each
+skip-payment page by primary key and its rows through
+`idx_sched_pay_obs_parse_run`; the scale test accepts that walk and no other.
+At `STATEMENT_SCALE` (16,786 pointers, no skip page) it took 0.6 ms on
+2026-11-20, and the whole answer 379 ms today and 326 ms a year back (median of
+three on `bun:sqlite`, a machine shared with other test processes; the table
+above is the 2026-11-18 run, before this read). On workerd,
+`services/processor/test/myjcb-shared-r2.test.ts` checks D1's own plan without
+statistics (the same walk and keys) and that its `rows_read` stays within the
+pointers plus a few rows per page, on a small store; it is not timed on D1.
+
 A holdings change between two dates is two of these answers (run
 concurrently through the executor) plus two keyed reads: the position
 quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
@@ -421,6 +489,14 @@ answer under two seconds.
   no older bill exists.
 - Only the Vpass and MyJCB statement parsers supply payables; unbilled usage,
   installment remainders and loans are not shown (`liabilitiesMissing`).
+- Scheduled payments come from MyJCB's skip-payment page only (its bonus page
+  stays unread). Production has stored only pages that listed none (ADR 0005,
+  amendments i and k), so a page with payments is exercised by synthetic
+  tests only. A newer page whose parse is not published (pending, refused,
+  or never parsed because its run was not failure-free), and a newer run
+  that stored no skip page, leave an older page current with its age shown,
+  and the answer does not say a newer page exists. The read scans the
+  publication pointers filtered by parser name ([cost](#cost)).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:
   rows are listed per provider account, which is why nothing is added.
   Valuation of the listed positions in a base unit, under an explicit price
