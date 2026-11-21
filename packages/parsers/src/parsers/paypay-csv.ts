@@ -27,26 +27,34 @@ import {
 const SOURCE_ACCOUNT = "paypay";
 
 /**
- * Field order is the documented column order; `match` identifies the column by
- * a distinguishing substring of its header label. `outgoing` and `incoming`
- * are deliberately matched on 出金/入金 rather than on position, since those
- * two carry the sign of the transaction.
+ * Field order is the documented column order; `label` is the documented
+ * header label (docs/sources/paypay.md) and `match` a distinguishing
+ * substring of it, used only when no column carries the documented label.
+ * `outgoing` and `incoming` are deliberately matched on 出金/入金 rather than
+ * on position, since those two carry the sign of the transaction. 出金 is also
+ * part of the overseas amount's label (海外出金金額), a foreign-currency figure,
+ * so the outgoing JPY column never matches a label that names 海外.
  */
-const COLUMNS = [
-  { field: "datetime", match: ["取引日"] },
-  { field: "outgoingJpy", match: ["出金"] },
-  { field: "incomingJpy", match: ["入金"] },
-  { field: "overseasAmount", match: ["海外"] },
-  { field: "overseasCurrency", match: ["通貨"] },
-  { field: "conversionRateJpy", match: ["レート"] },
-  { field: "country", match: ["利用国"] },
-  { field: "description", match: ["取引内容"] },
-  { field: "counterparty", match: ["取引先"] },
-  { field: "method", match: ["取引方法"] },
-  { field: "installmentType", match: ["支払い区分", "支払区分"] },
-  { field: "user", match: ["利用者"] },
-  { field: "transactionNumber", match: ["取引番号"] },
-] as const;
+const COLUMNS: readonly {
+  field: string;
+  label: string;
+  match: readonly string[];
+  exclude?: readonly string[];
+}[] = [
+  { field: "datetime", label: "取引日", match: ["取引日"] },
+  { field: "outgoingJpy", label: "出金金額（円）", match: ["出金"], exclude: ["海外"] },
+  { field: "incomingJpy", label: "入金金額（円）", match: ["入金"] },
+  { field: "overseasAmount", label: "海外出金金額", match: ["海外"] },
+  { field: "overseasCurrency", label: "通貨", match: ["通貨"] },
+  { field: "conversionRateJpy", label: "変換レート（円）", match: ["レート"] },
+  { field: "country", label: "利用国", match: ["利用国"] },
+  { field: "description", label: "取引内容", match: ["取引内容"] },
+  { field: "counterparty", label: "取引先", match: ["取引先"] },
+  { field: "method", label: "取引方法", match: ["取引方法"] },
+  { field: "installmentType", label: "支払い区分", match: ["支払い区分", "支払区分"] },
+  { field: "user", label: "利用者", match: ["利用者"] },
+  { field: "transactionNumber", label: "取引番号", match: ["取引番号"] },
+];
 
 /**
  * "2026/08/15 12:34:56" -> "2026-08-15T12:34:56+09:00" (PayPay shows JST).
@@ -96,7 +104,15 @@ function carriesSign(cell: string): boolean {
   return /^[+\-△▲(]/u.test(cell) || cell.endsWith(")");
 }
 
-/** Locate each documented field in the header row. */
+/**
+ * Locate each documented field in the header row, in three passes so that no
+ * weaker rule can take a column a stronger one names: first every column whose
+ * label is exactly the documented one, then a label containing the field's
+ * substring, and last the documented position. A substring alone is not
+ * enough while the exact label sits elsewhere: 出金 is in both 出金金額（円）
+ * and 海外出金金額, and taking the first such column read a foreign-currency
+ * amount as yen whenever the overseas column came first (0.2.4).
+ */
 function mapColumns(header: string[]): {
   index: Record<string, number>;
   warnings: string[];
@@ -104,29 +120,41 @@ function mapColumns(header: string[]): {
   const warnings: string[] = [];
   const index: Record<string, number> = {};
   const taken = new Set<number>();
-  COLUMNS.forEach((column, position) => {
+  const how = new Map<string, "label" | "position">();
+  const take = (field: string, at: number, kind: "label" | "position") => {
+    index[field] = at;
+    taken.add(at);
+    how.set(field, kind);
+  };
+  for (const column of COLUMNS) {
+    const found = header.findIndex((label, at) => !taken.has(at) && label.trim() === column.label);
+    if (found >= 0) take(column.field, found, "label");
+  }
+  for (const column of COLUMNS) {
+    if (how.has(column.field)) continue;
     const found = header.findIndex(
-      (label, at) => !taken.has(at) && column.match.some((needle) => label.includes(needle)),
+      (label, at) =>
+        !taken.has(at) &&
+        column.match.some((needle) => label.includes(needle)) &&
+        !(column.exclude ?? []).some((needle) => label.includes(needle)),
     );
-    if (found >= 0) {
-      index[column.field] = found;
-      taken.add(found);
-      if (found !== position) {
-        warnings.push(
-          `header: ${column.field} was found at column ${found + 1}, not the documented column ${position + 1}`,
-        );
-      }
-      return;
-    }
-    if (position < header.length && !taken.has(position)) {
-      index[column.field] = position;
-      taken.add(position);
+    if (found >= 0) take(column.field, found, "label");
+  }
+  COLUMNS.forEach((column, position) => {
+    if (how.has(column.field)) return;
+    if (position < header.length && !taken.has(position)) take(column.field, position, "position");
+  });
+  COLUMNS.forEach((column, position) => {
+    const found = index[column.field];
+    if (found === undefined) warnings.push(`header: no column found for ${column.field}`);
+    else if (how.get(column.field) === "position")
       warnings.push(
         `header: no label matched ${column.field}; fell back to documented column ${position + 1} (${JSON.stringify(header[position])})`,
       );
-    } else {
-      warnings.push(`header: no column found for ${column.field}`);
-    }
+    else if (found !== position)
+      warnings.push(
+        `header: ${column.field} was found at column ${found + 1}, not the documented column ${position + 1}`,
+      );
   });
   const unmatched = header
     .map((label, at) => (taken.has(at) ? undefined : `${at + 1}:${label}`))
@@ -141,6 +169,12 @@ function mapColumns(header: string[]): {
 
 export const paypayCsv: Parser = {
   name: "paypay-csv",
+  // 0.2.4: a column whose label is exactly the documented one is read as that
+  // field before any label is matched by substring, and the outgoing JPY
+  // column never matches a label naming 海外, so an overseas amount listed
+  // before 出金金額（円） is no longer read as a yen outflow (and the yen
+  // column dropped as undocumented). A header in the documented order and
+  // labels reads exactly as in 0.2.3.
   // 0.2.2: an outgoing or incoming amount that carries its own sign (-, +,
   // △, ▲ or parentheses) is left without an amount, with a closed warning,
   // instead of being negated (outgoing) or transcribed (incoming); every
@@ -148,7 +182,7 @@ export const paypayCsv: Parser = {
   // 0.2.1: a transaction date or time that does not exist gives no asOf and
   // the "not recognized" warning instead of an impossible instant; every
   // existing date and time reads as in 0.2.0.
-  version: "0.2.3",
+  version: "0.2.4",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "paypay" && artifact.mime === "text/csv";

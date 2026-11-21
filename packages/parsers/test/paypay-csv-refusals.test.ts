@@ -112,4 +112,45 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
     expect(short.warnings).toContain("header: no column found for transactionNumber");
     expect(short.warnings).toContain("header: no column found for incomingJpy");
   });
+
+  test("a reordered header reads each column by its documented label (0.2.4)", () => {
+    // The overseas amount (a foreign-currency figure) listed before the yen
+    // outflow. 0.2.3 matched 出金 in 海外出金金額 first: 12 USD became a yen
+    // outflow of 12, and the yen column was dropped as undocumented.
+    const reordered =
+      "取引日,海外出金金額,出金金額（円）,入金金額（円）,通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号";
+    const result = parse(
+      `${reordered}\n` +
+        "2026/08/01 00:00:00,12,1800,,USD,150,US,支払い,店,カード,一括払い,本人,t-1\n" +
+        "2026/08/02 00:00:00,,500,,,,,支払い,店,PayPay残高,一括払い,本人,t-2\n",
+    );
+    const [overseas, domestic] = result.observations;
+    if (overseas?.kind !== "transaction" || domestic?.kind !== "transaction")
+      throw new Error("expected two transactions");
+    expect(overseas.amountMinor).toBe(-1800);
+    expect(overseas.amountText).toBe("1800");
+    expect(overseas.extra["overseas"]).toEqual({
+      amount: "12",
+      currency: "USD",
+      conversionRateJpy: "150",
+      country: "US",
+    });
+    expect(domestic.amountMinor).toBe(-500);
+    expect(result.warnings).toEqual([
+      "header: outgoingJpy was found at column 3, not the documented column 2",
+      "header: incomingJpy was found at column 4, not the documented column 3",
+      "header: overseasAmount was found at column 2, not the documented column 4",
+    ]);
+    // With neither amount label as documented, the yen column still matches
+    // by 出金, never by the overseas label that also contains it.
+    const relabelled = reordered
+      .replace("海外出金金額", "海外出金額")
+      .replace("出金金額（円）", "出金金額(円)");
+    const variant = parse(
+      `${relabelled}\n2026/08/01 00:00:00,12,1800,,USD,150,US,支払い,店,カード,一括払い,本人,t-1\n`,
+    ).observations[0];
+    if (variant?.kind !== "transaction") throw new Error("expected a transaction");
+    expect(variant.amountMinor).toBe(-1800);
+    expect(variant.extra["overseas"]).toMatchObject({ amount: "12", currency: "USD" });
+  });
 });
