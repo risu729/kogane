@@ -368,6 +368,10 @@ describe("covers", () => {
       [DATE, "no", []],
       ["2098-03-26", "no", []],
     ]);
+    // The Tokyo day starts at 15:00 UTC: 00:30 on 3/20 is the bill's day,
+    // the last instant of 3/19 is not.
+    expect(run("2098-03-19T15:30:00.000Z")).toEqual(run("2098-03-19T23:00:00.000Z"));
+    expect(run("2098-03-19T14:59:59.999Z")).toEqual(run("2098-03-19T14:00:00.000Z"));
   });
 
   test("bills with no known debit account have their own line and make earlier-or-equal lines unknown", () => {
