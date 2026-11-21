@@ -212,3 +212,79 @@ Synthetic data only; no production data, D1 or Workers deployment.
   `reconstruction-form.test.ts` and `reconstructed-state.browser.test.ts`: the
   scope rules of the wire contract, the field's parsing and checks, and the
   page with two accounts (columns, panel, no total, accessibility audit).
+
+## Amendment: the context id pins each account's mapped sources (2026-11-21)
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context
+
+Decision 2 reads every scope account's mapped sources with one statement
+(`ACCOUNTS_SOURCES_SQL`, over `current_account_mappings`) and names an account
+that no source of the reported-state perimeter maps as without a reported
+container. That list decides `no_reported_container` (the scope is
+`unavailable`), each account's `startContainer` and `endContainer`, and each
+cell's `no_start_snapshot` gap. The outer manifest
+(`reconstructed-state-query-v2`) did not pin it. It pins both dated states'
+context ids, which since the [ADR 0019 context
+amendment](0019-dated-reported-state.md#context-amendment--2026-11-19) pin
+every row each state lists with the account it was read under, and the
+perimeter (the chosen snapshots and the containers without one). A mapping
+that no capture on either date lists changes neither: a source account of a
+perimeter source mapped to the scope account after the dates, or a mapping of
+a source account whose rows the dated reads do not list. Such a mapping turned
+an `unavailable` answer into an `indeterminate` or `incomplete` one, and back
+on its correction, under one context id (INV09). A test on the synthetic store
+reproduced it on `main`.
+
+### Options considered
+
+1. **Pin the derived list of accounts without a container.** It moves the id
+   exactly when the answer's containment moves, but the manifest would record
+   a conclusion, not what was read: a reader could not tell which mapping
+   decided it.
+2. **Pin every `[accountId, sourceId]` pair the statement returned.** Chosen.
+   With the perimeter the snapshot contexts already pin, the pairs decide the
+   containment, and they say why. A mapping to a source outside the perimeter
+   also moves the id over an unchanged answer, which is the stricter side, as
+   the ADR 0019 amendment accepts for a balance counted as excluded.
+3. **Pin each mapping row's id and revision.** Rejected: a revision that
+   keeps every account's set of sources changes nothing the answer reads yet
+   would move the id, and the statement would need to select more columns.
+
+### Decision
+
+`reconstructed-state-query-v3`. The outer manifest gains `accountSources`,
+after `snapshots`: the pairs `ACCOUNTS_SOURCES_SQL` returned, as
+`[accountId, sourceId]`, sorted by account then source, each once. The query
+reads nothing new and the statement is unchanged. The wire contract requires
+the key, the order and the uniqueness, every pair's account in the scope, and
+that an account with no pair has no reported container at either end.
+
+### Consequences
+
+- Every reconstructed-state context id changes once, with the schema; the
+  figures, status and reasons of an unchanged store do not. Nothing stores
+  one, so nothing is rebuilt.
+- A mapping that adds or removes a source of a scope account moves the id,
+  whether or not that source is in the perimeter; a revision that keeps every
+  account's set of sources keeps it.
+- Containment is still read from today's mappings, not as of either date
+  (the reported state's own limit); the id now says which mappings were read.
+
+### Verification
+
+Synthetic data only; no production data, D1 or Workers deployment.
+
+- `packages/application/test/reconstructed-state-query.test.ts`: a source
+  account of the bank's source mapped to the card account, which no capture
+  lists, turns the card account's answer from `unavailable` to one with a
+  reported container, with the same reported context ids and a new context id
+  and `accountSources`; this failed on `reconstructed-state-query-v2`. The
+  statement-count test maps the account to the card source before its first
+  read, so the statement it adds afterwards changes only the count.
+- `apps/web/test/reconstructed-state-contract.test.ts`: a manifest without
+  `accountSources`, with its pairs out of order, repeated, outside the scope
+  or malformed, or without a pair for an account a container lists, is
+  refused.
