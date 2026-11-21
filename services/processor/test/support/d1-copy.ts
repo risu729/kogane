@@ -8,8 +8,10 @@
 // then copied as they are: the triggers are dropped for the copy (they guard
 // writes the fixture already made through them, and an append-only guard
 // would refuse clearing the rows the migrations seeded), every table is
-// emptied and refilled with its rows in rowid order, and the triggers are
-// recreated verbatim from the target's own schema before anything is read.
+// emptied and refilled with its rows and rowids in rowid order, and the
+// triggers are recreated verbatim from the target's own schema before
+// anything is read. Every row, rowid included, and every trigger is then read
+// back and compared with the source.
 // D1 enforces foreign keys and cannot turn them off, so the copy runs in one
 // batch with `defer_foreign_keys`, checked once at its end; a statement stays
 // under D1's 100 KB limit. Nothing here changes a production path.
@@ -35,28 +37,40 @@ function tables(source: Database): string[] {
 
 const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
-/** INSERT statements holding every row of `table`, each under the D1 statement limit. */
-function insertsOf(source: Database, table: string): string[] {
+/** The copied columns of `table`, its rowid first where it has one of its own. */
+function columnsOf(source: Database, table: string): { columns: string[]; rowid: boolean } {
   const columns = (source.query(`PRAGMA table_xinfo(${quoted(table)})`).all() as Column[])
     .filter((column) => column.hidden === 0)
-    .map((column) => column.name);
-  if (columns.length === 0) return [];
-  const head = `INSERT INTO ${quoted(table)}(${columns.map(quoted).join(",")}) VALUES`;
-  const literal = columns.map((column) => `quote(${quoted(column)})`).join("||','||");
-  const order = (
+    .map((column) => quoted(column.name));
+  const rowid = !(
     source.query("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table) as {
       sql: string;
     }
-  ).sql.includes("WITHOUT ROWID")
-    ? ""
-    : " ORDER BY rowid";
-  const rows = source
-    .query(`SELECT '('||${literal}||')' AS v FROM ${quoted(table)}${order}`)
-    .all() as { v: string }[];
+  ).sql.includes("WITHOUT ROWID");
+  // An INTEGER PRIMARY KEY column is the rowid, and its own value wins when
+  // both are given; any other rowid table keeps its gaps only if the rowid is
+  // copied too (a row a migration deleted leaves one in `sources`).
+  return { columns: rowid ? ["rowid", ...columns] : columns, rowid };
+}
+
+/** Each row of `table` as one list of SQL literals, its rowid first where it has one, in a stable order. */
+function rowsOf(source: Database, table: string): string {
+  const { columns, rowid } = columnsOf(source, table);
+  const literals = columns.map((column) => `quote(${column})`).join("||','||");
+  return `SELECT ${literals} AS v FROM ${quoted(table)} ORDER BY ${rowid ? "rowid" : "v"}`;
+}
+
+/** INSERT statements holding every row of `table`, each under the D1 statement limit. */
+function insertsOf(source: Database, table: string): string[] {
+  const { columns } = columnsOf(source, table);
+  const head = `INSERT INTO ${quoted(table)}(${columns.join(",")}) VALUES`;
+  const rows = (source.query(rowsOf(source, table)).all() as { v: string }[]).map(
+    (row) => `(${row.v})`,
+  );
   const statements: string[] = [];
   let values: string[] = [];
   let bytes = head.length;
-  for (const { v } of rows) {
+  for (const v of rows) {
     if (values.length > 0 && bytes + v.length + 1 > STATEMENT_BYTES) {
       statements.push(`${head}${values.join(",")}`);
       values = [];
@@ -85,18 +99,25 @@ export async function copyIntoD1(source: Database, target: D1Database): Promise<
   ];
   await target.batch(statements.map((sql) => target.prepare(sql)));
   await target.batch(triggers.map((trigger) => target.prepare(trigger.sql)));
+  const recreated = (
+    await target
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY rowid")
+      .all<{ name: string; sql: string }>()
+  ).results;
+  if (JSON.stringify(recreated) !== JSON.stringify(triggers))
+    throw new Error(`d1_copy_triggers:${triggers.length}:${recreated.length}`);
+  // Every row, rowid and value, must read back as the source holds it.
   let copied = 0;
   for (const table of names) {
-    const expected = (
-      source.query(`SELECT count(*) AS n FROM ${quoted(table)}`).get() as {
-        n: number;
-      }
-    ).n;
-    const actual = (await target
-      .prepare(`SELECT count(*) AS n FROM ${quoted(table)}`)
-      .first<{ n: number }>())!.n;
-    if (actual !== expected) throw new Error(`d1_copy_mismatch:${table}:${expected}:${actual}`);
-    copied += actual;
+    const sql = rowsOf(source, table);
+    const expected = (source.query(sql).all() as { v: string }[]).map((row) => row.v);
+    const actual = (await target.prepare(sql).all<{ v: string }>()).results.map((row) => row.v);
+    const differs = expected.findIndex((value, index) => actual[index] !== value);
+    if (actual.length !== expected.length || differs !== -1)
+      throw new Error(
+        `d1_copy_mismatch:${table}:${expected.length}:${actual.length}:${differs === -1 ? "" : `row ${differs}`}`,
+      );
+    copied += actual.length;
   }
   return copied;
 }
