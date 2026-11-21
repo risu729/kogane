@@ -565,7 +565,8 @@ a refused sign-in, a refused account or month page) never learned them, so
 they are absent, not 0 (INV05); its failure code is the reason. Such a run is
 `failed` and keeps no artifact, so it writes no `manifest.json` at all. A
 `success` input that carries no `accountDetailCount` cannot be checked against
-its identities, so its units stay positional (`identity_incomplete`). Until
+its identities, so its units stay positional (`identity_incomplete`;
+[ADR 0027, amendment 2026-11-21](adr/0027-moneyforward-collector-account-identity.md#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)). Until
 2026-11-21 a stopped run reported both counts as 0 in its result. Verified
 with a synthetic passkey provider behind a mocked `fetch` in
 `services/collector-moneyforward/test/diagnostics.test.ts`.
