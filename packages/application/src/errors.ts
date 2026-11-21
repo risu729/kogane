@@ -40,13 +40,26 @@ export const UNKNOWN_KEY_REFS_MAX = 10;
 export const UNKNOWN_KEY_REF_LENGTH = 64;
 
 /**
+ * The first 64 code units of the caller's text, one fewer when the 64th is
+ * the first half of a surrogate pair: a cut never leaves a lone surrogate,
+ * which serialises as a `\ud83d` escape that strict JSON decoders refuse.
+ */
+export function refPrefix(text: string): string {
+  const cut = text.slice(0, UNKNOWN_KEY_REF_LENGTH);
+  const last = cut.charCodeAt(cut.length - 1);
+  return cut.length === UNKNOWN_KEY_REF_LENGTH && last >= 0xd800 && last <= 0xdbff
+    ? cut.slice(0, -1)
+    : cut;
+}
+
+/**
  * The refs of an `unsupported_semantics` refusal of unknown keys: the first
- * ten keys, each cut to its first 64 code units. A key is the caller's own
- * text, so it is named only far enough to be recognised, and a body full of
- * long keys is never repeated back whole.
+ * ten keys, each cut to its first 64 code units (`refPrefix`). A key is the
+ * caller's own text, so it is named only far enough to be recognised, and a
+ * body full of long keys is never repeated back whole.
  */
 export function unknownKeyRefs(keys: readonly string[]): string[] {
-  return keys.slice(0, UNKNOWN_KEY_REFS_MAX).map((key) => key.slice(0, UNKNOWN_KEY_REF_LENGTH));
+  return keys.slice(0, UNKNOWN_KEY_REFS_MAX).map(refPrefix);
 }
 
 /** HTTP status for each code. Auth failures keep the transport's own closed responses. */

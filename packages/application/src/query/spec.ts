@@ -12,7 +12,7 @@ import type { FinancialErrorCode, QuerySpec } from "../../../domain/src/result.t
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { validLocalDateText, type TemporalValue } from "../../../domain/src/time.ts";
 import { MEASURE_VIEWS } from "../../../../packages/observation-shared/src/api-schema.ts";
-import { unknownKeyRefs } from "../errors.ts";
+import { refPrefix, unknownKeyRefs } from "../errors.ts";
 import { DEFAULT_QUERY_LIMIT, GRANT_LIMITS } from "../grants.ts";
 
 /**
@@ -94,7 +94,7 @@ export function parseQueryRequest(value: unknown): SpecOutcome<QueryRequest> {
   const intent = value.intent;
   if (typeof intent !== "string") return reject("invalid_query", ["intent"]);
   if (!(SUPPORTED_QUERY_INTENTS as readonly string[]).includes(intent))
-    return reject("unsupported_semantics", [`intent:${intent.slice(0, 64)}`]);
+    return reject("unsupported_semantics", [`intent:${refPrefix(intent)}`]);
   const supported = intent as SupportedQueryIntent;
   const rawFilters: unknown = value.filters ?? {};
   if (!isRecord(rawFilters)) return reject("invalid_query", ["filters"]);

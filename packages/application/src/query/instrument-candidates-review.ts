@@ -44,7 +44,7 @@ import {
   readIdentityObservationCount,
 } from "../../../read-model/src/instrument-resolution.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
-import { financialError } from "../errors.ts";
+import { financialError, unknownKeyRefs } from "../errors.ts";
 import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
 import {
   type InstrumentResolution,
@@ -209,7 +209,7 @@ export function parseInstrumentCandidatesRequest(
     return {
       ok: false,
       code: "unsupported_semantics",
-      refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
+      refs: unknownKeyRefs(unknown),
     };
   const { view, offset, identifierId } = value;
   if (view !== undefined) {

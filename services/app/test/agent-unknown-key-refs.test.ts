@@ -130,6 +130,27 @@ describe("an unknown key is named by a bounded prefix, never echoed whole", () =
     expectBoundedRefs(await response.json(), "context.open query");
   });
 
+  it("never splits a surrogate pair, so neither body carries a lone surrogate escape", async () => {
+    // U+1F600 at code units 64 and 65: a plain cut would leave `\ud83d`.
+    const key = `${"x".repeat(63)}\u{1F600}tail`;
+    const route = await post("/api/agent/v1/financial.query", { intent: "coverage", [key]: 1 });
+    expect(route.status).toBe(400);
+    const text = await route.text();
+    expect(text).not.toMatch(/\\ud[89ab]/iu);
+    expect(JSON.parse(text)).toMatchObject({ refs: ["x".repeat(63)] });
+    const tool = await post("/mcp", {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "kogane.financial.query", arguments: { intent: "coverage", [key]: 1 } },
+    });
+    const toolText = await tool.text();
+    expect(toolText).not.toMatch(/\\+ud[89ab]/iu);
+    expect(
+      (JSON.parse(toolText) as { result: { structuredContent: unknown } }).result.structuredContent,
+    ).toMatchObject({ refs: ["x".repeat(63)] });
+  });
+
   it("keeps a short unknown key whole, as before", async () => {
     const response = await post("/api/agent/v1/financial.query", {
       intent: "coverage",
