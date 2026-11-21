@@ -51,6 +51,19 @@ async function relay(
   }
 }
 /**
+ * A Processor answer as this Worker serves it: its status and its body bytes,
+ * under this Worker's own JSON type. No header of the Processor's crosses back
+ * — not its `content-type`, not a `content-security-policy` or a cookie — so a
+ * relayed body can never choose how this origin serves it, whatever the
+ * Processor answered. The same rule as the command relay (`command-api.ts`).
+ */
+function relayed(upstream: Response, body: BodyInit | null = upstream.body): Response {
+  return new Response(body, {
+    status: upstream.status,
+    headers: { "content-type": "application/json" },
+  });
+}
+/**
  * The schedules page's snapshot as the Processor answers it, relayed with no
  * actor: the page's GET and `kogane.schedules.read` (ADR 0081) both read it.
  */
@@ -61,15 +74,16 @@ export function relayScheduleSnapshot(env: Env): Promise<Response> {
 /**
  * The schedules page at one detail (ADR 0123), the answer of the page's GET
  * and of `kogane.schedules.read`: `full` is the Processor's snapshot relayed
- * as it is; `summary` is `scheduleSnapshotSummary` of that same snapshot.
- * A refusal the Processor answers is relayed as it is under either detail.
+ * as its status and bytes (`relayed`); `summary` is `scheduleSnapshotSummary`
+ * of that same snapshot. A refusal the Processor answers is relayed the same
+ * way under either detail.
  */
 export async function scheduleSnapshotResponse(
   env: Env,
   detail: ScheduleReadDetail,
 ): Promise<Response> {
   const upstream = await relayScheduleSnapshot(env);
-  if (detail === "full" || upstream.status !== 200) return upstream;
+  if (detail === "full" || upstream.status !== 200) return relayed(upstream);
   let snapshot: unknown;
   try {
     snapshot = await upstream.json();
@@ -169,7 +183,7 @@ export async function scheduleBootstrapApi(
   const upstream = await relay(request, env, "/bootstrap", undefined, undefined, {
     "x-kogane-release-sha": appSha,
   });
-  if (upstream.status !== 200) return upstream;
+  if (upstream.status !== 200) return relayed(upstream);
   // Identity comes from the POST that actually reconciled reservations, never
   // the earlier health GET. A lost/malformed postwrite answer is not replayable.
   let result: unknown;
@@ -284,10 +298,7 @@ async function scheduleWrite(
     throw new UpstreamLost(503, "scheduling_unavailable");
   }
   return {
-    response: new Response(text, {
-      status: upstream.status,
-      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
-    }),
+    response: relayed(upstream, text),
     outcome: upstreamOutcome(upstream.status, upstream.headers, text, { result: "replayed" }),
   };
 }

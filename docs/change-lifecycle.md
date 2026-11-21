@@ -588,7 +588,9 @@ and forwards to the pipeline's private `POST /command/v1/*` routes over a
 `PIPELINE` service binding (the same pattern the importer uses for
 `kogane-ingest`). Without that binding the browser answers
 `503 command_executor_unavailable`; there is no fallback write path from the
-reader.
+reader. The browser answers with the pipeline's status and body bytes under
+its own `Content-Type: application/json`; no header of the pipeline's crosses
+back, so a pipeline answer never chooses how the browser's origin serves it.
 
 Both sides check the grant. The browser refuses an agent's `approve`/`commit`
 before forwarding; the pipeline refuses it again from the
@@ -874,12 +876,14 @@ already recorded is never undone by a DELETE — an undo is a new revision
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/app/test/command-api.test.ts` (21 tests): 401 without
+- `services/app/test/command-api.test.ts` (23 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding
   is absent, body and query-string bounds, `no-store` and no credentials in the
-  answer, and the capability advertised from the flag.
+  answer, the pipeline's status and bytes relayed under the browser's own
+  `application/json` with none of the pipeline's headers, and the capability
+  advertised from the flag.
 - `packages/application/test/pending-posted-plan.test.ts`: the pending-to-posted
   review on every CORE migration — the candidate and its payload, an accept
   that merges one purchase `authorized → captured` with the captured total
