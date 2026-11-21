@@ -622,8 +622,11 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 
 - Access JWT required on every route; the actor is the verified `sub`, never a
   body field or a header the client controls.
-- POST only, on exactly these five paths. Everything else in the evidence
-  browser stays GET-only; any other non-GET request is still `405`.
+- POST only, on exactly these five paths: any other method on them is
+  `405` with `Allow: POST`. Everything else in the evidence browser stays
+  GET-only; any other non-GET (or HEAD) request is still `405`, with
+  `Allow: GET, HEAD`
+  ([methods](production-evidence-browser.md#methods)).
 - No query string, body bounded to 16 KiB, `no-store` on every answer.
 - An `Origin` that is present and not the Worker's own is
   `403 origin_not_allowed` before the flag, the grant or the body is read

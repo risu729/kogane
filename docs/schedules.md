@@ -452,7 +452,10 @@ login or render with JavaScript cannot be read this way.
   with its closed states and newest receipt, each source's maintenance
   status and rule count, and the held leases
   ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
-  parameter is accepted.
+  parameter is accepted. `HEAD` is the same read, `detail` included, without
+  the body; another method is `405` with `Allow: GET, HEAD`, except `POST`,
+  which is `404` here. A method other than `POST` on any path below the page
+  is `405` with `Allow: POST`, as it is on `POST /api/ops/v1/schedules/bootstrap`.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped

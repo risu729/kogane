@@ -1898,6 +1898,9 @@ client can get, transport refusals included, is in
 [the refusal table](#refusals-a-client-sees).
 
 Requests are bounded at 64 KiB; a larger body is 413 before it reaches a tool.
+Every agent path (`/api/agent/v1/*` and `/mcp`) takes `POST` only: any other
+method is `405 method_not_allowed` with `Allow: POST`, decided after the
+caller is proved ([methods](production-evidence-browser.md#methods)).
 
 ## Connecting an MCP client
 
@@ -1970,7 +1973,7 @@ are unchanged.
   HTTP transport and the stateless 2026-07-28 revision through
   `createMcpHandler`, both answering one JSON object per request from one
   server definition. No session (`Mcp-Session-Id` is never minted), no SSE
-  stream; `GET` and `DELETE` are `405`.
+  stream; `GET`, `HEAD` and `DELETE` are `405`, with `Allow: POST`.
 - A client must send `Accept: application/json, text/event-stream` and
   `Content-Type: application/json` (the SDK answers `406` / `415`
   otherwise), as every MCP client does.
@@ -1989,7 +1992,7 @@ are unchanged.
 | a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                                         |
 | a store failure (or a bug) inside a read tool's own read, page reads included                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers (economic readiness: its own `503` body, as its route answers)         |
 | `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                                          |
-| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                                                    |
+| `GET` / `HEAD` / `DELETE`; a query string                                                                                                                         | Worker                                      | `405 method_not_allowed` with `Allow: POST` / `400 invalid_query`                                                                                 |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
 | unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                                          |
 | an operations tool whose principal does not resolve (a malformed subject, a bad clock)                                                                            | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_mcp_client"}` (or the resolution's other closed code); only the refusal record                         |

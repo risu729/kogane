@@ -421,9 +421,9 @@ is true today.
 What holds: the request handler writes nothing. No query in
 `src/queries.ts` is an `INSERT`, `UPDATE` or `DELETE`, and the first
 middleware in `src/api.ts` refuses any method other than `GET` or `HEAD`
-with 405 before any route runs, so a write could not reach a handler even
-if one were added carelessly later. `test/api.test.ts` asserts that for
-POST, PUT, PATCH and DELETE.
+with 405 (and `Allow: GET, HEAD`) before any route runs, so a write could not reach a handler even
+if one were added carelessly later. `test/api.test.ts` asserts that, and the
+`Allow` header, for POST, PUT, PATCH and DELETE.
 
 What does not: the process is not read-only. The entrypoint calls the same
 `openStore()` as the ingesting and parsing tools, and `openStore()`
@@ -442,7 +442,8 @@ The deployed Worker (`services/app`) gained exactly one
 non-GET path set: `POST /api/command/v1/{plan,simulate,approve,commit,operation}`
 ([change-lifecycle.md](change-lifecycle.md)). It is not a relaxation of the
 boundary above — every other request that is not `GET` or `HEAD` is still
-`405`, and `test/command-api.test.ts` asserts that for `/api/meta` and
+`405`, with `Allow: GET, HEAD`
+([production evidence browser](production-evidence-browser.md#methods)), and `test/command-api.test.ts` asserts that for `/api/meta` and
 `/api/evidence/v1/meta` while the command flag is on.
 
 Three properties hold on that path set:
@@ -716,7 +717,10 @@ deployment facts are:
   `/api/ops/v1/*` operations and schedules routes). Each is registered
   explicitly in `src/worker.ts` before the GET-only check, behind the same
   `auth.ts` gate as every read route, with bounded bodies, `no-store` and the
-  same closed 401/403 answers. Everything outside them is refused with 405.
+  same closed 401/403 answers. Everything outside them is refused with 405
+  and `Allow: GET, HEAD`; a method other than POST on one of them is 405
+  with `Allow: POST`
+  ([methods](production-evidence-browser.md#methods)).
 - The principal on both is the subject `authenticate` returned; no route reads
   an actor from a request body or a header.
 - Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
