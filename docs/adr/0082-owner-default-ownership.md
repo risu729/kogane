@@ -122,7 +122,7 @@ commit refusing an approved default on a MyJCB root atomically). No production d
 
 ## Amendment 2026-11-18: the card-ownership page plans the owner default
 
-- Status: proposed
+- Status: accepted (merged 2026-11-19 in [#1398](https://github.com/risu729/kogane/pull/1398))
 - Date: 2026-11-18
 - Replaces: decision point 4's "the card-ownership page does not yet offer to
   plan one (it plans only the sole-personal self-declaration)"

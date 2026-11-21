@@ -1,6 +1,6 @@
 # ADR 0114: Answer each card's debit account from stated evidence first, then accepted settlements
 
-- Status: proposed
+- Status: accepted (merged 2026-11-18 in [#1387](https://github.com/risu729/kogane/pull/1387))
 - Date: 2026-11-18
 - Tracking: [issue 1357](https://github.com/risu729/kogane/issues/1357)
 - Related: [ADR 0032](0032-provider-stated-debit-accounts.md) (provider-stated

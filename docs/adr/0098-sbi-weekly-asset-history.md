@@ -1,6 +1,6 @@
 # ADR 0098: Preserve SBI weekly asset history and select one revision per point
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1272](https://github.com/risu729/kogane/pull/1272))
 - Date: 2026-11-09
 - Issue: [#1238](https://github.com/risu729/kogane/issues/1238)
 

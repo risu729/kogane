@@ -232,8 +232,13 @@ export {
 } from "./card-purchase-keys";
 export {
   ACTIVITY_BASES,
+  ACTIVITY_FILTER_WALK,
   type ActivityBasis,
   activityEventsSql,
+  type ActivityFilters,
+  type ActivityKey,
+  type FilteredActivityPage,
+  filteredActivityEventsSql,
   type AllocationView,
   type BasisTotal,
   basisTotals,

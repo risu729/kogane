@@ -8,6 +8,9 @@
   each is a published tool change and needs the owner's approval before merge. Gap G4 is implemented in its own
   pull request ([ADR 0123, amendment](../adr/0123-summary-detail-for-large-reads.md#amendment-cash-per-account-and-per-bank-in-one-call-collection-cash-2026-11-20)),
   a published tool change that needs the owner's approval too. The other gaps are proposals.
+  Gap G3 has two parts: the digest, [ADR 0127](../adr/0127-changes-since-digest.md), and the `events.read`
+  recording-time, account and source filters, [ADR 0081, amendment of 2026-11-20](../adr/0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20)
+  (proposed; no event-date filter yet). The tables below describe main at `c9cd0c9`.
 - Issue: [#1414](https://github.com/risu729/kogane/issues/1414) (done when: "how much is my next card bill, from
   which account, and will that account cover it?" and "which sources are failing?" take one or two calls, each
   answer under 8 KB).

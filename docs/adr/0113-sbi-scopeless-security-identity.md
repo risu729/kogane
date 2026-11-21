@@ -1,6 +1,6 @@
 # ADR 0113: Map an SBI Securities code with no RIC, MIC or country as unresolved under identity policy 2, for foreign positions captures only
 
-- Status: proposed
+- Status: accepted (merged 2026-11-18 in [#1385](https://github.com/risu729/kogane/pull/1385))
 - Date: 2026-11-18
 - Amended by: [ADR 0117](0117-sbi-foreign-account-discriminator-identity.md)
   (proposed, 2026-11-18): the SBI Securities module now requires policy 3

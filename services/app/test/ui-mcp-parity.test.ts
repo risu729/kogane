@@ -363,6 +363,22 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
     ])
       expect(tool.description).toContain(term);
   });
+  it("names the overview summary's byte budget, what it trims, and its refusal", async () => {
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.store.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "8,192 bytes",
+      "`sourcesOmitted`",
+      "`moreFailureCodes`",
+      "`budget.trimmed`",
+      "every status keeps every code",
+      "413 result_limit_exceeded",
+      "`retryWith",
+    ])
+      expect(tool.description).toContain(term);
+  });
 
   it("publishes the holdings change's details, closed statuses and cursor codes (ADR 0075, 2026-11-19)", async () => {
     expect(READ_ROUTE_TOOLS["/api/v2/reported-holdings-change"]).toEqual([

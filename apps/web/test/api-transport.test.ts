@@ -153,9 +153,11 @@ describe("browser JSON transport", () => {
       detail: "summary",
       counts: [],
       sources: [],
+      sourcesOmitted: 0,
       fetchRuns: { byStatus: [], notSuccessful: [], notSuccessfulOmitted: [] },
       parseRuns: { byStatus: [], notOk: [], notOkOmitted: [] },
       coverage,
+      budget: { bytes: 8192, trimmed: false },
     };
     serve(Response.json(summary));
     expect((await errorFor("/api/overview?detail=full")).message).toContain("形式");

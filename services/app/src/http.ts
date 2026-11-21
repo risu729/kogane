@@ -25,6 +25,12 @@ export class HttpError extends Error {
 export interface HttpErrorHints {
   /** The argument names a continuation must repeat as they were (ADR 0123). */
   readonly mustMatch?: readonly string[];
+  /**
+   * The argument a refused read answers under instead: an overview summary
+   * whose status lines alone pass its byte budget names `detail: "full"`
+   * (ADR 0123, amendment 2026-11-20).
+   */
+  readonly retryWith?: { readonly detail: "full" };
 }
 
 /**
