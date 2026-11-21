@@ -109,7 +109,8 @@ export interface ChangesSinceHandler {
 
 /** The handler of each section, of the events line and of an unchanged source. */
 export const CHANGES_SINCE_HANDLERS = {
-  // A source's sealed runs, newest first.
+  // A source's sealed runs, newest first. `kogane.evidence.read` serves the
+  // configured evidence source only: any other source is 404 (ADR 0127).
   runs: { tool: "kogane.evidence.read", arguments: { page: "runs" }, sourceArgument: "source" },
   // The newest sealed new run's artifacts.
   captures: {

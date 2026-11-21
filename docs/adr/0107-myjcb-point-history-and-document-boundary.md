@@ -1,6 +1,6 @@
 # ADR 0107: MyJCB acquisition-month points and statement document boundary
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1283](https://github.com/risu729/kogane/pull/1283))
 - Date: 2026-11-10
 
 ## Context

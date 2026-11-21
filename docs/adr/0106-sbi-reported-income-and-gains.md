@@ -1,6 +1,6 @@
 # ADR 0106: Preserve reported SBI payments and sales as complete retained containers
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1282](https://github.com/risu729/kogane/pull/1282))
 - Date: 2026-11-10
 - Issue: [#1236](https://github.com/risu729/kogane/issues/1236)
 

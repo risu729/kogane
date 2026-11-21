@@ -1,6 +1,6 @@
 # ADR 0101: Read observed MyJCB debit statement rows separately from credit payments
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1276](https://github.com/risu729/kogane/pull/1276))
 - Date: 2026-11-10
 - Issue: [#1239](https://github.com/risu729/kogane/issues/1239)
 
