@@ -5,8 +5,10 @@
 // from the ADR 0114 answer, the account's balance from the reported state for
 // the date, and `covers`. Also: the answer passes the page's wire contract,
 // stays under 8 KB for ten cards, writes nothing, is graded before it reads,
-// and reaches account labels by key without table statistics. Every card,
-// account, label, amount and date is invented.
+// reads the reported state without the count of the statements before the
+// window or the scheduled payments and answers byte for byte as over the full
+// state (on random stores too), and reaches account labels by key without
+// table statistics. Every card, account, label, amount and date is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { validApiResponse } from "../../observation-shared/src/api-validation.ts";
@@ -32,8 +34,11 @@ import { SETTLEMENT_SQL } from "../src/query/card-purchases.ts";
 import {
   ACCOUNT_LABELS_SQL,
   reviewUpcomingCardBills,
+  reviewUpcomingCardBillsWith,
   type UpcomingCardBillsReview,
+  type UpcomingReportedStateRead,
 } from "../src/query/card-upcoming-bills.ts";
+import { DatedStateLimitError, queryDatedState } from "../src/query/dated-state.ts";
 
 const WHOLE: Grant = {
   principal: "synthetic-reader",
@@ -634,6 +639,178 @@ describe("the answer as served", () => {
   });
 });
 
+/**
+ * The reported state as the view read it until 2026-11-21: the full state,
+ * with the count of the statements before the window and the scheduled
+ * payments (`queryDatedState(sql, { date })`, the call this branch replaced).
+ */
+const fullState: UpcomingReportedStateRead = (sql, date) => queryDatedState(sql, { date });
+
+/** The view's answer as JSON text, over the state it reads and over the full state. */
+async function bothAnswers(store: DatedStore, date: string): Promise<[string, string]> {
+  const input = { grant: WHOLE, sql: executor(store), date };
+  return [
+    JSON.stringify(await reviewUpcomingCardBills(input)),
+    JSON.stringify(await reviewUpcomingCardBillsWith(input, fullState)),
+  ];
+}
+
+describe("the reported state it reads", () => {
+  test("neither the count before the window nor the scheduled payments, and the answer is the full state's", async () => {
+    // The scenario plus what only the skipped reads see: statements due long
+    // before the window, an undated one captured before it, and skip pages.
+    const store = scenario();
+    for (const [card, period, paymentDate] of [
+      ["vpass:card-001", "2026-05", "2026-05-27"],
+      ["vpass:card-002", "2026-04", "2026-04-26"],
+      ["vpass:card-003", "2026-06", null],
+    ] as const) {
+      const old = statement(store, { card, period, paymentDate, minor: 2_000 });
+      store.identify(old, "vpass", `acct-${card.slice(6)}`, "provider-local");
+    }
+    store.scheduledPage({
+      fetchedAt: "2026-09-15T02:00:00Z",
+      payments: [
+        { usageDate: "2026-09-01", dueDate: "2026-10-10", amount: "3000", asOf: "2026-09-01" },
+        { usageDate: "2026-09-02", dueDate: "2026-09-10", amount: "-500", asOf: "2026-09-01" },
+      ],
+    });
+    store.scheduledPage({ fetchedAt: "2026-09-16T02:00:00Z", connection: "conn-2" });
+    // The skipped reads find something on this store, so the comparison means something.
+    const full = await queryDatedState(executor(store), { date: DATE });
+    expect(full.manifest.statementsBeforeWindow.length).toBeGreaterThan(0);
+    expect(full.scheduledPayments.flatMap((capture) => capture.payments)).toHaveLength(2);
+
+    const seen: string[] = [];
+    await review(store, seen);
+    expect(seen).toContain(DATED_STATEMENTS_SQL);
+    expect(seen).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    expect(seen).not.toContain(DATED_SCHEDULED_PAYMENTS_SQL);
+
+    for (const date of [DATE, "2026-09-26", "2026-10-01", "2026-08-20"]) {
+      const [read, before] = await bothAnswers(store, date);
+      expect(read).toBe(before);
+    }
+  });
+
+  test("on random stores, the answer is byte-identical to the full state's", async () => {
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x0b11;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const seen = { answers: 0, counted: 0, scheduled: 0, compared: 0, unknown: 0 };
+    for (let round = 0; round < 10; round += 1) {
+      const store = new DatedStore();
+      for (let card = 0; card < 5; card += 1) {
+        const sourceAccount = `vpass:card-00${card}`;
+        const bank =
+          random(5) === 0 ? `smbc-bank:synthetic-${card}` : random(2) === 0 ? BANK_A : BANK_B;
+        // Distinct months per card: one statement capture per card month.
+        for (let month = 4; month <= 10; month += 1) {
+          if (random(3) === 0) continue;
+          const period = `2026-${pad(month)}`;
+          const kind = random(10);
+          const capture = statement(store, {
+            card: sourceAccount,
+            period,
+            paymentDate: kind === 0 ? null : `${period}-${pad(20 + random(9))}`,
+            minor: kind === 1 ? null : kind === 2 ? -random(5_000) : 1 + random(90_000),
+          });
+          if (random(4) !== 0)
+            store.identify(capture, "vpass", `acct-card-${card}`, "provider-local");
+          if (random(3) === 0)
+            accept(store, capture, {
+              card: sourceAccount,
+              period,
+              bank,
+              debitDate: `${period}-${pad(20 + random(9))}`,
+            });
+        }
+      }
+      for (let index = 0; index < 6; index += 1) {
+        const at = `2026-${pad(5 + random(7))}-${pad(1 + random(28))}T01:00:00Z`;
+        balances(store, at, [
+          [BANK_A, random(8) === 0 ? null : random(200_000), "acct-bank-a"],
+          [BANK_B, random(200_000), random(6) === 0 ? "acct-bank-a" : "acct-bank-b"],
+        ]);
+      }
+      for (let index = 0; index < 4; index += 1) {
+        const month = pad(4 + random(7));
+        store.scheduledPage({
+          fetchedAt: `2026-${month}-${pad(1 + random(28))}T02:00:00Z`,
+          connection: `conn-${random(2)}`,
+          published: random(4) !== 0,
+          payments: Array.from({ length: random(4) }, () => ({
+            usageDate: `2026-${month}-01`,
+            dueDate: `2026-${pad(4 + random(8))}-10`,
+            amount: String(1 + random(9_000)),
+            asOf: `2026-${month}-01`,
+          })),
+        });
+      }
+      for (const date of ["2026-05-31", "2026-07-15", "2026-09-20", "2026-10-25", "2026-11-30"]) {
+        const full = await queryDatedState(executor(store), { date });
+        if (full.manifest.statementsBeforeWindow.length > 0) seen.counted += 1;
+        if (full.scheduledPayments.some((capture) => capture.payments.length > 0))
+          seen.scheduled += 1;
+        const [read, before] = await bothAnswers(store, date);
+        expect(read).toBe(before);
+        const answer = JSON.parse(read) as { review: UpcomingCardBillsReview };
+        for (const line of answer.review.byDebitAccount)
+          if (line.covers === "unknown") seen.unknown += 1;
+          else seen.compared += 1;
+        seen.answers += 1;
+      }
+    }
+    // The random worlds reach states the skipped reads find something in, and
+    // answers with both compared and unknown lines.
+    expect(seen.answers).toBe(10 * 5);
+    expect(seen.counted).toBeGreaterThan(20);
+    expect(seen.scheduled).toBeGreaterThan(10);
+    expect(seen.compared).toBeGreaterThan(10);
+    expect(seen.unknown).toBeGreaterThan(10);
+  });
+
+  test("scheduled payments past the row bound no longer blank every balance", async () => {
+    // The one answer that differs: the full state refused this store for a
+    // read the view never used, and every balance read `missing`.
+    const store = scenario();
+    store.scheduledPage({
+      fetchedAt: "2026-09-15T02:00:00Z",
+      payments: Array.from({ length: 5_001 }, (_, index) => ({
+        usageDate: "2026-09-01",
+        dueDate: "2026-10-10",
+        amount: String(1 + index),
+        asOf: "2026-09-01",
+      })),
+    });
+    await expect(queryDatedState(executor(store), { date: DATE })).rejects.toBeInstanceOf(
+      DatedStateLimitError,
+    );
+    const input = { grant: WHOLE, sql: executor(store), date: DATE };
+    const before = await reviewUpcomingCardBillsWith(input, fullState);
+    if (!before.ok) throw new Error("refused");
+    const listed = before.review.byDebitAccount.flatMap((line) =>
+      line.balance === null ? [] : [line.balance],
+    );
+    expect(listed.length).toBeGreaterThan(0);
+    for (const balance of listed)
+      expect(balance).toEqual({
+        unit: "JPY",
+        status: "missing",
+        reason: "reported_state_limit_exceeded",
+        capturedAt: null,
+      });
+    // Now the answer is the one this store gives without the scheduled page.
+    expect(JSON.stringify(await review(store))).toBe(JSON.stringify(await review(scenario())));
+  });
+});
+
 describe("cost and authority", () => {
   test("it writes nothing and issues only the reads it composes", async () => {
     const store = scenario();
@@ -650,8 +827,6 @@ describe("cost and authority", () => {
         DATED_BALANCES_SQL,
         DATED_SNAPSHOTS_SQL,
         DATED_STATEMENTS_SQL,
-        DATED_STATEMENTS_BEFORE_WINDOW_SQL,
-        DATED_SCHEDULED_PAYMENTS_SQL,
         SETTLEMENT_SQL,
         ACCOUNT_LABELS_SQL,
       ]),
