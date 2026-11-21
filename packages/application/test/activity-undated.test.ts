@@ -173,6 +173,119 @@ describe("activity with a from/to window names the rows it cannot place (INV05)"
   });
 });
 
+describe("a grant narrowed by account bounds the count (SC18)", () => {
+  const sources = {
+    paypay: [
+      { asOf: "2026-03-04", account: "account-1" },
+      { asOf: null, account: "account-2" },
+    ],
+    wise: [{ asOf: "2026-03", account: "account-2" }],
+  };
+
+  test("undated rows only in an account outside the grant name nothing", async () => {
+    const { result, asOfs } = await activity(
+      sources,
+      WINDOW,
+      grant({ scopes: { sources: "*", accounts: ["account-1"] } }),
+    );
+    expect(asOfs).toEqual(["2026-03-04"]);
+    // wise has no row in the granted account, so it is named as having none;
+    // its hidden undated row does not turn it into undated_rows_excluded.
+    expect(result.coverage.gaps).toEqual([
+      { reasonCode: "no_rows_in_scope", scopeRef: "source:wise" },
+    ]);
+    expect(result.quality.freshness).toMatchObject({
+      state: "verified",
+      reasonCodes: ["every_row_carries_an_as_of"],
+    });
+  });
+
+  test("the same store answers the same as one without the hidden account's rows", async () => {
+    const narrowed = grant({ scopes: { sources: ["paypay", "wise"], accounts: ["account-1"] } });
+    const withHidden = await activity(sources, WINDOW, narrowed);
+    const without = await activity(
+      { paypay: [{ asOf: "2026-03-04", account: "account-1" }], wise: [] },
+      WINDOW,
+      narrowed,
+    );
+    expect(withHidden.result.completeness).toBe(without.result.completeness);
+    expect(withHidden.result.coverage).toEqual(without.result.coverage);
+    expect(withHidden.result.quality).toEqual(without.result.quality);
+  });
+
+  test("an undated row in a granted account is named for its source", async () => {
+    const { result } = await activity(
+      sources,
+      WINDOW,
+      grant({ scopes: { sources: "*", accounts: ["account-2"] } }),
+    );
+    expect(result.completeness).toBe("partial");
+    expect(result.coverage.gaps).toEqual([
+      { reasonCode: "undated_rows_excluded", scopeRef: "source:paypay" },
+      { reasonCode: "undated_rows_excluded", scopeRef: "source:wise" },
+    ]);
+  });
+});
+
+describe("the gap is the same on every page and leaves the cursor alone (ADR 0091)", () => {
+  async function pages(rows: readonly SyntheticTransaction[]) {
+    const store = new QualityStore();
+    try {
+      publishTransactions(store, "paypay", "synthetic-activity", rows);
+      const reader = createObservationReader(sqliteExecutor(store.db));
+      const overview = await reader.overview();
+      const scoped = {
+        ...overview,
+        sources: overview.sources.filter((row) => row.id === "paypay"),
+      };
+      const out = [];
+      let cursor: string | null = null;
+      do {
+        const body: QueryRequest = { intent: "activity", filters: WINDOW, cursor, limit: 2 };
+        const opened = await openContext(grant(), CONTEXT_INPUTS, { query: body });
+        const outcome = await executeQuery({
+          grant: grant(),
+          opened,
+          request: body,
+          reader,
+          overview: scoped,
+        });
+        if (!outcome.ok) throw new Error(`query refused: ${outcome.error.code}`);
+        out.push(outcome.result);
+        cursor = outcome.result.nextCursor;
+      } while (cursor !== null);
+      return out;
+    } finally {
+      store.db.close();
+    }
+  }
+
+  test("every page names the source; rows and cursors match a store without the undated row", async () => {
+    const dated = [
+      { asOf: "2026-03-01" },
+      { asOf: "2026-03-02" },
+      { asOf: "2026-03-03" },
+      { asOf: "2026-03-04" },
+      { asOf: "2026-03-05" },
+    ];
+    const withUndated = await pages([...dated, { asOf: null }, { asOf: "2026-03" }]);
+    const plain = await pages(dated);
+    expect(withUndated).toHaveLength(3);
+    expect(plain).toHaveLength(3);
+    for (const [index, page] of withUndated.entries()) {
+      expect(page.completeness).toBe("partial");
+      expect(page.coverage.gaps).toEqual([
+        { reasonCode: "undated_rows_excluded", scopeRef: "source:paypay" },
+      ]);
+      expect(page.quality.freshness.reasonCodes).toEqual(["undated_rows_excluded"]);
+      expect(page.data).toEqual(plain[index]!.data);
+      expect(page.nextCursor).toBe(plain[index]!.nextCursor);
+    }
+    // Without the undated rows only the last page is complete.
+    expect(plain.map((page) => page.completeness)).toEqual(["partial", "partial", "complete"]);
+  });
+});
+
 describe("the undated count is read only for a window", () => {
   test("one count per scope pair with from or to, none without", async () => {
     const calls = async (filters: Record<string, string>) => {

@@ -136,10 +136,16 @@ applies the same `source`, `account` and `q` predicates, and keeps the rows
 for which `(CALENDAR_DATED_AS_OF) IS NOT 1`, the exact complement of the
 window's date check, grouped per source account. The windowed SQL is the
 shipped text (the predicate moved into the constant unchanged; a test pins
-the frozen text). `test/undated-transactions.test.ts` checks, on five seeded
-random stores and ten scopes each, that the unwindowed rows of a scope are
-the rows the widest window places plus the counted ones, and that the count
-per source account equals an independent calendar oracle.
+the frozen text). `test/undated-transactions.test.ts` checks that the
+count's derived set is `TRANSACTIONS_SQL`'s text byte for byte for every
+scope, and, on five seeded random stores (about a quarter of their parses
+never published) and eleven scopes each, that the unwindowed rows of a scope
+are the rows the widest window places plus the counted ones, and that the
+count per source account equals an independent calendar oracle over the
+published rows. Its plan, on every CORE migration with no table statistics,
+makes exactly the scans and searches of the windowed `listTransactions`
+plan, as many times: only the final temporary B-tree differs (`GROUP BY` in
+place of `ORDER BY`).
 
 The `activity` intent of `kogane.financial.query` calls it once per scope
 pair when a request has `from` or `to`, and names each source with such a

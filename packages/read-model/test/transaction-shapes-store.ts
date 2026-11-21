@@ -14,13 +14,15 @@ export interface SyntheticTransaction {
 /**
  * One published parse of `parser` for `source`, holding one transaction per
  * entry. Each row has its own external id, so none is ranked away as a
- * duplicate of another.
+ * duplicate of another. With `published: false` the parse succeeds but is
+ * never published, so no current read may see its rows.
  */
 export function publishTransactions(
   store: QualityStore,
   source: string,
   parser: string,
   rows: readonly SyntheticTransaction[],
+  options: { published?: boolean } = {},
 ): void {
   const run = store.run({
     source,
@@ -48,6 +50,7 @@ export function publishTransactions(
     ),
   );
   store.db.run("UPDATE parse_runs SET status='ok' WHERE id=?", [parse]);
+  if (options.published === false) return;
   store.db.run(
     "INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at) VALUES(?,?,NULL,?,'normal','pipeline','parse_ok','2099-01-01')",
     [artifact, parser, parse],

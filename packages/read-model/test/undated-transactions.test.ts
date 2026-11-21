@@ -15,7 +15,8 @@ import {
   scopePredicates,
   type SqlExecutor,
 } from "../src/index";
-import { transactionsSql } from "../src/sql";
+import { transactionsSql, undatedTransactionsSql } from "../src/sql";
+import { explain, type PlanStep } from "./card-usage-plan";
 import {
   publishTransactions,
   QualityStore,
@@ -70,12 +71,99 @@ const SHAPES = [
   () => "2026/03/04",
 ];
 
+/** The derived set a read wraps: the text inside its outermost `FROM (...)`. */
+function innerSet(sql: string): string {
+  const start = sql.indexOf("FROM (") + "FROM (".length;
+  const last = "WHERE rank_in_identity = 1";
+  const end = sql.lastIndexOf(last) + last.length;
+  expect(sql.slice(end, end + 2)).toBe(")\n");
+  return sql.slice(start, end);
+}
+
+/** The relations a plan reads, by kind, subquery numbers erased, as a sorted multiset. */
+function reads(steps: readonly PlanStep[]): string[] {
+  return steps
+    .map((step) => step.detail)
+    .filter((detail) => /^(SCAN|SEARCH|MATERIALIZE|CO-ROUTINE) /u.test(detail))
+    .map((detail) => detail.replace(/subquery-\d+/gu, "subquery"))
+    .sort();
+}
+
 describe("the window's date check is unchanged", () => {
   test("the from/to predicates are the shipped text", () => {
     expect(scopePredicates({ from: "2026-01-01", to: "2026-01-31" }, ["from", "to"]).where).toBe(
       LEGACY_WINDOW_WHERE,
     );
     expect(LEGACY_WINDOW_WHERE.startsWith(CALENDAR_DATED_AS_OF)).toBe(true);
+  });
+});
+
+describe("the count reads the list's own row set", () => {
+  test("the derived set is TRANSACTIONS_SQL's text, byte for byte, for every scope", () => {
+    for (const scope of [
+      {},
+      { source: "paypay" },
+      { account: "account-1" },
+      { source: "paypay", account: "account-1", q: "alpha" },
+    ]) {
+      const list = transactionsSql({ ...scope, from: "2026-01-01" }, 0);
+      const count = undatedTransactionsSql(scope);
+      expect(innerSet(count.sql)).toBe(innerSet(list.sql));
+      expect(innerSet(count.sql).length).toBeGreaterThan(1000);
+      // The same filters, in the same order, with the window's date check
+      // turned into its complement and its bounds dropped.
+      const listWhere = scopePredicates({ ...scope, from: "2026-01-01" }, [
+        "source",
+        "account",
+        "from",
+        "q",
+      ]);
+      const countWhere = scopePredicates(scope, ["source", "account", "q"]);
+      expect(listWhere.where).toBe(
+        countWhere.where === "1"
+          ? `${CALENDAR_DATED_AS_OF} AND substr(as_of,1,10) >= ?`
+          : countWhere.where.replace(
+              /( AND \(instr|$)/u,
+              ` AND ${CALENDAR_DATED_AS_OF} AND substr(as_of,1,10) >= ?$1`,
+            ),
+      );
+      expect(count.sql).toContain(
+        `WHERE ${countWhere.where} AND (${CALENDAR_DATED_AS_OF}) IS NOT 1`,
+      );
+      expect(count.args).toEqual(countWhere.args);
+    }
+  });
+
+  test("without table statistics, the count's plan reads what the windowed list reads and nothing more", () => {
+    const store = new QualityStore();
+    try {
+      publishTransactions(store, "paypay", "synthetic-activity", [
+        { asOf: "2026-03-04", account: "account-1" },
+        { asOf: null, account: "account-2" },
+      ]);
+      // The store is what D1 runs: every CORE migration, no ANALYZE.
+      expect(
+        store.db
+          .query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+          .get(),
+      ).toEqual({ n: 0 });
+      for (const scope of [
+        {},
+        { source: "paypay" },
+        { account: "account-1" },
+        { source: "paypay", account: "account-1", q: "alpha" },
+      ]) {
+        const list = transactionsSql({ ...scope, from: "2026-01-01", to: "2026-12-31" }, 0);
+        const count = undatedTransactionsSql(scope);
+        const listReads = reads(explain(store.db, list.sql, list.args));
+        const countReads = reads(explain(store.db, count.sql, count.args));
+        expect(countReads.length).toBeGreaterThan(20);
+        // Every scan or search of the count is one the list makes, as many times.
+        expect(countReads).toEqual(listReads);
+      }
+    } finally {
+      store.db.close();
+    }
   });
 });
 
@@ -141,8 +229,13 @@ describe("undatedTransactions", () => {
               };
             },
           );
-          publishTransactions(store, source, `synthetic-activity-${String(parse)}`, rows);
-          written.push(...rows.map((row) => ({ ...row, source })));
+          // About one parse in four is never published: its rows are in no
+          // current read, so neither the list nor the count may see them.
+          const published = next() >= 0.25;
+          publishTransactions(store, source, `synthetic-activity-${String(parse)}`, rows, {
+            published,
+          });
+          if (published) written.push(...rows.map((row) => ({ ...row, source })));
         }
         const reader = createObservationReader(executor(store));
         const scopes: CollectionScope[] = [
@@ -152,6 +245,8 @@ describe("undatedTransactions", () => {
           { source: "paypay", account: "account-1" },
           { q: "alpha" },
           { source: "wise", q: "beta" },
+          // `q` also searches the source id and the account, case-insensitively.
+          { q: "PAY" },
         ];
         for (const scope of scopes) {
           const counts = await reader.undatedTransactions(scope);
@@ -159,7 +254,10 @@ describe("undatedTransactions", () => {
             (row) =>
               (scope.source === undefined || row.source === scope.source) &&
               (scope.account === undefined || row.account === scope.account) &&
-              (scope.q === undefined || row.description!.includes(scope.q)),
+              (scope.q === undefined ||
+                [row.description!, row.source, row.account!].some((text) =>
+                  text.toLowerCase().includes(scope.q!.toLowerCase()),
+                )),
           );
           const oracle = new Map<string, number>();
           for (const row of inScope)

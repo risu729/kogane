@@ -181,9 +181,15 @@ text.
   `account` and `q` filters and the grant bound what is counted, an
   all-dated window stays `complete` with `every_row_carries_an_as_of`, and an
   unwindowed answer returns the undated row with `as_of_missing`. Four of
-  these fail on origin/main.
+  these fail on origin/main. A grant narrowed by account counts no row of an
+  account outside it (the answer equals one from a store without that
+  account's rows), and across a cursor every page names the same gap while
+  its rows and `nextCursor` equal those of a store without the undated rows.
 - `packages/read-model/test/undated-transactions.test.ts`: the windowed
-  predicates equal the frozen shipped text; on five seeded random stores and
-  ten scopes each, the unwindowed rows equal the rows the widest window
-  places plus the counted ones, and the count per source account equals an
-  independent calendar oracle.
+  predicates equal the frozen shipped text; the count's derived set is
+  `TRANSACTIONS_SQL`'s text byte for byte; without table statistics its plan
+  makes exactly the windowed list's scans and searches; on five seeded random
+  stores (about a quarter of their parses never published) and eleven scopes
+  each, the unwindowed rows equal the rows the widest window places plus the
+  counted ones, and the count per source account equals an independent
+  calendar oracle over the published rows.
