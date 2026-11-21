@@ -77,6 +77,7 @@ const REASON_LABELS: Record<string, string> = {
   metric_mismatch: "対象の指標が異なるため",
   unit_mismatch: "単位が異なるため",
   overlap_unknown: "他の記録と範囲が重なるかどうか未確認のため",
+  account_entity_shared: "別の参照と同じ口座に対応付けられており、同じ残高かどうか未確認のため",
   overlap_declared: "他の記録と範囲が重なると記録されているため",
   total_breakdown_mismatch: "総額と内訳が一致しないため",
   conflicting_evidence: "同じ測定の証拠どうしで金額が一致しないため",

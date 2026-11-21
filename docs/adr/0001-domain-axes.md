@@ -4,8 +4,10 @@
   [2026-11-06 amendment](#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
   is accepted (owner approved 2026-11-07 13:39 UTC); the
   [2026-11-18 amendment](#amendment-2026-11-18-same-is-an-equivalence-in-adoption)
-  is proposed
-- Date: 2026-09-09; amended 2026-11-06 and 2026-11-18
+  is proposed; the
+  [2026-11-20 amendment](#amendment-2026-11-20-two-references-of-one-account-entity-are-not-disjoint)
+  is proposed and needs the owner's approval
+- Date: 2026-09-09; amended 2026-11-06, 2026-11-18 and 2026-11-20
 - Review basis: whole-architecture addendum 00, 04 (AR01–AR18), 05, 06, 13 §1–§3
   of the design review of commit `130912af`
 
@@ -455,3 +457,272 @@ claimed both `same` and `disjoint` joins nothing.
 projection from two accepted `same_account` rows of two lines of one source
 (which the policy declares disjoint) and fails on the first-match rule, which
 adopted one route next to the direct account.
+
+## Amendment 2026-11-20: two references of one account entity are not disjoint
+
+- Status: proposed. It changes published answers (the latest balance page,
+  its known-assets subtotal and `holdings`), so it takes effect only once the
+  owner approves it; the approval is recorded here with its time in UTC.
+- Date: 2026-11-20
+- Carried by: `policyDisjointness`, `scopeOrder`, `entitySharing`,
+  `entityTakesPart` and `adoptionOutcomes` in `packages/read-model/src/balance-projection.ts`,
+  `DISJOINT_ACCOUNTS_POLICY` (`distinct-identified-accounts-v3`) in the same
+  file, `ProjectionCandidate.accountEntity` and its writer
+  `collectCandidates` in `services/processor/src/balance-projection-job.ts`,
+  [balance read model](../balance-read-model.md#how-a-row-gets-its-state)
+
+### Context
+
+The balance projection's adoption subject is the provider reference:
+`subjectScopeFor` gives `source_account:<reference id>`, so a decision
+recorded against a reference lines up with it. The disjointness policy
+(`distinct-identified-accounts-v2`, [ADR 0093](0093-direct-bank-deposit-disjointness.md))
+declares two subjects disjoint when they share a source and neither is an
+aggregate (the provider listed them apart), when both are `identified`, or
+when both are direct `deposit.balance` readings at two listed institutions.
+None of the three reads the account entity the identity mapping gives each
+reference (`account_mappings.account_id`). Two references the current
+mapping sends to one entity were therefore declared disjoint, both were
+adopted, and every reader of the adopted set added both amounts: the
+known-assets subtotal (`knownAssetSubtotals` in `services/app/src/balances-v2.ts`)
+and `holdings` (`packages/application/src/query/execute.ts`) count once per
+`subtotalCountKey` (subject and unit), and the two subjects differ. One
+account was counted twice with `completeness: "complete"` (INV06).
+
+A reviewer reproduced it on `main` with a synthetic store: an SMBC capture of
+eight exact yen deposits plus a ninth reference whose mapping names the
+entity of one of them gave a JPY `adoptedCount` of 9 on
+`/api/v2/balances/latest?source=smbc-bank` and in `holdings`. The identity
+store gives one entity per reference except where a rule shares one on
+purpose (a trusted Vpass card token across producers, a MoneyForward account
+reference across the importer and collector producers), and a manual mapping
+may send any reference to any entity. Whether production holds such a pair
+in one adoption target was not checked.
+
+### Options considered
+
+1. **Key the subtotal and `holdings` on the account entity.** Rejected as
+   the fix: it repairs two readers and leaves the adopted set itself
+   claiming two adopted measurements of one account, which the latest page
+   rows, their coverage reasons and any later reader of adopted state would
+   still report. It would also need the entity on every READ row (a schema
+   and query change) and a rule for which of two adopted amounts to count,
+   which is an adoption decision made in a reader.
+2. **Let the policy not declare two references of one entity disjoint.**
+   Chosen. Adoption is the one place every reader takes its adopted set
+   from, so fixing the input to adoption fixes all of them at once, and the
+   overlap of the two references becomes what it is: unknown until a
+   decision says otherwise.
+3. **Read a shared entity as `same`.** Rejected: a mapping may come from a
+   rule, and a rule only proposes (INV07); bundling two references into one
+   measurement is what an accepted `same_account` relation does.
+
+### Decision
+
+- `policyDisjointness` declares no relation between two subjects that share
+  an account entity, whichever of its three rules would otherwise apply, nor
+  between two subjects that accepted decisions and the mapping force to
+  overlap with a mapped scope on the way (`scopeOrder` and `entitySharing`).
+  The rule reads scopes as non-empty sets: an accepted `same` makes two
+  scopes equal, a containment makes its part a subset of its whole, and two
+  references of one entity may be one measurement, so they are read as equal
+  too. Under those constraints two scopes are forced to overlap exactly when
+  some scope lies at or below both (a common lower bound): the assignment
+  that makes every scope the set of scopes at or below it satisfies every
+  constraint and keeps every other pair apart, and an accepted `disjoint`
+  would force nothing more. Two scopes that only lie inside one scope (two
+  pockets of one account) are not forced to overlap. The policy withholds
+  disjointness from a forced pair when a scope the mapping maps to an entity
+  lies on the way up from a common lower bound to one of the two; a forced
+  pair with no mapped scope on any way keeps v2's answer (an open limit
+  below). A scope's entities are those of every candidate of it in the
+  build, in any target, because the mapping belongs to the reference and
+  not to a metric: a scope whose witnesses disagree shares an entity with
+  each, and a scope measured only under another metric or unit carries its
+  entity into the target. Decisions are read from every accepted one,
+  through scopes with no candidate included. The build joins scopes into
+  equality classes (`same` and shared entities), finds the strongly
+  connected sets of the decided parts below a target's subjects, and
+  compares, as bit sets, the classes below each subject of a pair with the
+  classes below a mapped class below the other. Each earlier closure of this
+  amendment let a decision carry a shared entity past the policy, and the
+  rule covers every such shape: with `a ≡ c` accepted and `c` sharing `b`'s
+  entity, `a ⊥ b` adopted both; with `a ⊂ w` accepted and `a` sharing `b`'s
+  entity, `w ⊥ b` made `a ⊥ b` through step 7's one-step derivation, and
+  both were adopted; with `p ⊂ w` accepted and `w` sharing `b`'s entity,
+  `p ⊥ b` adopted `p` and `b` once `p` covered `w`; with `q ⊂ w` accepted,
+  `p` sharing `q`'s entity and `w` sharing `b`'s, `p ⊥ b` adopted both
+  though no decision touches either; with `z ⊂ q` and `z ⊂ b` accepted, `p`
+  sharing `q`'s entity and no entity on `z`, `p ⊥ b` adopted both; and a
+  scope measured only in another unit carried no entity into the target. A
+  pair a decision relates directly is read against its own entities: the
+  decision already keeps the pair from being adopted twice, and a policy
+  claim that contradicts it still degrades the pair to unknown as before.
+- The overlap of such a pair is unknown, so step 7 of `selectAdoptedSet`
+  decides it as it decides every unknown overlap: the worse-ranked side is
+  unresolved and the better-ranked side is adopted; at equal ranks both are
+  unresolved. Nothing is adopted or merged by the rule.
+- The projection names the cause: an `overlap_unknown` candidate that has
+  such a contender (another subject, not excluded, of no worse rank, with no
+  declared relation to it, that shares its entity, or that the rule above
+  keeps it from being declared disjoint from and that accepted decisions
+  alone would not force to overlap with it) is recorded as
+  `unresolved` / `account_entity_shared` instead. Every other unknown
+  overlap keeps `overlap_unknown`, including a pair accepted decisions alone
+  force to overlap that the rule withholds only because a mapped scope lies
+  on the way: no entity is shared there, so the reason does not say one is.
+  The entity is shown with that closed reason, its subtotal is `partial`,
+  and nothing becomes zero (INV05).
+- The way out is a decision: accepting `same_account` between the two
+  references makes them one measurement (one adopted, the other
+  `duplicate_evidence`; under v2 the same acceptance read as a
+  `relation_conflict` against the policy's `disjoint`), and a mapping
+  revision that separates them restores the disjointness.
+- The build reads the entity from the organization read it already makes
+  (`account_target`, the current mapping) into `ProjectionCandidate.accountEntity`.
+  A candidate without it (an input captured before the field existed) has no
+  entity and builds as v2 did.
+- The rule changes what the projection makes of an input, so the policy
+  release moves to `distinct-identified-accounts-v3`. It is part of the build
+  digest and is written on every policy relation the snapshot stores.
+
+### Consequences
+
+- No migration, no SQL change and no operator step. After deploy the build
+  digest differs, so the first projection tick captures a new input (whose
+  candidates carry the entity) and builds a new snapshot; no stored snapshot,
+  input or relation row is rewritten. An unfinished build that started before
+  the deploy continues from its own input, which has no entities, and so
+  builds as v2 did; the next capture corrects it.
+- A store where no two scopes share an entity and no accepted decision
+  touches a mapped scope adopts exactly what it adopted before. A store with
+  a shared entity in one target loses the doubled amount from the latest
+  subtotal and from `holdings`, which turn `partial` with
+  `unresolved:account_entity_shared`, until the owner decides the pair.
+- v3 also changes answers where no entity is shared, and in an organized
+  store it does so almost always where decisions force an overlap. Every subject the build keys by its reference
+  (`source_account:<reference>`) has a current mapping
+  (`account_mappings.account_id` is not null), and a subject lies on its
+  own way up. So v3 withholds disjointness from every pair of such subjects
+  that accepted decisions alone force to overlap without relating the pair
+  directly, whether or not the two share an entity: a sub-account accepted
+  as a part of two accounts, or a chain `a ⊂ w ⊂ b` or `a ≡ w ≡ b` through
+  a scope outside the target. v2 declared such a pair disjoint when a
+  policy rule applied and adopted both, counting the common part twice. v3
+  leaves the pair to step 7: the worse-ranked side, or both at equal rank,
+  is `unresolved` / `overlap_unknown`, and its whole amount, not only the
+  common part, leaves the latest subtotal and `holdings`, which turn
+  `partial`. Neither `same_account` nor a mapping revision clears it while
+  the two keep entities of their own: a decision between the pair itself
+  contradicts the policy, which reads such a pair against its own entities,
+  and degrades the pair to unknown as under v2. The pair is counted again
+  once a decision that forces the overlap is revised. This is part of what
+  the owner approves.
+- Open limit: adoption compares scopes only within one target (metric and
+  unit). Two references of one entity under two different summable metrics
+  of one unit are both adopted and both counted, as before.
+- Open limit: two references of one entity that are genuinely two
+  measurements (for example two pockets mapped to one account) stay
+  unresolved until a mapping revision separates them; no decision kind
+  declares two scopes disjoint.
+- Open limit: a forced overlap with no mapped scope on the way is left to
+  the policy as under v2. Two scopes that accepted decisions alone nest,
+  make one or give a common part, with no decision between the pair itself
+  and no scope the mapping maps to an entity on any way up from a common
+  lower bound to either, can still be declared disjoint and both adopted
+  (for example `z ⊂ a` and `z ⊂ b` accepted, `z` outside the target, and no
+  entity on `z`, `a` or `b`). Since every reference-keyed subject is mapped,
+  this is left only where neither subject of the pair has a mapping
+  (`source-local:` subjects) and no scope on any way has one.
+- Open limit: an entity is read only from the build's candidates. A scope
+  that appears only in a decision, with no candidate in the captured input
+  under any metric or unit, carries no entity, because its mapping is not
+  part of that input.
+- Step 7's one-step derivation looked up a scope's containers by scanning
+  every relation pair for each unknown pair, so a target with many unknown
+  overlaps cost the pair count cubed; `RelationIndex` now indexes them once.
+
+### Verification
+
+Synthetic data only. `packages/read-model/test/balance-projection.test.ts`
+("two references identity maps to one account entity") builds eight
+provider-local references of one source plus a ninth sharing the first's
+entity, in both input orders: seven are adopted, the entity's two
+references are `account_entity_shared`, no policy relation joins them and
+every policy relation names `distinct-identified-accounts-v3`; it fails on
+v2, which adopted nine. The same block shows that eight references of eight
+entities adopt eight, that an input without the field builds as v2, that an
+accepted `same_account` between the two references adopts one (it fails on
+v2 as a `relation_conflict`), that a cross-source identified pair at two
+listed banks sharing an entity adopts neither while a lower-ranked route of
+the entity leaves the direct reading adopted, that SC01's aggregate beside
+its members gives the same states and reasons with and without entities,
+and that an unknown overlap with no shared entity keeps `overlap_unknown`.
+Two more cases there fail on the rule without a decided closure: a route
+line accepted as a part of one bank account and sharing a second account's
+entity leaves the second adopted and the line `account_entity_shared` (both
+the line and the second were adopted), and a bank account accepted as the
+same as a route line that shares a second account's entity leaves both bank
+accounts `account_entity_shared` (both were adopted), while a third account
+of its own entity stays declared disjoint. Three more fail on the one-level
+closure that rule first had: a bank pocket accepted as a part of a route line
+that shares the bank account's entity (the pocket and the account were both
+adopted; two pockets of the line stay declared disjoint), a part two
+decisions deep under a bank account and sharing a second account's entity
+(both accounts were adopted), and a `same` chain through two scopes with no
+candidate in the target (both accounts were adopted). One more fails on a
+closure that follows decisions but not a shared entity: a route's pocket
+line sharing the bank pocket's entity, accepted as a part of the route's
+account line that shares the bank account's entity, leaves the bank pocket
+and the bank account `account_entity_shared` (both were adopted). Two more
+fail on the closure that read entities only on a common part or between the
+pair, and only from the target's own candidates: a sub-account with no
+candidate and no entity, accepted as a part of the route's line for the bank
+pocket (which shares the pocket's entity) and of the bank account, leaves
+the pocket, the account and the line `account_entity_shared` (the pocket
+and the account were both adopted; with the line mapped to an entity of its
+own, the pocket and the account do not overlap and both stay adopted), and a route line seen only in dollars, sharing the second account's
+entity and accepted as the same as the first, leaves both yen accounts
+`account_entity_shared` (both were adopted). A further case builds two
+targets of 250 subjects with entities shared in pairs and 5,000 accepted
+decisions over 4,000 more scopes, under one second (about 0.3 s locally,
+where the previous closure took about 0.4 s).
+`packages/read-model/test/balance-projection-entity-closure.test.ts` first
+checks the model: on 600 random graphs of two to four scopes with `same`,
+containment, proper containment and `disjoint`, a pair is kept apart by some
+non-empty set assignment exactly when it has no common lower bound. It then
+builds 3,000 random graphs of two to nine subjects in a yen target (some
+with a second witness mapped elsewhere or a dollar candidate), up to two
+scopes measured only in dollars, up to two scopes with no candidate,
+accepted `same` and containment decisions and shared or distinct entities
+at two sources and two ranks. An oracle that walks scopes edge by edge,
+carrying whether the walk passed a mapped scope, gives the pairs to
+withhold; against the policy pairs of a frozen copy of v2's adoption
+(`balance-projection-policy-v2-legacy.ts`, from commit `cb6edd41`), the
+build withholds exactly those: no miss and no false positive. No two
+adopted candidates are forced to overlap unless no mapped scope lies on the
+way and v2 adopted both. With every entity removed, or the field absent,
+every row's state and reason and every policy pair equal v2's, and so do
+they where entities sit only on scopes no decision touches and no other
+reference shares. A further property names the reason: over the same graphs
+a row is `account_entity_shared` exactly when it has a contender that shares
+its entity or whose overlap with it decisions alone (the same graph with
+every entity removed) do not force, and `overlap_unknown` otherwise; it
+fails on the rule that named every withheld pair.
+`packages/read-model/test/balance-projection.test.ts` ("a common part
+decisions alone give is withheld but not named a shared entity") shows two
+accounts of their own entities with an accepted common sub-account: neither
+is declared disjoint from the other, both are `overlap_unknown` (v2 adopted
+both), and with the entity shared both are `account_entity_shared`; an
+accepted `same` or containment between the two accounts leaves both
+`overlap_unknown`, and dropping one of the two containments adopts both.
+The exact and adoption properties fail on the previous
+closure and on a rule that reads a mapped scope only as a common lower
+bound or between the pair.
+`services/app/test/entity-double-count.test.ts` builds the snapshot through
+the Processor's own job and reads it as the readers do: the latest page with
+its subtotal over the route and `kogane.balances.read`, and `holdings` over
+`/api/v2/query` and `kogane.financial.query`. The reviewer's SMBC case gives
+`adoptedCount` 7 (9 on v2) with both references `account_entity_shared`, a
+`partial` coverage and the reason in the `holdings` gaps; an identified SBI
+Shinsei and Mizuho pair sharing an entity counts neither (2 on v2).
