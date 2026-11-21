@@ -15,7 +15,7 @@ import type {
 import { CARD_STATEMENTS_UNMATCHED_PATH } from "../../../packages/observation-shared/src/card-statements-unmatched-contract.ts";
 import {
   bankSourceLabel,
-  DateValue,
+  NullableDate,
   PageBudgetNote,
   SettlementQuantity,
 } from "./reconciliation-display.tsx";
@@ -130,11 +130,7 @@ function UnmatchedRow({ item }: { item: UnmatchedCardStatement }): ReactNode {
         <strong>{statement.sourceId === "vpass" ? "Vpass" : "MyJCB"}</strong> · 対象月{" "}
         <Nullable value={statement.period} /> · 請求総額{" "}
         <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
-        {statement.paymentDate === null ? (
-          <Nullable value={null} placeholder="不明" />
-        ) : (
-          <DateValue value={statement.paymentDate} />
-        )}
+        <NullableDate value={statement.paymentDate} />
       </p>
       <p>{label(CODES, item.code)}</p>
       {item.planner === null ? null : <PlannerAnswer answer={item.planner} />}
