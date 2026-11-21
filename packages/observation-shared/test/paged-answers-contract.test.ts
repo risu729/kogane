@@ -141,4 +141,54 @@ describe("an answer without next and paging, then with agreeing and disagreeing 
       ),
     ).toBe(false);
   });
+
+  // The same rule on the other converted validators: an extra continuation
+  // argument beside the one the old fields name, or a withheld page on a read
+  // whose old fields say the list ended.
+  test("the card, evidence and identity checks refuse an extra argument or a withheld end", () => {
+    const offered = { nextOffset: 50, nextPage: "offered" };
+    const short = { limit: 50, returned: 0, hasMore: true, stoppedBy: "bytes" };
+    expect(
+      validNextPage({ ...offered, next: { arguments: { offset: 50 } }, paging: short }, 50),
+    ).toBe(true);
+    expect(
+      validNextPage(
+        { ...offered, next: { arguments: { offset: 50, cursor: "x" } }, paging: short },
+        50,
+      ),
+    ).toBe(false);
+
+    const runs = {
+      apiVersion: "evidence-v1",
+      sourceId: "sony-bank",
+      coverage: "sealed-only",
+      items: [],
+      nextCursor: null,
+    };
+    const path = "/api/evidence/v1/sources/sony-bank/runs";
+    expect(
+      validEvidenceResponse(path, {
+        ...runs,
+        ...pagedFields({ limit: 50, returned: 0, next: null, withheld: true }),
+      }),
+    ).toBe(false);
+
+    const identity = { rows: [], coverage: { limit: 100, truncated: true, nextOffset: 100 } };
+    const continuing = { limit: 100, returned: 0, hasMore: true, stoppedBy: "bytes" };
+    const accounts = "/api/identity/accounts";
+    expect(
+      validIdentityResponse(accounts, {
+        ...identity,
+        next: { arguments: { offset: 100 } },
+        paging: continuing,
+      }),
+    ).toBe(true);
+    expect(
+      validIdentityResponse(accounts, {
+        ...identity,
+        next: { arguments: { offset: 100, cursor: "x" } },
+        paging: continuing,
+      }),
+    ).toBe(false);
+  });
 });
