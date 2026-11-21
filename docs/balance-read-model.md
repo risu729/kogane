@@ -260,7 +260,12 @@ page is not bound to its cursor either: a page read as `summary` continues as
 `full` and the reverse.
 
 The reader is never moved silently to a newer list. "Read the newest
-snapshot" is an explicit action: drop the cursor.
+snapshot" is an explicit action: drop the cursor. Under `identityRead: latest`
+the organization overlay (labels, mapping revision) is re-read on each page,
+while membership and order stay pinned: the rows come from the cursor's
+snapshot (for history, the record up to its high-water parse run), and only
+their organization is read again per page (`organizeRows` in
+`services/app/src/balances-v2.ts`).
 
 Order is the recorded effective time descending, then the scope key
 ascending, made dense as `row_seq`. A row with no recorded time sorts last and
