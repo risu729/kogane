@@ -38,6 +38,7 @@ export function useUpcomingCardBills() {
  */
 const COVERS_REASONS: Record<CoversUnknownReason, string> = {
   debit_account_unknown: "引落口座が分かりません。",
+  unit_mismatch: "通貨（単位）の異なる請求があり、合計できません。",
   bill_not_exact: "請求額が確定していない請求があります。",
   balance_not_exact: "口座の残高が分かりません。",
   balance_before_previous_debit:

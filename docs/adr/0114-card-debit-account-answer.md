@@ -443,6 +443,72 @@ command or catalogue operation is added.
   shows the bills, lines and reasons, offers no action, passes the
   accessibility audit, and refuses a `covers` its figures do not carry.
 
+## Amendment 2026-11-21: bills in two units are `unit_mismatch`, not `bill_not_exact`
+
+This amendment changes the 2026-11-19 `upcoming` amendment directly above, so
+it sits next to it rather than at the end of the file.
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. It adds a code to the closed
+  `covers` reasons that `kogane.card-settlements.debit-accounts` with
+  `view: "upcoming"` publishes, and a change to a published tool's answer is
+  the owner's to approve (the 2026-11-18 amendment above).
+
+### Context
+
+Decision 3 of the `upcoming` amendment sums a line's bills with
+`sumQuantities`, and any failure of the sum was reported as
+`bill_not_exact`. `sumQuantities` also refuses bills in more than one unit
+(`unit_mismatch`, INV03), for example a card billed in yen and another in
+dollars debited from one account. Such a line said a bill was not exact when
+every bill was exact. `covers` was `unknown`, so no wrong figure was shown,
+but the reason did not say what happened.
+
+### Options considered
+
+1. **Keep `bill_not_exact` and widen its words.** Rejected: one code for two
+   causes, and a reader cannot tell which holds.
+2. **Use the code `sumQuantities` refuses mixed units with, `unit_mismatch`.**
+   Chosen. It is the existing closed code for this cause in `values.ts` (and
+   in `scope.ts`, `rewards.ts` and `lots.ts`), so the line says the same as
+   the sum.
+3. **A new code of this view, such as `bills_unit_mismatch`.** Not chosen: a
+   second spelling of an existing cause.
+
+### Decision
+
+`COVERS_UNKNOWN_REASONS` gains `unit_mismatch`, between
+`debit_account_unknown` and `bill_not_exact`: the bills a line counts are in
+more than one unit (the line's first bill's unit and another). Each reason
+that holds is named, so a line with bills in two units and a bill that is not
+exact lists both. `cardBills` stays `missing` in the line's first bill's
+unit, with the reason `unit_mismatch` when the units differ, else
+`bill_not_exact`. Which lines are `unknown` does not change, only their
+reasons; the rule and schema versions stay, as with the 2026-11-18
+amendment's codes. The page labels the code, and the tool description lists
+it.
+
+### Consequences
+
+- A reader of a line in two units sees `unit_mismatch` and not a claim that a
+  bill is not exact.
+- The closed list grows by one code: the wire check
+  (`packages/observation-shared/src/card-upcoming-bills-contract.ts`) reads
+  the domain list, and the page's words for every code are a typed record,
+  so a client that pinned the old list sees a code it did not know. The page
+  shows an unknown code as stored.
+- Bills in two units are still never converted or added (INV03).
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: a yen and a dollar bill
+  on one account make the later line `unit_mismatch` (fails before the
+  change: `bill_not_exact`), the earlier yen-only line still compares, and a
+  line with two units and a bill that is not exact lists both reasons.
+- `services/app/test/ui-mcp-parity.test.ts`: the published description names
+  every code of `COVERS_UNKNOWN_REASONS` and stays within 2,048 characters.
+
 ## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
 
 - Status: proposed
