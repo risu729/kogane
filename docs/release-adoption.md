@@ -225,6 +225,24 @@ append-only, so an interrupted comparison leaves either nothing or one complete
 summary; re-running it once more candidates exist records a second row.
 Comparing marks the candidates `compared`; that changes nothing a reader sees.
 
+Each side is read through its own join: the base side from the artifact's
+published run, the candidate side from its candidate run of the release. An
+artifact whose published run is that candidate run (the release is active for
+it, or was activated and a later release left that artifact on it) therefore
+has every observation and coverage claim on both sides and compares as
+identical. The earlier text read both sides through one `OR` join and gave such a row to the base side
+only, so a comparison of an active release with itself counted every key
+`baseOnly`, every claim as differing and no candidate rows; the summaries
+already stored stay as written (append-only). Wherever no artifact's
+published run is its candidate run, which is every comparison before an
+activation, the statements answer exactly as before:
+`services/processor/test/release-comparison-differential.test.ts` runs the
+current text against the shipped text (frozen in
+`release-comparison-legacy-sql.ts`) on random and scaled stores of the full
+CORE schema, checks that a shared run compares as the shipped text compares a
+copy of it, and checks that no statement walks an observation, decimal value
+or coverage claim table without statistics.
+
 ## Activate and roll back
 
 ```text
