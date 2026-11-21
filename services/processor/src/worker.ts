@@ -1421,26 +1421,31 @@ async function replayCommand(env: Env, action: string, request: Request): Promis
   return refused ?? inspectPlan(env, id);
 }
 
-async function status(env: Env): Promise<Response> {
-  const now = Date.now();
-  const jobs = await env.DB.prepare(
-    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
-  ).all();
-  const laneRows = await env.DB.prepare(
-    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
-  ).all<{ lane: Lane; status: string; count: number; oldest: number | null }>();
-  const lanes: Record<
-    Lane,
-    Record<"pending" | "running" | "done" | "failed", number> & {
-      oldestPendingAgeMs: number | null;
-    }
-  > = {
+interface LaneJobRow {
+  lane: string;
+  status: string;
+  count: number;
+  oldest: number | null;
+}
+
+type LaneJobCounts = Record<"pending" | "running" | "done" | "failed", number> & {
+  oldestPendingAgeMs: number | null;
+};
+
+/** The `lanes` block of `/status`: parse-job counts per lane the 0035 CHECK
+ * allows. A stored lane outside them is skipped; the own-key lookup keeps a
+ * name such as `__proto__` or `constructor` from reaching an inherited member. */
+export function laneJobCounts(
+  rows: readonly LaneJobRow[],
+  now: number,
+): Record<Lane, LaneJobCounts> {
+  const lanes: Record<Lane, LaneJobCounts> = {
     incremental: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
     repair: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
     replay: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
   };
-  for (const row of laneRows.results) {
-    const lane = Object.hasOwn(lanes, row.lane) ? lanes[row.lane] : undefined;
+  for (const row of rows) {
+    const lane = Object.hasOwn(lanes, row.lane) ? lanes[row.lane as Lane] : undefined;
     if (!lane) continue;
     if (
       row.status === "pending" ||
@@ -1451,6 +1456,18 @@ async function status(env: Env): Promise<Response> {
       lane[row.status] = row.count;
     if (row.oldest !== null) lane.oldestPendingAgeMs = now - row.oldest;
   }
+  return lanes;
+}
+
+async function status(env: Env): Promise<Response> {
+  const now = Date.now();
+  const jobs = await env.DB.prepare(
+    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
+  ).all();
+  const laneRows = await env.DB.prepare(
+    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
+  ).all<LaneJobRow>();
+  const lanes = laneJobCounts(laneRows.results, now);
   const workItems = await env.DB.prepare(
     "SELECT count(*) AS unprocessed,min(enqueued_at_ms) AS oldest FROM observation_work_items WHERE processed_at_ms IS NULL",
   ).first<{ unprocessed: number; oldest: number | null }>();
