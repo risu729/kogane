@@ -66,7 +66,9 @@ export type NotListedReason = (typeof NOT_LISTED_REASONS)[number];
  * - `balance_not_exact`: the balance is not exact, or none was reported;
  * - `balance_before_previous_debit`: the balance was captured on or before
  *   the date of a card debit already due from the account, so it may not show
- *   that debit;
+ *   that debit, or on the due date of a bill the line counts, so it may
+ *   already show that debit and comparing it with the bill would count the
+ *   debit twice (INV06);
  * - `cards_with_unknown_account`: a bill due on or before the line's date has
  *   no known debit account and might be debited from this one;
  * - `cards_with_unknown_due_date`: a card debited from this account, or from
@@ -300,10 +302,14 @@ export function upcomingCardBills(input: {
         if (account.balance.value.status !== "exact" || account.balance.unitRef !== unit)
           reasons.add("balance_not_exact");
         const captured = account.capturedAt === null ? null : captureDate(account.capturedAt);
+        // A balance captured on a counted bill's own due date (only the date
+        // itself: no capture is later) may come before or after the bank
+        // takes it; compared with that bill, a capture after it would count
+        // the debit twice (INV06).
         if (
           captured !== null &&
-          account.previousDebit !== null &&
-          captured <= account.previousDebit
+          ((account.previousDebit !== null && captured <= account.previousDebit) ||
+            counted.some((bill) => bill.debitDate === captured))
         )
           reasons.add("balance_before_previous_debit");
         if (unknownDates.some((unknown) => unknown <= debitDate))
