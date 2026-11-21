@@ -34,12 +34,19 @@ import {
 } from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
-import { readDetail } from "../../../packages/application/src/query/read-detail.ts";
+import {
+  BalanceListSummaryLimitError,
+  balanceListSummary,
+  readDetail,
+} from "../../../packages/application/src/query/read-detail.ts";
 import {
   OverviewSummaryLimitError,
   overviewSummary,
 } from "../../../packages/application/src/query/overview-detail.ts";
-import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
+import type {
+  BalanceListPage,
+  OverviewPage,
+} from "../../../packages/observation-shared/src/api-contract";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -267,6 +274,10 @@ export async function readObservationRoute(
     };
   }
   if (path === "/api/balances") {
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-20): the
+    // summary is the full answer, shaped by the one function the tool shares.
+    const detail = readDetail(url.searchParams.get("detail"));
+    if (detail === null) throw new HttpError(400, "invalid_detail");
     const value = url.searchParams.get("latestOffset") ?? "0";
     const latestOffset = Number(value);
     if (
@@ -328,26 +339,34 @@ export async function readObservationRoute(
       history.slice(0, 500),
       identityRead,
     );
-    return {
-      body: {
-        latest: await decimalRows(d1Executor(env.DB), "balance", latest.slice(0, 500)),
-        history: await decimalRows(
-          d1Executor(env.DB),
-          "balance",
-          describeBalanceRows(organizedHistory),
-        ),
-        interpretationContext: organizationContext(identityRead, [
-          ...latest.slice(0, 500).map((row) => row.organization),
-          ...organizedHistory.map((row) => row.organization),
-        ]),
-        coverage: {
-          limit: 500,
-          truncated: latest.length > 500 || history.length > 500,
-          nextOffset: history.length > 500 ? offset + 500 : null,
-          latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
-        },
+    const full: BalanceListPage = {
+      latest: await decimalRows(d1Executor(env.DB), "balance", latest.slice(0, 500)),
+      history: await decimalRows(
+        d1Executor(env.DB),
+        "balance",
+        describeBalanceRows(organizedHistory),
+      ),
+      interpretationContext: organizationContext(identityRead, [
+        ...latest.slice(0, 500).map((row) => row.organization),
+        ...organizedHistory.map((row) => row.organization),
+      ]),
+      coverage: {
+        limit: 500,
+        truncated: latest.length > 500 || history.length > 500,
+        nextOffset: history.length > 500 ? offset + 500 : null,
+        latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
       },
     };
+    if (detail === "full") return { body: full };
+    try {
+      return { body: balanceListSummary(full, { offset, latestOffset }) };
+    } catch (error) {
+      // Its first line alone passes the byte budget: refused, never answered
+      // past it or with the line cut; `full` answers the same window.
+      if (error instanceof BalanceListSummaryLimitError)
+        throw new HttpError(413, "result_limit_exceeded", [], { retryWith: { detail: "full" } });
+      throw error;
+    }
   }
   if (path === "/api/positions") {
     const entries = await reader.listPositions({
