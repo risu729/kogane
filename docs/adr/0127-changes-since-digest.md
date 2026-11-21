@@ -291,3 +291,59 @@ kind arguments) is in its tool's published input schema, and calling
 `kogane.events.read` with the events handler's arguments and `since` lists
 exactly the revisions recorded since. The contract test holds `handlers`
 equal to `CHANGES_SINCE_HANDLERS`, so the published answer carries the new key.
+
+## Amendment: a `since` in the years 0000 to 0099 is too old, not malformed (2026-11-21)
+
+- Status: proposed.
+- Date: 2026-11-21
+
+### Context
+
+`checkedSince` checked that `since` is a real calendar time by rebuilding it
+with `Date.UTC`, which reads the years 0 to 99 as 1900 to 1999. A real time
+written in those years, such as `0050-01-01T00:00Z`, failed that check and was
+`since:format`, though the window of point 6 refuses it as `since:too_old`.
+Nothing it reads changed; only the refusal's ref was wrong. The activity
+list's `since` and `before`
+([ADR 0081's amendment of 2026-11-20](0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20))
+carried a second copy of the same rule that sets the year as written.
+
+### Options considered
+
+1. **Fix `checkedSince` in place.** Two copies of one rule stay, and the next
+   change to one of them may miss the other.
+2. **One pure parser in `packages/domain` both read (chosen):**
+   `parseQueryInstant` in `query-instant.ts`.
+
+### Decision
+
+`parseQueryInstant(text)` takes a date, a time to the minute or the second
+with at most three fraction digits, and `Z` or an offset up to ±23:59, by
+arithmetic on the written fields (years 0000 to 9999 as written; no 24:00, no
+second 60, no rolled-over date). It answers the ISO form when the UTC form is
+within the years 0000 to 9999, `format` when the text is no such time, and
+`range` with the instant when it is a real time outside those years.
+
+- `kogane.changes.since` refuses `format` as `since:format`, and checks every
+  real time, `range` included, against the window: a `since` in the years 0000
+  to 0099 is now `since:too_old`, as is one whose UTC form is before year 0000.
+  Every other `since` is answered or refused as before.
+- The activity list refuses `format` and `range` as `since:format` or
+  `before:format`, as before.
+
+### Consequences
+
+- `since:format` means the value is no real time of this form; a real time
+  outside the 31 days is `since:future` or `since:too_old`, whatever its year.
+- One rule for both reads: a change to the accepted form changes both.
+
+### Verification
+
+`packages/domain/test/query-instant.test.ts` pins leap years (0000-02-29
+taken, 0100-02-29 refused), 24:00, 23:59:60, offsets to ±23:59 and the edges
+of the years 0000 and 9999. `packages/domain/test/query-instant.differential.test.ts`
+freezes both shipped checks and compares them with the rewrites on 40,000
+seeded random strings, well formed and malformed: the activity answer is equal
+on every one, and `changes.since` differs only where a real time written in
+the years 0 to 99 went from `since:format` to `since:too_old`.
+`packages/application/test/changes-since.test.ts` holds that refusal.
