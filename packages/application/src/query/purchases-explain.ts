@@ -57,7 +57,7 @@ import { isRecord } from "../../../domain/src/guards.ts";
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import {
   CARD_PURCHASE_ACCOUNT,
   CARD_PURCHASE_EVENT_ID,
@@ -183,15 +183,7 @@ export type PurchasesExplainOutcome<
 
 /** The refusal of a grant that may not read the purchases, decided before anything is read. */
 function grantRefusal(grant: Grant): FinancialError | null {
-  if (!grantAllows(grant, PURCHASES_EXPLAIN_CAPABILITY))
-    return financialError("unauthorized", REQUEST_ID, [
-      `capability:${PURCHASES_EXPLAIN_CAPABILITY}`,
-    ]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  return narrowed.length > 0 ? financialError("evidence_restricted", REQUEST_ID, narrowed) : null;
+  return wholeStoreReadRefusal(grant, PURCHASES_EXPLAIN_CAPABILITY, REQUEST_ID);
 }
 
 type Rejection = { ok: false; code: FinancialErrorCode; refs: string[] };
