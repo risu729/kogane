@@ -1254,7 +1254,7 @@ async function inspectPlan(env: Env, id: number): Promise<Response> {
     .all<{ status: string; count: number }>();
   const jobs = { pending: 0, running: 0, done: 0, failed: 0 };
   for (const row of counts.results)
-    if (row.status in jobs) jobs[row.status as keyof typeof jobs] = row.count;
+    if (Object.hasOwn(jobs, row.status)) jobs[row.status as keyof typeof jobs] = row.count;
   // The plan owns only its attached jobs. Show matching work left in other
   // lanes too, so zero created jobs cannot be mistaken for completed parsing.
   const scopeJobs = await env.DB.prepare(`SELECT j.lane,j.status,
