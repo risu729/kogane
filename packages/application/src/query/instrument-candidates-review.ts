@@ -44,6 +44,11 @@ import {
   readIdentityObservationCount,
 } from "../../../read-model/src/instrument-resolution.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
+import {
+  offsetPagedFields,
+  type PagedFields,
+  type PagedWireFields,
+} from "../../../observation-shared/src/paging-contract.ts";
 import { financialError } from "../errors.ts";
 import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
 import {
@@ -137,7 +142,13 @@ export interface InstrumentCandidatesManifest {
   commands: { adopt: "identity.assign"; keepApart: "relation.reject" };
 }
 
-export interface InstrumentCandidateReview {
+/**
+ * The answer as a client reads it: `next` and `paging` (ADR 0128) beside the
+ * deprecated `nextOffset`; the service always sends both
+ * (`InstrumentCandidateReviewPage`), a client validator accepts an answer
+ * without them until slice S9.
+ */
+export interface InstrumentCandidateReview extends PagedWireFields {
   schemaVersion: "kogane-instrument-candidates-v1";
   /** The request as the server resolved it. */
   query: InstrumentCandidatesRequest;
@@ -153,7 +164,9 @@ export interface InstrumentCandidateReview {
    * Items in this view (after the identifier filter), of which `items` is one
    * page. `nextOffset` is null past the last page and past the grant's
    * `maxRows`, so `total` may name more items than this grant can page to;
-   * `identifierId` narrows the view.
+   * `identifierId` narrows the view. `next` and `paging` (ADR 0128) tell the
+   * two apart (`stoppedBy: "budget"`); `nextOffset` is deprecated in their
+   * favour and kept for one release.
    */
   total: number;
   items: ReviewItem[];
@@ -162,8 +175,11 @@ export interface InstrumentCandidateReview {
   identifiers: ResolutionIdentifier[];
 }
 
+/** One page as the service answers it: always with `next` and `paging`. */
+type InstrumentCandidateReviewPage = InstrumentCandidateReview & PagedFields;
+
 export type InstrumentCandidatesOutcome =
-  | { ok: true; review: InstrumentCandidateReview }
+  | { ok: true; review: InstrumentCandidateReviewPage }
   | { ok: false; error: FinancialError };
 
 type Rejection = { ok: false; code: FinancialErrorCode; refs: string[] };
@@ -344,12 +360,12 @@ export async function reviewInstrumentCandidates(input: {
   const items = all.slice(request.offset, request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE);
   const named = new Set(items.flatMap(namedIdentifiers));
   // The next page only while there is one and the grant may read it: a
-  // cursor the same caller would be refused is not offered.
+  // cursor the same caller would be refused is not offered, and the page says
+  // it is withheld (`stoppedBy: "budget"`), never that it is the last (ADR 0128).
   const following = request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE;
-  const nextOffset =
-    following < all.length && following + INSTRUMENT_CANDIDATES_PAGE_SIZE <= grant.budget.maxRows
-      ? following
-      : null;
+  const hasMore = following < all.length;
+  const withheld = hasMore && following + INSTRUMENT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows;
+  const nextOffset = hasMore && !withheld ? following : null;
   return {
     ok: true,
     review: {
@@ -371,6 +387,13 @@ export async function reviewInstrumentCandidates(input: {
         .sort((a, b) =>
           a.identifierId < b.identifierId ? -1 : a.identifierId > b.identifierId ? 1 : 0,
         ),
+      ...offsetPagedFields({
+        limit: INSTRUMENT_CANDIDATES_PAGE_SIZE,
+        offset: request.offset,
+        returned: items.length,
+        hasMore,
+        withheld,
+      }),
     },
   };
 }

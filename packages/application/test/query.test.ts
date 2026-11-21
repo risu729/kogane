@@ -3,6 +3,7 @@ import { validFinancialResult } from "../../domain/src/result.ts";
 import { contextIdOf, openContext } from "../src/context/open.ts";
 import { executeQuery, type QueryData } from "../src/query/execute.ts";
 import { encodeCursor } from "../src/query/cursor.ts";
+import { financialQueryPaging } from "../src/query/query-paging.ts";
 import { parseQueryRequest, querySpecDigest, type QueryRequest } from "../src/query/spec.ts";
 import { CONTEXT_INPUTS, grant, HOSTILE_DESCRIPTION, OVERVIEW, reader } from "./fixture.ts";
 import type { Overview } from "../../../packages/observation-shared/src/api-contract.ts";
@@ -499,6 +500,35 @@ describe("row intents", () => {
     if (!next.ok) return;
     expect((next.result.data as { rows: unknown[] }).rows).toHaveLength(1);
     expect(next.result.nextCursor).toBeNull();
+  });
+
+  test("next and paging (ADR 0128) say what a row page's nextCursor says", async () => {
+    const outcome = await run(grant(), request({ intent: "activity", limit: 2 }));
+    if (!outcome.ok) throw new Error(outcome.error.code);
+    expect(financialQueryPaging(outcome.result)).toEqual({
+      next: { arguments: { cursor: outcome.result.nextCursor! } },
+      paging: { limit: 2, returned: 2, hasMore: true, stoppedBy: "limit" },
+    });
+    const last = await run(
+      grant(),
+      request({ intent: "activity", limit: 2, cursor: outcome.result.nextCursor }),
+    );
+    if (!last.ok) throw new Error(last.error.code);
+    expect(financialQueryPaging(last.result)).toEqual({
+      next: null,
+      paging: { limit: 2, returned: 1, hasMore: false, stoppedBy: null },
+    });
+    const state = await run(grant(), request({ intent: "reported-state" }));
+    if (!state.ok) throw new Error(state.error.code);
+    expect(financialQueryPaging(state.result)?.paging).toMatchObject({
+      limit: 100,
+      hasMore: false,
+      stoppedBy: null,
+    });
+    // Coverage answers whole: no page, so neither field.
+    const coverage = await run(grant(), request({ intent: "coverage" }));
+    if (!coverage.ok) throw new Error(coverage.error.code);
+    expect(financialQueryPaging(coverage.result)).toBeNull();
   });
 
   test("numeric quality follows the stored decimal state", async () => {

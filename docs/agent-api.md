@@ -670,8 +670,13 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 `kogane-instrument-candidates-v1` with the manifest (policy, bounds, every
 closed code), the summary counts, `decisions: "change-lifecycle"`, `total`,
 at most 50 `items` with their `evidenceRefs`, `nextOffset` (null past the
-last page and where the next page would exceed the grant's `maxRows`) and the
-identifiers the items name.
+last page and where the next page would exceed the grant's `maxRows`), the
+identifiers the items name, and `next` and `paging`
+([one paging contract](#one-paging-contract-adr-0128)): `next.arguments` is
+`{offset}` while a next page is offered, and a page whose next page the
+grant's `maxRows` refuses says `paging.stoppedBy: "budget"` with `hasMore:
+true` and `next: null`, where `nextOffset` alone is null as on the last page.
+`nextOffset` is deprecated in their favour and kept for one release.
 
 Each call walks every current identity observation, linear in captured
 history (ADR 0055 amendment, Cost). Routine polling of this tool needs a
@@ -715,8 +720,12 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 6,400) and `sourceAccountId` (only the items naming that source account).
 Output: `kogane-account-candidates-v1` with the manifest (policy, bounds,
 every closed code), the summary, `decisions: "change-lifecycle"`, `total`, at
-most 50 `items`, `nextOffset` and the named source accounts with their
-current mappings.
+most 50 `items`, `nextOffset`, the named source accounts with their
+current mappings, and `next` and `paging`
+([one paging contract](#one-paging-contract-adr-0128)), as for the instrument
+candidates: a next page the grant's `maxRows` refuses is
+`stoppedBy: "budget"`, `next: null`. `nextOffset` is deprecated in their
+favour and kept for one release.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,
@@ -1813,7 +1822,7 @@ whatever their cursor kind:
   arguments), `410 context_expired` (its fixed context is gone) or
   `413 result_limit_exceeded`.
 
-Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
+Converted in slice S1: `kogane.identity.read`, `kogane.events.read`,
 `kogane.reports.read` (list), `kogane.evidence.read` (runs, artifacts),
 `kogane.reported-holdings-change.read` (summary), `kogane.card-settlements.read`,
 `.statements` and `.unmatched`, `kogane.purchases.explain` (`view: events` and
@@ -1821,11 +1830,34 @@ Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
 `kogane.schedules.maintenance.read` (summary), with their routes. Each keeps its
 previous continuation fields (`nextOffset`, `nextCursor`, `nextPage`,
 `coverage.nextOffset`, `page.nextCursor`, audit's result `cursor`) beside
-`next` and `paging` for one release; they always agree. The other paged reads
-(`kogane.financial.query` above, `observations.list`, `balances.read`,
-`rewards.read`, `collection-quality.read`, `changes.since`, the candidate
-reads) still page as their sections say, until their slice of the
-[MCP consistency plan](plans/2026-11-mcp-consistency.md).
+`next` and `paging` for one release; they always agree.
+
+Converted in slice S6: `kogane.accounts.candidates` and
+`kogane.instruments.candidates` and their routes
+(`/api/identity/account-candidates`, `/api/identity/instrument-candidates`):
+`next` and `paging` beside the deprecated `nextOffset`, and a page whose next
+page the grant's `maxRows` refuses now says so (`stoppedBy: "budget"`), where
+`nextOffset: null` alone looked like the last page
+([account candidates](#account-candidates),
+[instrument candidates](#instrument-candidates)).
+
+Converted in slice S7, the part that waits for no decision:
+`kogane.financial.query` and `GET /api/v2/query`. An `activity` or
+`reported-state` answer carries `next` and `paging` at the top level, beside
+`result` ([result contract](#result-contract)); `next.arguments` is
+`{cursor}`, the same token as `result.nextCursor`, and `paging.limit` is the
+resolved page size. `coverage` and `holdings` answer whole and carry neither.
+Two limits stay until the owner decides
+([ADR 0128, S7: open decision](adr/0128-one-paging-contract.md#s7-open-decision)):
+a refused cursor is still `financial-error-v1` (`409 stale_context` for a
+cursor this context or query did not issue, never `invalid_cursor` or
+`cursor_mismatch`), and the query does not withhold by budget, so a page can
+offer a cursor whose continued call, at the same `limit`, is
+`413 budget_exceeded` (when `offset + 2 × limit + 1` passes `maxRows`).
+
+The other paged reads (`observations.list`, `balances.read`, `rewards.read`,
+`collection-quality.read`, `changes.since`) still page as their sections say,
+until their slice of the [MCP consistency plan](plans/2026-11-mcp-consistency.md).
 
 ## Result contract
 
@@ -1838,8 +1870,17 @@ Every successful query returns
   "resultRef": "result:<64 hex>",
   "unresolvedInputs": [/* defaults the server chose */],
   "result": {/* financial-result-v1, packages/domain/src/result.ts */},
+  // activity and reported-state only (ADR 0128 slice S7):
+  "next": { "arguments": { "cursor": "…" } }, // null on the last page
+  "paging": { "limit": 100, "returned": 100, "hasMore": true, "stoppedBy": "limit" },
 }
 ```
+
+`next` and `paging` sit beside `result`, not inside it: `financial-result-v1`
+is a versioned shape with exact keys, and whether it changes in place is part
+of the owner's open S7 decision. They say exactly what `result.nextCursor`
+says (`packages/application/src/query/query-paging.ts`), and the browser's
+validator refuses an answer whose two fields disagree with it.
 
 `result` is the `FinancialResult<T>` of addendum 10 §4: `completeness`
 (`complete` / `partial` / `unavailable`), `data`, `coverage` (scope, covered

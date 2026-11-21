@@ -2,6 +2,7 @@
 // by the browser before it renders a page. Every code is checked against the
 // domain's closed lists, so a page never shows a status, hold or reason it
 // does not know as if it did; the client recomputes nothing.
+import { pagedFieldsSay } from "./paging-contract.ts";
 import {
   ACCOUNT_CANDIDATE_EVIDENCE,
   ACCOUNT_CANDIDATE_HOLDS,
@@ -143,6 +144,24 @@ function validSourceAccount(row: unknown): boolean {
   );
 }
 
+/**
+ * `next` and `paging` (ADR 0128), when the answer has them, say what the
+ * deprecated `nextOffset` and `total` say: the same offset, a full page of at
+ * most 50, and rows following exactly when `nextOffset` continues or items
+ * after this page are withheld. A withheld page (`nextOffset` null while
+ * `total` counts items past this page: the grant's `maxRows` refuses the next
+ * page) is `stoppedBy: "budget"` with `next` null, never the end.
+ */
+function pagedAgreesWithNextOffset(value: Record<string, any>): boolean {
+  const following = (value.query.offset as number) + (value.items as unknown[]).length;
+  return pagedFieldsSay(value, {
+    next: value.nextOffset === null ? null : { offset: value.nextOffset as number },
+    limit: PAGE_LIMIT,
+    returned: (value.items as unknown[]).length,
+    withheld: value.nextOffset === null && following < (value.total as number),
+  });
+}
+
 /** Validate the wire shape only. */
 export function validAccountCandidateReview(value: unknown): boolean {
   if (
@@ -172,6 +191,7 @@ export function validAccountCandidateReview(value: unknown): boolean {
     value.sourceAccounts.length > SOURCE_ACCOUNT_LIMIT
   )
     return false;
+  if (!pagedAgreesWithNextOffset(value)) return false;
   const view = value.query.view as string;
   return (
     value.items.every((item) => validItem(view, item)) &&
