@@ -1,3 +1,4 @@
+import { ownEntry } from "./labels.ts";
 import { SchedulesPage } from "./pages/Schedules";
 import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 import { AuditPage } from "./pages/Audit.tsx";
@@ -193,7 +194,7 @@ export function App(): ReactNode {
     : synthetic
       ? "表示対象の記録がありません"
       : connected
-        ? (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
+        ? (ownEntry(SOURCE_KIND_LABELS, metadata.data?.source.kind ?? "") ?? "保存された記録に接続")
         : "接続を確認できません";
 
   const evidenceRoute = features.evidenceHistory && isEvidencePath(path);
@@ -251,7 +252,7 @@ export function App(): ReactNode {
               ) : (
                 <>
                   <strong>
-                    {SOURCE_KIND_NOTICES[metadata.data.source.kind] ?? "保存された記録"}
+                    {ownEntry(SOURCE_KIND_NOTICES, metadata.data.source.kind) ?? "保存された記録"}
                   </strong>
                   <span className="notice-divider">·</span>
                   実データかどうか未確認

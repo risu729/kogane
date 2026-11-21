@@ -90,6 +90,24 @@ test("READ expiry keeps undated buckets, native quantities, snapshot time and pa
     expect(html).toContain(text);
 });
 
+test("a code that names a built-in object member is shown as the code, never as the member", () => {
+  const codes = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"];
+  const row = {
+    ...page.rows[0]!,
+    bucketKind: "constructor",
+    state: "toString",
+    basis: "valueOf",
+    reasonCodes: [...codes, "synthetic_unknown_code"],
+  } as unknown as (typeof page.rows)[number];
+  const html = renderToStaticMarkup(<RewardExpiryResults data={{ ...page, rows: [row] }} />);
+  for (const code of [...codes, "synthetic_unknown_code"]) expect(html).toContain(code);
+  expect(html).not.toContain("native code");
+  expect(html).not.toContain("[object Object]");
+  // A known code keeps its label.
+  const known = renderToStaticMarkup(<RewardExpiryResults data={page} />);
+  expect(known).toContain("取得できた履歴が途中から");
+});
+
 test("reward transport rejects malformed values and dates rather than rendering them", () => {
   for (const change of [
     { expiresOn: "2026-02-30" },

@@ -108,6 +108,7 @@ Pages compose these instead of writing their own markup or rules:
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
 | Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+| Codes as words                | `displayLabel` or `ownEntry` (`labels.ts`) for a code a table may lack: only own keys answer, so `constructor` is unknown             |
 | Evidence chains               | `ChainStep` in an `<ol className="chain">`: record → parse → original; usage → statement → debit; a candidate's pending → posted row  |
 | Review candidates             | A `.panel` with a `.settlement-head`, then a `.settlement-disclosure` open while a decision is due (see below)                        |
 | Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |

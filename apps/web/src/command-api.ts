@@ -6,6 +6,7 @@
 // The buttons are enabled by the advertised `commands` capability only. That
 // is a display decision: the server still authenticates, checks the grant, and
 // refuses an agent's approval whatever the client sends.
+import { ownEntry } from "./labels.ts";
 import type { OwnershipSelfDeclaration } from "../../../packages/domain/src/ownership-declaration.ts";
 
 export const COMMAND_PREFIX = "/api/command/v1";
@@ -164,7 +165,7 @@ const MESSAGES: Record<string, string> = {
 
 function messageFor(status: number, code: string): string {
   return (
-    MESSAGES[code] ??
+    ownEntry(MESSAGES, code) ??
     (status === 401
       ? "認証が必要です。ログイン状態を確認して、再読み込みしてください。"
       : status === 403
