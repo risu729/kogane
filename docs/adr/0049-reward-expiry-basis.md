@@ -860,3 +860,87 @@ Limits:
 - `services/app/test/ui-mcp-parity.test.ts`: the tool description names every
   closed code, says that without `from` or `before` nothing is windowed, and
   stays within 2,048 characters.
+
+## Amendment: an unreadable deadline calendar computes nothing
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context
+
+`expiryRule` in `packages/read-model/src/rewards.ts` split the stored
+`deadline_calendar_ref` (`zone:dayBoundary:zoneBasis`) and filled every gap:
+an empty or missing zone became `UTC`, any day boundary other than
+`start-of-day` became `end-of-day`, and any basis other than `documented`
+became `assumed`. The zone was not checked against time-zone data. So `""`
+read as `UTC:end-of-day:assumed`, and `:end-of-day:documented` as a
+_documented_ `UTC` zone, which also dropped `deadline_zone_assumed` for a zone
+nobody gave. A rule with such a reference computed dates stamped with a zone
+its terms never named. The seeded references (`Asia/Tokyo:end-of-day:assumed`,
+CORE migration 0033) are well formed, so no stored rule is affected today; the
+gap is in what the reader accepts.
+
+### Options considered
+
+1. Keep the defaults. A missing calendar keeps turning into UTC, a guess ADR
+   0004 forbids and INV05 calls a missing value read as a value; rejected.
+2. Treat a malformed reference as `family: "unsupported"` or
+   `needs-rule-verification`. The family and verification are stored facts of
+   their own and would be misreported in the computed basis; rejected.
+3. Read the reference strictly and leave the calendar `null` when it cannot be
+   read; the domain then refuses the rule with a closed reason, as it does for
+   an unresolved qualifying-activity policy.
+
+### Decision
+
+Option 3.
+
+- `deadlineCalendar(ref)` accepts exactly three parts: a zone the runtime's
+  time-zone data knows (`canonicalZone`, keeping the stored spelling), a day
+  boundary of `end-of-day` or `start-of-day`, and a basis of `documented` or
+  `assumed`. Anything else is `null`.
+- `ExpiryRule.deadlineCalendar` and `ExpiryRuleBasis.deadlineCalendar` are
+  `DeadlineCalendar | null`; `validExpiryRule` and `validBucketExpiryBasis`
+  accept `null` and still refuse a malformed calendar object.
+- `estimateExpiry` makes a `null` calendar a rule-level failure after the
+  existing ones: every bucket's computed side is `unavailable` with the new
+  closed reason `deadline_calendar_unreadable`, for every family (a date is
+  not derived, and verified terms of family `none` do not yield "no expiry"
+  either). No existing reason fits: `rule_family_unsupported` would say the
+  terms are not reduced to a family when the family is known, and
+  `deadline_zone_assumed` qualifies an answer rather than refusing one. The
+  estimate is `needs-rule-verification` and carries `rule_family_unsupported`,
+  the mapping already used for `qualifying_activity_policy_missing`, so
+  `REWARD_UNCERTAINTY_CODES` is unchanged. `deadline_zone_assumed` is raised
+  only for a calendar that was read and says `assumed`.
+- `EXPIRY_DERIVATION_RELEASE` is `reward-expiry-v3`: the same stored rule can
+  now produce a different reason. The reward READ build digest includes it, so
+  the Processor builds a new snapshot; `REWARD_PROJECTION_RELEASE` is
+  unchanged, and the App keeps serving the current snapshot until then.
+
+### Consequences
+
+- A rule whose calendar reference is malformed shows its buckets with an
+  unknown deadline and `deadline_calendar_unreadable` (labelled on the
+  Rewards page); a provider display is still returned as an observation.
+- The seeded rules read and compute exactly as before; only the stamped
+  derivation release changes.
+- The day boundary is checked but not yet consumed by any computation: a
+  computed deadline is a civil date in the rule's zone, not an instant.
+- Whether an alias zone (`Japan`) is known depends on the runtime's
+  time-zone data, as for every other `canonicalZone` reader.
+
+### Verification
+
+- `packages/read-model/test/rewards.test.ts`: `""`, `:end-of-day:documented`,
+  missing and extra parts, an unknown or wrongly cased day boundary, an empty
+  or unknown basis, an unknown zone and an offset each give a `null` calendar
+  and an estimate that is `needs-rule-verification`, computes no date, carries
+  `deadline_calendar_unreadable` and not `deadline_zone_assumed`; the seeded
+  reference and other well-formed ones are read exactly as stored. These
+  fail on the previous reader.
+- `packages/domain/test/reward-expiry-basis.test.ts`: the closed-reason table
+  reaches `deadline_calendar_unreadable`; inactivity, fixed-lot and `none`
+  rules with a `null` calendar compute nothing; a provider display stays an
+  observation beside the refusal; the validators accept only `null` as the
+  unreadable calendar.

@@ -5,6 +5,7 @@ import {
   conversionOffer,
   createRewardReader,
   CURRENT_REWARD_BUCKETS_SQL,
+  deadlineCalendar,
   expiryRule,
   membershipState,
   observedAtValue,
@@ -138,6 +139,79 @@ describe("reward mappers", () => {
     // The policy the terms record: store-limited movement does not extend it.
     expect(rule.qualifyingActivity!.excludedKinds).toContain("store-limited-redeem");
     expect(rule.qualifyingActivity!.extensionMonths).toBe(12);
+  });
+
+  test("a malformed or unknown deadline calendar reference is refused, never defaulted (ADR 0004)", () => {
+    for (const ref of [
+      "",
+      ":end-of-day:documented",
+      ":end-of-day:assumed",
+      "Asia/Tokyo",
+      "Asia/Tokyo:end-of-day",
+      "Asia/Tokyo:end-of-day:assumed:extra",
+      "Asia/Tokyo:midnight:assumed",
+      "Asia/Tokyo::assumed",
+      "Asia/Tokyo:end-of-day:",
+      "Asia/Tokyo:end-of-day:guessed",
+      "Asia/Tokyo:END-OF-DAY:assumed",
+      "Mars/Olympus_Mons:end-of-day:documented",
+      "Not a zone:end-of-day:documented",
+      "+09:00:end-of-day:documented",
+    ]) {
+      expect(deadlineCalendar(ref)).toBeNull();
+      const rule = expiryRule({ ...ruleRow, deadline_calendar_ref: ref });
+      expect(rule.deadlineCalendar).toBeNull();
+      // The rule computes nothing and says why; no UTC day is derived, and an
+      // assumed zone is not claimed for a zone nobody gave.
+      const estimate = estimateExpiry(
+        rule,
+        {
+          holdingRef: bucketRow.holding_ref,
+          programId: rule.programId,
+          unitRef: bucketRow.unit_ref,
+          buckets: [{ ...rewardBucket(bucketRow), kind: "regular", observedExpiry: null }],
+        },
+        {
+          windowRef: "window:synthetic",
+          completeness: "complete",
+          earliestObserved: null,
+          activities: [
+            {
+              activityRef: "act:earn",
+              kind: "earn",
+              postedDate: { kind: "local-date", value: "2026-03-01", zone: null, basis: "derived" },
+              usedDate: null,
+            },
+          ],
+        },
+        [],
+        { kind: "local-date", value: "2026-09-12", zone: null, basis: "derived" },
+      );
+      expect(estimate.state).toBe("needs-rule-verification");
+      expect(estimate.uncertaintyCodes).not.toContain("deadline_zone_assumed");
+      const [bucket] = estimate.expiringBuckets;
+      expect(bucket!.expiryBasis.computed.reasonCode).toBe("deadline_calendar_unreadable");
+      expect(bucket!.expiryBasis.computed.value).toBeNull();
+      expect(bucket!.expiryBasis.computed.rule.deadlineCalendar).toBeNull();
+    }
+  });
+
+  test("a well-formed calendar reference is read exactly as stored", () => {
+    expect(deadlineCalendar("Asia/Tokyo:end-of-day:assumed")).toEqual({
+      zone: "Asia/Tokyo",
+      dayBoundary: "end-of-day",
+      zoneBasis: "assumed",
+    });
+    expect(deadlineCalendar("Europe/London:start-of-day:documented")).toEqual({
+      zone: "Europe/London",
+      dayBoundary: "start-of-day",
+      zoneBasis: "documented",
+    });
+    expect(deadlineCalendar("UTC:end-of-day:documented")).toEqual({
+      zone: "UTC",
+      dayBoundary: "end-of-day",
+      zoneBasis: "documented",
+    });
   });
 
   test("an unresolved policy reference computes nothing rather than falling back", () => {
