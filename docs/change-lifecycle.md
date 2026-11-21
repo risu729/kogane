@@ -759,17 +759,22 @@ moves the revisions it pinned, so the server would answer it `stale` with
 another re-simulated plan id, or refuse it (`stale_context`: a card
 settlement no longer proposed, a pending-to-posted review already decided;
 `target_missing`: an identity protection already released). The re-read
-stops when the commit is sent, and one already in flight is cancelled; a
-refused commit reads the plan again. Once a receipt the server reports
-`accepted` or `published` is on screen the screen says the plan is committed
-(`確定済み`), that the plan it shows was read before the commit, and drops the
-warnings that guard approval and commit: the stale plan, the re-simulated plan
-id, and a pin that moved or an action no longer offered. A receipt in any
-other status (`failed`) is not shown as committed: the plan says its commit
-did not complete and points to the receipt, and the warnings stay. The commit reads the
-reviewed item (the settlement candidate, the ownership review, the purchases)
-again, so its panel shows it after the decision, at a revision newer than the
-plan pinned and without a warning. A refusal from any step (simulate,
+stops when the commit is sent, and one already in flight is cancelled. A
+commit the server refuses (a client error other than a timeout, or
+`commit_failed`) wrote nothing, and the plan is read again, so a stale plan
+shows its re-simulated plan id. A commit without such an answer (no response,
+a timeout, a server fault) may have landed: the plan stays as read, and the
+same confirmation sent again, with the same operation id, answers with its
+receipt. Once a receipt is on screen the screen says that the plan it shows
+was read before the commit, and drops the warnings that guard approval and
+commit: the stale plan, the re-simulated plan id, and a pin that moved or an
+action no longer offered. Every receipt is written in the batch that writes
+its decision, so this holds for any status; an `accepted` or `published`
+receipt reads as committed (`確定済み`), and any other (`failed`) says the
+decision was saved but the operation is recorded as failed, and points to the
+receipt. The commit reads the reviewed item (the settlement candidate, the
+ownership review, the purchases) again, so its panel shows it after the
+decision, at a revision newer than the plan pinned and without a warning. A refusal from any step (simulate,
 approve, commit or the re-check) is shown by a fixed message for its closed
 code, and every code in
 `COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the

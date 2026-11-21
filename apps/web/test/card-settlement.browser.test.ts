@@ -349,6 +349,8 @@ describe.if(runnable)("card settlement review", () => {
    * refused (`stale_context`: the candidate is no longer proposed).
    */
   let committed = false;
+  /** The receipt status the commit answers with. */
+  let receiptStatus: "accepted" | "failed" = "accepted";
   let older: ReturnType<typeof settlementReview>[] = [];
   let leadSearch = "not_searched";
   /** A second statement's candidates, newest first; empty serves one statement. */
@@ -373,6 +375,7 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     committed = false;
+    receiptStatus = "accepted";
     older = [];
     leadSearch = "not_searched";
     second = [];
@@ -566,7 +569,7 @@ describe.if(runnable)("card settlement review", () => {
               operationId: "op-synthetic",
               operationKind: simulation.kind,
               planId: PLAN,
-              status: "accepted",
+              status: receiptStatus,
               acceptedAt: "2026-09-11T00:00:00Z",
               publishedAt: null,
               decisionRevisionId: "decision-synthetic",
@@ -1066,6 +1069,24 @@ describe.if(runnable)("card settlement review", () => {
     expect(after).not.toContain("この候補では計画した操作を実行できません");
     expect(after).not.toContain("古い承認は適用されません");
     expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
+    await page.close();
+  });
+
+  test("a failed receipt says the decision was saved and does not report its own revision as a change since planning", async () => {
+    receiptStatus = "failed";
+    const page = await open(`/confirm/${PLAN}`);
+    await page.getByRole("button", { name: "承認する", exact: true }).click();
+    await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
+    await page.getByRole("button", { name: "確定する", exact: true }).click();
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    await page.getByText("操作の記録を確認してください", { exact: true }).waitFor();
+    const after = await page.locator("main").innerText();
+    expect(after).toContain("この計画の判断は保存されましたが、操作は失敗として記録されています");
+    expect(after).not.toContain("確定済み");
+    expect(after).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(after).not.toContain("この候補では計画した操作を実行できません");
     expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
     await page.close();
   });
