@@ -768,7 +768,10 @@ same confirmation sent again, with the same operation id, answers with its
 receipt. Until the server refuses it the reviewed item's checks neither warn
 nor block that resend: the item, read again (a refocused window, a
 reconnect), may show the decision the commit wrote, and a resend that did not
-land is checked against every pinned revision by the server again. Once a receipt is on screen the screen says that the plan it shows
+land is checked against every pinned revision by the server again. In their
+place the commit's alert says that no answer came back, so whether the
+decision was saved is unknown, and that 確定する sends the same operation id,
+which never saves twice and shows the receipt if it was saved. Once a receipt is on screen the screen says that the plan it shows
 was read before the commit, and drops the warnings that guard approval and
 commit: the stale plan, the re-simulated plan id, and a pin that moved or an
 action no longer offered. Every receipt is written in the batch that writes

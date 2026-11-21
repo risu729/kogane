@@ -744,9 +744,14 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                 ) : null}
                 {commitMutation.isError ? (
                   <Notice tone="bad" inline role="alert">
-                    {commitMutation.error instanceof CommandError
-                      ? commitMutation.error.message
-                      : "確定できませんでした。"}
+                    {!commitRefused(commitMutation.error)
+                      ? // No refusal came back, so the commit may have landed
+                        // and the item checks above stay silent: say so, and
+                        // that the resend is the same operation (addendum 10 §6).
+                        "確定の応答を受け取れなかったため、判断が保存されたかどうか分かりません。時間をおいて再試行してください。「確定する」は同じ操作IDで送るため二重には保存されず、保存済みならその操作の記録を表示します。"
+                      : commitMutation.error instanceof CommandError
+                        ? commitMutation.error.message
+                        : "確定できませんでした。"}
                   </Notice>
                 ) : null}
                 <p className="footnote">

@@ -1098,6 +1098,10 @@ describe.if(runnable)("card settlement review", () => {
     const lost = await page.locator("main").innerText();
     expect(lost).not.toContain("候補の判断が計画作成後に更新されています");
     expect(lost).not.toContain("この候補では計画した操作を実行できません");
+    // The warnings are silent, so the screen says the outcome is unknown and
+    // that the resend is the same operation.
+    expect(lost).toContain("判断が保存されたかどうか分かりません");
+    expect(lost).toContain("同じ操作IDで送るため二重には保存されず");
     const resend = page.getByRole("button", { name: "確定する", exact: true });
     expect(await resend.isDisabled()).toBe(false);
     await resend.click();
