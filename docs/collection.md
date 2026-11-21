@@ -939,6 +939,17 @@ page stops the collection (`premature-end`) instead of ending the walk: an
 early end of history has not been observed. Only the first V Money page may
 answer with an empty `results`, read as an empty history.
 
+`results.total` is read as a count only when the page states one: a
+non-negative safe integer number, or a string of ASCII digits. Anything else
+(`null`, an empty or blank string, a boolean, an array, an exponent or hex
+string, a fraction) stops the collection as `invalid-total`. Until 2026-11-21
+`Number()` read most of these as 0, so a page of rows under a missing total
+ended the walk as a complete history of zero rows (INV05). A page whose rows
+carry the walk past the stated total stops it as `rows-exceed-total`: the walk
+ends only on a page whose rows reach the total exactly. Both are synthetic
+cases in `services/collector-vpoint/test/vpoint.test.ts`; neither shape has
+been observed.
+
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the
 bytes are `Response.text()` encoded again as UTF-8, the same content but not
