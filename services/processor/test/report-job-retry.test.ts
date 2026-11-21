@@ -212,3 +212,57 @@ test("a run an earlier build marked complete without its artifact is finished, n
     .first<{ completed_at: string }>();
   expect(completedAt?.completed_at).toBe(options.now);
 }, 120_000);
+
+async function generatedEvents(reportId: string | null): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM report_events WHERE report_id=? AND kind='generated'",
+  )
+    .bind(reportId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+test("a batch the database refuses part-way rolls the run's completion back", async () => {
+  // The refusal comes from D1 itself, after the completion and the artifact
+  // insert have run inside the batch, so this shows the batch is one
+  // transaction rather than only that the job never sends the statements.
+  await seedValuedPosition(8105, "SYN-E");
+  await env.DB.prepare(
+    "CREATE TRIGGER test_refuse_report_events BEFORE INSERT ON report_events BEGIN SELECT RAISE(ABORT,'synthetic event refusal'); END",
+  ).run();
+  try {
+    await expect(runReportJob(jobEnv, options)).rejects.toThrow();
+  } finally {
+    await env.DB.prepare("DROP TRIGGER test_refuse_report_events").run();
+  }
+  const building = await env.DB.prepare(
+    "SELECT run_id FROM calculation_runs WHERE status='building'",
+  ).all<{ run_id: string }>();
+  expect(building.results).toHaveLength(1);
+  const runId = building.results[0]!.run_id;
+  expect(await runState(runId)).toEqual({ status: "building", results: 5 });
+  const artifacts = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM report_artifacts WHERE report_id=?",
+  )
+    .bind(runId.replace(/^run-/u, "rpt-"))
+    .first<{ n: number }>();
+  expect(artifacts?.n).toBe(0);
+
+  const retry = await runReportJob(jobEnv, options);
+  expect(retry).toMatchObject({ generated: 1, runId });
+  expect(await runState(runId)).toEqual({ status: "complete", results: 5 });
+  expect(await generatedEvents(retry.reportId)).toBe(1);
+}, 120_000);
+
+test("two jobs that finish the same run write one artifact and one generated event", async () => {
+  await seedValuedPosition(8106, "SYN-F");
+  const before = await artifactCount();
+  const [first, second] = await Promise.all([
+    runReportJob(jobEnv, options),
+    runReportJob(jobEnv, { ...options, now: "2026-09-08T00:00:01.000Z" }),
+  ]);
+  expect(second.reportId).toBe(first.reportId);
+  expect(await artifactCount()).toBe(before + 1);
+  expect(await generatedEvents(first.reportId)).toBe(1);
+  expect(await runState(first.runId)).toEqual({ status: "complete", results: 6 });
+}, 120_000);

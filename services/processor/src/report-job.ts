@@ -711,6 +711,9 @@ export async function runReportJob(
   // The run is marked complete in the same batch that writes its artifact, so
   // a failure anywhere before it leaves the run building and the next run over
   // the same manifest finishes it, never a complete run that no report names.
+  // The `generated` event is written only when the report has none: two jobs
+  // that both found the run unfinished write one artifact (`ON CONFLICT`) and
+  // one event, never a second generation of the same report (INV06).
   await env.DB.batch([
     env.DB.prepare(
       "UPDATE calculation_runs SET status='complete',completed_at=?,replayability=? WHERE run_id=? AND status='building'",
@@ -728,8 +731,10 @@ export async function runReportJob(
       options.now,
     ),
     env.DB.prepare(
-      "INSERT INTO report_events(report_id,kind,actor,related_report_id,occurred_at) VALUES(?,'generated',?,NULL,?)",
-    ).bind(reportId, options.actor, options.now),
+      `INSERT INTO report_events(report_id,kind,actor,related_report_id,occurred_at)
+       SELECT ?,'generated',?,NULL,?
+       WHERE NOT EXISTS(SELECT 1 FROM report_events WHERE report_id=? AND kind='generated')`,
+    ).bind(reportId, options.actor, options.now, reportId),
   ]);
 
   return {

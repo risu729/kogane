@@ -486,7 +486,13 @@ clause is considered. A run in that state is finished too: the job reads the
 run's status first and, when it is already `complete`, offers no results (the
 run already holds them, since they were written before it was marked) and
 writes only the artifact and its event; the run's status, `completed_at` and
-results are left as they are.
+results are left as they are. The `generated` event is inserted only when
+the report has none, so two jobs that both found the same run unfinished
+write one artifact and one event. The Processor's tick is dispatched by the
+single `processor-tick` alarm, so two report jobs do not normally overlap;
+the status read and the results batch are separate statements, and a job
+whose results batch meets a run another job has just finished fails that
+tick and reuses the report on the next.
 
 ### Listing and the 評価レポート pages
 
@@ -693,9 +699,11 @@ would discard later collection and later decisions (docs/operations.md).
   stability, storage key, event shapes, replayability and capabilities (AT66).
 - `services/processor/test/report-job-retry.test.ts` — a failed R2 write
   and a refused artifact batch each leave the run `building` with no
-  artifact, and the next run finishes it and is then reused; a complete run
-  with its results and no artifact, as the earlier order could leave, is
-  finished without a new result.
+  artifact, and the next run finishes it and is then reused; a batch D1
+  itself refuses part-way rolls the completion back; a complete run with its
+  results and no artifact, as the earlier order could leave, is finished
+  without a new result; two concurrent jobs over the same run write one
+  artifact and one `generated` event.
 - `services/processor/test/reports.test.ts` — migration 0034 on
   0017-0037, append-only triggers, retention-class seed, the flag, provider
   value beside own valuation (AT30), reuse, a corrected price giving a new
