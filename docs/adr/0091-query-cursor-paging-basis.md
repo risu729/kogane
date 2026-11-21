@@ -209,6 +209,13 @@ the policy rows that name a listed source (`SOURCE_PUBLICATION_MARKS_SQL`). The 
   `source_id` is not the source of the artifacts it matches moves no listed
   grant that holds only those artifacts. A deploy that changes the read SQL
   between two pages keeps the basis, as before.
+- Limits outside `activity` and `reported-state`: the marker does not move
+  with a sealed run that no parse has reached yet, which changes the
+  `coverage` intent's artifact and run counts, nor with a newly sealed
+  balance projection snapshot, which changes `holdings` (its freshness refs
+  name the snapshot id). Neither intent pages, and the context's clock is
+  whole seconds, so two such answers share a `contextId` only within one
+  second.
 
 **Verification.** `services/app/test/query-paging-basis.test.ts`: over the
 real read model and CORE migrations, an unchanged store keeps the rows, the
