@@ -40,9 +40,10 @@ export const UNKNOWN_KEY_REFS_MAX = 10;
 export const UNKNOWN_KEY_REF_LENGTH = 64;
 
 /**
- * The first 64 code units of the caller's text, one fewer when the 64th is
- * the first half of a surrogate pair: a cut never leaves a lone surrogate,
- * which serialises as a `\ud83d` escape that strict JSON decoders refuse.
+ * The first 64 code units of the caller's text, one fewer when the 64th is a
+ * high surrogate: the cut never makes a lone surrogate, which serialises as a
+ * `\ud83d` escape that strict JSON decoders refuse. A lone surrogate the
+ * caller sent inside the kept prefix is the caller's own text and stays.
  */
 export function refPrefix(text: string): string {
   const cut = text.slice(0, UNKNOWN_KEY_REF_LENGTH);

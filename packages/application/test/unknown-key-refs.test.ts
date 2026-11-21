@@ -3,7 +3,12 @@
 // cut to its first 64 code units without splitting a surrogate pair, so a body
 // of long keys is never repeated back whole. Synthetic keys only.
 import { describe, expect, test } from "bun:test";
-import { UNKNOWN_KEY_REF_LENGTH, UNKNOWN_KEY_REFS_MAX, unknownKeyRefs } from "../src/errors.ts";
+import {
+  refPrefix,
+  UNKNOWN_KEY_REF_LENGTH,
+  UNKNOWN_KEY_REFS_MAX,
+  unknownKeyRefs,
+} from "../src/errors.ts";
 import { parseExplainRequest } from "../src/explain.ts";
 import { parseProposalRequest } from "../src/propose.ts";
 import { parseAccountCandidatesRequest } from "../src/query/account-candidates.ts";
@@ -55,6 +60,18 @@ describe("unknown keys are named by a bounded prefix", () => {
       expect({ pad, wellFormed: wellFormed(ref!) }).toEqual({ pad, wellFormed: true });
       expect(ref!.length).toBeLessThanOrEqual(UNKNOWN_KEY_REF_LENGTH);
     }
+  });
+
+  test("a lone surrogate the caller sent is cut by the same rule, never repaired", () => {
+    // A high surrogate at unit 64 is dropped whether or not a low one follows.
+    expect(refPrefix(`${"x".repeat(63)}\uD800tail`)).toBe("x".repeat(63));
+    expect(refPrefix(`${"x".repeat(63)}\uD800`)).toBe("x".repeat(63));
+    // A lone low surrogate at unit 64 splits nothing, so it is kept.
+    expect(refPrefix(`${"x".repeat(63)}\uDC00tail`)).toBe(`${"x".repeat(63)}\uDC00`);
+    // Inside the kept prefix the caller's own text is repeated as sent.
+    expect(refPrefix("a\uD800b")).toBe("a\uD800b");
+    expect(refPrefix("")).toBe("");
+    expect(unknownKeyRefs([""])).toEqual([""]);
   });
 
   test("an unsupported intent is cut the same way", () => {

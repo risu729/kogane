@@ -348,8 +348,9 @@ The refusal's `refs` name the unknown keys (a filter key as `filter:<key>`).
 A key is the caller's own text, so the tools that name unknown keys —
 `financial.query`, `context.open`, `explain`, `reconcile.propose`,
 `instruments.candidates` and `purchases.explain` — name at most the first
-ten, each cut to its first 64 UTF-16 code units, or 63 where the 64th would
-split a surrogate pair, so a ref is never a lone surrogate (all six through
+ten, each cut to its first 64 UTF-16 code units, or 63 when the 64th is a
+high surrogate, so the cut never splits a surrogate pair (a lone surrogate
+the caller sent inside the kept prefix is repeated as sent; all six through
 `unknownKeyRefs` in `packages/application/src/errors.ts`; an unsupported
 `financial.query` intent is named as `intent:<intent>` under the same cut): a
 body of long keys is never repeated back whole.
