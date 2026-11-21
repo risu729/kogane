@@ -200,12 +200,22 @@ export async function readReportRoute(
     const cached = await env.EVIDENCE.get(`${artifact.storage_ref}.explanation`);
     if (!cached) throw new HttpError(404, "not_found");
     if (cached.size > MAX_BODY_BYTES) throw new HttpError(503, "report_body_too_large");
+    // A cached node that is not JSON is refused as a stored body is, with a
+    // closed code of its own: the report body is untouched, only the cache
+    // beside it cannot be read.
+    const text = await cached.text();
+    let explanation: unknown;
+    try {
+      explanation = JSON.parse(text);
+    } catch {
+      throw new HttpError(503, "report_explanation_invalid");
+    }
     return {
       reportId: artifact.report_id,
       contextId: artifact.context_id,
       replayability,
       interpretationContext: interpretation,
-      explanation: JSON.parse(await cached.text()) as unknown,
+      explanation,
     };
   }
 

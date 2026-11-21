@@ -23,6 +23,8 @@ const NOW = "2026-08-31T15:00:00.000Z";
 /** Records and evidence over the whole store: the collection quality page needs evidence.read. */
 const EVIDENCE_GRANT = { ...RECORDS_GRANT, capabilities: ["records.read", "evidence.read"] };
 const page = pageReadHarness("report-read");
+/** Text in a cached explanation node that does not parse; no answer may carry it. */
+const UNPARSED_TEXT = "synthetic-unparsed-explanation-text";
 
 const bare = pageReadHarness("report-read-bare", { DB: withoutTables(env.DB) });
 /** The open report's body key: under `racing`, it leaves R2 between the reader's `head` and `get`. */
@@ -108,6 +110,11 @@ beforeAll(async () => {
   vanishing = await storeReport("rpt:synthetic-open", "ctx-open");
   await storeReport("rpt:synthetic-restricted", "ctx-restricted");
   await storeReport("rpt:synthetic-truncated", "ctx-truncated", true);
+  // Its cached explanation node is not JSON; its body is intact.
+  await env.EVIDENCE.put(
+    `${await storeReport("rpt:synthetic-bad-explanation", "ctx-bad-explanation")}.explanation`,
+    new TextEncoder().encode(`{"schemaVersion":"report-explanation-v1",${UNPARSED_TEXT}`),
+  );
   // Its run is complete, but its body has left R2.
   await env.EVIDENCE.delete(await storeReport("rpt:synthetic-gone", "ctx-gone"));
   await env.DB.prepare(
@@ -184,6 +191,7 @@ describe("report page reads", () => {
     }
     const list = await page.mcp(REPORTS, {});
     expect(list.body.data.items.map((item: { reportId: string }) => item.reportId).sort()).toEqual([
+      "rpt:synthetic-bad-explanation",
       "rpt:synthetic-gone",
       "rpt:synthetic-open",
       "rpt:synthetic-restricted",
@@ -258,6 +266,54 @@ describe("report page reads", () => {
       isError: true,
       body: overHttp.body,
     });
+  });
+
+  it("refuse a cached explanation that is not JSON with a closed code, as a stored body is", async () => {
+    // 503 report_explanation_invalid on the route and both agent paths, not
+    // the store's 503 catalogue_read_failed (the Worker's wrap of an exception
+    // the reader did not refuse), and nothing of the stored text crosses the
+    // boundary.
+    const reportId = "rpt:synthetic-bad-explanation";
+    const path = `/api/v2/reports/${encodeURIComponent(reportId)}`;
+    const logged = vi.spyOn(console, "log");
+    onTestFinished(() => {
+      logged.mockRestore();
+    });
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const operator = await page.route(`${path}/explanation`);
+    expect(operator.status).toBe(503);
+    expect(operator.body).toEqual({
+      error: "report_explanation_invalid",
+      requestId: expect.any(String),
+    });
+    const refused = await page.expectSameAnswer(`${path}/explanation`, REPORTS, {
+      reportId,
+      view: "explanation",
+    });
+    expect(refused.status).toBe(503);
+    const overMcp = await page.mcp(REPORTS, { reportId, view: "explanation" });
+    expect(overMcp).toEqual({ isError: true, body: { error: "report_explanation_invalid" } });
+    // The request log and the audit record carry the closed code only.
+    const lines = logged.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => line.includes('"errorCode":"report_explanation_invalid"'))).toBe(
+      true,
+    );
+    expect(lines.filter((line) => line.includes(UNPARSED_TEXT))).toEqual([]);
+    const audited = (
+      await env.DB.prepare(
+        "SELECT path,result,result_code FROM audit_records WHERE rowid>? AND operation='reports.read' ORDER BY rowid",
+      )
+        .bind(last)
+        .all<{ path: string; result: string; result_code: string }>()
+    ).results;
+    expect(audited.length).toBeGreaterThan(0);
+    for (const row of audited)
+      expect(row).toMatchObject({ result: "failed", result_code: "report_explanation_invalid" });
+    expect(JSON.stringify(audited)).not.toContain(UNPARSED_TEXT);
+    // The body beside it is untouched and still served.
+    expect((await page.route(path)).status).toBe(200);
   });
 
   it("refuse what the routes refuse, and what the schema does not take", async () => {
@@ -514,7 +570,7 @@ describe("the audit rows of the report and collection quality reads", () => {
     });
     expect(rows).toEqual([
       read("mcp", "reports.read", 50, true),
-      read("agent-http", "reports.read", 4),
+      read("agent-http", "reports.read", 5),
       // One report, not its events.
       read("agent-http", "reports.read", 1),
       read("mcp", "reports.read", 1),
