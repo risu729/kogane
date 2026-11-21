@@ -690,3 +690,188 @@ guard and the proposal passed. `test/mcp-client.test.ts` (G3-08) now throws thro
 both eras and on the HTTP path, and checks a read's tool result in both eras.
 `test/audit.test.ts` records the proposal's exception once and the read's
 `catalogue_read_failed` once.
+
+## Amendment: activity filters on `kogane.events.read` (2026-11-20)
+
+- Status: proposed. The tool's input schema, its description and the
+  activity route's answer gain fields: published changes, so **the owner's
+  approval is needed before merge**, as for every published tool change.
+- Date: 2026-11-20
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap
+  G3 of the MCP everyday-questions audit; the next slice
+  [ADR 0127](0127-changes-since-digest.md) names
+- Related: [ADR 0119](0119-cursor-page-size.md) and
+  [ADR 0123](0123-summary-detail-for-large-reads.md) (cursor binding,
+  `mustMatch`), [read model: cost](../read-model.md#cost) (a query rewrite
+  is proven equal to the shipped text)
+
+### Context
+
+`kogane.events.read` (plan D19) answers `GET /api/v2/activity` and
+`/api/v2/obligations` through the routes' own `readEventsRoute`. The activity
+list pages every current event revision with a leg on one basis, 200 a page by
+`offset`, with no filter. [ADR 0127](0127-changes-since-digest.md) counts the
+event revisions recorded since an instant, and names `kogane.events.read` as
+the read that lists them, but an agent could not ask that read for only those
+revisions, nor for one account's or one source's: it paged the whole list and
+filtered it itself.
+
+What the projection holds for a filter (CORE 0032):
+
+- `created_at`, when a writer recorded the revision. No index has it; the
+  changes digest compares it in `strftime('%Y-%m-%dT%H:%M:%fZ', …)` form.
+- The legs, by `(event_id, revision)`: each names a subject. An account is
+  `account:<id>` (card purchases, every new writer) or the bare id (card
+  settlements, the 0044 tolerance); the knowledge selector reads both forms.
+- `evidence_support_json`: the SourceFactRefs, a transaction or balance fact
+  with `revision: parse_run:<id>`, or a typed claim (`reader:<version>`). A
+  parse run's capture (`fetch_artifacts`) names its source.
+- `effective_time_json`: a role-typed time (an instant with its offset, a
+  local date, a period, or unknown with a reason), not a date column.
+
+The shipped activity text walks `economic_event_revisions_current` (live
+revisions, in `(event_id, revision)` order) and checks each revision's basis
+leg by key until `LIMIT` and `OFFSET` are met.
+
+### Options considered
+
+1. **Add the filters to the shipped text and keep `offset`.** A sparse filter
+   would walk every live revision to fill a page or reach a deep offset: the
+   cost grows with the store, and an offset counts rows of a list the filter
+   changes.
+2. **An index on `created_at` and an additive migration.** Only the time
+   filter would use it, its order differs from the list's, and the walk below
+   needs none.
+3. **A bounded keyset walk in the shipped order (chosen).** The filtered list
+   walks the same partial index from a key, a fixed number of live revisions a
+   call, and continues after the last one it walked.
+4. **A window on the event's own date.** A rule per time kind (which civil day
+   an instant falls on, whether a period straddling the edge is inside, what an
+   unknown time does) is a decision no observed need asks for yet, and the
+   digest's handler needs the recording window. Left for its own amendment.
+
+### Decision
+
+1. **Filters.** `activity` takes, each optional: `since` (inclusive) and
+   `before` (exclusive), ISO 8601 instants with a zone, on `created_at`
+   compared as the digest compares it; `account`, an account id or
+   `account:<id>`, which a leg of the revision names in either form; `source`,
+   a source id, the source of a capture a parse run the evidence cites
+   (`parse_run:<id>`) was read from. A typed claim or a parse run that does not
+   exist names no source. `obligations` takes none (`400 invalid_query`, as
+   before).
+2. **Closed refusals.** A malformed value is `400 invalid_query` with a ref per
+   refused filter: `since:format`, `before:format` (no zone, no time, no
+   real calendar time, or one whose UTC form leaves the years 0000 to 9999
+   that `created_at` is compared in), `account:format`, `source:format` (the
+   evidence browser's source charset); `since` at or after `before` is
+   `window:empty`.
+   An `offset` beside a filter or a cursor is `400 invalid_query` with
+   `refs: ["offset"]`.
+3. **The unfiltered list is the shipped one.** Without a filter or a cursor,
+   `activityEventsSql` is unchanged byte for byte, paged by `offset`, with the
+   next offset as `nextCursor` and the same fields, so a cursor issued before
+   this change still continues.
+4. **The filtered list** (`filteredActivityEventsSql`,
+   `packages/read-model/src/events.ts`) walks at most 5,000 live revisions
+   (`ACTIVITY_FILTER_WALK`) after a key through
+   `economic_event_revisions_current` (one index range), tests the recording
+   window on the row it holds, then the basis leg and the account leg by the
+   legs' primary key, then each evidence reference's parse run and capture by
+   primary key; it lists the first 200 that pass, in the shipped order. Its
+   cursor continues after the last revision listed when more matched than the
+   page holds, else after the last one walked when the walk reached its bound,
+   so a page may be short or empty and still continue. The answer adds
+   `filters` (each in its compared form, null when absent) and `walk`
+   (`bound`, `walked`), and speaks the paging surface ADR 0128 proposes
+   (branch `claude/adoring-faraday-co4por-mcp-consistency`, not merged):
+   `next` is `{ arguments: { cursor } }` while something follows, else null,
+   and `paging` is `{ limit: 200, returned, hasMore, stoppedBy }`, with
+   `stoppedBy` `limit` for a full page, `walk` for a page the walk bound
+   ended before it filled, null at the end. `nextCursor` carries the same
+   cursor, as the unfiltered list's `nextCursor` carries its offset. ADR
+   0128's closed list of stops (`limit`, `bytes`, `budget`) has no stop for
+   a scan bound; `walk` is proposed for it, and its validator must admit it
+   (with `returned` below `limit`) before the two branches merge.
+5. **The cursor binds the filters.** It is the keyset cursor of
+   `packages/domain/src/paging.ts` (scope `economic-events:activity`, the
+   last key, and the digest of the route, the basis and the four filters in
+   their compared form). Read with another basis or filter, or with no
+   filter, it is `400 cursor_mismatch` with `mustMatch` naming `collection`,
+   `basis`, `since`, `before`, `account` and `source` (ADR 0123); a cursor it
+   did not issue is `400 invalid_cursor`.
+6. **One reader, one grant.** The route and both agent paths call
+   `readEventsRoute`, as before; the tool's grant (`records.read` over the
+   whole store) is graded before its arguments are read.
+7. **The digest's handler.** ADR 0127's events handler names `sinceArgument:
+   since` ([its amendment](0127-changes-since-digest.md#amendment-the-events-handler-names-since-2026-11-20)).
+
+### Consequences
+
+- "Which events were recorded since yesterday", "this account's events" and
+  "this source's events" each take one filtered walk instead of the whole list.
+- A call reads a fixed number of rows whatever the store holds: on workerd's
+  D1, the first page reads 15,005 to 35,005 rows (by filter) over a history
+  5,100 or 15,300 revisions long (`events-filters-cost.test.ts`), each
+  revision citing one evidence reference. `source` reads a parse run and a
+  capture for each reference it tests, so its rows grow with the references a
+  revision cites (two for a card settlement, one for each card usage a card
+  purchase recognises), not with the store.
+  Listing a sparse filter over a store of N live revisions takes about
+  N / 5,000 calls, most of them short or empty.
+- The list is in event-id order, not recording order: the revisions recorded
+  since are spread over the walk.
+- The pages read the live projection, not a snapshot: each call walks the
+  revisions live at that moment after its key. A revision recorded between
+  calls is listed only if its key sorts after the cursor, and a revision that
+  replaces one already listed, under the same event id, is listed again in its
+  new revision when it sorts after the cursor (the shipped list's offset pages
+  shift the same way).
+- Where one event has two live revisions (an inconsistency
+  `economic_event_live_conflicts` lists, which no writer leaves), the item
+  view gathers legs and evidence by event id, as the shipped list does, so
+  such an item shows what its page holds of both; the filters decide on each
+  revision's own legs and evidence.
+- No migration and no index: the walk uses `economic_event_revisions_current`
+  and primary keys only.
+- No filter on the event's own date (`effectiveTime`), and none on
+  obligations.
+
+### Verification
+
+- `packages/read-model/test/events-activity-legacy-sql.ts` freezes the shipped
+  text; `events-filters.test.ts` asserts `activityEventsSql` equals it, and
+  compares every filtered read, paged to its end at page sizes 1 to 200 and
+  walk bounds 2 to 5,000, with the frozen text's rows narrowed in memory by a
+  restatement of each filter over the base tables: on 40 random stores (both
+  account forms, superseded revisions, a merge across event ids, live
+  conflicts, evidence with no parse run, a missing or malformed parse run,
+  non-object references, recording times with and without milliseconds, at
+  +09:00, as a bare date and unreadable), the listed revisions in order on
+  every store and every item whole on stores without live conflicts; with no
+  filter it returns the shipped list; on a scaled store of 11,234 live
+  revisions every page walks at most the bound. A boundary, an account form,
+  each source case and a walk that stops at its bound are checked by name.
+  Changing `>=` to `>` on `since`, dropping the bare account form, accepting a
+  malformed parse run reference, or ending a walk that stopped at its bound
+  instead of continuing it makes it fail.
+- `packages/read-model/test/statement-plans.test.ts`, without table
+  statistics: one range of `economic_event_revisions_current` from the key, the
+  legs by primary key, the parse run and capture by primary key, no other
+  table scanned.
+- `services/processor/test/events-filters-cost.test.ts`, on workerd's D1 with
+  every CORE migration and no `sqlite_stat` table: the same plan steps; each
+  filter's first page reads the same rows and answers the same over a history
+  three times larger; D1 answers what bun:sqlite answers.
+- `services/app/test/page-read-events-filters.test.ts`: the route, the agent
+  HTTP route and MCP answer the same for each filter, both account forms and
+  an offset-written `since`; the pages of a filtered list join with nothing
+  repeated or skipped, each page's `next` naming its `cursor` and its
+  `paging` saying how it ended (`walk` for a short page with a cursor);
+  another filter, basis or no filter is
+  `cursor_mismatch` with `mustMatch`; each malformed filter, a foreign cursor
+  and an `offset` beside a filter are refused with their codes; the grant is
+  graded before a filter is read; the unfiltered answer keeps its fields and
+  its offset cursor; every argument a changes-digest handler names is in its
+  tool's schema, and the events handler's `since` lists the revisions
+  recorded since.

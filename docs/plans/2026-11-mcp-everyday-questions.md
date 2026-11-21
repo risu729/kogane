@@ -6,6 +6,9 @@
   the same pull request as this plan ([ADR 0125](../adr/0125-card-purchases-per-card-view.md)), and gap G2 on a
   branch stacked on it ([ADR 0125, amendment](../adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19));
   each is a published tool change and needs the owner's approval before merge. The other gaps are proposals.
+  Gap G3 has two parts: the digest, [ADR 0127](../adr/0127-changes-since-digest.md), and the `events.read`
+  recording-time, account and source filters, [ADR 0081, amendment of 2026-11-20](../adr/0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20)
+  (proposed; no event-date filter yet). The tables below describe main at `c9cd0c9`.
 - Issue: [#1414](https://github.com/risu729/kogane/issues/1414) (done when: "how much is my next card bill, from
   which account, and will that account cover it?" and "which sources are failing?" take one or two calls, each
   answer under 8 KB).

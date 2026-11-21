@@ -990,11 +990,12 @@ where the projection is absent. `handlers` name the read that lists each
 count's items: `kogane.evidence.read` for runs (`page: runs`, `source`) and
 captures (`page: artifacts`, `runId`), `kogane.observations.get` for the newest
 parse's artifact, `kogane.observations.list` for observations,
-`kogane.events.read` for events and `kogane.collection-quality.read` for why a
-source is unchanged. `kogane.evidence.read` shows only the configured
+`kogane.events.read` for events (`collection: activity`, with the answer's
+`since` in `sinceArgument`, `since`) and `kogane.collection-quality.read` for
+why a source is unchanged. `kogane.evidence.read` shows only the configured
 source's runs, so for any other source the runs and captures handlers answer
-`404 not_found`. Counts, closed codes, times and ids only: no amount,
-label or provider text.
+`404 not_found`. Counts, closed codes, times and ids only: no amount, label or
+provider text.
 
 Bounds: the newest 500 fetch runs per source, 5,000 parse runs and 2,000
 event revisions are read, newest first in recording order, and at most 20,000
@@ -1005,9 +1006,11 @@ events line's `complete: false`. The answer is cut between sources before
 8,192 bytes; `next.after` is the `after` that continues it. `after` is a
 place in source id order (an id no source has continues from where it sorts),
 and each answer is a fresh read of the sources after it. More than 200
-visible sources is `413 budget_exceeded`. The events line counts revisions,
-but `kogane.events.read` does not filter by date yet (the next slice in the
-ADR).
+visible sources is `413 budget_exceeded`. The events line counts every
+revision recorded since, of every kind; its handler lists only the current
+ones, one basis a call (`kogane.events.read` with `since`, below), so a
+revision superseded since, or one with no leg on the basis asked, is counted
+and not listed.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; both decided before the request is
@@ -1196,8 +1199,9 @@ page's. A cursor is bound to neither `detail` nor `limit`
 is `400 cursor_mismatch` with `mustMatch`, the argument names that must
 repeat (`collection`, `source`, `account`, `instrument`, `metric`,
 `view`, `identityRead` on `kogane.balances.read`; `collection`, `program`,
-`from` and `before` on `kogane.rewards.read`'s expiry), on the route and the
-tool alike.
+`from` and `before` on `kogane.rewards.read`'s expiry; `collection`, `basis`,
+`since`, `before`, `account` and `source` on `kogane.events.read`'s filtered
+activity), on the route and the tool alike.
 `test/mcp-answer-size.test.ts` measures every read tool's default answer on
 a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
 and keeps the summaries under the 8 KB a client shows, with the overview
@@ -1436,6 +1440,37 @@ routes, it exists only where the events projection (CORE 0032) does: else it
 is neither listed nor callable. It is how an agent reads an accepted card
 settlement's debit: one `card_settlement` event on the `cash-movement` basis,
 gone from the list once withdrawn (its current revision has no leg).
+
+The activity list takes filters, each optional
+([ADR 0081, amendment of 2026-11-20](adr/0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20)):
+`since` (inclusive) and `before` (exclusive), ISO 8601 instants with a zone,
+on when a revision was recorded (`created_at`, compared as
+`kogane.changes.since` compares it); `account`, an account id or
+`account:<id>`, which a leg of the revision names in either stored form;
+`source`, a source id, from whose capture a parse run the revision's
+evidence cites (`parse_run:<id>`) was read. Obligations take none. Without a
+filter the list is the shipped one: the same fields, `offset` paging and the
+next offset as `nextCursor`. With one, the same list in the same order is
+narrowed, and the answer adds `filters` (each in its compared form, null
+when not given) and `walk` (`bound`, `walked`): each call walks at most
+5,000 current revisions, so a page lists at most 200 and may be short or
+empty while `nextCursor` still continues it. The answer also carries ADR
+0128's paging surface (proposed): `next` (`{ arguments: { cursor } }`, or
+null at the end) and `paging` (`limit` 200, `returned`, `hasMore`,
+`stoppedBy`: `limit` for a full page, `walk` for a page the walk bound
+ended first, null at the end). That cursor is the `cursor` of
+the next call with the same `basis` and filters (spelled any way that
+compares equal); another basis or filter, or no filter, is `400
+cursor_mismatch` with `mustMatch` (above), a cursor it did not issue is `400
+invalid_cursor`, and an `offset` beside a filter or a cursor is `400
+invalid_query` with `refs: ["offset"]`. A malformed filter is `400
+invalid_query` naming each one refused (`since:format`, `before:format`,
+`account:format`, `source:format`), and `since` at or after `before` is
+`window:empty`. The filters decide nothing on a value: there is no filter on
+the event's own date (`effectiveTime`) yet. The pages are not a snapshot:
+each call walks the revisions live when it runs, after its cursor, so a
+revision recorded between calls is listed only if it sorts after the cursor,
+and one that replaces a revision already listed may be listed again.
 
 `kogane.evidence.read` takes `{ page, source?, runId?, artifactId?, cursor? }`.
 `page` picks the route: `meta`; `runs`, which needs `source`; `artifacts`,
