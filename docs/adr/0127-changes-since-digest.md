@@ -294,7 +294,10 @@ equal to `CHANGES_SINCE_HANDLERS`, so the published answer carries the new key.
 
 ## Amendment: a `since` in the years 0000 to 0099 is too old, not malformed (2026-11-21)
 
-- Status: proposed.
+- Status: proposed. The refusal ref is part of `kogane.changes.since`'s
+  published answer, and it changes from `since:format` to `since:too_old` for
+  a `since` written in the years 0000 to 0099: **the owner's approval is
+  needed before merge**.
 - Date: 2026-11-21
 
 ### Context

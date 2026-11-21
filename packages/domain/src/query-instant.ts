@@ -6,7 +6,11 @@
 // It is pure arithmetic on the written fields, never `Date.parse`: a parser
 // that rolls `02-30` or `24:00` over to another instant is not trusted with
 // it, and `Date.UTC` reads the years 0 to 99 as 1900 to 1999. The years are
-// taken as written, 0000 to 9999, proleptic Gregorian.
+// taken as written, 0000 to 9999, proleptic Gregorian. It is not
+// `parseInstant` (`time.ts`), whose evidence instants need seconds, take up
+// to nine fraction digits and offsets to ±18:00: the published filters take
+// what they took when `Date.parse` read them. Both use `time.ts`'s calendar
+// arithmetic (`daysInMonth`, `daysFromCivil`).
 //
 // Its ISO form (`toISOString`, milliseconds, `Z`) is what the stores compare
 // as text, in `strftime`'s four-digit years: an instant whose UTC form leaves
