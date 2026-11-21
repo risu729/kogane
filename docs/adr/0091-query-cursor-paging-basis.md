@@ -163,12 +163,23 @@ store does not hold, is the existing gap `no_artifacts_collected` on
 - `no_measures_in_scope` is a new published reason code; the gap reason
   vocabulary stays open text checked only for length
   (`validFinancialResult`).
+- The whole-store grant names no source, so `coverage` without a filter over
+  a store that holds no source stays `complete` with zero sources: nothing
+  the grant names is missing. A listed grant names its sources, so the same
+  empty store is `partial` with each of them.
+- Limit: `activity` and `reported-state` do not name a listed grant's unheld
+  sources. Their reads leave them out of the scope pairs, and
+  `no_rows_in_scope` is named only for a source that was read, so a listed
+  grant whose sources the store holds none of still answers those intents
+  `complete` with no row. Like the other listed-grant cases, it is reached
+  only by tests while every caller holds the whole-store grant.
 
 **Verification.** `packages/application/test/query.test.ts`, "an empty scope
 is a reason, never a complete empty answer (INV05)": an unmeasured `account`
 filter, an empty snapshot, a listed account never measured beside a measured
 one, an unheld `source` filter on the whole-store and on a listed grant (a
 denied one stays `evidence_restricted`), and a listed grant's unheld sources
-without a filter are `partial` with the gap; a points-only account and a held
-`source` filter stay `complete`. Six of these fail against the previous
+without a filter, also over an empty store, are `partial` with the gap; a
+points-only account, a held `source` filter and an empty store under the
+whole-store grant stay `complete`. Seven of these fail against the previous
 `execute.ts`.

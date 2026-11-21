@@ -1066,6 +1066,38 @@ describe("an empty scope is a reason, never a complete empty answer (INV05)", ()
     expect(JSON.stringify(coverage.result)).not.toContain("fixture-b");
   });
 
+  test("an empty store is complete with no source under the whole-store grant, and names a listed grant's sources", async () => {
+    const empty: Overview = { ...OVERVIEW, sources: [], fetchRuns: [] };
+    const coverageOver = async (grantValue: Grant) => {
+      const body = request({ intent: "coverage" });
+      const opened = await openContext(grantValue, CONTEXT_INPUTS, { query: body });
+      return executeQuery({
+        grant: grantValue,
+        opened,
+        request: body,
+        reader: reader(),
+        overview: empty,
+      });
+    };
+    // The whole-store grant names no source, so nothing it covers is missing.
+    const whole = await coverageOver(grant());
+    expect(whole.ok).toBe(true);
+    if (!whole.ok) return;
+    expect(whole.result.data).toMatchObject({ scopes: [], sourceCount: 0 });
+    expect(whole.result.completeness).toBe("complete");
+    expect(whole.result.coverage.gaps).toEqual([]);
+    const listed = await coverageOver(
+      grant({ scopes: { sources: ["fixture-a", "fixture-unknown"], accounts: "*" } }),
+    );
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.result.completeness).toBe("partial");
+    expect(listed.result.coverage.gaps).toEqual([
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-a" },
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-unknown" },
+    ]);
+  });
+
   test("coverage filtered to a held source is unchanged", async () => {
     const outcome = await run(
       grant(),
