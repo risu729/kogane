@@ -9,6 +9,7 @@
 //   * Confidence is written out. Every row says whether its date is
 //     provider-observed or policy-estimated, and every reason code has text;
 //     colour alone never carries the meaning.
+import { displayLabel } from "../labels.ts";
 import type { RewardProviderExpirySection } from "../../../../packages/domain/src/reward-expiry-observations.ts";
 import { type ReactNode } from "react";
 import { useFeatures } from "../api.ts";
@@ -107,7 +108,7 @@ const REASON_LABELS: Record<string, string> = {
 };
 
 function reasonText(code: string): string {
-  return REASON_LABELS[code] ?? code;
+  return displayLabel(REASON_LABELS, code);
 }
 
 /**
@@ -184,7 +185,7 @@ function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
   return (
     <Panel
       id={domId("reward-holding", holding.programId, holding.holdingRef)}
-      title={`${holding.programRef}（${HOLDING_KIND_LABELS[holding.holdingKind] ?? holding.holdingKind}）`}
+      title={`${holding.programRef}（${displayLabel(HOLDING_KIND_LABELS, holding.holdingKind)}）`}
       note={
         <>
           取得元 {holding.sourceId} ／ 単位 {holding.unitRef}。
@@ -206,7 +207,7 @@ function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
           <tbody>
             {holding.buckets.map((bucket) => (
               <tr key={bucket.bucketRef}>
-                <td>{BUCKET_LABELS[bucket.kind] ?? bucket.kind}</td>
+                <td>{displayLabel(BUCKET_LABELS, bucket.kind)}</td>
                 <td>
                   <Quantity quantity={bucket.quantity} />
                 </td>
@@ -249,7 +250,7 @@ function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
             <ul className="plain-list">
               {holding.excluded.map((row) => (
                 <li key={row.bucketRef}>
-                  {BUCKET_LABELS[row.kind] ?? row.kind}: {reasonText(row.reasonCode)}
+                  {displayLabel(BUCKET_LABELS, row.kind)}: {reasonText(row.reasonCode)}
                 </li>
               ))}
             </ul>
@@ -289,7 +290,7 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
       title={`${row.ruleRef}（${row.holdingRef}）`}
       note={
         <>
-          判定: {STATE_LABELS[row.state] ?? row.state} ／ 規約の確認状況:{" "}
+          判定: {displayLabel(STATE_LABELS, row.state)} ／ 規約の確認状況:{" "}
           {row.verification === "verified" ? "確認済み" : "未確認"} ／ 期限の基準時間帯:{" "}
           {row.deadlineZone}
           {row.deadlineZoneBasis === "assumed" ? "（規約に明記なし・仮置き）" : "（規約に明記）"}
@@ -321,7 +322,7 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
                 <td>
                   <Time time={bucket.deadline} />
                 </td>
-                <td>{BASIS_LABELS[bucket.basis] ?? bucket.basis}</td>
+                <td>{displayLabel(BASIS_LABELS, bucket.basis)}</td>
                 <td>
                   <Time time={bucket.providerObserved} />
                 </td>
@@ -392,8 +393,8 @@ export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }):
             )}
           </KvRow>
           <KvRow label="規約版">
-            {computed.rule.ruleRef}（
-            {VERIFICATION_LABELS[computed.rule.verification] ?? computed.rule.verification}）
+            {computed.rule.ruleRef}（{displayLabel(VERIFICATION_LABELS, computed.rule.verification)}
+            ）
           </KvRow>
           <KvRow label="適用期間">
             {computed.rule.validPeriod === null ? (
@@ -410,9 +411,7 @@ export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }):
           {computed.activity === null ? null : (
             <KvRow label="活動履歴">
               {computed.activity.windowRef} ／{" "}
-              {COMPLETENESS_LABELS[computed.activity.completeness] ??
-                computed.activity.completeness}{" "}
-              ／ 起算:{" "}
+              {displayLabel(COMPLETENESS_LABELS, computed.activity.completeness)} ／ 起算:{" "}
               {computed.activity.anchorActivityRef === null || computed.activity.anchorDate === null
                 ? "対象になる活動なし"
                 : `${computed.activity.anchorActivityRef}（${computed.activity.anchorDate.value}）`}
@@ -431,7 +430,7 @@ export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }):
                     .join("、")}
             </KvRow>
           )}
-          <KvRow label="照合">{AGREEMENT_LABELS[agreement] ?? agreement}</KvRow>
+          <KvRow label="照合">{displayLabel(AGREEMENT_LABELS, agreement)}</KvRow>
         </Kv>
         <Codes codes={computed.uncertaintyCodes} />
       </section>
@@ -451,8 +450,8 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
       // of one kind, and the snapshot holds one row per bucket for every rule
       // version of the programme. The holding is not needed: a bucket
       // reference already names the provider account it came from.
-      title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}（${row.bucketRef} ／ 規約 ${row.ruleRef}）`}
-      note={<>判定: {STATE_LABELS[row.state] ?? row.state}</>}
+      title={`${row.programId} ／ ${displayLabel(BUCKET_LABELS, row.bucketKind)}（${row.bucketRef} ／ 規約 ${row.ruleRef}）`}
+      note={<>判定: {displayLabel(STATE_LABELS, row.state)}</>}
     >
       <div className="panel-body">
         <Kv>
@@ -460,7 +459,7 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
             <Quantity quantity={row.quantity} />
           </KvRow>
           <KvRow label="期限">{row.expiresOn ?? <Badge tone="warn">期限未確認</Badge>}</KvRow>
-          <KvRow label="根拠">{BASIS_LABELS[row.basis] ?? row.basis}</KvRow>
+          <KvRow label="根拠">{displayLabel(BASIS_LABELS, row.basis)}</KvRow>
           <KvRow label="取得元の表示">
             <Time time={row.providerObserved} />
           </KvRow>

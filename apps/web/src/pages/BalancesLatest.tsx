@@ -6,6 +6,7 @@
 // shown, and how many pieces of evidence back them (addendum 11 section 4).
 // A measurement with two witnesses is one balance and two pieces of evidence,
 // and this page never calls the second number a balance.
+import { displayLabel } from "../labels.ts";
 import { useState, type ReactNode } from "react";
 import {
   useLatestBalances,
@@ -92,7 +93,7 @@ const REASON_LABELS: Record<string, string> = {
 };
 
 const reasonText = (code: string | null): string | null =>
-  code === null ? null : (REASON_LABELS[code] ?? code);
+  code === null ? null : displayLabel(REASON_LABELS, code);
 
 export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }): ReactNode {
   // The cursor is opaque and belongs to one snapshot; clearing it is the

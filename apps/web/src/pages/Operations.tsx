@@ -12,7 +12,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError } from "../api.ts";
 import { AUDIT_ROUTE } from "../audit-api.ts";
-import { displayLabel } from "../labels.ts";
+import { displayLabel, ownEntry } from "../labels.ts";
 import {
   EXECUTION_REASON_LABELS,
   OPERATION_DISPATCH_LABELS,
@@ -118,7 +118,7 @@ function SummaryRow({ summary }: { summary: OperationSummaryWire }): ReactNode {
         {displayLabel(OPERATION_KIND_LABELS, summary.kind)} <Code value={summary.kind} />
       </td>
       <td>
-        <Badge tone={STATUS_TONES[summary.status] ?? "neutral"}>
+        <Badge tone={ownEntry(STATUS_TONES, summary.status) ?? "neutral"}>
           {displayLabel(OPERATION_STATUS_LABELS, summary.status)}
         </Badge>{" "}
         <Code value={summary.status} />
