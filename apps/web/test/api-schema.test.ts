@@ -77,10 +77,19 @@ describe("shared API schema", () => {
         limit: "balancesV2",
         detail: "balancesV2",
       },
+      "/api/v2/balances/cash": {
+        source: "collectionFilters",
+        account: "collectionFilters",
+        instrument: "collectionFilters",
+        identityRead: "identityReadModes",
+        cursor: "balancesV2",
+        limit: "balancesV2",
+      },
     });
     expect(LIST_PATH_CAPABILITY).toEqual({
       "/api/v2/balances/latest": "balancesV2",
       "/api/v2/balances/history": "balancesV2",
+      "/api/v2/balances/cash": "balancesV2",
     });
     expect(REWARD_REQUEST_SCHEMA).toEqual({
       "/api/v2/rewards/holdings": ["program", "offset"],

@@ -254,15 +254,21 @@ offered page size; what remains is that the refusal says nothing.
 - Left as they are, and over 8 KB at this scale: `kogane.observations.list`
   `{kind: balances}` (the v1 grouped list, about 520 KB) and the collection
   quality account view (about 107 KB for Vpass in production, issue 1414's
-  proposal). Each is a follow-up of its own; the
-  [amendment of 2026-11-20](#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)
-  gives the account view a summary, and the
-  [amendment of 2026-11-20](#amendment-the-v1-grouped-balance-list-answers-a-summary-by-default-2026-11-20)
-  gives the grouped list one.
-  `kogane.schedules.maintenance.read` (about 15 KB) and `kogane.store.read`
-  `{page: overview}` (about 9 KB) were too; the
-  [amendment below](#amendment-the-store-overview-and-the-maintenance-read-answer-a-summary-by-default-2026-11-19)
-  gives them a summary.
+  proposal). `kogane.schedules.maintenance.read` (about 15 KB) and
+  `kogane.store.read` `{page: overview}` (about 9 KB) were too. Each is a
+  follow-up of its own, taken up by the amendments below, in order: the
+  [amendment of 2026-11-19](#amendment-the-store-overview-and-the-maintenance-read-answer-a-summary-by-default-2026-11-19)
+  gives the overview and the maintenance read a summary; the
+  [first amendment of 2026-11-20](#amendment-the-overview-summary-is-held-to-8-kb-by-construction-2026-11-20)
+  holds the overview summary to 8 KB by construction; the
+  [second](#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)
+  gives the account view a paged summary; the
+  [third](#amendment-cash-per-account-and-per-bank-in-one-call-collection-cash-2026-11-20)
+  answers cash per account and per bank in one call
+  (`kogane.balances.read` `collection: cash`) instead of pages of `latest`;
+  and the
+  [fourth](#amendment-the-v1-grouped-balance-list-answers-a-summary-by-default-2026-11-20)
+  gives the grouped list a summary.
 - Unit B of the proposal (`collection-quality.read` `view: status`, its own
   branch) adds a view to the same tool and route. `detail` is defined only
   for the summary without a source and for `view: cells`; every other view
@@ -1023,6 +1029,247 @@ result):
 - `services/app/test/ui-mcp-parity.test.ts` passes unchanged: no route or
   tool was added, and the description keeps its pinned terms within 2,048
   characters.
+
+## Amendment: cash per account and per bank in one call (`collection: cash`) (2026-11-20)
+
+- Status: proposed. **Owner approval is needed before merge**: it changes the
+  published input schema of `kogane.balances.read` (`collection` gains
+  `cash`) and its description, adds `GET /api/v2/balances/cash` to the shared
+  request schema (`LIST_REQUEST_SCHEMA`, `LIST_PATH_CAPABILITY`), and the MCP
+  Portal needs its capabilities synced after the deploy.
+- Date: 2026-11-20
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap
+  G4 of the everyday-questions audit (question Q2: "How much cash do I have
+  across banks, per bank?")
+- Carried by: `packages/application/src/query/cash-per-account.ts`,
+  `cashPerAccountPage` in `services/app/src/balances-v2.ts`,
+  `services/app/src/page-read-tools.ts`, `services/app/src/observation-api.ts`,
+  `projectionMeasureSql` in `packages/read-model/src/balance-projection-sql.ts`
+  with `measureRows` in `packages/storage-d1/src/read/reader.ts`, and the
+  contract, validator and request schema in `packages/observation-shared`
+- Builds on: [ADR 0120](0120-readable-account-labels.md) (one readable
+  label per account entity), [ADR 0119](0119-cursor-page-size.md),
+  [ADR 0081](0081-ui-parity-through-mcp.md),
+  [ADR 0093](0093-direct-bank-deposit-disjointness.md) (the adopted set the
+  known-assets subtotal and `holdings` share)
+
+### Context
+
+Q2 took `kogane.financial.query` `holdings` (one adopted figure per unit,
+no account) and pages of `kogane.balances.read` `latest` for each account
+(160 to 300 KB in production before this ADR's summary; two to four summary
+pages after it), and the client had to pick the cash rows, group them by
+account and bank and add them itself, which INV03 keeps in
+`packages/domain`. Both reads already rest on one adopted set: the balance
+projection adopts at most one measurement per subject and unit, and the
+known-assets subtotal (`known-assets-subtotal-v1`) sums its `sum-disjoint`
+asset-positive currency stocks with no overlap group, refusing a subject
+counted twice in one unit (`subtotalCountKey`). That key is the projection
+subject, which is the provider reference, not the account entity.
+
+### Options considered
+
+1. **`financial.query` `holdings` with `groupBy: account`.** Holdings has
+   the grant-scope pairs and the same adopted figures, but no account
+   organization (no entity, no ADR 0120 label: its executor reads no SQL),
+   no as-of date per figure, and its answer envelope (context, resolved
+   query, five quality dimensions) is several KB before a line. Grouping
+   needs a new reader port for labels, a new projection read for dates and
+   statuses, and a change to the query spec that `context.open` pins too.
+2. **A new `kogane.cash.read` tool.** A new tool and route for a view of
+   the same snapshot the balance read already serves; the plan and the
+   owner prefer extending a tool.
+3. **`kogane.balances.read` `collection: cash` and
+   `GET /api/v2/balances/cash` (chosen).** The balance read already
+   serves the snapshot under the routes' refusals, organizes rows with the
+   ADR 0120 label, pages with the ADR 0119 cursor, and answers the
+   known-assets subtotal; a third collection reuses each of them and adds
+   only the grouping. `holdings` is unchanged.
+4. **A `groupBy` on `collection: latest`.** The latest page is a keyset
+   page of rows with its own `limit`, `metric` and `view` semantics; a
+   grouped answer would change what each of them means on one route.
+
+### Decision
+
+1. **What is cash.** The known-assets subtotal's metrics, as a closed list
+   (`CASH_METRIC_IDS`): `deposit.balance` (SBI Shinsei, SMBC, Mizuho),
+   `broker.foreign-cash-deposit` (SBI Securities foreign cash, one per
+   currency) and `exchange.cash-balance` (SBI VC Trade). A test pins the
+   list to `knownAssetMetricIds()`, so a registry change that moves a
+   metric in or out fails until this list follows. Every other latest
+   measurement of the scope is left out under one closed reason, decided
+   from its registry definition in this order: `metric_unknown`,
+   `not_currency`, `not_a_stock`, `not_asset_positive`,
+   `overlaps_another_measure`, `restates_a_balance`, `not_summable`
+   (`CASH_LEFT_OUT_REASONS`). Today that leaves out Sony Bank's and Mobile
+   Suica's balances (`restates_a_balance`: a balance after a transaction),
+   PRESTIA's term-deposit principal and Sony Bank's gross aggregates
+   (`overlaps_another_measure`), Mizuho's available balance and SBI's
+   buying power (`not_a_stock`), and every card, reward and income measure.
+   `not_summable` describes no registry metric today.
+2. **One line per account.** `lines` holds one line per account entity
+   (`account`, the 64-hex id, and `label`, the ADR 0120 label of its first
+   reference), or per projection subject when the organization is
+   unavailable (both null). An account reached through several provider
+   references is one line with one `references` entry each (`source`,
+   `sourceAccount`, `amounts`). Each amount is `{ observationId, metric,
+   unit, value, scale, status, adoption, counted, asOf, reasons }`: an
+   exact value has its decimal text and scale, one that is not has neither
+   and keeps its status (INV05); `reasons` are `adoption:<code>`,
+   `freshness:<code>` and `cash:account_reported_twice`, and a not-counted
+   amount always has one. Lines are ordered by source, then label.
+3. **What is counted (INV06).** An adopted exact amount, and only when it
+   is the only adopted amount of its unit on its line and on its provider
+   reference. Two adopted amounts of one unit on one account are both left
+   uncounted with `cash:account_reported_twice`; the read never picks one.
+   An aggregate beside its members, or one balance reached through a second
+   route, is the projection's to keep out (`excluded`, with its code), as
+   for the known-assets subtotal.
+4. **Subtotals.** `subtotals.byUnit` and `subtotals.bySource` (source and
+   unit) over the whole filter scope, the same on every page:
+   `sumQuantities` of the counted amounts (INV03), `value` and `scale` null
+   when nothing is counted (never a zero), `counted`, `notCounted`, `status`
+   (`partial` when an amount is not counted for a reason other than
+   `excluded`) and the not-counted amounts' `reasons`. Each source of a cash
+   metric is one institution's own screen, so `bySource` is per bank. No
+   unit is added to another, nothing is valued, and the page carries
+   `liabilitiesCoverage: "unknown"` and no net worth.
+5. **Left out.** `leftOut` has one entry per reason present: its row count,
+   up to three metric ids with the most rows (`CASH_LEFT_OUT_METRICS`) and
+   `moreMetrics`, the overview summary's bound.
+6. **Read and paging.** One read of the snapshot's latest rows of the scope
+   in compact columns (`measureRows`): the subtotal's scope and view
+   predicates, its 5,000-row bound (`413 result_limit_exceeded` past it,
+   never a partial answer; the bound counts every latest row of the scope,
+   of every metric and state, where the subtotal counts its adopted exact
+   rows, so the cash read is refused on a smaller scope than the one where
+   the subtotal reports itself unavailable), and a plan that searches one
+   snapshot through `current_balance_projection_order` without table
+   statistics, on SQLite and on D1. Only the
+   cash rows are organized. A page holds whole lines up to `limit`
+   measurements (10 by default, the offered sizes of the balance read), so
+   a line with more is a page alone, and fewer when the next line would
+   carry the tool's answer past 8,192 bytes as `/mcp` writes it (the
+   overview summary's and the account summary's rule); a page that cannot
+   hold its first line is `413 result_limit_exceeded`. The cursor is the balance cursor
+   (snapshot, READ instance, a digest of the route, `source`, `account`,
+   `instrument` and `identityRead`), continues at any offered `limit` (ADR
+   0119), answers `400 cursor_mismatch` with `mustMatch` otherwise, and
+   carries a digest of the whole grouping (every line's key and label, and
+   its references' observations): when an identity decision between two
+   pages merges, splits, relabels or reorders any line of the scope, the
+   cursor is `410 context_expired` instead of skipping or repeating a line
+   or continuing under other subtotals.
+7. **Arguments.** `source`, `account`, `instrument`, `identityRead`,
+   `limit`, `cursor`; `metric`, `view` and `detail` are the route's
+   `400 invalid_query` (one detail, its own lines). The snapshot, its
+   refusals and the grant checks are the balance read's: `records.read`
+   over the whole store, checked before any read, and `503` with the
+   snapshot's closed code.
+
+### Consequences
+
+Measured as the UTF-8 bytes of the text `/mcp` answers (`{ schemaVersion,
+data }` serialized, the page's own cursor included):
+
+| Read                                                                                                                                                                                                                         |                      Bytes |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------: |
+| `{collection: cash}`, synthetic store of 30 cash accounts in four units over five sources (`test/cash-per-account-api.test.ts`), each page                                                                                   | 6,184, 6,713, 6,649, 2,961 |
+| `{collection: cash}`, the answer-size store of #1414 (no cash metric: only `leftOut`)                                                                                                                                        |                        564 |
+| first page, 30 accounts with 64-hex ids, 20-character labels, 48-character keys, half their amounts stale, two four-currency accounts, every registry metric left out (`packages/application/test/cash-per-account.test.ts`) |                      8,065 |
+| the same, every account a one-currency deposit                                                                                                                                                                               |                      7,146 |
+| the same, every account four currencies                                                                                                                                                                                      |                      5,529 |
+
+- Q2 is one call: `bySource` and `byUnit` answer "per bank" and "in all"
+  on the first page, and the lines page at about 6 to 8 KB.
+- Every page is held to 8,192 bytes by construction (`CASH_PAGE_BYTES`,
+  `cashPage`, and the validator): a page ends before the line that would
+  carry the tool's answer past them, measured with its own cursor, so
+  longer labels or provider keys, more sources holding several units or
+  more reasons per amount make pages shorter, never larger. At the
+  realistic worst above the measurements end the first page 127 bytes
+  short of the bound; with 120-character labels and 200-character keys
+  the bytes end it (nine pages of 30 accounts), and with 512-character
+  labels and keys a page holds one account.
+- Open limit: a page that cannot hold its first line within 8,192 bytes
+  is `413 result_limit_exceeded`, never cut, with no hint beside the code
+  (as the 5,000-row refusal: the read has no other `detail` to name, so it
+  carries no `retryWith`). A line passes it with a label of thousands of
+  characters, and nothing shortens a line. The header passes it with about
+  50 source and unit pairs in `bySource` (each about 160 bytes, about 220
+  with two reasons, so about 35 when every amount is stale), which every
+  page repeats; `source` or `instrument` narrows `bySource` and `byUnit`
+  to one source or one unit, and that header fits.
+- Open limit and owner decision: the known-assets subtotal of the latest
+  page and `financial.query` `holdings` key on the provider reference, so
+  an account entity reached through two references of one source that the
+  within-source policy lists apart is added twice there
+  (`cash-per-account-api.test.ts` pins this: the latest page counts nine
+  amounts where the cash read counts seven and names the two). The cash
+  read is stricter by design; aligning the other two is a change to their
+  published answers, left to the owner.
+- The cash definition follows the known-assets policy: a bank whose only
+  balance is a balance after a transaction (Sony Bank) or whose deposits
+  are an overlap group (PRESTIA) has no cash line; `leftOut` names it.
+  Counting such a balance is a registry and policy decision (ADR 0093's
+  allow-list is the precedent), not this read's.
+- The organization (entity, label) is the current identity's, not the
+  snapshot's, as on the latest page.
+- Open limit: `cash:account_reported_twice` is decided within the filter
+  scope. An account entity whose two references fall on either side of a
+  `source` or `account` filter has one of them in the filtered answer, and
+  that one is counted there while the unfiltered answer counts neither.
+  Within one answer nothing is added twice.
+- No screen reads the route yet: like `kogane.changes.since`, it is an
+  agent's everyday question; a page is a later slice. `ui-mcp-parity.test.ts`
+  passes unchanged (the route is the mapped tool's).
+
+### Verification
+
+- `packages/application/test/cash-per-account.test.ts`: the cash metrics
+  equal `knownAssetMetricIds()`; every other registry metric has one closed
+  reason (the nearest measures named); left-out entries count rows and name
+  their metrics; one line per account, an account with several units
+  counted once in each, subtotals per unit and per source, never mixed; an
+  account reached through two references counts once when the projection
+  excluded one, and neither when both were adopted; one reference adopted
+  twice in a unit is not added; an unparsed, unresolved or stale amount is
+  a reason and a unit with nothing counted has no value; a snapshot behind
+  CORE is partial; the validator refuses a counted amount that is not
+  adopted, a zero subtotal, a partial subtotal or an uncounted amount
+  without reasons, and a net worth; pages hold whole lines up to their
+  measurements; the size rows above, measured with a cursor as long as the
+  route's; past today's widths (labels of 120 and 512 characters, keys of
+  200 and 512, `limit` 500) every page is within 8,192 bytes and the walk
+  lists every line once; a line or a header that cannot fit is
+  `CashPageLimitError`.
+- `services/app/test/cash-per-account-api.test.ts`: every page is the same
+  answer on the route, `/api/agent/v1/balances.read` and `/mcp`, validates,
+  and is under 8 KB; the pages list 30 accounts once each with the same
+  subtotals and left-out counts; the subtotals equal the latest page's
+  known-assets subtotal unit by unit; source and unit filters; `metric`,
+  `view` and `detail` refused; a cursor continues at 25 and is
+  `cursor_mismatch` with `mustMatch` under another source and from a
+  latest page; two references of one account are one line and not added;
+  a cursor is `410 context_expired` after an identity decision moves a
+  reference of a line past the cursor onto an account before it; the
+  bytes measured are those of the text `/mcp` answers, `limit` 500 pages
+  end at 8,192 bytes and list every account once, and an account whose
+  label alone passes them is `413 result_limit_exceeded` on all three
+  paths; the published description is within 2,048 characters and names
+  every closed term.
+- `packages/storage-d1/test/statement-plans.test.ts`: `projectionMeasureSql`
+  under every filter searches one snapshot by key, without table
+  statistics; `cash-per-account-api.test.ts` checks the same on the D1
+  READ binding (no `sqlite_stat1`): a search of
+  `current_balance_projection_order` by snapshot under every filter, no
+  scan and no temporary sort. `packages/storage-d1/test/read-cursor.test.ts`:
+  `measureRows` answers 5,000 rows and refuses 5,001.
+- `services/app/test/mcp-answer-size.test.ts` measures the cash call among
+  every read tool's default answer and keeps it under 8 KB; the schema pins
+  (`agent-api.test.ts` unchanged: no property was added; `conformance.test.ts`,
+  `apps/web/test/api-schema.test.ts`, `page-read-observations.test.ts`)
+  gain the route.
 
 ## Amendment: the v1 grouped balance list answers a summary by default (2026-11-20)
 
