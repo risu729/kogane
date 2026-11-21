@@ -26,9 +26,10 @@ export interface HttpErrorHints {
   /** The argument names a continuation must repeat as they were (ADR 0123). */
   readonly mustMatch?: readonly string[];
   /**
-   * The argument a refused read answers under instead: a balance list
-   * summary whose first line alone passes its byte budget names
-   * `detail: "full"` (ADR 0123, amendment 2026-11-20).
+   * The argument a refused read answers under instead: an overview summary
+   * whose status lines alone pass its byte budget, or a balance list summary
+   * whose first line alone passes its byte budget, names `detail: "full"`
+   * (ADR 0123, amendments of 2026-11-20).
    */
   readonly retryWith?: { readonly detail: "full" };
 }

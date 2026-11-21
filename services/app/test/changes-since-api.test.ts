@@ -12,6 +12,7 @@ import { validChangesSince } from "../../../packages/observation-shared/src/chan
 import type { Grant } from "../../../packages/application/src/index";
 import worker from "../src/worker";
 import { callTool, toolContext } from "../src/agent-service";
+import { changesSinceFor } from "../src/changes-since-api";
 import { readMcpTools } from "../src/read-tools";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
@@ -245,6 +246,35 @@ describe("kogane.changes.since", () => {
     const summary = await direct({ since: "not a time" }, { capabilities: ["summary.read"] });
     expect(summary.status).toBe(403);
     expect(summary.body).toMatchObject({ code: "unauthorized", refs: ["capability:records.read"] });
+    // Before the body's form is checked and before any read, the probe of
+    // what this deployment serves included.
+    const prepared: string[] = [];
+    const watched = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get: (target, key) =>
+          key === "prepare"
+            ? (text: string) => {
+                prepared.push(text);
+                return target.prepare(text);
+              }
+            : Reflect.get(target, key, target),
+      }),
+    } as Env;
+    for (const [body, grant] of [
+      [{}, { capabilities: ["summary.read"] }],
+      [{ since, kind: "x" }, { scopes: { sources: ["sony-bank"], accounts: "*" } }],
+    ] as const) {
+      const refused = await callTool(
+        TOOL,
+        body,
+        toolContext(watched, narrow(grant), "2026-11-07T00:00:00Z"),
+      );
+      expect(refused.status).toBe(403);
+    }
+    // A request the service refuses is refused before the probe too.
+    expect((await changesSinceFor(watched, narrow({}), { since: "not a time" })).ok).toBe(false);
+    expect(prepared).toEqual([]);
     const narrowed = await direct({ since }, { scopes: { sources: ["sony-bank"], accounts: "*" } });
     expect(narrowed.status).toBe(403);
     expect(narrowed.body).toMatchObject({ code: "evidence_restricted", refs: ["scope:source"] });

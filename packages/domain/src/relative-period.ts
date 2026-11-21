@@ -44,8 +44,8 @@ export function civilDateInZone(instant: string, zone: string): CivilDate | null
  * production capture falls on days 12–30 yet (docs/observations.md).
  */
 export const MYJCB_CLOSING_DAY = 15;
-/** The collector's relative fallback: `detailMonth-0` … `detailMonth-17`. */
-const MYJCB_LABEL = /^detailMonth-(0|[1-9]|1[0-7])$/u;
+/** The collector's relative fallback: `detailMonth-0` … `detailMonth-18`. */
+const MYJCB_LABEL = /^detailMonth-(0|[1-9]|1[0-8])$/u;
 /**
  * Positions below this are resolved: 0, the statement still accumulating, and
  * 1, the newest closed one. The production captures place exactly these two
