@@ -738,8 +738,9 @@ test("decision log rows reject UPDATE, DELETE and REPLACE; superseded_by is set 
   ]);
   // Each statement is refused by the table's own append-only or replacement
   // guard, named by its message: a row another insert guard refuses (a
-  // superseded or mapping decision fails decision_subject_invalid first)
-  // would pass with the replacement guard gone.
+  // superseded decision, or a mapping decision that no longer matches its
+  // mapping row, fails decision_subject_invalid first) would pass with the
+  // replacement guard gone.
   for (const [table, column, row, appendOnly, replacement] of [
     [
       "decision_operations",
