@@ -145,6 +145,32 @@ describe("reward mappers", () => {
     expect(rule.qualifyingActivity).toBeNull();
   });
 
+  test("a policy reference naming an inherited property is unresolved, never a function", () => {
+    for (const ref of ["constructor", "toString", "hasOwnProperty", "__proto__", "valueOf"]) {
+      const rule = expiryRule({ ...ruleRow, qualifying_activity_policy_ref: ref });
+      expect(rule.qualifyingActivity).toBeNull();
+      const estimate = estimateExpiry(
+        rule,
+        {
+          holdingRef: bucketRow.holding_ref,
+          programId: bucketRow.program_id,
+          unitRef: bucketRow.unit_ref,
+          buckets: [{ ...rewardBucket(bucketRow), kind: "regular", observedExpiry: null }],
+        },
+        {
+          windowRef: "window:synthetic",
+          completeness: "complete",
+          earliestObserved: null,
+          activities: [],
+        },
+        [],
+        { kind: "local-date", value: "2026-09-12", zone: null, basis: "derived" },
+      );
+      expect(estimate.state).toBe("needs-rule-verification");
+      expect(estimate.uncertaintyCodes).toContain("rule_family_unsupported");
+    }
+  });
+
   test("an unknown family or verification degrades to the safe value", () => {
     const rule = expiryRule({ ...ruleRow, family: "invented", verification: "maybe" });
     expect(rule.family).toBe("unsupported");
