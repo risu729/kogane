@@ -17,8 +17,11 @@
 //   before anything is read, and bounds the cards at 100 (`cardsTruncated`).
 // - `queryDatedState` (./dated-state.ts) for the date: the provider-reported
 //   balance of each debit account, and which account entity a bank source
-//   account maps to (reported state is keyed by source account). A read past
-//   its row bound leaves every balance `missing` with
+//   account maps to (reported state is keyed by source account). It is called
+//   with `includeStatementsBeforeWindow: false`, so it neither counts the
+//   statements before the payable window nor lists the scheduled payments:
+//   this read uses only the state's accounts and pins no reported-state
+//   context id. A read past its row bound leaves every balance `missing` with
 //   `reported_state_limit_exceeded`, never cut into a partial answer.
 // - `ACCOUNT_LABELS_SQL`: the labels of the account entities named, by key.
 //
@@ -95,7 +98,7 @@ interface ResolvedAccount {
  * account's entries name exactly one, else the source account itself.
  */
 function resolveAccount(
-  state: ReportedState | null,
+  state: Pick<ReportedState, "accounts"> | null,
   sourceId: string,
   sourceAccount: string,
 ): ResolvedAccount {
@@ -155,15 +158,40 @@ function reportedBalance(
 const localDate = (value: string | null | undefined): string | null =>
   typeof value === "string" && parseLocalDate(value) !== null ? value : null;
 
+/** The reported state on a date, as far as upcoming bills read it: its accounts. */
+export type UpcomingReportedStateRead = (
+  sql: SqlExecutor,
+  date: string,
+) => Promise<Pick<ReportedState, "accounts">>;
+
+/**
+ * The state this read builds on: without the count of the statements before
+ * the payable window and without the scheduled payments, which it never uses.
+ */
+const readAccountsState: UpcomingReportedStateRead = (sql, date) =>
+  queryDatedState(sql, { date, includeStatementsBeforeWindow: false });
+
 /**
  * Each card's next bill on `date` (`YYYY-MM-DD`, Asia/Tokyo; the adapters pass
  * today), for whoever the grant allows. Reads only.
  */
-export async function reviewUpcomingCardBills(input: {
+export function reviewUpcomingCardBills(input: {
   grant: Grant;
   sql: SqlExecutor;
   date: string;
 }): Promise<UpcomingCardBillsOutcome> {
+  return reviewUpcomingCardBillsWith(input, readAccountsState);
+}
+
+/**
+ * `reviewUpcomingCardBills` over the reported state `readState` answers. Only
+ * the tests call it with another read: the full state the view read until
+ * 2026-11-21, to show the answer does not depend on which one it reads.
+ */
+export async function reviewUpcomingCardBillsWith(
+  input: { grant: Grant; sql: SqlExecutor; date: string },
+  readState: UpcomingReportedStateRead,
+): Promise<UpcomingCardBillsOutcome> {
   const { grant, sql, date } = input;
   if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date) || parseLocalDate(date) === null)
     throw new Error("invalid_date");
@@ -171,10 +199,10 @@ export async function reviewUpcomingCardBills(input: {
   if (!outcome.ok) return outcome;
   const { items, cardsTruncated } = outcome.review;
 
-  let state: ReportedState | null = null;
+  let state: Pick<ReportedState, "accounts"> | null = null;
   let stateReason: string | null = null;
   try {
-    state = await queryDatedState(sql, { date });
+    state = await readState(sql, date);
   } catch (error) {
     if (!(error instanceof DatedStateLimitError)) throw error;
     stateReason = "reported_state_limit_exceeded";
