@@ -537,7 +537,9 @@ bounds is not declared captured. These manifest-based ranges do not prove the
 aggregator's underlying provider data is fresh or its full history is retained;
 one `terminal` report carries the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
-aggregator currently shows) listing the accounts as `unitKeys`.
+aggregator currently shows) listing the accounts as `unitKeys`. Every account
+is asked for the same 12 JST calendar months, computed once from the run's
+`startedAt` ([source notes](sources/moneyforward.md#collection-surfaces-and-run-boundaries)).
 
 The unit key is the account identity the parser requires,
 `moneyforward-account-v2-<64 hex>`

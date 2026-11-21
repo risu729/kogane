@@ -60,7 +60,9 @@ function sharedRunFailed(result: SharedResult): boolean {
 /** Module-only executor; the entrypoint exposes it solely through validated private RPC. */
 export async function runSharedCollection(env: Env): Promise<SharedResult> {
   return withCollectionLease(env, "moneyforward-me", async () => {
-    const startedAt = new Date().toISOString();
+    // One clock read: the terminal's startedAt and the month window agree.
+    const started = new Date();
+    const startedAt = started.toISOString();
     const runId = crypto.randomUUID();
     const failures: CollectionFailure[] = [];
     let artifacts: readonly RawArtifact[] = [];
@@ -75,6 +77,7 @@ export async function runSharedCollection(env: Env): Promise<SharedResult> {
     try {
       const collection = await collectMoneyForward({
         onStage,
+        startedAt: started,
         credential: parseCredential(
           requiredSecret(env.MONEYFORWARD_CREDENTIAL_JSON, "MONEYFORWARD_CREDENTIAL_JSON"),
         ),
