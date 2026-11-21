@@ -371,12 +371,11 @@ their reward claims per day), copied into Miniflare D1:
 | `currentCardUsageSql` page     | `cardPurchaseSweep`  |  15,010 |  27,702 |   1.85 | 68 / 85       |
 | Vpass binding insert           | `identitySweep`      |  75,890 | 283,740 |   3.74 | (insert)      |
 
-Rows read are per call. Doubling the history doubles every read and
-quadruples the Vpass binding insert, while what they return stays the same
-(the card usage page returns the older statement months the longer history
-still holds as current). The report job's second run over unchanged inputs
-reads as much as its first (32,451 and 64,231 rows) only to find the report it
-stored. The current-snapshot selections alone (container snapshots, MyJCB past
+Rows read are per call. Doubling the history about doubles every read (1.84
+to 2.00) and nearly quadruples the Vpass binding insert (3.74), while what they
+return stays the same (the card usage page returns the older statement months
+the longer history still holds as current). The report job's second run over
+unchanged inputs reads as much as its first (32,451 rows at 30 days, 64,231 at 60) only to find the report it stored. The current-snapshot selections alone (container snapshots, MyJCB past
 months, V Point runs) are 45,503 of the 74,943 rows of one latest-balances read
 at 60 days; the rest is its active chain over every artifact. The test pins
 each growth ratio in a band around these values, so a change that moves a cost

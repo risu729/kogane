@@ -22,10 +22,11 @@
 // insert). A change that makes a read cheaper or dearer moves its ratio out of
 // the band and fails here, so the change states its new cost in the same PR
 // and tightens the band; the target (ADR 0129) is a `test.todo` until a slice
-// reaches it. The two prototypes at the end measure slices 1 and 2 of ADR 0129
-// without touching a production path: the report job's reuse against a skip
-// keyed on the CORE revision, and the Vpass binding insert written to start
-// from its candidate. Every value is synthetic.
+// reaches it. The prototypes at the end measure ADR 0129's directions without
+// touching a production path: the Vpass binding insert written to start from
+// its candidate (direction 2), the report job's reuse against a skip keyed on
+// the CORE revision (direction 3), and the snapshot selections alone against
+// a whole latest-balances read (direction 1). Every value is synthetic.
 import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, expect } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
@@ -338,13 +339,13 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
   );
   expect(vpoint.processedRuns).toBeGreaterThan(0);
 
-  // Slice 1 prototype: the reuse decision keyed on what the report reads.
+  // Direction 3 prototype: the reuse decision keyed on what the report reads.
   const revision = await db
     .prepare(
       "SELECT source_revision,visibility_revision,core_epoch FROM core_source_revision WHERE id=1",
     )
     .all();
-  // Slice 2 prototype: the binding join over every identified Vpass parse,
+  // Direction 2 prototype: the binding join over every identified Vpass parse,
   // in the shipped join order and starting from the candidate.
   const candidates = JSON.stringify(
     (
@@ -489,7 +490,7 @@ test("rows read per call grow with the history today (measured baseline)", () =>
 for (const name of Object.keys(NAMED))
   test.todo(`${name}: rows read per call at 2N within a small constant of N (ADR 0129)`);
 
-test("prototype, slice 1: a report skip keyed on the revision reads a few rows instead of the reuse", () => {
+test("prototype, direction 3: a report skip keyed on the revision reads a few rows instead of the reuse", () => {
   console.info("report job reuse vs revision-keyed skip", {
     [`reuse, ${DAYS} days`]: small.reportReuse,
     [`reuse, ${2 * DAYS} days`]: large.reportReuse,
@@ -508,7 +509,7 @@ const fromCandidate = (sql: string) =>
     .replace("JOIN parse_runs p", "CROSS JOIN parse_runs p")
     .replace("JOIN trusted_vpass_card_bindings b", "CROSS JOIN trusted_vpass_card_bindings b");
 
-test("prototype, slice 2: the Vpass binding insert's plan nests every Vpass artifact under every binding artifact; from the candidate it is keyed", () => {
+test("prototype, direction 2: the Vpass binding insert's plan nests every Vpass artifact under every binding artifact; from the candidate it is keyed", () => {
   const shipped = [...small.callers["identity sweep (v-point, empty parses)"]!.keys()].find(
     NAMED.vpassBindingInsert,
   )!;
@@ -531,7 +532,7 @@ test("prototype, slice 2: the Vpass binding insert's plan nests every Vpass arti
   }
 });
 
-test("prototype, slice 2: the Vpass binding join started from the candidate returns the same rows by key", () => {
+test("prototype, direction 2: the Vpass binding join started from the candidate returns the same rows by key", () => {
   for (const measured of [small, large]) {
     expect(measured.vpassShipped.rows.length).toBeGreaterThan(0);
     expect(measured.vpassFromCandidate.rows).toEqual(measured.vpassShipped.rows);

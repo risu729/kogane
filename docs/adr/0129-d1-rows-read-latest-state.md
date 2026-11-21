@@ -35,11 +35,12 @@ it per statement (Cloudflare GraphQL, rows read per day):
 | card settlement debits                 |      5,934 |     0.20B |           34k | settlement sweep                                       |
 
 The six sum to 6.74B a day (the issue gives 5.75B for the whole tick that
-day from another query, so only the proportions are used here). Splitting the first row with the harness's ratio
-of a positions read to a latest-balances read (39,791 to 74,943 rows, below):
-555 latest-balances reads of about 5.6M rows (3.1B) and 288 positions reads of
-about 3.0M (0.86B), which matches the issue's "about 2.9M rows per tick only
-to find the same report".
+day from another query, so only the proportions are used here). Splitting the
+first row with the harness's ratio of a positions read to a latest-balances
+read (39,791 to 74,943 rows, below) gives 555 latest-balances reads of about
+5.6M rows (3.1B) and 288 positions reads of about 3.0M (0.86B), which matches
+the issue's report job that "reads about 2.9M rows per tick today only to find
+the same report".
 
 Why each costs that much, from the plans without table statistics (as D1
 plans them) and from `meta.rows_read` measured on workerd
@@ -163,9 +164,10 @@ current key, join the memo rows of that key, and recompute when it moved.
   key is superseded, so the table is `operational-mutable` like the scan
   cursors and `processor_lane_ticks`. The counter is a sibling of
   `core_source_revision`.
-- Failure modes: an input table missing from the ledger (caught by the trigger
-  ledger test); a write that lands between computing the memo and recording
-  its key (the key is read in the same statement batch).
+- Failure modes: an input table missing from the ledger (guarded by the
+  trigger ledger test and by a test that a write of each input moves the key);
+  a write between computing the memo and recording its key (avoided by writing
+  the memo rows and their key in one statement, which D1 runs atomically).
 
 **1c. A memo keyed by the existing CORE revision**, as `runReadProjection`
 keys its builds (source and visibility revision, `core_epoch`, build digest).
@@ -256,7 +258,8 @@ slices, each after the owner approves it:
   CTEs** (`VPASS_STATEMENT_SNAPSHOT_CTES`, `MYJCB_LEDGER_SNAPSHOT_CTES`), with
   each reader rewritten to start from the members. Option 1a is not chosen: a
   missed update is silent and permanent, where 1b's worst case is a key that
-  misses an input, which the trigger ledger test catches.
+  misses an input, which its ledger tests guard and which the next move of
+  the key repairs.
 
 Expected rows read per day, at today's cadence and executions, as a share of
 the 6.74B the issue attributes (estimates from the harness ratios and the
