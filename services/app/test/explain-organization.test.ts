@@ -31,6 +31,7 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
+  type SqlExecutor,
 } from "../../../packages/read-model/src/index";
 
 const MCP_AUDIENCE = "fixture-mcp-audience";
@@ -310,7 +311,12 @@ describe("a served graph has the organization levels", () => {
 });
 
 describe("a scoped grant (SC18)", () => {
-  async function scopedExplain(grant: Grant, ref: string) {
+  async function scopedExplain(
+    grant: Grant,
+    ref: string,
+    sql: SqlExecutor = d1Executor(env.DB),
+    depth: number | null = null,
+  ) {
     const opened = await openContext(grant, {
       now: "2026-09-09T00:00:00Z",
       publicationHighWater: "published-parse-runs@1",
@@ -321,9 +327,26 @@ describe("a scoped grant (SC18)", () => {
     return explain({
       grant,
       opened,
-      reader: organizedExplainReader(evidenceReader(env.DB), d1Executor(env.DB)),
-      request: { ref, depth: null },
+      reader: organizedExplainReader(evidenceReader(env.DB), sql),
+      request: { ref, depth },
     });
+  }
+
+  /** The organization read's statements, so a test can say what one call read. */
+  function countingExecutor(): SqlExecutor & { statements: string[] } {
+    const inner = d1Executor(env.DB);
+    const statements: string[] = [];
+    return {
+      statements,
+      all: (sql, args) => {
+        statements.push(sql);
+        return inner.all(sql, args);
+      },
+      first: (sql, args) => {
+        statements.push(sql);
+        return inner.first(sql, args);
+      },
+    };
   }
 
   it("sees its own row's mapping and nothing of a row outside the grant", async () => {
@@ -357,5 +380,64 @@ describe("a scoped grant (SC18)", () => {
     if (hidden.ok || absent.ok) return;
     expect(hidden.error).toEqual(absent.error);
     expect(hidden.error.code).toBe("evidence_restricted");
+  });
+
+  it("a corrected second account on the shared entity changes neither the graph nor what it reads", async () => {
+    // Baseline: one source account alone on its entity.
+    const solo = await seedMapped("adv-solo");
+    const soloGrant: Grant = {
+      ...fullGrant("scoped-principal"),
+      scopes: { sources: ["other-test"], accounts: [solo.account] },
+    };
+    const soloSql = countingExecutor();
+    const baseline = await scopedExplain(soloGrant, solo.observationRef, soloSql);
+    // The same shape with a second, out-of-scope source account on the
+    // entity, whose mapping the owner has since corrected by hand (@2).
+    const inside = await seedMapped("adv-in", "adv-shared-entity");
+    const outside = await seedMapped("adv-out", "adv-shared-entity");
+    await outside.correct();
+    const grant: Grant = {
+      ...fullGrant("scoped-principal"),
+      scopes: { sources: ["other-test"], accounts: [inside.account] },
+    };
+    const insideSql = countingExecutor();
+    const shown = await scopedExplain(grant, inside.observationRef, insideSql);
+    if (!baseline.ok || !shown.ok) throw new Error("expected two graphs");
+    // Same kinds, depths, parents and organization refs once the tags are
+    // named alike: no node count or revision says the entity is shared.
+    const shape = (nodes: Graph["nodes"], tag: string) =>
+      nodes.map((node) => [
+        node.kind,
+        node.depth,
+        node.parents.length,
+        node.kind === "adopted-claim" || node.kind === "identity-decision"
+          ? node.ref.replaceAll(tag, "TAG")
+          : "",
+      ]);
+    expect(shape(shown.graph.nodes, "adv-in")).toEqual(shape(baseline.graph.nodes, "adv-solo"));
+    const serialized = JSON.stringify(shown.graph);
+    for (const hidden of ["adv-out", "adv-shared-entity", "@2", "manual"])
+      expect(serialized).not.toContain(hidden);
+    // The organization read runs the same statements for both rows.
+    expect(insideSql.statements.length).toBeGreaterThan(0);
+    expect(insideSql.statements).toEqual(soloSql.statements);
+
+    // The out-of-scope row reads no organization at any depth, and answers as
+    // a ref that names nothing.
+    for (const depth of [1, 2, null]) {
+      const hiddenSql = countingExecutor();
+      const absentSql = countingExecutor();
+      const hidden = await scopedExplain(grant, outside.observationRef, hiddenSql, depth);
+      const absent = await scopedExplain(
+        grant,
+        "observation:transaction:999999999",
+        absentSql,
+        depth,
+      );
+      if (hidden.ok || absent.ok) throw new Error("expected two refusals");
+      expect(hidden.error).toEqual(absent.error);
+      expect(hiddenSql.statements).toEqual([]);
+      expect(absentSql.statements).toEqual([]);
+    }
   });
 });

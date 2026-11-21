@@ -729,9 +729,11 @@ the question whether `explain` must now pin the revisions it reads (INV09).
 
 On INV09:
 
-a. **Pin the revisions read in the `contextId`.** Every other `latest` read
-(the shared query, balance pages, the observation routes) pins the
-identity mode and release and re-reads the current revisions; an
+a. **Pin the revisions read in the `contextId`.** The shared query's context,
+the balance pages and the observation routes pin the identity mode and
+release and re-read the current revisions (a dated reported-state
+`contextId`, whose rows name no revision, pins each row's mapped account and
+instrument instead); an
 `explain` context with extra pins would no longer equal the
 `kogane.context.open` context for the same inputs, which is what a caller
 hands from one answer to the next. It would also need the revisions before
@@ -763,8 +765,9 @@ identifier's namespace, scope and value stay out of the graph.
   `identity-decision` nodes. Its shape changes for every existing ref that
   is organized; the owner approves the changed answer before this merges.
 - Under `latest`, a mapping corrected between two calls in the same second
-  changes the graph's refs and not its `contextId`, as on every other
-  `latest` read ([agent API](../agent-api.md#explain-and-the-identity-read)).
+  changes the graph's refs and not its `contextId`, as it changes a `latest`
+  query's rows and not that query's `contextId`
+  ([agent API](../agent-api.md#explain-and-the-identity-read)).
 - The levels are shown under `summary.read`, like the parse run beside them;
   no level checks `records.read`. Every served caller holds the whole-store
   grant (ADR 0084), so this changes nothing served today; a narrower grant
@@ -774,7 +777,13 @@ identifier's namespace, scope and value stay out of the graph.
 - An `explain` call runs the organization read's statements for one row
   (the organization, the preferred instrument names, the account connection
   and the entity labels), of which it keeps only ids and revisions: the
-  statements the detail route runs to organize the same row.
+  statements the detail route runs to organize the same row. That is one
+  statement for a row no sealed run organizes and five for a mapped row with
+  an instrument (the organization, the preferred names, the connection
+  reviews, the entity's references and the connection reviews again), six
+  when the entity holds a Vpass reference; each is keyed by the one row or
+  its entity, and the connection reviews are capped at 64. They run at
+  `depth: 1` too, where no organization node fits.
 
 ### Verification
 
@@ -786,8 +795,13 @@ identifier's namespace, scope and value stay out of the graph.
   `@2` and `manual` while the `contextId` stays; no label, reason, entity or
   identifier value appears; a grant scoped to one source account sees that
   account's mapping, nothing of a second source account mapped onto the same
-  entity, and that account's row answers exactly as an absent ref. With the
-  served reader's organization removed, the three served-shape tests fail.
+  entity, and that account's row answers exactly as an absent ref. With a
+  second, hand-corrected source account on the shared entity, the scoped
+  graph has the kinds, depths and organization refs of a graph whose entity
+  has one account, and runs the same organization statements; the
+  out-of-scope row runs none of them at depths 1, 2 and the default, like an
+  absent ref. With the served reader's organization removed, the three
+  served-shape tests fail.
 - `packages/application/test/explain-propose.test.ts`: the levels' refs and
   depths, the mode they are read under, that labels, reasons, entities and
   identifier values stay out, and that a row outside the grant is refused

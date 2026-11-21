@@ -1815,11 +1815,16 @@ them; only the raw locators need `evidence.read`.
 
 Under `latest` a mapping corrected between two calls in the same second
 leaves the `contextId` as it was and changes the graph's refs to the new
-revision. That is the rule every `latest` read follows: the context pins the
-identity mode and release, not revisions, the `identity` quality dimension of
-a `latest` query says `mappings_may_change_under_latest`
-([result contract](#result-contract)), and balance pages re-read the
-organization overlay. A graph is self-describing instead: each mapping ref
+revision. That is how the shared context treats `latest`, which `explain`
+opens with the inputs `kogane.context.open` and `kogane.query` use: it pins
+the identity mode and release, not revisions, and the `identity` quality
+dimension of a `latest` query says `mappings_may_change_under_latest`
+([result contract](#result-contract)); balance pages likewise re-read the
+organization overlay. Not every `latest` answer works this way: a dated
+reported-state `contextId` pins each listed row's account and instrument, so
+a mapping revision that changes what a row shows moves it
+([reported state](reported-state.md#the-answer)). A graph is self-describing
+instead: each mapping ref
 names the revision it was built from, so two graphs that differ under one
 `contextId` say how. `explain` issues no cursor and no `resultRef`, so nothing
 resumes or hands off on a revision it did not read
