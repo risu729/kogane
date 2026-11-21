@@ -231,7 +231,7 @@ test("a batch the database refuses part-way rolls the run's completion back", as
     "CREATE TRIGGER test_refuse_report_events BEFORE INSERT ON report_events BEGIN SELECT RAISE(ABORT,'synthetic event refusal'); END",
   ).run();
   try {
-    await expect(runReportJob(jobEnv, options)).rejects.toThrow();
+    await expect(runReportJob(jobEnv, options)).rejects.toThrow("synthetic event refusal");
   } finally {
     await env.DB.prepare("DROP TRIGGER test_refuse_report_events").run();
   }
@@ -262,6 +262,9 @@ test("two jobs that finish the same run write one artifact and one generated eve
     runReportJob(jobEnv, { ...options, now: "2026-09-08T00:00:01.000Z" }),
   ]);
   expect(second.reportId).toBe(first.reportId);
+  // Neither job found the other's artifact first, so both reached the
+  // artifact batch; a job that reused the report would not test the race.
+  expect([first.reused, second.reused]).toEqual([0, 0]);
   expect(await artifactCount()).toBe(before + 1);
   expect(await generatedEvents(first.reportId)).toBe(1);
   expect(await runState(first.runId)).toEqual({ status: "complete", results: 6 });
