@@ -99,9 +99,14 @@ writer fencing and captured CORE references; the contract is in
    step 7 leaves the worse-ranked side unresolved, or both sides at equal
    rank, with `account_entity_shared` instead of `overlap_unknown`. Towards
    a scope no decision relates to it directly, a scope also stands for the
-   entities of the scopes an accepted `same` joins it to and of its accepted
-   parts, so a decision cannot carry a shared entity past the policy (a
-   part's entity made disjoint through its whole, or a `same` partner's). The
+   entities accepted decisions put it with, transitively and through scopes
+   outside the target: those it holds (its `same` scopes and their parts)
+   and those it lies inside (its `same` scopes and their wholes). Two scopes
+   share an entity when one holds an entity the other holds or lies inside,
+   so a decision cannot carry a shared entity past the policy (a part's
+   entity made disjoint through its whole, a `same` partner's, or a whole's
+   entity made disjoint through its part); two pockets of one account do not
+   share it by that alone. The
    entity is then shown and not counted until a decision accepts the two
    references as `same_account` (one is adopted, the other is
    `duplicate_evidence`) or a mapping revision separates them

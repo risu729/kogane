@@ -381,24 +381,45 @@ function shareAccountEntity(
   return false;
 }
 
-const pairKey = (a: string, b: string): string => JSON.stringify(a < b ? [a, b] : [b, a]);
+/** Account entities as bits over the target's entities: a pair is compared in a few words. */
+type EntityBits = Uint32Array;
+
+function bitsMeet(left: EntityBits | undefined, right: EntityBits | undefined): boolean {
+  if (left === undefined || right === undefined) return false;
+  for (const [index, word] of left.entries()) if ((word & (right[index] ?? 0)) !== 0) return true;
+  return false;
+}
+
+interface DecidedEntities {
+  /** What the subject holds: its decided `same` scopes and, transitively, their parts. */
+  holds: Map<string, EntityBits>;
+  /** What the subject lies inside: its decided `same` scopes and, transitively, their wholes. */
+  within: Map<string, EntityBits>;
+}
 
 /**
  * The account entities a subject stands for towards a subject no decision
- * relates to it directly: its own, those of every subject an accepted `same`
- * joins it to (directly or through others: one measurement), and those of
- * every subject a decision makes a part of it or of one of those, with that
- * part's own `same` subjects. Without them a decision carries a shared entity
- * past the policy: with `a ≡ c` decided and `c` sharing `b`'s entity, `a ⊥ b`
- * adopted both `a` and `b`; with `a ⊂ w` decided and `a` sharing `b`'s
- * entity, `w ⊥ b` became `a ⊥ b` by step 7's one-step derivation, and both
- * were adopted. A pair a decision relates directly keeps its own entities, so
- * a policy claim that contradicts that decision still degrades it as before.
+ * relates to it directly, read from every accepted decision, a scope with no
+ * candidate in the target included. A subject holds the entities of every
+ * scope an accepted `same` joins it to (one measurement) and of every scope a
+ * decision makes a part of one of those, transitively; it lies inside the
+ * entities of those `same` scopes and of every scope it is decided a part of,
+ * transitively. Two subjects may overlap when an entity one holds is held by
+ * the other or holds the other; two scopes that only lie inside one entity
+ * (two pockets of one account) do not overlap by that alone.
+ *
+ * Without the closure a decision carries a shared entity past the policy:
+ * with `a ≡ c` decided and `c` sharing `b`'s entity, `a ⊥ b` adopted both `a`
+ * and `b`; with `a ⊂ w` decided and `a` sharing `b`'s entity, `w ⊥ b` became
+ * `a ⊥ b` by step 7's one-step derivation, and both were adopted; with
+ * `p ⊂ w` decided and `w` sharing `b`'s entity, `p ⊥ b` adopted `p` and `b`
+ * once `p` covered `w`; and a part two decisions deep was counted in its
+ * outer whole and in another reference of its entity.
  */
 function decidedEntities(
   subjects: ReadonlyMap<string, Subject>,
-  declared: readonly DerivedScopeRelation[],
-): Map<string, Set<string>> {
+  decisions: readonly DerivedScopeRelation[],
+): DecidedEntities {
   const parent = new Map<string, string>();
   const root = (key: string): string => {
     let at = key;
@@ -406,49 +427,113 @@ function decidedEntities(
       at = next;
     return at;
   };
-  for (const relation of declared)
+  for (const relation of decisions)
     if (relation.relation === "same") {
       const [x, y] = [root(relation.fromScopeKey), root(relation.toScopeKey)];
       if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
     }
-  const components = new Map<string, Set<string>>();
+  const bit = new Map<string, number>();
+  for (const subject of subjects.values())
+    for (const entity of subject.accountEntities) if (!bit.has(entity)) bit.set(entity, bit.size);
+  const words = Math.ceil(bit.size / 32);
+  const own = new Map<string, EntityBits>();
   for (const [key, subject] of subjects) {
-    const entities = components.get(root(key)) ?? new Set<string>();
-    for (const entity of subject.accountEntities) entities.add(entity);
-    components.set(root(key), entities);
+    const bits = own.get(root(key)) ?? new Uint32Array(words);
+    for (const entity of subject.accountEntities) {
+      const at = bit.get(entity)!;
+      bits[at >>> 5] = (bits[at >>> 5] ?? 0) | (1 << (at & 31));
+    }
+    own.set(root(key), bits);
   }
-  const withParts = new Map<string, Set<string>>();
-  for (const [component, entities] of components) withParts.set(component, new Set(entities));
+  const parts = new Map<string, Set<string>>();
+  const wholes = new Map<string, Set<string>>();
+  const link = (edges: Map<string, Set<string>>, from: string, to: string) => {
+    const set = edges.get(from) ?? new Set<string>();
+    set.add(to);
+    edges.set(from, set);
+  };
   // `subset` reads from ⊂ to: the part is the left side.
-  for (const relation of declared) {
-    if (relation.relation !== "subset") continue;
-    const whole = withParts.get(root(relation.toScopeKey));
-    for (const entity of components.get(root(relation.fromScopeKey)) ?? []) whole?.add(entity);
+  for (const relation of decisions)
+    if (relation.relation === "subset") {
+      const [part, whole] = [root(relation.fromScopeKey), root(relation.toScopeKey)];
+      link(parts, whole, part);
+      link(wholes, part, whole);
+    }
+  // One walk per subject component and direction, over every decided scope.
+  const reach = (start: string, edges: ReadonlyMap<string, Set<string>>): EntityBits => {
+    const bits = new Uint32Array(words);
+    const seen = new Set([start]);
+    const stack = [start];
+    for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
+      for (const [index, word] of (own.get(at) ?? []).entries())
+        bits[index] = (bits[index] ?? 0) | word;
+      for (const next of edges.get(at) ?? [])
+        if (!seen.has(next)) {
+          seen.add(next);
+          stack.push(next);
+        }
+    }
+    return bits;
+  };
+  const byRoot = new Map<string, { holds: EntityBits; within: EntityBits }>();
+  const result: DecidedEntities = { holds: new Map(), within: new Map() };
+  for (const key of subjects.keys()) {
+    const component = root(key);
+    const sets = byRoot.get(component) ?? {
+      holds: reach(component, parts),
+      within: reach(component, wholes),
+    };
+    byRoot.set(component, sets);
+    result.holds.set(key, sets.holds);
+    result.within.set(key, sets.within);
   }
-  const result = new Map<string, Set<string>>();
-  for (const key of subjects.keys()) result.set(key, withParts.get(root(key)) ?? new Set());
   return result;
 }
 
+/** Scope pairs a relation in `relations` relates directly. */
+function relatedPairs(
+  relations: readonly DerivedScopeRelation[],
+): (left: string, right: string) => boolean {
+  const pairs = new Map<string, Set<string>>();
+  for (const relation of relations)
+    for (const [from, to] of [
+      [relation.fromScopeKey, relation.toScopeKey],
+      [relation.toScopeKey, relation.fromScopeKey],
+    ] as const) {
+      const set = pairs.get(from) ?? new Set<string>();
+      set.add(to);
+      pairs.set(from, set);
+    }
+  return (left, right) => pairs.get(left)?.has(right) ?? false;
+}
+
 /**
- * Whether two subjects share an account entity: directly when a decision
- * relates the pair, otherwise through their decided `same` subjects and parts.
+ * Whether two subjects may be references of one account entity: on their own
+ * entities when a decision relates the pair, otherwise when an entity one
+ * holds is held by the other or holds the other (`decidedEntities`).
+ * `declared` is the target's relations; `decisions` is every accepted one.
  */
 function entitySharing(
   subjects: ReadonlyMap<string, Subject>,
   declared: readonly DerivedScopeRelation[],
+  decisions: readonly DerivedScopeRelation[],
 ): (left: string, right: string) => boolean {
-  const decided = decidedEntities(subjects, declared);
-  const related = new Set(
-    declared.map((relation) => pairKey(relation.fromScopeKey, relation.toScopeKey)),
-  );
-  return (left, right) =>
-    related.has(pairKey(left, right))
-      ? shareAccountEntity(
-          subjects.get(left)?.accountEntities,
-          subjects.get(right)?.accountEntities,
-        )
-      : shareAccountEntity(decided.get(left), decided.get(right));
+  const { holds, within } = decidedEntities(subjects, decisions);
+  const related = relatedPairs(declared);
+  return (left, right) => {
+    if (related(left, right))
+      return shareAccountEntity(
+        subjects.get(left)?.accountEntities,
+        subjects.get(right)?.accountEntities,
+      );
+    const leftHolds = holds.get(left);
+    const rightHolds = holds.get(right);
+    return (
+      bitsMeet(leftHolds, rightHolds) ||
+      bitsMeet(within.get(left), rightHolds) ||
+      bitsMeet(leftHolds, within.get(right))
+    );
+  };
 }
 
 // Only banks whose own deposit readings are in the deposit.balance registry
@@ -477,7 +562,7 @@ const DEPOSIT_INSTITUTIONS = new Map([
  * account, so their overlap stays unknown until a decision accepts them as
  * the same account or a mapping revision separates them (v3). Towards a
  * scope no decision relates to it directly, a scope also stands for the
- * entities of the scopes decided `same` as it and of its decided parts
+ * entities it holds or lies inside through accepted decisions, transitively
  * (`decidedEntities`).
  *
  * Everything else is deliberately absent. An aggregate or total scope, an
@@ -493,7 +578,6 @@ function policyDisjointness(
   const relations: DerivedScopeRelation[] = [];
   for (const [index, [left, leftSubject]] of entries.entries())
     for (const [right, rightSubject] of entries.slice(index + 1)) {
-      if (sharesEntity(left, right)) continue;
       const sameSource = leftSubject.sourceId === rightSubject.sourceId;
       const listedApart =
         sameSource && leftSubject.status !== "aggregate" && rightSubject.status !== "aggregate";
@@ -504,6 +588,7 @@ function policyDisjointness(
         rightSubject.depositInstitution !== null &&
         leftSubject.depositInstitution !== rightSubject.depositInstitution;
       if (!listedApart && !bothIdentified && !differentDepositInstitutions) continue;
+      if (sharesEntity(left, right)) continue;
       relations.push({
         fromScopeKey: left,
         toScopeKey: right,
@@ -525,6 +610,7 @@ function adoptionOutcomes(
   target: AdoptionTarget,
   candidates: readonly ProjectionCandidate[],
   declared: readonly DerivedScopeRelation[],
+  decisions: readonly DerivedScopeRelation[],
 ): { outcomes: Map<string, Outcome>; relations: DerivedScopeRelation[] } {
   const outcomes = new Map<string, Outcome>();
   const subjects = new Map<string, Subject>();
@@ -561,7 +647,7 @@ function adoptionOutcomes(
       });
     return { outcomes, relations: [] };
   }
-  const sharesEntity = entitySharing(subjects, declared);
+  const sharesEntity = entitySharing(subjects, declared, decisions);
   const policy = policyDisjointness(subjects, sharesEntity);
   const claims = [...declared.map(claim), ...policy.map(claim)];
   const measures: MeasureCandidate[] = candidates.map((candidate) => ({
@@ -610,9 +696,7 @@ function entitySharingCandidates(
   sharesEntity: (left: string, right: string) => boolean,
   excluded: ReadonlySet<string>,
 ): Set<string> {
-  const related = new Set(
-    declared.map((relation) => pairKey(relation.fromScopeKey, relation.toScopeKey)),
-  );
+  const related = relatedPairs(declared);
   const found = new Set<string>();
   for (const candidate of candidates) {
     const contender = candidates.some(
@@ -620,7 +704,7 @@ function entitySharingCandidates(
         other.subjectScopeKey !== candidate.subjectScopeKey &&
         !excluded.has(other.scopeKey) &&
         other.authorityRank <= candidate.authorityRank &&
-        !related.has(pairKey(candidate.subjectScopeKey, other.subjectScopeKey)) &&
+        !related(candidate.subjectScopeKey, other.subjectScopeKey) &&
         sharesEntity(candidate.subjectScopeKey, other.subjectScopeKey),
     );
     if (contender) found.add(candidate.scopeKey);
@@ -676,7 +760,9 @@ export function buildBalanceProjection(
           candidate.subjectScopeKey === relation.toScopeKey,
       ),
     );
-    const resolved = adoptionOutcomes(target, bucket, relevant);
+    // The target's own relations decide; every decision feeds the entity
+    // closure, so a chain through scopes outside the target still counts.
+    const resolved = adoptionOutcomes(target, bucket, relevant, declaredRelations);
     for (const [ref, outcome] of resolved.outcomes) outcomes.set(ref, outcome);
     policyRelations.push(...resolved.relations);
   }

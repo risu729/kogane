@@ -656,6 +656,105 @@ describe("balance projection builder", () => {
         ).relations.filter((entry) => entry.source === "policy"),
       ).toHaveLength(1);
     });
+
+    test("a decided part lies inside its whole's entity", () => {
+      // A route line shares the bank account's entity and is decided to hold
+      // the bank's pocket. The pocket covers the line, and declaring the
+      // pocket and the account disjoint (listed apart) adopted both: the
+      // pocket's money inside the account, counted twice.
+      const pocket = deposit("m-pocket", "source_account:smbc:pocket", "1000", {
+        accountEntity: "account:synthetic:pocket",
+      });
+      const account = deposit("m-account", "source_account:smbc:account", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const line = routeLine("m-line", "source_account:route:line", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [pocket, account, line],
+        [relation("source_account:smbc:pocket", "source_account:route:line", "subset")],
+      );
+      expect(stateOf(build, "m-line").reasonCode).toBe("covered_by_breakdown");
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-pocket", "m-account"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // Two pockets of one entity are not shared by that alone.
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:second",
+      });
+      expect(
+        buildBalanceProjection(
+          [pocket, second, line],
+          [
+            relation("source_account:smbc:pocket", "source_account:route:line", "subset"),
+            relation("source_account:smbc:second", "source_account:route:line", "subset"),
+          ],
+        ).relations.filter((entry) => entry.source === "policy"),
+      ).toHaveLength(1);
+    });
+
+    test("a part two decisions deep still keeps its outer whole from being declared disjoint", () => {
+      // part ⊂ middle ⊂ outer, and the part shares the second account's
+      // entity. The middle covers nothing once the part covers it, so the
+      // outer stands alone, and declaring it disjoint from the second account
+      // adopted both.
+      const outer = deposit("m-outer", "source_account:smbc:outer", "1000", {
+        accountEntity: "account:synthetic:outer",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      // The middle is the route's aggregate line, so the policy does not
+      // declare it disjoint from the part it is decided to hold.
+      const middle = {
+        ...routeLine("m-middle", "source_account:route:middle", "account:synthetic:mid"),
+        subjectStatus: "aggregate" as const,
+      };
+      const part = routeLine("m-part", "source_account:route:part", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [outer, second, middle, part],
+        [
+          relation("source_account:route:part", "source_account:route:middle", "subset"),
+          relation("source_account:route:middle", "source_account:smbc:outer", "subset"),
+        ],
+      );
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-outer", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+    });
+
+    test("a same chain through scopes outside the target still carries the entity", () => {
+      // first ≡ x ≡ y ≡ line, x and y have no candidate here, and the line
+      // shares the second account's entity. The target's relations alone
+      // missed x ≡ y, and declaring the two bank accounts disjoint adopted
+      // both.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        accountEntity: "account:synthetic:first",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const line = routeLine("m-line", "source_account:route:line", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [first, second, line],
+        [
+          relation("source_account:smbc:first", "source_account:other:x", "same"),
+          relation("source_account:other:x", "source_account:other:y", "same"),
+          relation("source_account:other:y", "source_account:route:line", "same"),
+        ],
+      );
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-first", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+    });
   });
 
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {

@@ -523,16 +523,23 @@ in one adoption target was not checked.
   an account entity, whichever of its three rules would otherwise apply. A
   subject's entities are those of every witness of it, so a scope whose
   witnesses disagree shares an entity with each. Towards a subject no
-  decision relates to it directly, a subject also stands for the entities of
-  every subject an accepted `same` joins it to (directly or through others)
-  and of every subject a decision makes a part of it, with that part's own
-  `same` subjects (`decidedEntities`). Without that, a decision carried a
+  decision relates to it directly, a subject also stands for the entities
+  that accepted decisions put it with (`decidedEntities`), read from every
+  accepted decision, including decisions through scopes with no candidate in
+  the target. It holds the entities of every scope an accepted `same` joins
+  it to and of every scope a decision makes a part of one of those,
+  transitively, and it lies inside the entities of those `same` scopes and of
+  every scope it is decided a part of, transitively. Two such subjects share
+  an entity when an entity one holds is held by the other or holds the
+  other; two scopes that only lie inside one entity (two pockets of one
+  account) do not share it by that alone. Without that, a decision carried a
   shared entity past the policy: with `a ≡ c` accepted and `c` sharing `b`'s
   entity, `a ⊥ b` adopted both; with `a ⊂ w` accepted and `a` sharing `b`'s
   entity, `w ⊥ b` made `a ⊥ b` through step 7's one-step derivation, and both
-  were adopted. A pair a decision relates directly is read against its own
-  entities, so a policy claim that contradicts that decision still degrades
-  the pair to unknown as before.
+  were adopted; with `p ⊂ w` accepted and `w` sharing `b`'s entity, `p ⊥ b`
+  adopted `p` and `b` once `p` covered `w`. A pair a decision relates
+  directly is read against its own entities, so a policy claim that
+  contradicts that decision still degrades the pair to unknown as before.
 - The overlap of such a pair is unknown, so step 7 of `selectAdoptedSet`
   decides it as it decides every unknown overlap: the worse-ranked side is
   unresolved and the better-ranked side is adopted; at equal ranks both are
@@ -575,6 +582,14 @@ in one adoption target was not checked.
   measurements (for example two pockets mapped to one account) stay
   unresolved until a mapping revision separates them; no decision kind
   declares two scopes disjoint.
+- Open limit: the policy reads decisions only for entities. Two scopes that
+  decisions alone nest or make one, with no decision between the pair itself
+  and no entity on the way, can still be declared disjoint and both adopted,
+  as under v2. Entities never add such a case (the property test below
+  checks that).
+- Step 7's one-step derivation looked up a scope's containers by scanning
+  every relation pair for each unknown pair, so a target with many unknown
+  overlaps cost the pair count cubed; `RelationIndex` now indexes them once.
 
 ### Verification
 
@@ -598,7 +613,22 @@ entity leaves the second adopted and the line `account_entity_shared` (both
 the line and the second were adopted), and a bank account accepted as the
 same as a route line that shares a second account's entity leaves both bank
 accounts `account_entity_shared` (both were adopted), while a third account
-of its own entity stays declared disjoint.
+of its own entity stays declared disjoint. Three more fail on the one-level
+closure that rule first had: a bank pocket accepted as a part of a route line
+that shares the bank account's entity (the pocket and the account were both
+adopted; two pockets of the line stay declared disjoint), a part two
+decisions deep under a bank account and sharing a second account's entity
+(both accounts were adopted), and a `same` chain through two scopes with no
+candidate in the target (both accounts were adopted).
+`packages/read-model/test/balance-projection-entity-closure.test.ts` builds
+4,000 random graphs of two to six candidates, up to two scopes outside the
+target, accepted `same` and containment decisions and shared or distinct
+entities at two sources and two ranks. It checks that no two adopted
+candidates put one entity on both sides of their transitive decided closures
+(an entity one holds is held by, or holds, the other) unless decisions alone
+nest them and both were adopted without entities too, and that the policy
+declares a pair disjoint exactly when it did without entities and the pair
+shares no entity that way. Both properties fail on the one-level closure.
 `services/app/test/entity-double-count.test.ts` builds the snapshot through
 the Processor's own job and reads it as the readers do: the latest page with
 its subtotal over the route and `kogane.balances.read`, and `holdings` over
