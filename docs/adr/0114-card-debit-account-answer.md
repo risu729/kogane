@@ -273,9 +273,10 @@ What the stored data can say:
    debit dates are plain text with no unknown shape, so the two would differ.
    Rejected for this change.
 4. **Fail the read on a debit date that is not civil,** as on other
-   malformed rows. One such row would hide every card's answer, and the
-   statement due dates are legitimately absent on rows the parsers did not
-   write. Rejected.
+   malformed rows. One such row would hide every card's answer, though the
+   rest of that row (its card, bank account and candidate) is still readable;
+   and a null due date already answers its statement, never fails the read.
+   Rejected.
 5. **An optional reason beside each nullable date (chosen),** from closed
    lists in the domain, present exactly when the date is null, so every
    dated answer is unchanged byte for byte.
