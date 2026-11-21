@@ -120,12 +120,13 @@ point grant. Consequently, CSV is strong transaction evidence but cannot by
 itself produce a complete balance-type ledger or expiry-lot ledger.
 
 How `paypay-csv` reads these columns today (parser 0.2.4): each column is
-found by its documented label first, then by a distinguishing part of the
-label, and only then by position; the outgoing yen column is never the one
-whose label names 海外 (the overseas amount), so a reordered header keeps the
-yen amount in the yen field. A row of separators only is skipped with a
+found by the exact label the parser expects first (the labels its synthetic
+fixtures use; the export's exact labels are not verified here), then by a
+distinguishing part of the label, and only then by position; neither yen
+amount column is ever the one whose label names 海外 (the overseas amount),
+so a reordered header keeps the yen amount in the yen field. A row of separators only is skipped with a
 warning
-([observations](../observations.md#paypay-csv-columns-read-by-documented-label-first-separator-only-rows-skipped-parser-024)).
+([observations](../observations.md#paypay-csv-columns-read-by-expected-label-first-separator-only-rows-skipped-parser-024)).
 The direction of a row comes from its column, outgoing as negative and
 incoming as positive.
 An amount that carries its own sign in either column (`-`, `+`, `△`, `▲` or

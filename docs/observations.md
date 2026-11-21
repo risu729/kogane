@@ -261,7 +261,7 @@ quoted rows, trailing text, multiline fields and logical row numbering.
 | v-point-smfg-point                       | 1.0.0    | 1.0.1   |
 | vpass-statement-page                     | 1.2.0    | 1.2.1   |
 
-## PayPay CSV: columns read by documented label first, separator-only rows skipped (parser 0.2.4)
+## PayPay CSV: columns read by expected label first, separator-only rows skipped (parser 0.2.4)
 
 2026-11-21. 0.2.4 fixes two independent reading errors of `paypay-csv`
 0.2.3.
@@ -276,15 +276,23 @@ yen amount was dropped as an undocumented column, and a domestic row
 warnings, and a header whose overseas column sat at the outgoing column's
 documented position gave no position warning either.
 
-0.2.4 places every column whose trimmed label is exactly the documented label
-first, then matches the remaining fields by substring, and only then falls
-back to the documented position, so neither a substring nor a position can
-take a column a documented label names. The outgoing JPY field never matches a
-label containing `海外` (the overseas amount is a foreign-currency figure, not
-yen). A header in the documented order with the documented labels is read
-exactly as in 0.2.3, with the same warnings; only a header whose overseas
-column precedes the yen outflow, or whose labels differ from the documented
-ones, reads differently, and its yen amount is now the yen column's.
+0.2.4 places every column whose trimmed label is exactly the label the parser
+expects first, then matches the remaining fields by substring, and only then
+falls back to the documented position, so neither a substring nor a position
+can take a column an expected label names. The expected labels are the ones
+the synthetic fixtures use; [the source notes](sources/paypay.md#csv-granularity-and-omissions)
+list the 13 columns by meaning, and the current export's exact labels are
+unverified. Neither JPY amount field matches a label containing `海外` (the
+overseas amount is a foreign-currency figure, not yen). A header with all 13
+expected labels in the documented order is read exactly as in 0.2.3, with the
+same warnings. A header that reads differently is one whose overseas column
+precedes the yen outflow, whose labels differ from the expected ones, or that
+lacks a column: 0.2.3 let a field with no label take its documented position
+before later fields looked for their labels, so without `入金金額（円）` the
+incoming JPY field took the overseas amount in column 3, every later field
+took the column after its own (the transaction number was lost), and a
+yen outflow row was left without an amount as stating both. In 0.2.4 the yen
+amounts are the yen columns' and each labelled column keeps its field.
 
 **Rows of separators only.** The shared CSV reader drops an empty line, but a
 line of separators only (`,,,,,,,,,,,,`, as a spreadsheet saves a trailing
@@ -307,7 +315,7 @@ empty observation a separators-only row produced, stay as recorded in those
 superseded runs. Limits: PayPay CSV has no production input (see
 [identity rollout](identity-rollout.md)), so no stored export is known to be
 affected by either change, and the parser still reads a header whose labels
-match none of the documented ones by position, with a warning. Tests:
+match none of the expected ones by position, with a warning. Tests:
 `packages/parsers/test/paypay-csv-refusals.test.ts`,
 `packages/parsers/test/parser-digests.test.ts`.
 
@@ -3023,14 +3031,16 @@ same rule `smcc-meisai-scraper` already follows for foreign card use.
 
 Its column mapping is load-bearing and is not positional. Columns are
 located in three passes (0.2.4): first every column whose trimmed label is
-exactly the documented one (`取引日`, `出金金額（円）`, `入金金額（円）`,
+exactly the one the parser expects (`取引日`, `出金金額（円）`, `入金金額（円）`,
 `海外出金金額`, `通貨`, `変換レート（円）`, `利用国`, `取引内容`, `取引先`,
 `取引方法`, `支払い区分`, `利用者`, `取引番号`); then, for a field still
 unplaced, the first free column whose label contains its distinguishing
 substring (`取引日`, `出金`, `入金`, `海外`, `通貨`, `レート`, `利用国`,
 `取引内容`, `取引先`, `取引方法`, `支払い区分`/`支払区分`, `利用者`,
-`取引番号`), where the outgoing JPY column never matches a label containing
-`海外`; and last the documented position.
+`取引番号`), where neither JPY amount column matches a label containing
+`海外`; and last the documented position. The expected labels are the ones the
+synthetic fixtures use; `docs/sources/paypay.md` lists the columns by meaning,
+not by exact label.
 Position is used only as a fallback, and every fallback is warned about,
 as is a column found at a position other than the documented one and any
 header column the documentation does not list. The parser throws outright

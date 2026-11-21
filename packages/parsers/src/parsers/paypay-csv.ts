@@ -27,13 +27,15 @@ import {
 const SOURCE_ACCOUNT = "paypay";
 
 /**
- * Field order is the documented column order; `label` is the documented
- * header label (docs/sources/paypay.md) and `match` a distinguishing
- * substring of it, used only when no column carries the documented label.
- * `outgoing` and `incoming` are deliberately matched on 出金/入金 rather than
- * on position, since those two carry the sign of the transaction. 出金 is also
- * part of the overseas amount's label (海外出金金額), a foreign-currency figure,
- * so the outgoing JPY column never matches a label that names 海外.
+ * Field order is the documented column order (docs/sources/paypay.md lists
+ * the 13 columns by meaning, not by exact label); `label` is the exact header
+ * label the parser expects, the one its synthetic fixtures use, and `match` a
+ * distinguishing substring of it, used only when no column carries that
+ * label. `outgoing` and `incoming` are deliberately matched on 出金/入金
+ * rather than on position, since those two carry the sign of the transaction.
+ * 出金 is also part of the overseas amount's label (海外出金金額), a
+ * foreign-currency figure, so neither JPY amount column matches a label that
+ * names 海外.
  */
 const COLUMNS: readonly {
   field: string;
@@ -43,7 +45,7 @@ const COLUMNS: readonly {
 }[] = [
   { field: "datetime", label: "取引日", match: ["取引日"] },
   { field: "outgoingJpy", label: "出金金額（円）", match: ["出金"], exclude: ["海外"] },
-  { field: "incomingJpy", label: "入金金額（円）", match: ["入金"] },
+  { field: "incomingJpy", label: "入金金額（円）", match: ["入金"], exclude: ["海外"] },
   { field: "overseasAmount", label: "海外出金金額", match: ["海外"] },
   { field: "overseasCurrency", label: "通貨", match: ["通貨"] },
   { field: "conversionRateJpy", label: "変換レート（円）", match: ["レート"] },
@@ -107,7 +109,7 @@ function carriesSign(cell: string): boolean {
 /**
  * Locate each documented field in the header row, in three passes so that no
  * weaker rule can take a column a stronger one names: first every column whose
- * label is exactly the documented one, then a label containing the field's
+ * label is exactly the expected one, then a label containing the field's
  * substring, and last the documented position. A substring alone is not
  * enough while the exact label sits elsewhere: 出金 is in both 出金金額（円）
  * and 海外出金金額, and taking the first such column read a foreign-currency
@@ -169,15 +171,16 @@ function mapColumns(header: string[]): {
 
 export const paypayCsv: Parser = {
   name: "paypay-csv",
-  // 0.2.4: a column whose label is exactly the documented one is read as that
-  // field before any label is matched by substring, and the outgoing JPY
-  // column never matches a label naming 海外, so an overseas amount listed
-  // before 出金金額（円） is no longer read as a yen outflow (and the yen
-  // column dropped as undocumented). A row whose every cell is blank (only
-  // separators) is skipped with the closed warning `row N: blank row skipped`
-  // instead of becoming a transaction with no date, amount or id. A header in
-  // the documented order and labels, and every row with a non-blank cell,
-  // read exactly as in 0.2.3.
+  // 0.2.4: a column whose label is exactly the expected one is read as that
+  // field before any label is matched by substring, and before any field
+  // falls back to its documented position; neither JPY amount column matches
+  // a label naming 海外, so an overseas amount listed before 出金金額（円） is
+  // no longer read as a yen outflow (and the yen column dropped as
+  // undocumented). A row whose every cell is blank (only separators) is
+  // skipped with the closed warning `row N: blank row skipped` instead of
+  // becoming a transaction with no date, amount or id. A header with all 13
+  // expected labels in the documented order, and every row with a non-blank
+  // cell, read exactly as in 0.2.3.
   // 0.2.2: an outgoing or incoming amount that carries its own sign (-, +,
   // △, ▲ or parentheses) is left without an amount, with a closed warning,
   // instead of being negated (outgoing) or transcribed (incoming); every

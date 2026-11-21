@@ -113,7 +113,7 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
     expect(short.warnings).toContain("header: no column found for incomingJpy");
   });
 
-  test("a reordered header reads each column by its documented label (0.2.4)", () => {
+  test("a reordered header reads each column by its expected label (0.2.4)", () => {
     // The overseas amount (a foreign-currency figure) listed before the yen
     // outflow. 0.2.3 matched 出金 in 海外出金金額 first: 12 USD became a yen
     // outflow of 12, and the yen column was dropped as undocumented.
@@ -152,6 +152,36 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
     if (variant?.kind !== "transaction") throw new Error("expected a transaction");
     expect(variant.amountMinor).toBe(-1800);
     expect(variant.extra["overseas"]).toMatchObject({ amount: "12", currency: "USD" });
+    // The incoming yen field is held to the same rule: a relabelled overseas
+    // column naming 入金 is never read as a yen inflow.
+    const inflow = parse(
+      "取引日,出金金額(円),海外入金金額,入金金額(円),通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号\n" +
+        "2026/08/01 00:00:00,,12,1800,USD,150,US,受取,人,カード,一括払い,本人,t-1\n",
+    ).observations[0];
+    if (inflow?.kind !== "transaction") throw new Error("expected a transaction");
+    expect(inflow.amountMinor).toBe(1800);
+    expect(inflow.extra["overseas"]).toMatchObject({ amount: "12", currency: "USD" });
+  });
+
+  test("a missing column's documented position never takes a labelled column (0.2.4)", () => {
+    // Without 入金金額（円）, 0.2.3 gave incomingJpy the documented column 3
+    // before overseasAmount looked for its label, so the overseas amount read
+    // as a yen inflow.
+    const header = HEADER.replace(",入金金額（円）", "");
+    const result = parse(
+      `${header}\n2026/08/01 00:00:00,1800,12,USD,150,US,支払い,店,カード,一括払い,本人,t-1\n`,
+    );
+    const [observation] = result.observations;
+    if (observation?.kind !== "transaction") throw new Error("expected a transaction");
+    expect(observation.amountMinor).toBe(-1800);
+    expect(observation.extra["overseas"]).toEqual({
+      amount: "12",
+      currency: "USD",
+      conversionRateJpy: "150",
+      country: "US",
+    });
+    expect(observation.externalId).toBe("t-1");
+    expect(result.warnings).toContain("header: no column found for incomingJpy");
   });
 
   test("a row of separators only is skipped, not read as a transaction (0.2.4)", () => {
