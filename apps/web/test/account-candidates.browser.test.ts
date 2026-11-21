@@ -180,8 +180,15 @@ describe.if(runnable)("account candidate review", () => {
   test("a later page the open list no longer reaches never says no candidate is waiting", async () => {
     // A decided candidate leaves the open view, so a later page can come back
     // empty while the first still lists candidates. The world holds one page;
-    // its first page is served as if a second followed.
-    reshape = (review) => (review.query.offset === 0 ? { ...review, nextOffset: 50 } : review);
+    // its first page is served as if a second followed, by `nextOffset` alone
+    // as a server before ADR 0128 S6 answered it: the page reads only
+    // `nextOffset`, and a `next` or `paging` that disagreed with it would be
+    // refused by the shared validator (a short page cannot honestly continue).
+    reshape = (review) => {
+      if (review.query.offset !== 0) return review;
+      const { next: _next, paging: _paging, ...older } = review;
+      return { ...older, nextOffset: 50 };
+    };
     const first = await page("open", 0, null);
     const tab = await open();
     const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
