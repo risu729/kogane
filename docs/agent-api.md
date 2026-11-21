@@ -1782,6 +1782,51 @@ hand to each other: the receiver reads them back under its own authority
 instead of trusting the sender's figures (addendum 11 §8). The Overview page
 shows both under a disclosure for exactly that purpose.
 
+### One paging contract (ADR 0128)
+
+MCP pages only its own list methods; a `tools/call` result has none, so each
+read pages through its own arguments. The reads converted to
+[ADR 0128](adr/0128-one-paging-contract.md) say how to continue in one way,
+whatever their cursor kind:
+
+```json
+{
+  "next": { "arguments": { "offset": 50 } },
+  "paging": { "limit": 50, "returned": 50, "hasMore": true, "stoppedBy": "limit" }
+}
+```
+
+- `next` is null on the last page; otherwise its `arguments` are exactly the
+  arguments to set on the same call (on a route, the same query parameters),
+  with every other argument repeated as it was. `cursor` is an opaque token or
+  an id the read minted; `offset` a position.
+- `paging.stoppedBy` is `limit` (the page is full), `bytes` (the answer
+  reached its byte bound first), `budget` (rows follow but the grant's
+  `maxRows` withholds the next page: `next` is null, `hasMore` true) or
+  `walk` (a scan bound ended the page before it was full: it holds fewer than
+  `limit` items, perhaps none, and `next` continues it; a full page says
+  `limit`). No converted read in S1 answers `walk` yet. It says
+  nothing about whether the data behind the page is complete; each read's own
+  reasons do.
+- A refused continuation is `400 invalid_cursor` (not a token this read
+  issued), `400 cursor_mismatch` with `mustMatch` (issued for other
+  arguments), `410 context_expired` (its fixed context is gone) or
+  `413 result_limit_exceeded`.
+
+Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
+`kogane.reports.read` (list), `kogane.evidence.read` (runs, artifacts),
+`kogane.reported-holdings-change.read` (summary), `kogane.card-settlements.read`,
+`.statements` and `.unmatched`, `kogane.purchases.explain` (`view: events` and
+`lines`), `kogane.ops.operation.list`, `kogane.audit.search` and
+`kogane.schedules.maintenance.read` (summary), with their routes. Each keeps its
+previous continuation fields (`nextOffset`, `nextCursor`, `nextPage`,
+`coverage.nextOffset`, `page.nextCursor`, audit's result `cursor`) beside
+`next` and `paging` for one release; they always agree. The other paged reads
+(`kogane.financial.query` above, `observations.list`, `balances.read`,
+`rewards.read`, `collection-quality.read`, `changes.since`, the candidate
+reads) still page as their sections say, until their slice of the
+[MCP consistency plan](plans/2026-11-mcp-consistency.md).
+
 ## Result contract
 
 Every successful query returns

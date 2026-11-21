@@ -156,6 +156,8 @@ const MESSAGES: Record<string, string> = {
   approval_scope_mismatch: "承認の範囲がこの対象を含んでいません。",
   approval_not_found: "承認が見つかりません。もう一度承認してください。",
   receipt_not_found: "この操作の記録は見つかりません。",
+  // A list cursor the operations list did not issue (ADR 0128).
+  invalid_cursor: "一覧の続きを読み込めません。最新の一覧から読み直してください。",
   target_missing: "対象の記録が見つかりません。表示を更新して、対象を選び直してください。",
   target_ambiguous: "対象を一つに特定できません。表示を更新して、対象を選び直してください。",
   commit_failed: "変更は保存されませんでした。表示を更新して、対象と計画を確認し直してください。",

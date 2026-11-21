@@ -15,10 +15,17 @@ import {
   readAuditPage,
 } from "../../../packages/application/src/index";
 import { principalFor } from "./grants";
+import {
+  cursorMismatch,
+  invalidCursor,
+} from "../../../packages/observation-shared/src/paging-contract.ts";
 import { HttpError, json } from "./http";
+import { pagingHttpError } from "./paging-refusal";
 
 export const AUDIT_PATH = "/api/v2/audit";
-const KEYS = ["operation", "path", "principalKind", "result", "from", "to", "cursor"];
+/** The filter parameters a cursor is bound to. */
+const FILTER_KEYS = ["operation", "path", "principalKind", "result", "from", "to"] as const;
+const KEYS = [...FILTER_KEYS, "cursor"];
 
 export async function auditApi(
   env: Env,
@@ -40,10 +47,17 @@ export async function auditApi(
   const filters = auditPageFilters(rest);
   if (filters === null) throw new HttpError(400, "invalid_query");
   const page = await readAuditPage(d1CommandStore(env.DB), filters, cursor);
-  if (!page.ok) throw new HttpError(page.code === "stale_context" ? 409 : 400, page.code);
+  // The paging family (ADR 0128): a cursor issued under other filters names
+  // the filter parameters that must repeat.
+  if (!page.ok)
+    throw pagingHttpError(
+      page.code === "cursor_mismatch" ? cursorMismatch(FILTER_KEYS) : invalidCursor(),
+    );
   return json({
     schemaVersion: "kogane-audit-page-v1",
     records: page.records,
     cursor: page.cursor,
+    next: page.next,
+    paging: page.paging,
   });
 }

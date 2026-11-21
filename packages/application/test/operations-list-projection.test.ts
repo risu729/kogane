@@ -377,6 +377,8 @@ describe("the listed status is the single read's", () => {
           },
         ],
         nextCursor: null,
+        next: null,
+        paging: { limit: 20, returned: 2, hasMore: false, stoppedBy: null },
       },
     });
     // The completed filter matches the stored status: neither is stored completed.

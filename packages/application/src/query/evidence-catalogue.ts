@@ -8,6 +8,8 @@ import type {
   EvidenceArtifact,
   EvidenceArtifactDetail,
 } from "../../../observation-shared/src/evidence-contract";
+import { EVIDENCE_PAGE_LIMIT } from "../../../observation-shared/src/evidence-contract.ts";
+import { pagedFields } from "../../../observation-shared/src/paging-contract.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
 export interface EvidenceRunRow {
@@ -108,16 +110,33 @@ export function detailDto(row: EvidenceArtifactRow): EvidenceArtifactDetail["art
     declaredMediaType: row.declared_media_type,
   };
 }
+/**
+ * One page of at most 50 rows read with one row more: the next page starts
+ * below the page's last id (`c_<id>`), as `next.arguments.cursor` and, for
+ * one release, the deprecated `nextCursor` (ADR 0128).
+ */
+function evidencePage<Row extends { id: number }, Item>(results: Row[], map: (row: Row) => Item) {
+  const items = results.slice(0, EVIDENCE_PAGE_LIMIT).map(map);
+  const cursor =
+    results.length > EVIDENCE_PAGE_LIMIT ? `c_${results[EVIDENCE_PAGE_LIMIT - 1]!.id}` : null;
+  return {
+    items,
+    nextCursor: cursor,
+    ...pagedFields({
+      limit: EVIDENCE_PAGE_LIMIT,
+      returned: items.length,
+      next: cursor === null ? null : { cursor },
+    }),
+  };
+}
+
 /** One page of a source's sealed runs below `before`, newest first. */
 export async function listEvidenceRuns(sql: SqlExecutor, source: string, before: number) {
   const results = await sql.all<EvidenceRunRow>(
     `${RUN_SELECT} WHERE r.source_id = ? AND r.id < ? ORDER BY r.id DESC LIMIT 51`,
     [source, before],
   );
-  return {
-    items: results.slice(0, 50).map(runDto),
-    nextCursor: results.length > 50 ? `c_${results[49]!.id}` : null,
-  };
+  return evidencePage(results, runDto);
 }
 
 /** One sealed run of the source, or null when it has none by that id. */
@@ -144,10 +163,7 @@ export async function listEvidenceArtifacts(
     `${ARTIFACT_SELECT} AND a.id < ? ORDER BY a.id DESC LIMIT 51`,
     [source, run, before],
   );
-  return {
-    items: results.slice(0, 50).map(artifactDto),
-    nextCursor: results.length > 50 ? `c_${results[49]!.id}` : null,
-  };
+  return evidencePage(results, artifactDto);
 }
 
 /** One artifact of the run's sealed inventory, or null when it is not in it. */

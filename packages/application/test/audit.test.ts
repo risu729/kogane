@@ -1019,21 +1019,23 @@ describe("the operator's page", () => {
     expect(first.records).toHaveLength(50);
     expect(first.records.every((record) => record.operation === "financial.query")).toBe(true);
     expect(first.records[0]!.recordedAt > first.records[49]!.recordedAt).toBe(true);
-    expect(Object.keys(first).sort()).toEqual(["cursor", "ok", "records"]);
+    expect(Object.keys(first).sort()).toEqual(["cursor", "next", "ok", "paging", "records"]);
+    expect(first.next).toEqual({ arguments: { cursor: first.cursor! } });
+    expect(first.paging).toEqual({ limit: 50, returned: 50, hasMore: true, stoppedBy: "limit" });
     const second = await readAuditPage(store, { operation: "financial.query" }, first.cursor);
     if (!second.ok) throw new Error("unreachable");
     expect(second.records).toHaveLength(10);
     expect(second.cursor).toBeNull();
     const ids = new Set([...first.records, ...second.records].map((record) => record.auditId));
     expect(ids.size).toBe(60);
-    // A cursor is bound to the filters it was issued under.
+    // A cursor is bound to the filters it was issued under (ADR 0128).
     expect(await readAuditPage(store, { operation: "command.plan" }, first.cursor)).toEqual({
       ok: false,
-      code: "stale_context",
+      code: "cursor_mismatch",
     });
     expect(await readAuditPage(store, {}, "not-a-cursor!")).toEqual({
       ok: false,
-      code: "invalid_query",
+      code: "invalid_cursor",
     });
     // A day range is inclusive of both days.
     const day = await readAuditPage(
