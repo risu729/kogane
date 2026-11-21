@@ -76,7 +76,13 @@ describe("commandProposalStore", () => {
       store.appendProposal({ ...PROPOSAL, kind: "unknown_kind" as StoredProposal["kind"] }),
     ).rejects.toThrow();
     expect(await store.proposalRecorded(PROPOSAL.decisionRevisionId)).toBe(false);
+    // The refused write left no decision behind it either.
+    expect(db.query("SELECT count(*) n FROM decision_revisions").get()).toEqual({ n: 0 });
     await store.appendProposal(PROPOSAL);
+    expect(await store.proposalRecorded(PROPOSAL.decisionRevisionId)).toBe(true);
+    // The same proposal again is refused by the store, and is then recorded:
+    // the one case `proposeReconciliation` answers `idempotency_conflict`.
+    await expect(store.appendProposal(PROPOSAL)).rejects.toThrow();
     expect(await store.proposalRecorded(PROPOSAL.decisionRevisionId)).toBe(true);
     db.close();
   });

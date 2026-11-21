@@ -907,8 +907,84 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     }
     // Nothing was recorded, so this is the store's failure, never a duplicate
     // the agent is told not to resend (`idempotency_conflict`).
-    expect(answer).toMatchObject({ status: 500, body: { error: "internal_error" } });
+    expect(answer).toEqual({
+      status: 500,
+      body: { error: "internal_error", requestId: expect.any(String) },
+    });
     expect(await rows()).toEqual(before);
+  });
+
+  it("a proposal whose batch fails is internal_error on both transports, recorded once as failed", async () => {
+    const count = async () =>
+      (await env.DB.prepare(
+        "SELECT (SELECT count(*) FROM decision_revisions) AS decisions,(SELECT count(*) FROM entity_relations) AS relations",
+      ).first<{ decisions: number; relations: number }>())!;
+    const before = await count();
+    const body = (reason: string) => ({
+      kind: "same_account",
+      from: `source_account:${sourceAccounts[0]}`,
+      to: `source_account:${sourceAccounts[1]}`,
+      evidenceRefs: [`fetch_artifact:${artifactId}`],
+      reason,
+      method: "ai",
+    });
+    // The relation insert, the batch's second statement, raises: the
+    // decision before it is rolled back, and the audit log itself still works.
+    await env.DB.prepare(
+      "CREATE TRIGGER review_relation_write_fails BEFORE INSERT ON entity_relations BEGIN SELECT RAISE(ABORT,'synthetic_relation_failure'); END",
+    ).run();
+    let answers: { path: string; requestId: string; status: number; text: string }[];
+    try {
+      const http = await call("/api/agent/v1/reconcile.propose", {
+        subject: AGENT,
+        body: body("synthetic proposal whose batch fails over http"),
+      });
+      const mcp = await call("/mcp", {
+        via: "mcp",
+        subject: AGENT,
+        headers: MCP_HEADERS,
+        body: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "kogane.reconcile.propose",
+            arguments: body("synthetic proposal whose batch fails over mcp"),
+          },
+        },
+      });
+      answers = [];
+      for (const [path, sent] of [
+        ["agent-http", http],
+        ["mcp", mcp],
+      ] as const)
+        answers.push({
+          path,
+          requestId: sent.requestId,
+          status: sent.response.status,
+          text: await sent.response.text(),
+        });
+    } finally {
+      await env.DB.prepare("DROP TRIGGER review_relation_write_fails").run();
+    }
+    for (const answer of answers) {
+      expect(answer.status, answer.path).toBe(500);
+      expect(answer.text, answer.path).not.toContain("synthetic_relation_failure");
+      expect(JSON.parse(answer.text), answer.path).toEqual({
+        error: "internal_error",
+        requestId: answer.requestId,
+      });
+      expect(
+        (await recordsOf(answer.requestId)).map((row) => [
+          row["path"],
+          row["operation"],
+          row["result"],
+          row["result_code"],
+        ]),
+        answer.path,
+      ).toEqual([[answer.path, "reconcile.propose", "failed", "internal_error"]]);
+    }
+    expect(await count()).toEqual(before);
   });
 });
 
