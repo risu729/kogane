@@ -795,28 +795,42 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
-  test("a due or debit date the server sends as null names what is missing, never a bare 不明 (INV05)", async () => {
+  test("a due or debit date the server sends as null shows its reason, and a null without one is refused (INV05)", async () => {
     const [stated, settled] = debitAccounts.items;
     const match = settled!.settled[0]!;
-    debitAccountsPage = {
+    const undated = (
+      paymentDateReason: string | undefined,
+      debitDateReason: string | undefined,
+    ) => ({
       ...debitAccounts,
       items: [
-        { ...stated!, latestStatement: { ...stated!.latestStatement!, paymentDate: null } },
+        {
+          ...stated!,
+          latestStatement: { ...stated!.latestStatement!, paymentDate: null, paymentDateReason },
+        },
         {
           ...settled!,
-          settled: [{ ...match, latest: { ...match.latest, debitDate: null } }],
-          answer: { ...settled!.answer, debitDate: null },
+          settled: [{ ...match, latest: { ...match.latest, debitDate: null, debitDateReason } }],
+          answer: { ...settled!.answer, debitDate: null, debitDateReason },
         },
       ],
-    };
-    const page = await open();
-    const section = page.getByRole("region", { name: "カードの引落口座" });
+    });
+    debitAccountsPage = undated("payment_date_absent", "debit_date_invalid");
+    let page = await open();
+    let section = page.getByRole("region", { name: "カードの引落口座" });
     await section.getByText("myjcb:synthetic:root").waitFor();
     const text = await section.innerText();
-    expect(text).toContain("引落予定日 年月日として読める記録なし");
-    expect(text).toContain("引落日 年月日として読める記録なし · 照合を見る");
-    expect(text).toContain("最新の引落日 年月日として読める記録なし");
-    expect(text).not.toContain("不明");
+    expect(text).toContain("引落予定日 不明（payment_date_absent）");
+    expect(text).toContain("引落日 不明（debit_date_invalid） · 照合を見る");
+    expect(text).toContain("最新の引落日 不明（debit_date_invalid）");
+    expect(text).not.toContain("年月日として読める記録なし");
+    await page.close();
+    // A null that came without its reason is refused before anything renders.
+    debitAccountsPage = undated(undefined, undefined);
+    page = await open();
+    section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("myjcb:synthetic:root");
     await page.close();
   });
 
@@ -858,13 +872,17 @@ describe.if(runnable)("card settlement review", () => {
     await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
     expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
     await page.close();
-    // A due date the server sends as null has no reason: the words name what is missing.
+    // A due date the server sends as null shows the reason it carries.
     unmatchedPage = {
       ...unmatched,
       items: [
         {
           ...first!,
-          statement: { ...first!.statement, paymentDate: null },
+          statement: {
+            ...first!.statement,
+            paymentDate: null,
+            paymentDateReason: "payment_date_invalid",
+          },
           code: "statement_not_comparable",
           debitsInWindow: null,
           planner: null,
@@ -874,9 +892,7 @@ describe.if(runnable)("card settlement review", () => {
     page = await open();
     section = page.getByRole("region", { name: "照合候補のない請求" });
     await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
-    const undated = await section.innerText();
-    expect(undated).toContain("引落予定日 年月日として読める記録なし");
-    expect(undated).not.toContain("不明");
+    expect(await section.innerText()).toContain("引落予定日 不明（payment_date_invalid）");
     await page.close();
     unmatchedPage = withTotal(null);
     page = await open();

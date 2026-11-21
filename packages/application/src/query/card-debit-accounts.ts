@@ -45,10 +45,15 @@ import {
   type StatedDebitAccount,
   type StatedReading,
 } from "../../../domain/src/card-debit-account-answer.ts";
+import {
+  settlementDebitDate,
+  statementDueDate,
+  type StatementDueDateReason,
+} from "../../../domain/src/card-settlement.ts";
 import type { SourceFactRef } from "../../../domain/src/events.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-information.ts";
 import type { FinancialError } from "../../../domain/src/result.ts";
-import { parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
+import type { TemporalValue } from "../../../domain/src/time.ts";
 import type { Quantity } from "../../../domain/src/values.ts";
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
@@ -91,6 +96,12 @@ export interface CardDebitAccountCard {
     period: string | null;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
+    /**
+     * Why `paymentDate` is null, present exactly then (INV05):
+     * `payment_date_absent` or `payment_date_invalid`
+     * (`STATEMENT_DUE_DATE_REASONS`).
+     */
+    paymentDateReason?: StatementDueDateReason;
     /**
      * The provider's total. One that is not exact keeps its status and a
      * closed reason (`stored:<status>`, or `decimal_not_projected` when no
@@ -275,8 +286,6 @@ const cardSource = (value: unknown): value is CardDebitAccountSource =>
 const reasonCode = (value: unknown): value is CardDebitAccountReason =>
   (CARD_DEBIT_ACCOUNT_REASONS as readonly unknown[]).includes(value);
 const cardKey = (sourceId: string, sourceAccount: string) => sourceId + "\n" + sourceAccount;
-const localDate = (value: string | null): string | null =>
-  value !== null && parseLocalDate(value) !== null ? value : null;
 
 /**
  * The statement's total (./card-statement-total.ts). A row CORE 0024's CHECK
@@ -371,13 +380,16 @@ function matchedOf(row: CandidateRow): MatchedDebitAccount {
   const split = row.latest_key.indexOf("\n");
   const proposalId = row.latest_key.slice(split + 1);
   if (split < 0 || !text(proposalId)) throw invalid();
+  // The read's `debit_date` is null unless `bankDebit.occurred` is a
+  // `local-date`, and `max()` joins null as empty text: either way the stored
+  // date is not a civil local date (`debit_date_invalid`).
   return {
     bankSourceId: row.bank_source_id,
     bankSourceAccount: row.bank_source_account,
     statements: row.statements,
     latest: {
       proposalId,
-      debitDate: localDate(row.latest_key.slice(0, split) || null),
+      ...settlementDebitDate(row.latest_key.slice(0, split) || null),
       period: typeof row.latest_period === "string" ? row.latest_period : null,
     },
   };
@@ -473,7 +485,7 @@ export async function reviewCardDebitAccounts(input: {
       readingsOf(card.readings),
     );
     const row = card.statement;
-    const paymentDate = row === null ? null : localDate(row.payment_date);
+    const due = row === null ? null : statementDueDate(row.payment_date);
     return {
       card: {
         sourceId: card.sourceId,
@@ -481,7 +493,7 @@ export async function reviewCardDebitAccounts(input: {
         accountId: row?.account_id ?? null,
       },
       latestStatement:
-        row === null
+        row === null || due === null
           ? null
           : {
               ref: {
@@ -490,15 +502,16 @@ export async function reviewCardDebitAccounts(input: {
                 revision: "parse_run:" + row.parse_run_id,
               },
               period: row.period ?? null,
-              paymentDate:
-                paymentDate === null
-                  ? null
-                  : {
+              ...(due.paymentDate === null
+                ? { paymentDate: null, paymentDateReason: due.paymentDateReason }
+                : {
+                    paymentDate: {
                       kind: "local-date" as const,
-                      value: paymentDate,
+                      value: due.paymentDate,
                       zone: "Asia/Tokyo",
                       basis: "provider" as const,
                     },
+                  }),
               amount: totalOf(row),
             },
       stated,

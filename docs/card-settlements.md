@@ -326,7 +326,13 @@ settlement candidate is listed, by source and source account, at most 100
   the card purchase read gives the same view's `providerTotal`; it is never
   null or zero (INV05), and the page shows it as unknown with that reason. An
   `exact` status without both decimal-v1 columns, which CORE 0024's CHECK
-  never stores, fails the read (`card_debit_accounts_row_invalid`);
+  never stores, fails the read (`card_debit_accounts_row_invalid`). The due
+  date (`paymentDate`) is a `local-date` when the stored `_kogane.paymentDate`
+  is a civil `YYYY-MM-DD` date, else null with `paymentDateReason`
+  ([ADR 0114, amendment 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)):
+  `payment_date_absent` when nothing is recorded there, `payment_date_invalid`
+  when a value that is not a civil date is. The reason is there exactly when
+  the date is null;
 - `stated`: the readings the settlement sweep compared with a candidate (the
   `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
   that `card_settlement_debit_account_evidence` cites under
@@ -343,7 +349,10 @@ settlement candidate is listed, by source and source account, at most 100
   `evidence_not_recorded` for a MyJCB card;
 - `settled`: per bank account, the candidates whose latest decision is
   `accepted`, with the number of distinct statements and the one with the
-  latest debit date. A withdrawn or rejected candidate is not counted;
+  latest debit date (`latest.debitDate`; null with `debitDateReason`
+  `debit_date_invalid` when the candidate's stored `bankDebit.occurred` is
+  not a `local-date` with a civil value, which the only candidate writer
+  never stores). A withdrawn or rejected candidate is not counted;
 - `proposed`: the same for candidates still `proposed`, of statements no
   accepted candidate covers. They are listed for the reviewer and never
   answer (INV07). A statement is covered as the acceptance guard reserves it
@@ -363,7 +372,8 @@ settlement candidate is listed, by source and source account, at most 100
   review), but its statement is not settled;
 - `answer`: `provider-stated` from `lastNamed` (the account, the reading and
   its capture time); else `accepted-settlement` from the newest accepted
-  settlement (the account, the candidate and its debit date), which is an
+  settlement (the account, the candidate and its debit date, with its
+  `debitDateReason` when null), which is an
   amount match a person accepted and so weaker than a stated account; else
   `unknown` with `stated_reading_conflicting`, `only_unreviewed_candidates`
   or `no_debit_account_evidence`. Closed `codes` say what disagrees:
@@ -411,13 +421,16 @@ Limits:
   per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
-- A statement's due date (`latestStatement.paymentDate`) and a settlement's
-  debit date (`answer.debitDate`, `latest.debitDate`) are null without a
-  reason: the due date when it is absent or not a civil date, the debit date
-  when the candidate's stored bank debit date is not a civil date (any reason
-  it stored is not carried). The page names what is missing,
-  年月日として読める記録なし, and gives no reason; `照合候補のない請求` shows a
-  null due date the same way.
+- A null date's reason says only what is stored: `payment_date_absent` and
+  `payment_date_invalid` do not say why the provider page or the parser left
+  the due date so, and a stored debit date that is an `unknown` time with its
+  own `reasonCode` would read `debit_date_invalid` too (the candidates read
+  takes the date only from a `local-date`). The two parsers the view reads
+  today (`vpass-statement-page`, `myjcb-credit-statement-total`) always
+  record a civil due date, and the only candidate writer always a civil
+  debit date, so the reasons are for rows they did not write. The page shows a null date as
+  不明（reason）; the 次回の引落 view keeps its own `payment_date_not_published`
+  for a card whose due date is null, whichever reason it has.
 
 ### Upcoming bills
 
@@ -587,6 +600,10 @@ or zero (INV05), and the page shows it as unknown with that reason. Such a
 statement is still `statement_not_comparable`. An `exact` status without both
 decimal-v1 columns, or a status outside decimal-v1, which CORE 0024's CHECK
 never stores, fails the read (`card_statements_unmatched_row_invalid`).
+A due date (`paymentDate`) that is null carries `paymentDateReason`, the same
+as each card's debit account gives it: `payment_date_absent` or
+`payment_date_invalid` ([ADR 0114, amendment 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)). Such a
+statement is `statement_not_comparable`, with no window read.
 
 For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
 ([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))

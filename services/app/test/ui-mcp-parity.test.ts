@@ -71,6 +71,10 @@ import {
   STATED_ABSENT_REASONS,
 } from "../../../packages/domain/src/card-debit-account-answer";
 import {
+  SETTLEMENT_DEBIT_DATE_REASONS,
+  STATEMENT_DUE_DATE_REASONS,
+} from "../../../packages/domain/src/card-settlement";
+import {
   COVERS_UNKNOWN_REASONS,
   NOT_LISTED_REASONS,
   UPCOMING_BILL_NOTES,
@@ -342,6 +346,11 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       ...COVERS_UNKNOWN_REASONS,
       ...NOT_LISTED_REASONS,
       ...UPCOMING_BILL_NOTES,
+      // A null date's reason, and the field that carries it (INV05).
+      ...STATEMENT_DUE_DATE_REASONS,
+      ...SETTLEMENT_DEBIT_DATE_REASONS,
+      "paymentDateReason",
+      "debitDateReason",
     ])
       expect(published.description, code).toContain(code);
   });
