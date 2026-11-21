@@ -327,6 +327,49 @@ test("SC17/AT69: a plan pinned to rev7 is refused once a concurrent change made 
   expect(report.ok && report.report.resimulatedPlanId).toBe(resimulated.planId);
 });
 
+test("an approval whose pin moves between its reads and its batch is refused as stale, not as a closed plan", async () => {
+  const mapping = await seedParse(298, "smbc-bank:approve-race");
+  const plan = await planFor(mapping.ref, await target("target-approve-race-a"));
+  const before = await counts();
+  // Another path moves the pinned mapping after `approve` read it and before
+  // its batch runs.
+  const raced = racedBeforeBatch(db, async () => {
+    const concurrent = await executeIdentityCommand(
+      db,
+      {
+        operationId: "op-approve-race-concurrent",
+        actorId: "other-operator",
+        actorVerification: "server",
+        action: "assign",
+        kind: "account",
+        referenceId: mapping.ref,
+        expectedRevision: 1,
+        targetId: await target("target-approve-race-b"),
+        reason: "another operator got there first",
+      },
+      IDENTITY_POLICY_VERSION,
+    );
+    expect(concurrent.ok).toBe(true);
+  });
+  const result = await approve(d1CommandStore(raced), {
+    planId: plan.planId,
+    planDigest: plan.planDigest,
+    actor: operator,
+    scope: [],
+    ttlSeconds: 600,
+    now: NOW,
+  });
+  expect(result).toEqual({
+    ok: false,
+    error: "stale_context",
+    refs: [plan.planId, `account_mapping:${mapping.ref}`],
+  });
+  // No approval was written, and the plan says why: it is stale, as an
+  // approval that read the moved pin marks it.
+  expect((await counts()).approvals).toBe(before.approvals);
+  expect((await loadPlan(store, plan.planId))!.status).toBe("stale");
+});
+
 test("a stale plan is refused at commit too, and the failed guard writes nothing at all", async () => {
   const mapping = await seedParse(202, "smbc-bank:guard");
   const plan = await planFor(mapping.ref, await target("target-guard"));
