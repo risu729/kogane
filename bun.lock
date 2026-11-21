@@ -26,7 +26,7 @@
         "shiki": "4.6.0",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/react": "19.3.0",
         "@types/react-dom": "19.3.0",
         "@vitejs/plugin-react": "6.3.0",
@@ -53,7 +53,7 @@
         "impit": "0.14.9",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
         "wrangler": "4.163.0",
       },
@@ -61,7 +61,7 @@
     "experiments/d1-conformance": {
       "name": "@kogane/d1-conformance",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "miniflare": "5.20260831.0-alpha",
         "typescript": "7.0.2",
         "wrangler": "4.163.0",
@@ -76,7 +76,7 @@
         "hono": "4.13.19",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "playwright": "1.65.1",
         "typescript": "7.0.2",
       },
@@ -84,7 +84,7 @@
     "experiments/st-george-automation": {
       "name": "@kogane/st-george-automation",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "playwright": "1.65.1",
         "typescript": "7.0.2",
       },
@@ -103,7 +103,7 @@
         "zod": "4.6.7",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
@@ -111,7 +111,7 @@
       "name": "@kogane/collection",
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@vitest/coverage-istanbul": "5.1.1",
         "typescript": "7.0.2",
         "vitest": "5.1.1",
@@ -120,28 +120,28 @@
     "packages/collector-diagnostics": {
       "name": "@kogane/collector-diagnostics",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
     "packages/domain": {
       "name": "@kogane/domain",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
     "packages/evidence-contract": {
       "name": "@kogane/evidence-contract",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
     "packages/identity": {
       "name": "@kogane/identity",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
@@ -151,7 +151,7 @@
         "zod": "4.6.7",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
@@ -161,21 +161,21 @@
         "parse5": "8.1.1",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
     "packages/read-model": {
       "name": "@kogane/read-model",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
     "packages/sbi-vc-trade-client": {
       "name": "@kogane/poc-sbi-vc-trade-client",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
@@ -185,7 +185,7 @@
         "drizzle-orm": "0.45.4",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "typescript": "7.0.2",
       },
     },
@@ -215,7 +215,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -233,7 +233,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -250,7 +250,7 @@
       "devDependencies": {
         "@cloudflare/puppeteer": "2.0.1",
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -266,7 +266,7 @@
         "parse5": "8.1.1",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "cf": "1.0.0-rc.0",
         "typescript": "7.0.2",
@@ -280,7 +280,7 @@
         "parse5": "8.1.1",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "cf": "1.0.0-rc.0",
         "typescript": "7.0.2",
@@ -294,7 +294,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -311,7 +311,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -327,7 +327,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -341,7 +341,7 @@
       "name": "@kogane/poc-sbi-vc-trade-worker",
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -360,7 +360,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -372,7 +372,7 @@
     "services/collector-sony-bank": {
       "name": "@kogane/poc-sony-bank-worker",
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "cf": "1.0.0-rc.0",
         "typescript": "7.0.2",
@@ -386,7 +386,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -404,7 +404,7 @@
       },
       "devDependencies": {
         "@cloudflare/workers-types": "5.20261117.1",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "cf": "1.0.0-rc.0",
         "typescript": "7.0.2",
@@ -421,7 +421,7 @@
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -434,7 +434,7 @@
       "name": "@kogane/poc-vpoint-pay-worker",
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.8.3",
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.1",
         "cf": "1.0.0-rc.0",
@@ -451,7 +451,7 @@
         "zod": "4.6.7",
       },
       "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.5",
         "@types/node": "26.6.6",
         "cf": "1.0.0-rc.0",
         "miniflare": "5.20260831.0-alpha",
@@ -860,7 +860,7 @@
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.5", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-dOGOPxlaNV+G046mZzN+9C0dAcQZeSKcXiVaM0TYy/LM4ttTmgSBDxYfovcYI8Em3+eAbiAYpvWLOv8+ZVRJKA=="],
 
-    "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
+    "@types/bun": ["@types/bun@1.4.5", "", { "dependencies": { "bun-types": "1.4.5" } }, "sha512-DpgwNI9z0L1S0gtb45QLCWgwCUcMLnsHYMJHQvpNj7erGiCGBvpggltAIeARrtobNMKMuy0UP7i56tKKgwFs/Q=="],
 
     "@types/chai": ["@types/chai@5.2.3", "", { "dependencies": { "@types/deep-eql": "*", "assertion-error": "^2.0.1" } }, "sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA=="],
 
@@ -956,7 +956,7 @@
 
     "boolbase": ["boolbase@1.0.0", "", {}, "sha512-JZOSA7Mo9sNGB8+UjSgzdLtokWAky1zbztM3WRLCbZ70/3cTANmQmOdR7y2g+J0e2WXywy1yS468tY+IruqEww=="],
 
-    "bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+    "bun-types": ["bun-types@1.4.5", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-ECHn+9dhL3wv0G6u0+7dQvrnaimXiRDxxerYBmhTaLyJEEuvTPWk2Fye3XIf5Y++JIIiHKfQw4Z7V5D8KuiXbg=="],
 
     "ccount": ["ccount@2.0.1", "", {}, "sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg=="],
 
