@@ -230,5 +230,6 @@ change cases, leaving the policy digest out fails the third, and reading the
 whole-store marks for a listed grant fails the last.
 `packages/read-model/test/publication-marks.test.ts`: the listed marks move
 only with the listed sources' events, exclusions and policy updates, the
-whole-store marks with any, and a policy column the lists do not read
-(`updated_at_ms`) moves none.
+whole-store marks with any; an update of each of the eight policy columns
+the lists read moves the listed marks, and an update of either column they
+do not read (`policy_version`, `updated_at_ms`) moves none.

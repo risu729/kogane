@@ -1,8 +1,9 @@
-// `publicationMarks`: the newest publication event and the number of runs
-// excluded from financial views, over every source or over listed sources
-// only. The agent context pins them in its publication marker (ADR 0091
-// amendment of 2026-11-21), so they must move with a listed source's
-// publication or exclusion and never with an unlisted source's (SC18).
+// `publicationMarks`: the newest publication event, the number of runs
+// excluded from financial views and the dataset policy columns the lists
+// read, over every source or over listed sources only. The agent context pins
+// them in its publication marker (ADR 0091 amendment of 2026-11-21), so they
+// must move with a listed source's publication, exclusion or policy update and
+// never with an unlisted source's (SC18).
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { createObservationReader, type SqlExecutor } from "../src/index";
@@ -100,6 +101,50 @@ describe("publication marks", () => {
     store.db.run("UPDATE dataset_snapshot_policies SET updated_at_ms=updated_at_ms+1");
     expect(await marks()).toEqual(after);
   });
+
+  // Every policy column the snapshot CTEs or the unit eligibility predicate
+  // read (packages/parsers/src/snapshot-query.ts) moves the listed mark; the
+  // two they do not read move nothing, so an operator's bookkeeping update
+  // does not make an earlier cursor stale.
+  const POLICY_COLUMNS: readonly (readonly [string, string, boolean])[] = [
+    ["source_id", "source_id || '-renamed'", true],
+    ["parser_name", "parser_name || '-renamed'", true],
+    ["dataset", "dataset || '-renamed'", true],
+    [
+      "policy_id",
+      "CASE policy_id WHEN 'coverage-v1' THEN 'legacy-warning-compat-v1' ELSE 'coverage-v1' END",
+      true,
+    ],
+    ["required_parser_version", "coalesce(required_parser_version, '') || '9'", true],
+    ["replaces_previous_on_complete_empty", "1 - replaces_previous_on_complete_empty", true],
+    ["unit_scope", "CASE unit_scope WHEN 'unit' THEN 'run' ELSE 'unit' END", true],
+    ["snapshot_selection", "1 - snapshot_selection", true],
+    ["policy_version", "policy_version + 1", false],
+    ["updated_at_ms", "updated_at_ms + 1", false],
+  ];
+  test("classify every policy column as read or not read", () => {
+    // A column a later migration adds must be placed in the list above.
+    const { store } = baseWorld();
+    const columns = store.db
+      .query("SELECT name FROM pragma_table_info('dataset_snapshot_policies')")
+      .all() as { name: string }[];
+    expect(columns.map((column) => column.name).sort()).toEqual(
+      POLICY_COLUMNS.map(([column]) => column).sort(),
+    );
+  });
+  for (const [column, next, read] of POLICY_COLUMNS)
+    test(`${read ? "move" : "hold"} when a policy row's ${column} changes`, async () => {
+      const { store } = baseWorld();
+      const reader = createObservationReader(recording(store.db));
+      const before = await reader.publicationMarks(["smbc-bank"]);
+      store.db.run(
+        `UPDATE dataset_snapshot_policies SET ${column}=${next}
+          WHERE source_id='smbc-bank' AND dataset='balance-normalized'`,
+      );
+      const after = await reader.publicationMarks(["smbc-bank"]);
+      if (read) expect(after.snapshotPolicies).not.toBe(before.snapshotPolicies);
+      else expect(after).toEqual(before);
+    });
 
   test("reads nothing for an empty list and binds a repeated source once", async () => {
     const { store } = baseWorld();
