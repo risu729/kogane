@@ -469,6 +469,20 @@ describe("the operations routes (ui)", () => {
       expect(await recordsOf(answer.requestId), path).toEqual([]);
     }
     expect(await operations()).toBe(before);
+    // The variable segment may be encoded: the route is named, served and recorded.
+    const accepted = await call("/api/ops/v1/sessions/sony%2Dbank/refresh", {
+      body: { idempotencyKey: "audit-encoded-segment" },
+    });
+    expect(accepted.response.status).toBe(202);
+    const { operationId } = (await accepted.response.json()) as { operationId: string };
+    expect((await recordsOf(accepted.requestId)).map(brief)).toMatchObject([
+      { operation: "ops.session.refresh", result: "accepted" },
+    ]);
+    const read = await call(`/api/ops/v1/operations/%6F${operationId.slice(1)}`);
+    expect(read.response.status).toBe(200);
+    expect((await recordsOf(read.requestId)).map(brief)).toMatchObject([
+      { operation: "ops.operation.get", result: "read" },
+    ]);
   });
 });
 
