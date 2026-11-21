@@ -136,6 +136,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.balances.read", { collection: "latest", detail: "full" }],
     ["kogane.balances.read", { collection: "history" }],
     ["kogane.balances.read", { collection: "history", detail: "full" }],
+    ["kogane.balances.read", { collection: "cash" }],
     ["kogane.rewards.read", { collection: "holdings" }],
     ["kogane.events.read", { collection: "activity" }],
     ["kogane.events.read", { collection: "obligations" }],
@@ -181,6 +182,7 @@ describe("MCP read answer sizes (ADR 0123)", () => {
     for (const call of [
       'kogane.balances.read {"collection":"latest"}',
       'kogane.balances.read {"collection":"history"}',
+      'kogane.balances.read {"collection":"cash"}',
       "kogane.schedules.read {}",
       "kogane.collection-quality.read {}",
       'kogane.collection-quality.read {"source":"sony-bank"}',

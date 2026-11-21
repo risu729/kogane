@@ -569,6 +569,183 @@ export interface BalanceHistorySummaryPage extends Omit<
   items: BalanceHistorySummaryItem[];
 }
 
+// ── cash per account (ADR 0123, amendment 2026-11-20) ───────────────────
+//
+// `/api/v2/balances/cash` and `kogane.balances.read` `collection: cash`: the
+// latest cash measurements of the published snapshot, one line per account,
+// with exact subtotals per unit and per source. No unit is added to another,
+// nothing is valued, and there is no net worth.
+
+/**
+ * The metrics this read counts as cash: the known-assets subtotal's metrics
+ * (`known-assets-subtotal-v1`: `sum-disjoint` currency stocks with an
+ * asset-positive sign and no overlap group). A test pins it to
+ * `knownAssetMetricIds()`, so a registry change that moves a metric in or
+ * out of that set fails until this list, its ADR and its docs follow.
+ */
+export const CASH_METRIC_IDS = [
+  "broker.foreign-cash-deposit",
+  "deposit.balance",
+  "exchange.cash-balance",
+] as const;
+export type CashMetricId = (typeof CASH_METRIC_IDS)[number];
+
+/**
+ * Why a latest measurement of the scope is not cash, from its registry
+ * definition, in this order:
+ *
+ *   * `metric_unknown` — the registry does not describe the provider metric;
+ *   * `not_currency` — its unit is a reward point or another non-currency unit;
+ *   * `not_a_stock` — a capacity, flow, period total, valuation, obligation,
+ *     price or qualification, not an amount held;
+ *   * `not_asset_positive` — a liability or a provider-signed amount;
+ *   * `overlaps_another_measure` — it shares an overlap group with another
+ *     measure (an aggregate, a provider total, a term-deposit principal);
+ *   * `restates_a_balance` — a balance after a transaction (`select-one`);
+ *   * `not_summable` — any other aggregation rule.
+ */
+export const CASH_LEFT_OUT_REASONS = [
+  "metric_unknown",
+  "not_currency",
+  "not_a_stock",
+  "not_asset_positive",
+  "overlaps_another_measure",
+  "restates_a_balance",
+  "not_summable",
+] as const;
+export type CashLeftOutReason = (typeof CASH_LEFT_OUT_REASONS)[number];
+
+/**
+ * The reason the cash read adds to an adopted amount it does not count: its
+ * account (or its provider reference) holds another adopted amount of the
+ * same unit, so adding both could count one balance twice (INV06).
+ */
+export const CASH_REPORTED_TWICE = "cash:account_reported_twice";
+
+/**
+ * One cash measurement. `value` and `scale` are the exact decimal of an exact
+ * value; a value that is not exact has neither, and `status` is its reason
+ * (`missing`, `unparsed`, `conflict`), never a zero (INV05). `counted` says
+ * whether the subtotals add it: adopted, exact, and the only adopted amount
+ * of its unit on its line and on its provider reference. `reasons` are
+ * `adoption:<code>`, `freshness:<code>` and `cash:account_reported_twice`;
+ * an amount that is not counted always has one.
+ */
+export interface CashAmount {
+  observationId: number;
+  metric: CashMetricId;
+  unit: string;
+  value: string | null;
+  scale: number | null;
+  status: import("./normalized-decimal.ts").NormalizedDecimal["status"];
+  adoption: BalanceAdoptionState;
+  counted: boolean;
+  asOf: string | null;
+  reasons: string[];
+}
+
+/** One provider reference of an account: its source and account key, and its cash. */
+export interface CashReference {
+  source: string;
+  /** The provider account key, as the read's `account` filter takes it. */
+  sourceAccount: string;
+  amounts: CashAmount[];
+}
+
+/**
+ * One account: its organized account entity and readable label (ADR 0120),
+ * both null when the rows' organization is unavailable, and the cash of each
+ * provider reference that reaches it. An account reached through two
+ * references is one line with two references, never two lines.
+ */
+export interface CashLine {
+  account: string | null;
+  label: string | null;
+  references: CashReference[];
+}
+
+/**
+ * The counted amounts of one unit, added exactly. `value` is null when no
+ * amount is counted, never a zero. `status` is `partial` when an amount of
+ * the unit is not counted for a reason other than adoption's `excluded`
+ * (another counted measurement covers an excluded one), and `reasons` names
+ * every not-counted amount's reasons.
+ */
+export interface CashSubtotal {
+  unit: string;
+  value: string | null;
+  scale: number | null;
+  counted: number;
+  notCounted: number;
+  status: "complete" | "partial";
+  reasons: string[];
+}
+
+export interface CashSourceSubtotal extends CashSubtotal {
+  source: string;
+}
+
+/**
+ * At most this many metric ids on one `leftOut` entry, those with the most
+ * rows first; `moreMetrics` counts the rest, so the entry stays bounded
+ * whatever the registry grows to (the overview summary's pattern, ADR 0123).
+ */
+export const CASH_LEFT_OUT_METRICS = 3;
+
+/** The latest measurements of the scope that are not cash, per reason. */
+export interface CashLeftOut {
+  reason: CashLeftOutReason;
+  rows: number;
+  metrics: string[];
+  moreMetrics: number;
+}
+
+/**
+ * The bytes a cash page is held to: the UTF-8 bytes of the tool's answer,
+ * `{ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }` serialized as `/mcp`
+ * writes its text content, at most the 8 KB an MCP client shows (issue
+ * 1414). The route answers `data` alone, which is shorter.
+ */
+export const CASH_PAGE_BYTES = 8_192;
+
+/**
+ * The bytes of a page read tool's answer that carries `data`, as `/mcp`
+ * writes it (`PAGE_READ_SCHEMA_VERSION` names the envelope; a test pins
+ * this to the text `/mcp` answers).
+ */
+export function cashAnswerBytes(data: unknown): number {
+  return new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))
+    .length;
+}
+
+/**
+ * A page holds whole lines up to `limit` measurements (ten by default,
+ * `DEFAULT_SUMMARY_PAGE_LIMIT`), as `limit` counts rows on the latest page,
+ * and fewer when the next line would carry the tool's answer past
+ * `CASH_PAGE_BYTES`. A line with more measurements than `limit` is a page of
+ * its own; a page that cannot hold its first line within the bytes is
+ * refused (`413 result_limit_exceeded`), never cut.
+ */
+export interface CashPageInfo extends SnapshotPageInfo {
+  /** Lines in the whole scope; the page holds at most `limit` of them. */
+  lines: number;
+}
+
+export interface CashPerAccountPage {
+  schemaVersion: "snapshot-page-v1";
+  collection: "cash";
+  /** `known-assets-subtotal-v1`: the policy that names the cash metrics. */
+  policyRelease: string;
+  lines: CashLine[];
+  /** Over the whole filter scope, never the page. */
+  subtotals: { byUnit: CashSubtotal[]; bySource: CashSourceSubtotal[] };
+  leftOut: CashLeftOut[];
+  /** Unfetched liabilities mean cash is not a net worth, or a lower bound of one. */
+  liabilitiesCoverage: "unknown";
+  dataCoverage: SnapshotDataCoverage;
+  page: CashPageInfo;
+}
+
 /**
  * `GET /api/overview` as its route answers it in full: the reader's overview,
  * each list cut to 500 rows, with that bound's coverage.

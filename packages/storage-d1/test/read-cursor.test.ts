@@ -208,3 +208,29 @@ describe("the read reader", () => {
     expect(page.map((entry) => entry.row_seq)).toEqual([0]);
   });
 });
+
+// The cash read's measure read (ADR 0123, amendment of 2026-11-20) answers
+// a scope of at most 5,000 latest rows; one more is no answer, never a part.
+describe("the measure read's bound", () => {
+  const reading = (count: number) => {
+    const asked: string[] = [];
+    const read = {
+      async all<T>(sql: string): Promise<T[]> {
+        asked.push(sql);
+        return Array.from({ length: count }, (_, index) => ({ row_seq: index }) as T);
+      },
+      async first<T>(): Promise<T | null> {
+        return null;
+      },
+    };
+    return { reader: createReadProjectionReader(read, read), asked };
+  };
+
+  test("answers 5,000 rows and refuses 5,001", async () => {
+    const full = reading(5_000);
+    expect(await full.reader.measureRows("a".repeat(64), {})).toHaveLength(5_000);
+    // The statement asks for one row over the bound, so it can tell the two apart.
+    expect(full.asked[0]).toContain("LIMIT 5001");
+    expect(await reading(5_001).reader.measureRows("a".repeat(64), {})).toBeNull();
+  });
+});

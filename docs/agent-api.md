@@ -1142,7 +1142,7 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 | `kogane.store.read`                    | `GET /api/meta`, `/api/overview`, `/api/filter-options`                                                                                                                          | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.observations.list`             | `GET /api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                                                                                     | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.observations.get`              | `GET /api/observations/{kind}/{id}`, `/api/artifacts/{id}`                                                                                                                       | `records.read` on `"*"` sources and accounts                                                    |
-| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                                                                                        | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`; `/api/v2/balances/cash` (no screen reads it)                                                                          | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                                                                         | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                                                                                    | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.reports.read`                  | `GET /api/v2/reports`, `/api/v2/reports/{id}`, `/api/v2/reports/{id}/explanation`, while `reportArtifacts` is served; never `/export`                                            | `records.read` on `"*"` sources and accounts                                                    |
@@ -1209,6 +1209,84 @@ and keeps the summaries under the 8 KB a client shows, with the overview
 and the maintenance read (below) also at their realistic worst (the
 overview under 7 KB there), the overview at its bound, and the overview
 past today's names, where its byte budget trims it.
+
+**Cash per account.** `kogane.balances.read` `{collection: "cash"}` and `GET /api/v2/balances/cash`
+answer "how much cash do I have, per account and per bank" in one call
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+2026-11-20). Both call `cashPerAccountPage` (`services/app/src/balances-v2.ts`),
+which reads the published snapshot the other two balance routes serve, under
+their refusals (`503 read_model_unavailable` and the snapshot refusals), and
+shapes it with `cashPerAccount`
+(`packages/application/src/query/cash-per-account.ts`). The page is
+`{ schemaVersion, collection: "cash", policyRelease, lines, subtotals,
+leftOut, liabilitiesCoverage: "unknown", dataCoverage, page }`:
+
+- **What is cash.** The metrics of the known-assets subtotal
+  (`known-assets-subtotal-v1`): `deposit.balance` (SBI Shinsei, SMBC and
+  Mizuho deposits), `broker.foreign-cash-deposit` (SBI Securities foreign
+  cash, per currency) and `exchange.cash-balance` (SBI VC Trade cash)
+  (`CASH_METRIC_IDS`, pinned to `knownAssetMetricIds()`).
+- **`lines`.** One line per account entity: `account` (the 64-hex entity)
+  and `label` (its readable label, [ADR 0120](adr/0120-readable-account-labels.md)),
+  both null when the organization is unavailable (the line is then one
+  projection subject), and `references`, one per provider reference that
+  reaches the account (`source`, `sourceAccount`, the key the `account`
+  filter takes), each with its `amounts`: `observationId`, `metric`, `unit`,
+  `value` and `scale` (none when the value is not exact), `status`,
+  `adoption`, `counted`, `asOf` and `reasons` (`adoption:<code>`,
+  `freshness:<code>`, `cash:account_reported_twice`; an amount not counted
+  always has one). Lines are ordered by source, then label.
+- **`subtotals`.** `byUnit` and `bySource` (per source and unit), over the
+  whole filter scope on every page: `value` and `scale` are the exact sum
+  (`sumQuantities`) of the counted amounts, null when nothing is counted,
+  never a zero; `counted`, `notCounted`, `status` (`partial` when an amount
+  is not counted for a reason other than adoption's `excluded`) and the
+  not-counted amounts' `reasons`. No two units are added.
+- **What is counted (INV06).** An adopted exact amount, as the projection
+  adopted it for the known-assets subtotal and `financial.query` `holdings`,
+  and only when it is the only adopted amount of its unit on its account
+  line and on its provider reference. Two adopted amounts of one unit on
+  one account (two references of one account entity, or one reference
+  twice) are both left uncounted with `cash:account_reported_twice`, and
+  the subtotal and the coverage say so.
+- **`leftOut`.** The scope's other latest measurements, per closed reason
+  (`metric_unknown`, `not_currency`, `not_a_stock`, `not_asset_positive`,
+  `overlaps_another_measure`, `restates_a_balance`, `not_summable`, decided
+  from the registry definition in that order) with the row count, up to
+  three metric ids with the most rows and `moreMetrics`. A Sony Bank or
+  Mobile Suica balance (`restates_a_balance`) and a PRESTIA term deposit
+  (`overlaps_another_measure`) are left out here, as from every known-assets
+  subtotal.
+- **Paging.** A page holds whole lines up to `limit` measurements (10 by
+  default; 10, 25, 50, 100, 200 or 500), a line with more being a page
+  alone, and fewer when the next line would carry the tool's answer past
+  8,192 bytes as `/mcp` writes it (UTF-8, cursor included); a page that
+  cannot hold its first line is `413 result_limit_exceeded`, never cut,
+  with no hint (no `retryWith`: the read has no other `detail`). The
+  subtotals and `leftOut` repeat on every page, so a scope of about 50
+  source and unit pairs leaves no room for a line; `source` or
+  `instrument` narrows them. `page.lines` counts the scope's lines. The cursor is the v2 balance
+  cursor: bound to the snapshot, the route, `source`, `account`,
+  `instrument` and `identityRead`, continued at any offered `limit`
+  ([ADR 0119](adr/0119-cursor-page-size.md)), `400 cursor_mismatch` with
+  `mustMatch` otherwise, and `410 context_expired` when an identity
+  decision between two pages changed the grouping of the scope's lines
+  anywhere (merged, split, relabelled or reordered them). It carries a
+  digest of every line's key, label and references' observations, never an
+  account key or label.
+- **Filters.** `source`, `account`, `instrument` (the unit), `identityRead`,
+  `limit`, `cursor`; `metric`, `view` and `detail` are `400 invalid_query`.
+  A scope of more than 5,000 latest rows is `413 result_limit_exceeded`,
+  never a partial answer.
+
+It reads one fixed snapshot's latest rows of the scope in compact columns
+(`measureRows`, `projectionMeasureSql`: a search of
+`current_balance_projection_order` by snapshot, checked without table
+statistics in `packages/storage-d1/test/statement-plans.test.ts`) and
+organizes only the cash rows. `test/cash-per-account-api.test.ts` pins the
+route, `/api/agent/v1/balances.read` and `/mcp` answering the same page on a
+synthetic store of 30 cash accounts in four units over five sources, each
+page under 8 KB.
 
 The overview summary (`GET /api/overview`, `kogane.store.read`
 `{page: "overview"}`; ADR 0123, amendments of 2026-11-19 and 2026-11-20) is

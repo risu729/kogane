@@ -223,7 +223,22 @@ a subject that appears twice in the same unit makes the subtotal unavailable
 several units (an exchange account's cash per asset, a broker's foreign cash
 per currency) counts once in each unit's figure: the subtotal is per unit, so
 that is not a second count of anything. Above 5,000 adopted rows the subtotal
-is `null` with `scope_exceeds_subtotal_bound`.
+is `null` with `scope_exceeds_subtotal_bound`. The subject is the provider
+reference: an account entity reached through two references of one source
+that the within-source policy lists apart is added once per reference here
+(an open limit; the cash read below counts neither).
+
+`GET /api/v2/balances/cash` (`kogane.balances.read` `collection: cash`)
+answers the same snapshot's cash per account: one line per account entity
+with its references and amounts, exact subtotals per unit and per source, and
+every other latest measurement counted under a closed reason. Its counted
+amounts are the known-assets subtotal's, except that two adopted amounts of
+one unit on one account entity are both left uncounted with
+`cash:account_reported_twice`. Its lines page under the cursor below, whole
+lines up to `limit` measurements and 8 KB a page; its page and the rules of what is cash are
+in [agent API: UI read pages](agent-api.md#ui-read-pages) and
+[ADR 0123](adr/0123-summary-detail-for-large-reads.md) (amendment of
+2026-11-20).
 
 ### Cursor contract
 
