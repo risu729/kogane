@@ -798,6 +798,68 @@ describe("balance projection builder", () => {
         ),
       ).toBe(false);
     });
+
+    test("a common part no entity marks still keeps an entity's references apart", () => {
+      // A sub-account with no candidate and no entity is decided a part of
+      // the route's line for the bank pocket and of the bank account. The
+      // pocket and the line share an entity, so the pocket overlaps the
+      // account in that sub-account. The closure read entities only on a
+      // common part or between the pair, so the pocket and the account were
+      // declared disjoint (listed apart) and both adopted.
+      const pocket = deposit("m-pocket", "source_account:smbc:pocket", "1000", {
+        accountEntity: "account:synthetic:pocket",
+      });
+      const account = deposit("m-account", "source_account:smbc:account", "3000", {
+        accountEntity: "account:synthetic:account",
+      });
+      const line = routeLine("m-line", "source_account:route:pocket", "account:synthetic:pocket");
+      const decisions = [
+        relation("source_account:other:sub", "source_account:route:pocket", "subset"),
+        relation("source_account:other:sub", "source_account:smbc:account", "subset"),
+      ];
+      const build = buildBalanceProjection([pocket, account, line], decisions);
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-pocket", "m-account", "m-line"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // Without the shared entity the pocket's line is its own account: the
+      // sub-account lies in the line and in the bank account, and the
+      // pocket stays declared disjoint from the account.
+      const apart = buildBalanceProjection(
+        [pocket, account, { ...line, accountEntity: "account:synthetic:line" }],
+        decisions,
+      );
+      expect(adopted(apart)).toEqual(["m-account", "m-pocket"]);
+    });
+
+    test("a scope measured only in another target carries its entity", () => {
+      // A route line seen only in dollars shares the second account's entity
+      // and is decided the same account as the first. Its entity was read
+      // only from the yen target's own candidates, where it has none, so the
+      // two bank accounts were declared disjoint and both adopted.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        accountEntity: "account:synthetic:first",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const dollars = {
+        ...routeLine("m-line-usd", "source_account:route:line", "account:synthetic:shared"),
+        instrument: "USD",
+      };
+      const build = buildBalanceProjection(
+        [first, second, dollars],
+        [relation("source_account:smbc:first", "source_account:route:line", "same")],
+      );
+      for (const scopeKey of ["m-first", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      expect(stateOf(build, "m-line-usd").state).toBe("adopted");
+    });
   });
 
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {
@@ -882,6 +944,41 @@ describe("balance projection builder", () => {
     const build = buildBalanceProjection(candidates, []);
     expect(build.rows.every((row) => row.state === "unresolved")).toBe(true);
     expect(build.rows.every((row) => row.reasonCode === "adoption_target_oversized")).toBe(true);
+  });
+
+  test("two full targets with shared entities and the relation budget build well under a second", () => {
+    // 2 × 250 subjects, entities shared in pairs, and 5,000 accepted
+    // decisions (the relation read's bound) over them and 4,000 scopes with
+    // no candidate: the scope order and its lower sets stay cheap beside the
+    // pairwise adoption itself.
+    let state = 7;
+    const next = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 2 ** 32;
+    };
+    const candidates = ["JPY", "USD"].flatMap((instrument) =>
+      Array.from({ length: ADOPTION_SUBJECT_BOUND }, (_, index) =>
+        deposit(`m-${instrument}-${String(index)}`, `scope:${String(index)}`, "1", {
+          instrument,
+          accountEntity: `account:synthetic:${String(index >> 1)}`,
+        }),
+      ),
+    );
+    const scopes = [
+      ...Array.from({ length: ADOPTION_SUBJECT_BOUND }, (_, index) => `scope:${String(index)}`),
+      ...Array.from({ length: 4000 }, (_, index) => `outside:${String(index)}`),
+    ];
+    const decisions = Array.from({ length: 5000 }, () => {
+      const [a, b] = [Math.floor(next() * scopes.length), Math.floor(next() * scopes.length)];
+      return a === b
+        ? relation(scopes[a]!, scopes[(a + 1) % scopes.length]!, "same")
+        : relation(scopes[Math.max(a, b)]!, scopes[Math.min(a, b)]!, "subset");
+    });
+    const started = performance.now();
+    const build = buildBalanceProjection(candidates, decisions);
+    const elapsed = performance.now() - started;
+    expect(build.rows).toHaveLength(2 * ADOPTION_SUBJECT_BOUND);
+    expect(elapsed).toBeLessThan(1000);
   });
 
   test("temporal references keep the precision of the stored value", () => {

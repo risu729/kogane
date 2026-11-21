@@ -97,19 +97,21 @@ writer fencing and captured CORE references; the contract is in
    (`account_mappings.account_id`, read by the build as each candidate's
    `accountEntity`) name one account entity: their overlap stays unknown, so
    step 7 leaves the worse-ranked side unresolved, or both sides at equal
-   rank, with `account_entity_shared` instead of `overlap_unknown`. Towards
-   a scope no decision relates to it directly, a scope also stands for the
-   entities accepted decisions put it with, transitively and through scopes
-   outside the target, reading two references of one entity as one scope:
-   those it holds (its `same` scopes and their parts) and those it lies
-   inside (its `same` scopes and their wholes). Two scopes share an entity
-   when one holds an entity the other holds or lies inside, so a decision
-   cannot carry a shared entity past the policy (a part's entity made
-   disjoint through its whole, a `same` partner's, or a whole's entity made
-   disjoint through its part); two pockets of one account do not share it by
-   that alone. A scope with no candidate in the target carries no entity,
-   and a nesting or common part no entity marks is not read (the ADR's open
-   limits). The
+   rank, with `account_entity_shared` instead of `overlap_unknown`. Nor do
+   they apply to two scopes that accepted decisions and those mappings force
+   to overlap, with a mapped scope on the way, so a decision cannot carry a
+   shared entity past the policy. The build reads scopes as non-empty sets:
+   an accepted `same` makes two equal, a containment makes its part a
+   subset, and two references of one entity are read as equal. Two scopes
+   are forced to overlap exactly when some scope lies at or below both (two
+   pockets of one account are not), and the policy withholds disjointness
+   when a scope mapped to an entity lies on the way up from that scope to
+   one of the two. Every accepted decision is read, through scopes outside
+   the target too, and a scope's entities come from its candidates in every
+   target. A pair a decision relates directly is read against its own
+   entities. A forced overlap with no mapped scope on the way keeps the v2
+   answer, and a scope known only from a decision carries no entity (the
+   ADR's open limits). The
    entity is then shown and not counted until a decision accepts the two
    references as `same_account` (one is adopted, the other is
    `duplicate_evidence`) or a mapping revision separates them

@@ -147,9 +147,10 @@ export interface ProjectionCandidate {
    * The account entity the current identity mapping gives the candidate's
    * reference (`account_mappings.account_id`), or null when no mapping
    * organizes it. It never makes two scopes one measurement; it only keeps
-   * the disjointness policy from declaring two references of one entity
-   * apart. An input captured before this field existed has no value here and
-   * builds as v2 did.
+   * the disjointness policy from declaring apart two references of one
+   * entity, or two scopes accepted decisions and the mapping force to
+   * overlap. An input captured before this field existed has no value here
+   * and builds as v2 did.
    */
   accountEntity: string | null;
 }
@@ -369,8 +370,196 @@ interface Subject {
   status: SubjectStatus;
   sourceId: string;
   depositInstitution: string | null;
-  /** Every account entity a witness of this scope is mapped to. */
-  accountEntities: Set<string>;
+}
+
+/**
+ * The order accepted decisions and the current identity mapping put scopes
+ * in, read once per build from every accepted decision and every candidate,
+ * so a chain through scopes outside a target still counts.
+ *
+ * Scopes are read as non-empty sets. An accepted `same` makes two scopes
+ * equal and a containment makes its part a subset of its whole. Two
+ * references the current mapping gives one account entity may be one
+ * measurement, so they are read as equal too; a scope's entities are those of
+ * every candidate of it, in every target, because the mapping belongs to the
+ * reference and not to a metric. Under those constraints two scopes are
+ * forced to overlap exactly when some scope lies at or below both of them (a
+ * common lower bound): the set of scopes at or below each scope satisfies
+ * every constraint and keeps any other pair apart. An accepted `disjoint`
+ * forces no overlap (that same model satisfies it whenever the decisions are
+ * consistent), and the build reads none.
+ */
+interface ScopeOrder {
+  /** The equality class of a scope: accepted `same` and shared entities join scopes. */
+  classOf: (scope: string) => string;
+  /** Class → the classes a decision makes a part of one of its scopes. */
+  parts: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Classes with a scope the current mapping maps to an account entity. */
+  mapped: ReadonlySet<string>;
+  /** Scope → the account entities of its candidates. */
+  entities: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+function scopeOrder(
+  candidates: readonly ProjectionCandidate[],
+  decisions: readonly DerivedScopeRelation[],
+): ScopeOrder {
+  const parent = new Map<string, string>();
+  const classOf = (key: string): string => {
+    let at = key;
+    for (let next = parent.get(at); next !== undefined; next = parent.get(at)) {
+      const grand = parent.get(next);
+      if (grand !== undefined) parent.set(at, grand);
+      at = grand ?? next;
+    }
+    return at;
+  };
+  const join = (left: string, right: string) => {
+    const [x, y] = [classOf(left), classOf(right)];
+    if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
+  };
+  const entities = new Map<string, Set<string>>();
+  for (const candidate of candidates)
+    // `typeof` and not `!== null`: an input captured before the field
+    // existed lacks it.
+    if (typeof candidate.accountEntity === "string") {
+      const held = entities.get(candidate.subjectScopeKey) ?? new Set<string>();
+      held.add(candidate.accountEntity);
+      entities.set(candidate.subjectScopeKey, held);
+    }
+  for (const relation of decisions)
+    if (relation.relation === "same") join(relation.fromScopeKey, relation.toScopeKey);
+  const holder = new Map<string, string>();
+  for (const [scope, held] of entities)
+    for (const entity of held) {
+      const first = holder.get(entity);
+      if (first === undefined) holder.set(entity, scope);
+      else join(first, scope);
+    }
+  const parts = new Map<string, Set<string>>();
+  // `subset` reads from ⊂ to: the part is the left side.
+  for (const relation of decisions)
+    if (relation.relation === "subset") {
+      const [part, whole] = [classOf(relation.fromScopeKey), classOf(relation.toScopeKey)];
+      if (part === whole) continue;
+      const set = parts.get(whole) ?? new Set<string>();
+      set.add(part);
+      parts.set(whole, set);
+    }
+  return { classOf, parts, mapped: new Set([...entities.keys()].map(classOf)), entities };
+}
+
+/** Classes as bits over one target's lower closure: a pair is compared in a few words. */
+type ClassBits = Uint32Array;
+
+// Indexed loops: a pair is compared for every two subjects of a target.
+function orInto(target: ClassBits, source: ClassBits): void {
+  for (let index = 0; index < source.length; index += 1)
+    target[index] = target[index]! | source[index]!;
+}
+
+function bitsMeet(left: ClassBits, right: ClassBits): boolean {
+  for (let index = 0; index < left.length; index += 1)
+    if ((left[index]! & right[index]!) !== 0) return true;
+  return false;
+}
+
+interface LowerSets {
+  /** Class → its position in the bit sets. */
+  position: ReadonlyMap<string, number>;
+  /** Position → the classes at or below it. */
+  below: readonly ClassBits[];
+  /** Position → the classes at or below a mapped class at or below it. */
+  belowMapped: readonly ClassBits[];
+}
+
+/**
+ * The lower sets of every class at or below one of `starts`, over the
+ * decided parts. A decided cycle (`a ⊂ b` and `b ⊂ a`, or a chain whose ends
+ * share an entity) makes its classes equal, so they are read as one
+ * strongly connected set, found with Tarjan's algorithm without recursion.
+ * Tarjan completes a set only after every set it reaches, so each set's
+ * lower sets are the union of its own members and its parts' lower sets.
+ */
+function lowerSets(starts: Iterable<string>, order: ScopeOrder): LowerSets {
+  const nodes: string[] = [];
+  const position = new Map<string, number>();
+  const visit = (key: string) => {
+    if (position.has(key)) return;
+    position.set(key, nodes.length);
+    nodes.push(key);
+  };
+  for (const start of starts) visit(start);
+  for (let at = 0; at < nodes.length; at += 1)
+    for (const part of order.parts.get(nodes[at]!) ?? []) visit(part);
+  const edges = nodes.map((key) =>
+    [...(order.parts.get(key) ?? [])].map((part) => position.get(part)!),
+  );
+  const words = Math.ceil(nodes.length / 32);
+  const index = new Int32Array(nodes.length).fill(-1);
+  const low = new Int32Array(nodes.length);
+  const open = new Uint8Array(nodes.length);
+  const setOf = new Int32Array(nodes.length).fill(-1);
+  const setBelow: ClassBits[] = [];
+  const setBelowMapped: ClassBits[] = [];
+  const stack: number[] = [];
+  let counter = 0;
+  const enter = (node: number) => {
+    index[node] = counter;
+    low[node] = counter;
+    counter += 1;
+    stack.push(node);
+    open[node] = 1;
+  };
+  for (let start = 0; start < nodes.length; start += 1) {
+    if (index[start] !== -1) continue;
+    enter(start);
+    const work: [number, number][] = [[start, 0]];
+    while (work.length > 0) {
+      const frame = work.at(-1)!;
+      const [node, next] = frame;
+      const out = edges[node]!;
+      if (next < out.length) {
+        frame[1] = next + 1;
+        const to = out[next]!;
+        if (index[to] === -1) {
+          enter(to);
+          work.push([to, 0]);
+        } else if (open[to] === 1) low[node] = Math.min(low[node]!, index[to]!);
+        continue;
+      }
+      work.pop();
+      const caller = work.at(-1);
+      if (caller !== undefined) low[caller[0]] = Math.min(low[caller[0]]!, low[node]!);
+      if (low[node] !== index[node]) continue;
+      const set = setBelow.length;
+      const members: number[] = [];
+      for (let member = stack.pop()!; ; member = stack.pop()!) {
+        open[member] = 0;
+        setOf[member] = set;
+        members.push(member);
+        if (member === node) break;
+      }
+      const below = new Uint32Array(words);
+      const belowMapped = new Uint32Array(words);
+      for (const member of members)
+        below[member >>> 5] = below[member >>> 5]! | (1 << (member & 31));
+      for (const member of members)
+        for (const to of edges[member]!)
+          if (setOf[to] !== set) {
+            orInto(below, setBelow[setOf[to]!]!);
+            orInto(belowMapped, setBelowMapped[setOf[to]!]!);
+          }
+      if (members.some((member) => order.mapped.has(nodes[member]!))) orInto(belowMapped, below);
+      setBelow.push(below);
+      setBelowMapped.push(belowMapped);
+    }
+  }
+  return {
+    position,
+    below: nodes.map((_, node) => setBelow[setOf[node]!]!),
+    belowMapped: nodes.map((_, node) => setBelowMapped[setOf[node]!]!),
+  };
 }
 
 function shareAccountEntity(
@@ -379,130 +568,6 @@ function shareAccountEntity(
 ): boolean {
   for (const entity of left ?? []) if (right?.has(entity)) return true;
   return false;
-}
-
-/** Account entities as bits over the target's entities: a pair is compared in a few words. */
-type EntityBits = Uint32Array;
-
-function bitsMeet(left: EntityBits | undefined, right: EntityBits | undefined): boolean {
-  if (left === undefined || right === undefined) return false;
-  for (const [index, word] of left.entries()) if ((word & (right[index] ?? 0)) !== 0) return true;
-  return false;
-}
-
-interface DecidedEntities {
-  /** What the subject holds: its decided `same` scopes and, transitively, their parts. */
-  holds: Map<string, EntityBits>;
-  /** What the subject lies inside: its decided `same` scopes and, transitively, their wholes. */
-  within: Map<string, EntityBits>;
-}
-
-/**
- * The account entities a subject stands for towards a subject no decision
- * relates to it directly, read from every accepted decision, a scope with no
- * candidate in the target included (its entity is not known here). Scopes an
- * accepted `same` joins (one measurement) and references of one entity (may
- * be one) are read as one scope. A subject holds the entities of every scope
- * so joined to it and of every scope a decision makes a part of one of those,
- * transitively; it lies inside the entities of those scopes and of every
- * scope one of them is decided a part of, transitively. A nesting or common
- * part no entity marks is not read (ADR 0001's open limit). Two subjects may
- * overlap when an entity one holds is held by
- * the other or holds the other; two scopes that only lie inside one entity
- * (two pockets of one account) do not overlap by that alone.
- *
- * Without the closure a decision carries a shared entity past the policy:
- * with `a ≡ c` decided and `c` sharing `b`'s entity, `a ⊥ b` adopted both `a`
- * and `b`; with `a ⊂ w` decided and `a` sharing `b`'s entity, `w ⊥ b` became
- * `a ⊥ b` by step 7's one-step derivation, and both were adopted; with
- * `p ⊂ w` decided and `w` sharing `b`'s entity, `p ⊥ b` adopted `p` and `b`
- * once `p` covered `w`; a part two decisions deep was counted in its outer
- * whole and in another reference of its entity; and with `q ⊂ w` decided, `p`
- * sharing `q`'s entity and `w` sharing `b`'s, `p ⊥ b` adopted both.
- */
-function decidedEntities(
-  subjects: ReadonlyMap<string, Subject>,
-  decisions: readonly DerivedScopeRelation[],
-): DecidedEntities {
-  const parent = new Map<string, string>();
-  const root = (key: string): string => {
-    let at = key;
-    for (let next = parent.get(at); next !== undefined && next !== at; next = parent.get(at))
-      at = next;
-    return at;
-  };
-  const join = (left: string, right: string) => {
-    const [x, y] = [root(left), root(right)];
-    if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
-  };
-  for (const relation of decisions)
-    if (relation.relation === "same") join(relation.fromScopeKey, relation.toScopeKey);
-  // Two references of one entity may be one measurement, so the walk reads
-  // them as one: with `p ≈ q ⊂ w ≈ b` (≈ an entity shared), `p` lies inside
-  // `b`'s entity although no decision touches `p` or `b`.
-  const holder = new Map<string, string>();
-  for (const [key, subject] of subjects)
-    for (const entity of subject.accountEntities) {
-      const first = holder.get(entity);
-      if (first === undefined) holder.set(entity, key);
-      else join(first, key);
-    }
-  const bit = new Map<string, number>();
-  for (const subject of subjects.values())
-    for (const entity of subject.accountEntities) if (!bit.has(entity)) bit.set(entity, bit.size);
-  const words = Math.ceil(bit.size / 32);
-  const own = new Map<string, EntityBits>();
-  for (const [key, subject] of subjects) {
-    const bits = own.get(root(key)) ?? new Uint32Array(words);
-    for (const entity of subject.accountEntities) {
-      const at = bit.get(entity)!;
-      bits[at >>> 5] = (bits[at >>> 5] ?? 0) | (1 << (at & 31));
-    }
-    own.set(root(key), bits);
-  }
-  const parts = new Map<string, Set<string>>();
-  const wholes = new Map<string, Set<string>>();
-  const link = (edges: Map<string, Set<string>>, from: string, to: string) => {
-    const set = edges.get(from) ?? new Set<string>();
-    set.add(to);
-    edges.set(from, set);
-  };
-  // `subset` reads from ⊂ to: the part is the left side.
-  for (const relation of decisions)
-    if (relation.relation === "subset") {
-      const [part, whole] = [root(relation.fromScopeKey), root(relation.toScopeKey)];
-      link(parts, whole, part);
-      link(wholes, part, whole);
-    }
-  // One walk per subject component and direction, over every decided scope.
-  const reach = (start: string, edges: ReadonlyMap<string, Set<string>>): EntityBits => {
-    const bits = new Uint32Array(words);
-    const seen = new Set([start]);
-    const stack = [start];
-    for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
-      for (const [index, word] of (own.get(at) ?? []).entries())
-        bits[index] = (bits[index] ?? 0) | word;
-      for (const next of edges.get(at) ?? [])
-        if (!seen.has(next)) {
-          seen.add(next);
-          stack.push(next);
-        }
-    }
-    return bits;
-  };
-  const byRoot = new Map<string, { holds: EntityBits; within: EntityBits }>();
-  const result: DecidedEntities = { holds: new Map(), within: new Map() };
-  for (const key of subjects.keys()) {
-    const component = root(key);
-    const sets = byRoot.get(component) ?? {
-      holds: reach(component, parts),
-      within: reach(component, wholes),
-    };
-    byRoot.set(component, sets);
-    result.holds.set(key, sets.holds);
-    result.within.set(key, sets.within);
-  }
-  return result;
 }
 
 /** Scope pairs a relation in `relations` relates directly. */
@@ -523,31 +588,36 @@ function relatedPairs(
 }
 
 /**
- * Whether two subjects may be references of one account entity: on their own
- * entities when a decision relates the pair, otherwise when an entity one
- * holds is held by the other or holds the other (`decidedEntities`).
- * `declared` is the target's relations; `decisions` is every accepted one.
+ * Whether the current identity mapping takes part in forcing two subjects to
+ * overlap (`ScopeOrder`): some scope lies at or below both, and a mapped
+ * class lies on the way up from it to one of them. With `c ≤ m ≤ a` and
+ * `c ≤ b`, `m` mapped, the classes below a mapped class below `a` meet the
+ * classes below `b`. Two scopes that only lie below one mapped scope (two
+ * pockets of one account) have no common lower bound and are not forced to
+ * overlap. A forced overlap with no mapped class on any way is the
+ * decision-only nesting v2 left to the policy, and stays so. A pair a
+ * decision relates directly is read against its own entities: the decision
+ * already keeps the pair from being adopted twice, and a policy claim that
+ * contradicts it still degrades the pair to unknown as under v2.
+ * `declared` is the target's relations.
  */
 function entitySharing(
-  subjects: ReadonlyMap<string, Subject>,
+  subjects: Iterable<string>,
+  order: ScopeOrder,
   declared: readonly DerivedScopeRelation[],
-  decisions: readonly DerivedScopeRelation[],
 ): (left: string, right: string) => boolean {
-  const { holds, within } = decidedEntities(subjects, decisions);
+  const { position, below, belowMapped } = lowerSets(
+    [...subjects].map((key) => order.classOf(key)),
+    order,
+  );
   const related = relatedPairs(declared);
   return (left, right) => {
     if (related(left, right))
-      return shareAccountEntity(
-        subjects.get(left)?.accountEntities,
-        subjects.get(right)?.accountEntities,
-      );
-    const leftHolds = holds.get(left);
-    const rightHolds = holds.get(right);
-    return (
-      bitsMeet(leftHolds, rightHolds) ||
-      bitsMeet(within.get(left), rightHolds) ||
-      bitsMeet(leftHolds, within.get(right))
-    );
+      return shareAccountEntity(order.entities.get(left), order.entities.get(right));
+    const l = position.get(order.classOf(left));
+    const r = position.get(order.classOf(right));
+    if (l === undefined || r === undefined) return false;
+    return bitsMeet(belowMapped[l]!, below[r]!) || bitsMeet(belowMapped[r]!, below[l]!);
   };
 }
 
@@ -575,10 +645,10 @@ const DEPOSIT_INSTITUTIONS = new Map([
  * entity: being listed apart, being identified or sitting at two
  * institutions says nothing when identity says both references are one
  * account, so their overlap stays unknown until a decision accepts them as
- * the same account or a mapping revision separates them (v3). Towards a
- * scope no decision relates to it directly, a scope also stands for the
- * entities it holds or lies inside through accepted decisions, transitively
- * (`decidedEntities`).
+ * the same account or a mapping revision separates them (v3). Nor between
+ * two scopes that accepted decisions and those mappings force to overlap
+ * with a mapped scope on the way (`entitySharing`), so a decision cannot
+ * carry a shared entity past the policy.
  *
  * Everything else is deliberately absent. An aggregate or total scope, an
  * aggregator line with no terminal account, and a provider-local label seen
@@ -625,7 +695,7 @@ function adoptionOutcomes(
   target: AdoptionTarget,
   candidates: readonly ProjectionCandidate[],
   declared: readonly DerivedScopeRelation[],
-  decisions: readonly DerivedScopeRelation[],
+  order: ScopeOrder,
 ): { outcomes: Map<string, Outcome>; relations: DerivedScopeRelation[] } {
   const outcomes = new Map<string, Outcome>();
   const subjects = new Map<string, Subject>();
@@ -638,11 +708,6 @@ function adoptionOutcomes(
         ? (DEPOSIT_INSTITUTIONS.get(candidate.sourceId) ?? null)
         : null;
     const previous = subjects.get(candidate.subjectScopeKey);
-    // Every entity any witness of the scope is mapped to: a scope whose
-    // witnesses disagree shares an entity with each of them. `typeof` and
-    // not `!== null`: an input captured before the field existed lacks it.
-    const accountEntities = new Set(previous?.accountEntities);
-    if (typeof candidate.accountEntity === "string") accountEntities.add(candidate.accountEntity);
     subjects.set(candidate.subjectScopeKey, {
       status: candidate.subjectStatus,
       sourceId: candidate.sourceId,
@@ -651,7 +716,6 @@ function adoptionOutcomes(
       // merely by appearing before a listed witness in the input.
       depositInstitution:
         previous === undefined || previous.depositInstitution === institution ? institution : null,
-      accountEntities,
     });
   }
   if (subjects.size > ADOPTION_SUBJECT_BOUND) {
@@ -662,7 +726,7 @@ function adoptionOutcomes(
       });
     return { outcomes, relations: [] };
   }
-  const sharesEntity = entitySharing(subjects, declared, decisions);
+  const sharesEntity = entitySharing(subjects.keys(), order, declared);
   const policy = policyDisjointness(subjects, sharesEntity);
   const claims = [...declared.map(claim), ...policy.map(claim)];
   const measures: MeasureCandidate[] = candidates.map((candidate) => ({
@@ -762,6 +826,7 @@ export function buildBalanceProjection(
   }
   const outcomes = new Map<string, Outcome>();
   const policyRelations: DerivedScopeRelation[] = [];
+  const order = scopeOrder(candidates, declaredRelations);
   for (const [, bucket] of [...targets.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const first = bucket[0]!;
     const target: AdoptionTarget = {
@@ -775,9 +840,10 @@ export function buildBalanceProjection(
           candidate.subjectScopeKey === relation.toScopeKey,
       ),
     );
-    // The target's own relations decide; every decision feeds the entity
-    // closure, so a chain through scopes outside the target still counts.
-    const resolved = adoptionOutcomes(target, bucket, relevant, declaredRelations);
+    // The target's own relations decide; every decision and every
+    // candidate's entity feed the scope order, so a chain through scopes
+    // outside the target still counts.
+    const resolved = adoptionOutcomes(target, bucket, relevant, order);
     for (const [ref, outcome] of resolved.outcomes) outcomes.set(ref, outcome);
     policyRelations.push(...resolved.relations);
   }
