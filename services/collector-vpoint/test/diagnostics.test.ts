@@ -40,6 +40,29 @@ describe("V Point safe diagnostics", () => {
     expect(JSON.stringify(safeFailure(error))).not.toContain(PRIVATE);
   });
 
+  test("a history walk past its stated total is logged with its closed reason", async () => {
+    try {
+      await collectVPoint({
+        sessionCookie: "session=value",
+        fetcher: async (input) =>
+          Response.json({
+            status: { code: "0000" },
+            results:
+              new URL(String(input)).pathname === "/api/tpoint_history"
+                ? { total: 0, history: [{ point: 1 }], graph: {} }
+                : {},
+          }),
+      });
+      throw new Error("expected failure");
+    } catch (error) {
+      expect(safeFailure(error)).toEqual({
+        errorType: "VPointProtocolError",
+        failureCode: "provider_protocol_failed",
+        reasonCode: "rows-exceed-total",
+      });
+    }
+  });
+
   test("provider HTTP failure retains status and active read stage without response body", async () => {
     const stages: string[] = [];
     try {
