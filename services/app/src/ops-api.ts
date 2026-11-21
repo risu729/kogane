@@ -518,7 +518,12 @@ export async function opsApi(
   if (operation === null) {
     if (url.search) throw new HttpError(400, "invalid_query");
     if (request.method === "POST") assertOwnOrigin(request, url);
-    return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
+    // A path `opsOperation` does not name never reaches the Hono app. Hono
+    // routes on a percent-decoded path, so `/api/ops/v1/coll%65ctions` would
+    // run the collections handler while this function, which reads the path
+    // as sent, names no operation: an accepted request with no audit record
+    // (ADR 0064). The audit classifier is the route table.
+    throw new HttpError(404, "not_found");
   }
   // One audit record per operations request (ADR 0064, path `ui`): the
   // acceptance batch writes an accepted request's own, and every other

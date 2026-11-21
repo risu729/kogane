@@ -413,7 +413,9 @@ occurrence of that job.
   recorded.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
-  not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
+  not serve (`404 not_found`, MCP `unknown_tool`; under `/api/ops/v1` that
+  includes a percent-encoded spelling of a route, which is never served, so
+  no operations request is accepted unrecorded), and the MCP protocol's own
   messages (`initialize`, `tools/list`, `ping`, an accepted notification) —
   including a JSON-RPC error `/mcp` answers inside a `200` (an unknown method,
   `-32601`). Everything `/mcp` refuses with an HTTP status before a message

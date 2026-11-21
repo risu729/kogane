@@ -60,7 +60,12 @@ in protected GitHub workflows (02 §6).
 All seven are authenticated, and all seven are refused unless `OPS_API_ENABLED`
 is `"true"`. The route set is closed: any other path under `/api/ops/v1` is
 `404 not_found`, and any verb other than `POST` (accept) and `GET` (read) is
-`405 method_not_allowed`, exactly as everywhere else on this Worker.
+`405 method_not_allowed`, exactly as everywhere else on this Worker. A path is
+matched as it was sent: a percent-encoded spelling of a route
+(`/api/ops/v1/coll%65ctions`) is another path and `404 not_found`, because the
+function that names a request's audit operation (`opsOperation`) is the route
+table, and a path it does not name never reaches a handler, so the router's own
+percent-decoding cannot accept a request no audit record names (ADR 0064).
 
 | Route                                        | Body                                                       | Answers                     | What "done" means                                                          |
 | -------------------------------------------- | ---------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------- |
