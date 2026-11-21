@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { Quantity } from "../../../packages/domain/src/values.ts";
-import { decimalToString } from "../../../packages/domain/src/values.ts";
 import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
 import type { CardSettlementNextPage } from "../../../packages/domain/src/card-settlement-review.ts";
 import type { CardSettlementReview } from "./reconciliation-api.ts";
 import { Link } from "./router.tsx";
+import { formatDecimal } from "./money.ts";
 import { Badge, Kv, KvRow, Notice, Nullable } from "./ui.tsx";
 
 export const SETTLEMENT_STATUS = {
@@ -108,7 +108,7 @@ export function settlementReason(code: string): string {
 export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
   return value.value.status === "exact" ? (
     <span>
-      {decimalToString(value.value.value)} {value.unitRef}
+      {formatDecimal(value.value.value)} {value.unitRef}
     </span>
   ) : (
     <Nullable value={null} placeholder={`不明（${value.value.reasonCode}） · ${value.unitRef}`} />
@@ -123,7 +123,7 @@ export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
 export function QuantityChange({ value }: { value: Quantity }): ReactNode {
   if (value.value.status !== "exact")
     return <Nullable value={null} placeholder={`不明（${value.value.reasonCode}）`} />;
-  const text = decimalToString(value.value.value);
+  const text = formatDecimal(value.value.value);
   return <span>{text === "0" ? "±0" : text.startsWith("-") ? text : `+${text}`}</span>;
 }
 

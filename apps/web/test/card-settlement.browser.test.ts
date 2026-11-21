@@ -658,7 +658,7 @@ describe.if(runnable)("card settlement review", () => {
     const text = await section.innerText();
     expect(text).toContain("2098-03-20 以降に引き落とされるカードの請求です。");
     expect(text).toContain("架空カード（card-001）");
-    expect(text).toContain("30000 JPY");
+    expect(text).toContain("30,000 JPY");
     // Not exact: its reason, never a zero (INV05).
     expect(text).toContain("不明（stored:unparsed） · JPY");
     expect(text).toContain("架空銀行 普通");
@@ -785,8 +785,8 @@ describe.if(runnable)("card settlement review", () => {
     const text = await section.innerText();
     expect(text).toContain("請求総額と同じ金額の出金はありません");
     expect(text).toContain("複数の出金の合計が一致");
-    expect(text).toContain("三井住友銀行 · synthetic-bank · 1000 JPY");
-    expect(text).toContain("三井住友銀行 · synthetic-bank · 2000 JPY");
+    expect(text).toContain("三井住友銀行 · synthetic-bank · 1,000 JPY");
+    expect(text).toContain("三井住友銀行 · synthetic-bank · 2,000 JPY");
     expect(text).toContain("返金の割り当ては未対応");
     expect(text).toContain("まだ採用できません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
@@ -831,7 +831,7 @@ describe.if(runnable)("card settlement review", () => {
     const note = section.getByRole("note");
     await note.waitFor();
     expect(await note.innerText()).toContain(
-      "一致する組み合わせ 4,960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
+      "一致する組み合わせ 4960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
     );
     expect(await section.locator(".unmatched-allocation").count()).toBe(50);
     expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
@@ -1024,7 +1024,7 @@ describe.if(runnable)("card settlement review", () => {
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
     const page = await open();
     const text = await page.locator("main").innerText();
-    expect(text).toContain("3000 JPY");
+    expect(text).toContain("3,000 JPY");
     expect(text).toContain("追加する現金移動");
     expect(text).toContain("0 JPY");
     expect(text).toContain("候補・未適用");

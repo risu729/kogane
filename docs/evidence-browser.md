@@ -362,9 +362,11 @@ The pieces:
 - `packages/parsers/src/money.ts` — the minor-unit table, `formatAmount` and
   `amountSign`. It imports no runtime API, so the same module runs on Bun, on
   Workers, and in the browser. `packages/parsers/src/parsers/util.ts`
-  re-exports `minorUnitExponent` from it, and `apps/web/src/money.ts` is a
-  re-export that keeps
-  "nothing in the client formats an amount itself" enforceable by grep.
+  re-exports `minorUnitExponent` from it, and `apps/web/src/money.ts`
+  re-exports it beside `formatDecimal`, the client's one display format for
+  an exact decimal (kept out of the parser digest closure), which keeps
+  "nothing in the client formats an amount outside src/money.ts" enforceable
+  by grep.
 - `src/api.ts` — a Hono app. Every route it defines is a GET, and any
   method other than GET or HEAD is refused before routing.
 - `src/serve.ts` — the Bun entry point: binds loopback only, serves the
