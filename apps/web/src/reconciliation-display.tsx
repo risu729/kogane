@@ -181,7 +181,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
           {facts.statement.sourceAccount}
         </KvRow>
         <KvRow label="請求対象期間">
-          <Nullable value={facts.statement.period} placeholder="不明" />
+          <Nullable value={facts.statement.period} />
         </KvRow>
         <KvRow label="カード会社の請求総額">
           <SettlementQuantity value={facts.statement.amount} />
@@ -263,7 +263,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
               : "（採用済み）"}
         </KvRow>
         <KvRow label="元本負債の減少額">不明（請求総額だけでは元本と手数料を分けられません）</KvRow>
-        <KvRow label="手数料の内訳">不明</KvRow>
+        <KvRow label="手数料の内訳">不明（請求総額だけでは元本と手数料を分けられません）</KvRow>
         <KvRow label="純資産への影響">算定していません（資産・負債全体の情報が不足）</KvRow>
       </Kv>
       <p className="footnote">

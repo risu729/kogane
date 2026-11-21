@@ -594,6 +594,17 @@ describe.if(runnable)("card settlement review", () => {
     return page;
   }
 
+  test("a candidate's statement with no period recorded says so, never a bare 不明 (INV05)", async () => {
+    const base = settlementReview();
+    review = {
+      ...base,
+      facts: { ...base.facts, statement: { ...base.facts.statement, period: null } },
+    };
+    const page = await open();
+    expect(await page.locator("main").innerText()).toMatch(/請求対象期間\s+未記録/u);
+    await page.close();
+  });
+
   test("unknown ownership blocks adoption, preserves evidence access and allows explicit rejection planning", async () => {
     review = settlementReview(true);
     const page = await open();
@@ -606,7 +617,10 @@ describe.if(runnable)("card settlement review", () => {
     expect(
       await page.getByRole("link", { name: "銀行明細と原本", exact: true }).getAttribute("href"),
     ).toBe("/observations/transaction/12");
-    expect(await page.locator("main").innerText()).toContain("純資産への影響");
+    const details = await page.locator("main").innerText();
+    expect(details).toContain("純資産への影響");
+    // An unknown fee breakdown says why, never a bare 不明 (INV05).
+    expect(details).toMatch(/手数料の内訳\s+不明（請求総額だけでは元本と手数料を分けられません）/u);
     await page.getByRole("button", { name: "却下内容を確認" }).click();
     await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
     expect(posted.filter((row) => row.operation === "plan")[0]?.body).toMatchObject({
