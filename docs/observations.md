@@ -261,6 +261,31 @@ quoted rows, trailing text, multiline fields and logical row numbering.
 | v-point-smfg-point                       | 1.0.0    | 1.0.1   |
 | vpass-statement-page                     | 1.2.0    | 1.2.1   |
 
+## PayPay CSV: a row of separators only is not a transaction (parser 0.2.4)
+
+2026-11-21. The shared CSV reader drops an empty line, but a line of
+separators only (`,,,,,,,,,,,,`, as a spreadsheet saves a trailing blank row
+of the export) is a row of empty cells. `paypay-csv` 0.2.3 turned each such
+row into a transaction observation with no date, amount, external id,
+description or counterparty, and the warning `row N: neither an outgoing nor
+an incoming amount was stated`, so the transaction list showed an empty
+transaction for a line that states nothing.
+
+0.2.4 skips a row whose every cell is blank after trimming and records the
+closed warning `row N: blank row skipped`, which names no value. Row numbers
+and raw locators of every other row are unchanged, and every row with any
+non-blank cell reads exactly as in 0.2.3, including a row that states neither
+amount but does state something else.
+
+**Deploying rewrites nothing**: the processor registers 0.2.4 itself and the
+repair lane re-parses any stored PayPay CSV artifact under it. No migration
+and no operator step; an empty observation an earlier run stored stays in that
+superseded run. Limits: PayPay CSV has no production input (see
+[identity rollout](identity-rollout.md)), so whether any stored export ends in
+such rows is not established. Tests:
+`packages/parsers/test/paypay-csv-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
 ## PayPay CSV: a signed amount in either amount column is left empty (parser 0.2.2)
 
 2026-11-06. The export states a row's direction by its column: outgoing
@@ -2965,7 +2990,8 @@ skipped, not turned into placeholder rows.
 
 **`paypay-csv`** consumes the official consumer CSV documented in
 `docs/sources/paypay.md`, ingested through the `ingest-file` path. Each
-data row becomes one transaction observation: outgoing amounts negative,
+data row becomes one transaction observation (a row of separators only is
+skipped with a warning, 0.2.4): outgoing amounts negative,
 incoming positive, and the overseas amount, currency, conversion rate, and
 country left decomposed in `extra`, never folded into the JPY figure — the
 same rule `smcc-meisai-scraper` already follows for foreign card use.

@@ -141,6 +141,9 @@ function mapColumns(header: string[]): {
 
 export const paypayCsv: Parser = {
   name: "paypay-csv",
+  // 0.2.4: a row whose every cell is blank (only separators) is skipped with
+  // the closed warning `row N: blank row skipped` instead of becoming a
+  // transaction with no date, amount or id; every other row reads as in 0.2.3.
   // 0.2.2: an outgoing or incoming amount that carries its own sign (-, +,
   // △, ▲ or parentheses) is left without an amount, with a closed warning,
   // instead of being negated (outgoing) or transcribed (incoming); every
@@ -148,7 +151,7 @@ export const paypayCsv: Parser = {
   // 0.2.1: a transaction date or time that does not exist gives no asOf and
   // the "not recognized" warning instead of an impossible instant; every
   // existing date and time reads as in 0.2.0.
-  version: "0.2.3",
+  version: "0.2.4",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "paypay" && artifact.mime === "text/csv";
@@ -172,6 +175,13 @@ export const paypayCsv: Parser = {
     const observations: Observation[] = [];
     rows.slice(1).forEach((cells, offset) => {
       const rowNumber = offset + 2; // 1-based, counting the header as row 1
+      // A row of separators only (",,,," as a spreadsheet saves a trailing
+      // blank line) states nothing, as an empty line does, which the CSV
+      // reader already drops; it is not a transaction (0.2.4).
+      if (cells.every((cell) => cell.trim() === "")) {
+        warnings.push(`row ${rowNumber}: blank row skipped`);
+        return;
+      }
       if (cells.length !== header.length) {
         warnings.push(`row ${rowNumber}: expected ${header.length} columns, got ${cells.length}`);
       }
