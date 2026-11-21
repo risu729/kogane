@@ -130,6 +130,8 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
   let advertised = true;
   let requested = 0;
   let current: unknown = answer;
+  // While set, a read of the route waits for it before it answers.
+  let held: Promise<void> | null = null;
   beforeAll(async () => {
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -144,6 +146,7 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
           });
         if (url.pathname === "/api/overview") return Response.json(overview);
         if (url.pathname === PENDING_DECISIONS_PATH) requested += 1;
+        if (url.pathname === PENDING_DECISIONS_PATH && held !== null) await held;
         if (url.pathname === PENDING_DECISIONS_PATH)
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
@@ -242,27 +245,50 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
 
   test("a read that fails after an answer shows no total from the earlier answer", async () => {
     refuse = false;
+    // The answer once the read recovers: one more statement waits.
+    const recovered = {
+      ...answer,
+      kinds: lines.map((line) =>
+        line.kind === "card-settlement.statement" ? { ...line, count: 4 } : line,
+      ),
+    };
+    expect(validPendingDecisions(recovered)).toBe(true);
+    let release = (): void => {};
     const page = await browser.newPage();
     const panel = page.locator('section[aria-labelledby="pending-decisions"]');
     const total = panel.locator(".panel-head .count");
+    const failed = panel.getByText("判断待ちの件数を読み込めませんでした。");
     try {
       await page.goto(`${origin}/`);
       await panel.getByText("カード請求と引落の照合").waitFor();
       expect(await total.textContent()).toBe(`${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
-      // The next read fails (and its one retry): the body says the count could
-      // not be read, so the heading must not keep the earlier answer's total
-      // beside it as if it were current (INV05).
+      // The next read fails (the panel does not retry it): the body says the
+      // count could not be read, so the heading must not keep the earlier
+      // answer's total beside it as if it were current (INV05).
       unavailable = true;
       await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-      await panel.getByText("判断待ちの件数を読み込めませんでした。").waitFor();
+      await failed.waitFor();
       expect(await total.count()).toBe(0);
-      // A read that succeeds again shows its own total.
+      // A read after the failure, still in flight: the failure stands, and
+      // there is still no total.
       unavailable = false;
+      current = recovered;
+      held = new Promise((resolve) => (release = resolve));
+      const before = requested;
       await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-      await total.waitFor();
-      expect(await total.textContent()).toBe(`${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
+      while (requested === before) await Bun.sleep(10);
+      expect(await failed.count()).toBe(1);
+      expect(await total.count()).toBe(0);
+      // The read succeeds: the heading shows its total, not the earlier one.
+      release();
+      held = null;
+      await failed.waitFor({ state: "detached" });
+      expect(await total.textContent()).toBe(`${String(4 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
     } finally {
+      release();
+      held = null;
       unavailable = false;
+      current = answer;
       await page.close();
     }
   }, 30_000);
