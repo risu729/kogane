@@ -104,7 +104,9 @@ import {
   OVERVIEW_FETCH_RUN_STATUSES,
   OVERVIEW_LINE_FAILURE_CODES,
   OVERVIEW_PARSE_RUN_STATUSES,
+  OVERVIEW_SUMMARY_BYTES,
   OVERVIEW_SUMMARY_LINES,
+  PAGE_READ_SCHEMA_VERSION,
 } from "./api-contract.ts";
 import type {
   ApiMetadata,
@@ -476,6 +478,8 @@ const overview = object<Overview>({
 // status is one of the closed set and listed once, a line per source or
 // parser names a status other than the success one, each list is capped, and
 // its lines with the ones it left out count exactly the runs of their status.
+// The tool's answer is within its byte budget, and it says it was trimmed
+// exactly when it shows what only the budget trims (amendment 2026-11-20).
 type OverviewFetchLine = OverviewSummary["fetchRuns"]["byStatus"][number];
 /** A closed failure code, as `safeCode` in the collection quality read writes one. */
 const failureCode: Check<string> = (value): value is string =>
@@ -487,6 +491,11 @@ const overviewSummaryShape = object<OverviewSummary>({
   sources: array(
     object<OverviewSummary["sources"][number]>({ sourceIds: array(text), artifacts: number }),
   ),
+  sourcesOmitted: identifier,
+  budget: object<OverviewSummary["budget"]>({
+    bytes: literal(OVERVIEW_SUMMARY_BYTES),
+    trimmed: boolean,
+  }),
   fetchRuns: object<OverviewSummary["fetchRuns"]>({
     byStatus: array(
       object<OverviewFetchLine>({
@@ -587,10 +596,10 @@ const overviewSummaryShape = object<OverviewSummary>({
 });
 /**
  * Each status once; a capped list holds at most `OVERVIEW_SUMMARY_LINES`
- * lines and leaves lines out only when full, each status's omitted entry
- * once; and a status's per-source or per-parser lines with its omitted ones
- * count exactly its runs and its sources or parsers (`distinct`), one line
- * each.
+ * lines, each status's omitted entry once; and a status's per-source or
+ * per-parser lines with its omitted ones count exactly its runs and its
+ * sources or parsers (`distinct`), one line each. Whether a list that is not
+ * full may leave lines out is `budgetTrimmed`'s.
  */
 function linesCountStatus<Line extends { status: string; runs: number }>(
   byStatus: readonly Line[],
@@ -616,18 +625,18 @@ function linesCountStatus<Line extends { status: string; runs: number }>(
     ) && [...lines, ...omitted].every((entry) => statuses.includes(entry.status))
   );
 }
-/** At most the cap listed, and lines left out only from a full list, each counting its runs. */
+/** At most the cap listed, and each entry of lines left out counting its runs. */
 function capped(listed: number, omitted: readonly { lines: number; runs: number }[]): boolean {
   return (
     listed <= OVERVIEW_SUMMARY_LINES &&
-    omitted.every((entry) => entry.lines > 0 && entry.runs >= entry.lines) &&
-    (omitted.length === 0 || listed === OVERVIEW_SUMMARY_LINES)
+    omitted.every((entry) => entry.lines > 0 && entry.runs >= entry.lines)
   );
 }
 /**
  * A failing parser's line lists at most `OVERVIEW_LINE_FAILURE_CODES` codes,
- * counts the rest only when it is full, and each of its codes is on its
- * status's line, which lists each code once.
+ * and each of its codes is on its status's line, which lists each code once
+ * and has at least the codes the line lists and counts. Whether a line that
+ * is not full may count codes is `budgetTrimmed`'s.
  */
 function failureCodesKept(summary: OverviewSummary): boolean {
   const byStatus = new Map(
@@ -641,7 +650,6 @@ function failureCodesKept(summary: OverviewSummary): boolean {
       (line) =>
         line.failureCodes.length <= OVERVIEW_LINE_FAILURE_CODES &&
         new Set(line.failureCodes).size === line.failureCodes.length &&
-        (line.moreFailureCodes === 0 || line.failureCodes.length === OVERVIEW_LINE_FAILURE_CODES) &&
         line.failureCodes.every((code) => byStatus.get(line.status)?.includes(code)) &&
         (byStatus.get(line.status)?.length ?? 0) >=
           line.failureCodes.length + line.moreFailureCodes,
@@ -657,8 +665,36 @@ function unitUpdatesCapped(summary: OverviewSummary): boolean {
     ? runs === 0 && summary.unitUpdates.length <= OVERVIEW_SUMMARY_LINES
     : capped(summary.unitUpdates.length, [{ lines, runs }]);
 }
+/**
+ * Whether the summary shows what only its byte budget trims: a list that
+ * leaves lines out while holding fewer than `OVERVIEW_SUMMARY_LINES`, a
+ * `notOk` line that counts codes while listing fewer than
+ * `OVERVIEW_LINE_FAILURE_CODES`, or sources left out. A summary under its
+ * caps alone shows none of them.
+ */
+function budgetTrimmed(summary: OverviewSummary): boolean {
+  const short = (listed: readonly unknown[], omitted: number) =>
+    omitted > 0 && listed.length < OVERVIEW_SUMMARY_LINES;
+  const lines = (omitted: readonly { lines: number }[]) =>
+    omitted.reduce((sum, entry) => sum + entry.lines, 0);
+  return (
+    summary.sourcesOmitted > 0 ||
+    short(summary.fetchRuns.notSuccessful, lines(summary.fetchRuns.notSuccessfulOmitted)) ||
+    short(summary.parseRuns.notOk, lines(summary.parseRuns.notOkOmitted)) ||
+    short(summary.unitUpdates ?? [], summary.unitUpdatesOmitted?.lines ?? 0) ||
+    summary.parseRuns.notOk.some(
+      (line) => line.moreFailureCodes > 0 && line.failureCodes.length < OVERVIEW_LINE_FAILURE_CODES,
+    )
+  );
+}
+/** The UTF-8 bytes of the tool's answer that carries `data`, as the tool serializes it. */
+const pageReadAnswerBytes = (data: unknown) =>
+  new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))
+    .length;
 const overviewSummary: Check<OverviewSummary> = (value): value is OverviewSummary =>
   overviewSummaryShape(value) &&
+  pageReadAnswerBytes(value) <= OVERVIEW_SUMMARY_BYTES &&
+  value.budget.trimmed === budgetTrimmed(value) &&
   linesCountStatus(
     value.fetchRuns.byStatus,
     (line) => line.sources,

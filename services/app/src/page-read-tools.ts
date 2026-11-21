@@ -45,9 +45,9 @@ import { mcpInputSchema } from "./mcp-input-schema";
 import { schedulesServed } from "./schedule-tools";
 import { scheduleSnapshotResponse } from "./schedules-api";
 import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
-
-/** The result envelope of every page read: the route's answer, under `data`. */
-const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
+// The result envelope of every page read: the route's answer, under `data`.
+// Shared, so the overview summary's byte budget measures this very envelope.
+import { PAGE_READ_SCHEMA_VERSION } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /** A free query value a route accepts: bounded, non-empty, no control character. */
 const routeText = (max: number) =>
@@ -119,7 +119,7 @@ const TOOLS = {
   "kogane.store.read": tool({
     title: "Store metadata, overview and filter options",
     description:
-      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the newest 500 fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). `overview` takes `detail`: `summary` (the default) keeps the counts and coverage, lists the sources by artifact count (equal counts share a line with `sourceIds`), and collapses each run window by status (fetch `success`/`partial`, parse `ok`/`pending`/`error`) into runs, sources or parsers, superseded and warning counts, every closed `failureCodes` of a parse status and the newest run's ids, with a line per source or parser for each status that is not a success (`notSuccessful`, `notOk` with its newest three `failureCodes` and `moreFailureCodes`) and per partial-unit dataset (`unitUpdates`), the five with the newest runs each, the rest counted in `notSuccessfulOmitted`, `notOkOmitted` and `unitUpdatesOmitted`; `full` lists every run with its producer, session id, parser version, warnings and error. The same answer as GET /api/meta, /api/overview or /api/filter-options with the same `detail`, under records.read and a whole-store read grant. Read-only.",
+      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the newest 500 fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). `overview` takes `detail`: `summary` (the default) keeps the counts and coverage, lists the sources by artifact count (equal counts share a line with `sourceIds`), and collapses each run window by status (fetch `success`/`partial`, parse `ok`/`pending`/`error`) into runs, sources or parsers, superseded and warning counts, every closed `failureCodes` of a parse status and the newest run's ids, with a line per source or parser for each status that is not a success (`notSuccessful`, `notOk` with its newest three `failureCodes` and `moreFailureCodes`) and per partial-unit dataset (`unitUpdates`), the five with the newest runs each, the rest counted in `notSuccessfulOmitted`, `notOkOmitted` and `unitUpdatesOmitted`. The summary is held to 8,192 bytes: past it, sources (the last by id first, counted in `sourcesOmitted`), then line codes (into `moreFailureCodes`), then lines (oldest first, into the omitted counts) are left out and `budget.trimmed` is true; every status keeps every code. When its counts and status lines alone pass it, the read is 413 result_limit_exceeded with `retryWith: {detail: \"full\"}`. `full` lists every run with its producer, session id, parser version, warnings and error. The same answer as GET /api/meta, /api/overview or /api/filter-options with the same `detail`, under records.read and a whole-store read grant. Read-only.",
     schema: z.strictObject({
       page: z.enum(["meta", "overview", "filter-options"]),
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]).optional(),

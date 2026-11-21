@@ -1202,15 +1202,17 @@ tool alike.
 a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
 and keeps the summaries under the 8 KB a client shows, with the overview
 and the maintenance read (below) also at their realistic worst (the
-overview under 7 KB there) and the overview at its bound.
+overview under 7 KB there), the overview at its bound, and the overview
+past today's names, where its byte budget trims it.
 
 The overview summary (`GET /api/overview`, `kogane.store.read`
-`{page: "overview"}`; ADR 0123, amendment of 2026-11-19) is
-`{ detail: "summary", counts, sources, fetchRuns, parseRuns, unitUpdates?,
-unitUpdatesOmitted?, coverage }`, shaped by `overviewSummary`
-(`packages/application/src/query/overview-detail.ts`): the counts and the
-coverage as the full page has them; the sources as `{ sourceIds, artifacts }`,
-sources with the same artifact count sharing a line; `fetchRuns.byStatus`
+`{page: "overview"}`; ADR 0123, amendments of 2026-11-19 and 2026-11-20) is
+`{ detail: "summary", counts, sources, sourcesOmitted, fetchRuns, parseRuns,
+unitUpdates?, unitUpdatesOmitted?, coverage, budget }`, shaped by
+`overviewSummary` (`packages/application/src/query/overview-detail.ts`): the
+counts and the coverage as the full page has them; the sources as
+`{ sourceIds, artifacts }` in the full page's order (by id), sources with the
+same artifact count sharing a line; `fetchRuns.byStatus`
 and `parseRuns.byStatus`, one line per status of the newest-500 window
 (`success`, `partial`; `ok`, `pending`, `error`) with its run count, its
 source or parser count, the parse lines' superseded, warning and
@@ -1225,7 +1227,28 @@ those three lists holds the five lines with the newest runs
 (`OVERVIEW_SUMMARY_LINES`); the lines left out are counted per status, with
 their runs, in `notSuccessfulOmitted`, `notOkOmitted` and
 `unitUpdatesOmitted`, and listed by `detail: "full"`. It drops
-provider names, producers, session ids, parser versions and warnings. `detail` on `meta` or `filter-options` is the route's
+provider names, producers, session ids, parser versions and warnings.
+
+The tool's answer, `{ schemaVersion, data }` as the tool serializes it, is
+at most 8,192 bytes (`OVERVIEW_SUMMARY_BYTES`; the route's `data` alone is
+47 bytes shorter). When the capped summary is over, it leaves out, one at a
+time and in this order until the answer fits: sources, the last by id first,
+counted in `sourcesOmitted`; then per-line failure codes, the oldest listed
+`notOk` line's oldest first, counted in its `moreFailureCodes`; then lines,
+the oldest of the list holding the most first (on a tie `unitUpdates`, then
+`notSuccessful`, then `notOk`), counted in the omitted entries. `budget` is
+`{ bytes: 8192, trimmed }`; `trimmed` is true exactly when the summary shows
+what only the budget trims (a list leaving lines out while holding fewer than
+five, a line counting codes while listing fewer than three, or
+`sourcesOmitted` above 0). `counts`, `coverage` and the `byStatus` lines,
+each with every failure code of its status, are never trimmed: when they
+alone pass the budget (parser names of about 1,800 characters on each status
+line, none today), the read is `413 result_limit_exceeded` with
+`retryWith: { detail: "full" }`. At today's names the bound is 8,140 bytes
+and untrimmed; at the schema's 100-character source ids and 200-character
+datasets it leaves every source out and keeps every failing line.
+
+`detail` on `meta` or `filter-options` is the route's
 `400 invalid_query`, and another value `400 invalid_detail` (the tool's
 schema: `400 invalid_request`). The parameter exists where a store advertises
 `sharedQuery`; the local store answers its full overview alone.
