@@ -464,8 +464,8 @@ adopted one route next to the direct account.
   its known-assets subtotal and `holdings`), so it takes effect only once the
   owner approves it; the approval is recorded here with its time in UTC.
 - Date: 2026-11-20
-- Carried by: `policyDisjointness`, `scopeOrder`, `entitySharing` and
-  `adoptionOutcomes` in `packages/read-model/src/balance-projection.ts`,
+- Carried by: `policyDisjointness`, `scopeOrder`, `entitySharing`,
+  `entityTakesPart` and `adoptionOutcomes` in `packages/read-model/src/balance-projection.ts`,
   `DISJOINT_ACCOUNTS_POLICY` (`distinct-identified-accounts-v3`) in the same
   file, `ProjectionCandidate.accountEntity` and its writer
   `collectCandidates` in `services/processor/src/balance-projection-job.ts`,
@@ -570,8 +570,9 @@ in one adoption target was not checked.
   `unresolved` / `account_entity_shared` instead. Every other unknown
   overlap keeps `overlap_unknown`, including a pair accepted decisions alone
   force to overlap that the rule withholds only because a mapped scope lies
-  on the way: no entity is shared there, so the reason does not say one is. The entity is shown with that closed
-  reason, its subtotal is `partial`, and nothing becomes zero (INV05).
+  on the way: no entity is shared there, so the reason does not say one is.
+  The entity is shown with that closed reason, its subtotal is `partial`,
+  and nothing becomes zero (INV05).
 - The way out is a decision: accepting `same_account` between the two
   references makes them one measurement (one adopted, the other
   `duplicate_evidence`; under v2 the same acceptance read as a
@@ -594,21 +595,29 @@ in one adoption target was not checked.
   the deploy continues from its own input, which has no entities, and so
   builds as v2 did; the next capture corrects it.
 - A store where no two scopes share an entity and no accepted decision
-  touches a mapped scope adopts exactly what it adopted before. Every
-  subject the build keys by its reference (`source_account:<reference>`)
-  has a current mapping (`account_mappings.account_id` is not null), and a
-  subject lies on its own way up, so in a store the identity pipeline
-  organizes the second clause of the rule reaches every pair of such
-  subjects that accepted decisions force to overlap without relating the
-  pair directly: a sub-account accepted as a part of two accounts, or a
-  chain `a ⊂ w ⊂ b` or `a ≡ w ≡ b` through a scope outside the target. v2
-  declared such a pair disjoint when a policy rule applied and adopted
-  both, counting the common part twice; v3 leaves the pair to step 7 with
-  `overlap_unknown`. That changes published answers where no entity is
-  shared, and is part of what the owner approves. A store with
+  touches a mapped scope adopts exactly what it adopted before. A store with
   a shared entity in one target loses the doubled amount from the latest
   subtotal and from `holdings`, which turn `partial` with
   `unresolved:account_entity_shared`, until the owner decides the pair.
+- v3 also changes answers where no entity is shared, and in an organized
+  store it does so almost always where decisions force an overlap. Every subject the build keys by its reference
+  (`source_account:<reference>`) has a current mapping
+  (`account_mappings.account_id` is not null), and a subject lies on its
+  own way up. So v3 withholds disjointness from every pair of such subjects
+  that accepted decisions alone force to overlap without relating the pair
+  directly, whether or not the two share an entity: a sub-account accepted
+  as a part of two accounts, or a chain `a ⊂ w ⊂ b` or `a ≡ w ≡ b` through
+  a scope outside the target. v2 declared such a pair disjoint when a
+  policy rule applied and adopted both, counting the common part twice. v3
+  leaves the pair to step 7: the worse-ranked side, or both at equal rank,
+  is `unresolved` / `overlap_unknown`, and its whole amount, not only the
+  common part, leaves the latest subtotal and `holdings`, which turn
+  `partial`. Neither `same_account` nor a mapping revision clears it while
+  the two keep entities of their own: a decision between the pair itself
+  contradicts the policy, which reads such a pair against its own entities,
+  and degrades the pair to unknown as under v2. The pair is counted again
+  once a decision that forces the overlap is revised. This is part of what
+  the owner approves.
 - Open limit: adoption compares scopes only within one target (metric and
   unit). Two references of one entity under two different summable metrics
   of one unit are both adopted and both counted, as before.
@@ -704,7 +713,10 @@ fails on the rule that named every withheld pair.
 decisions alone give is withheld but not named a shared entity") shows two
 accounts of their own entities with an accepted common sub-account: neither
 is declared disjoint from the other, both are `overlap_unknown` (v2 adopted
-both), and with the entity shared both are `account_entity_shared`. The exact and adoption properties fail on the previous
+both), and with the entity shared both are `account_entity_shared`; an
+accepted `same` or containment between the two accounts leaves both
+`overlap_unknown`, and dropping one of the two containments adopts both.
+The exact and adoption properties fail on the previous
 closure and on a rule that reads a mapped scope only as a common lower
 bound or between the pair.
 `services/app/test/entity-double-count.test.ts` builds the snapshot through

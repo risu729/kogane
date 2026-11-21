@@ -895,6 +895,24 @@ describe("balance projection builder", () => {
         decisions,
       );
       expect(shared.reasons).toEqual(["unresolved:account_entity_shared"]);
+      // A decision between the pair itself does not clear it while the two
+      // keep their own entities: the policy, read against their own
+      // entities, declares them disjoint, and the contradiction degrades the
+      // pair to unknown as under v2. Revising a decision that forces the
+      // overlap does.
+      for (const kind of ["same", "subset"] as const)
+        expect(
+          buildBalanceProjection(
+            [first, other],
+            [
+              ...decisions,
+              relation("source_account:smbc:first", "source_account:smbc:other", kind),
+            ],
+          ).reasons,
+        ).toEqual(["unresolved:overlap_unknown"]);
+      const revised = buildBalanceProjection([first, other], decisions.slice(1));
+      expect(revised.rows.map((row) => row.state)).toEqual(["adopted", "adopted"]);
+      expect(revised.relations.filter((entry) => entry.source === "policy")).toHaveLength(1);
     });
   });
 

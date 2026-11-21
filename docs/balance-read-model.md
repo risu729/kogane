@@ -111,20 +111,24 @@ writer fencing and captured CORE references; the contract is in
    target. A pair a decision relates directly is read against its own
    entities. A forced overlap with no mapped scope on the way keeps the v2
    answer, and a scope known only from a decision carries no entity (the
-   ADR's open limits). Every subject keyed by its reference
-   (`source_account:<reference>`) has a current mapping, so in practice the
-   second rule withholds disjointness from every pair of such subjects that
-   accepted decisions force to overlap without relating them directly (a
-   sub-account accepted as a part of two accounts, say), shared entity or
-   not; v2 declared such a pair disjoint and adopted both. Such a pair's
-   unknown overlap keeps `overlap_unknown`: `account_entity_shared` names
-   only a contender that shares the entity, or whose overlap the mapping and
-   not decisions alone forces. The
-   entity is then shown and not counted until a decision accepts the two
-   references as `same_account` (one is adopted, the other is
-   `duplicate_evidence`) or a mapping revision separates them
+   ADR's open limits). The entity is then shown and not counted until a
+   decision accepts the two references as `same_account` (one is adopted,
+   the other is `duplicate_evidence`) or a mapping revision separates them
    ([ADR 0001's amendment of 2026-11-20](adr/0001-domain-axes.md#amendment-2026-11-20-two-references-of-one-account-entity-are-not-disjoint)).
-   Version 2 declared such pairs disjoint and adopted both.
+   Version 2 declared such pairs disjoint and adopted both. The second rule
+   is not limited to shared entities: every subject keyed by its reference
+   (`source_account:<reference>`) has a current mapping, so in practice it
+   withholds disjointness from every pair of such subjects that accepted
+   decisions alone force to overlap without relating them directly (a
+   sub-account accepted as a part of two accounts, say), shared entity or
+   not. v2 declared such a pair disjoint and adopted both, counting the
+   common part twice. Its unknown overlap keeps `overlap_unknown`
+   (`account_entity_shared` names only a contender that shares the entity,
+   or whose overlap the mapping and not decisions alone forces), and the
+   whole amount of each unresolved side leaves the subtotal. A decision
+   between the pair itself does not clear it while the two keep entities of
+   their own (it contradicts the policy and degrades to unknown, as under
+   v2); revising a decision that forces the overlap does.
 6. **Authority.** `packages/read-model/src/authority.ts`
    (`source-authority-v3`, [ADR 0042](adr/0042-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
    supplies the caller policy `selectAdoptedSet` takes. It names sources by
