@@ -65,12 +65,17 @@ requests, the schedules settings writes and the schedule bootstrap) answer
 - Every route that serves `GET` serves `HEAD` with the `GET`'s status and
   headers and no body: the health route, the operations reads (recorded in
   the audit log as the read they are) and the schedules page, `detail`
-  included.
+  included. `secureResponse` cancels the body it does not send, so a relayed
+  stream (the schedules snapshot in full) is released, never read.
 - Nothing else changes. Every other status and code stays: the caller is
   still proved before the method is checked (401 is 401 whatever the
   method), an operations path that does not take `GET` or `POST` is still
   404 for it, `POST` to the schedules page is still 404, and the schedule
-  bootstrap keeps its order of checks.
+  bootstrap keeps its order of checks (the flag, the method, the query and
+  the body before the deployment service token). One answer follows from
+  serving `HEAD` under `/api/ops/v1`: `HEAD` on an acceptance route
+  (`HEAD /api/ops/v1/collections`) is now the 404 its `GET` answers, where
+  it was 405.
 - The local evidence browser (`experiments/observation-pipeline-local`),
   which refuses every method but `GET` and `HEAD` in one middleware, sends
   `Allow: GET, HEAD` on its 405 too.
@@ -87,6 +92,9 @@ requests, the schedules settings writes and the schedule bootstrap) answer
   404, while the change lifecycle and agent paths answer 405 for a verb they
   do not take; an unrouted path refused by a boundary is 405 rather than 404.
   This ADR keeps those statuses and only names the methods.
+- Out of scope, as open limits: the Processor's internal routes (reached
+  only over the service binding; the App never relays their 405) and the
+  collectors' local CONNECT relays still answer 405 without `Allow`.
 
 ## Verification
 
@@ -101,7 +109,7 @@ requests, the schedules settings writes and the schedule bootstrap) answer
   and the bootstrap), each refused method is 405 with the exact `Allow` and
   the security headers; no other answer carries `Allow`; an unproved caller
   is 401 with no `Allow`; and on 24 reads (200s, 404s and 400s) `HEAD`
-  answers the `GET`'s status and headers with no body. Before this change 43
-  of its 61 checks fail.
+  answers the `GET`'s status and headers with no body, and a relayed body it
+  does not send is cancelled. Before this change 44 of its 62 checks fail.
 - `experiments/observation-pipeline-local/test/api.test.ts`: each refused
   write method carries `Allow: GET, HEAD`.

@@ -344,6 +344,36 @@ describe("HEAD is GET without its body", () => {
       expect(get.headers.get("allow")).toBeNull();
     });
 
+  it("cancels a relayed body it does not send", async () => {
+    let cancelled = false;
+    const snapshot = JSON.stringify({ schedules: [], maintenance: [], leases: [], survey: [] });
+    const relay = {
+      fetch: async (request: Request) => {
+        if (new URL(request.url).pathname !== "/internal/schedules") return PIPELINE.fetch(request);
+        let sent = false;
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              // The snapshot, then a stream that stays open until cancelled.
+              if (!sent) controller.enqueue(new TextEncoder().encode(snapshot));
+              sent = true;
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+    };
+    const head = await call(`${SCHEDULES_PATH}?detail=full`, "HEAD", {
+      environment: { PIPELINE: relay },
+    });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+  });
+
   it("answers the reads HEAD used to refuse", async () => {
     // The health route, the operations reads and the schedules page each
     // served GET and refused HEAD with 405; their GETs succeed here.

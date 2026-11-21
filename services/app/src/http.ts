@@ -169,6 +169,9 @@ export function secureResponse(response: Response, request: Request, requestId: 
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
     );
   }
+  // A HEAD answer has no body: the GET's is cancelled, never read, so a relayed
+  // stream (the schedules snapshot in full) is released at once.
+  if (request.method === "HEAD") response.body?.cancel().catch(() => undefined);
   return new Response(request.method === "HEAD" ? null : response.body, {
     status: response.status,
     headers,

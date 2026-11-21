@@ -441,8 +441,9 @@ the deployed shape. Neither is done; both are in the open questions.
 The deployed Worker (`services/app`) gained exactly one
 non-GET path set: `POST /api/command/v1/{plan,simulate,approve,commit,operation}`
 ([change-lifecycle.md](change-lifecycle.md)). It is not a relaxation of the
-boundary above — every other request that is not `GET` or `HEAD` is still
-`405`, with `Allow: GET, HEAD`
+boundary above — outside the Worker's POST routes (this set, the agent
+routes and the `/api/ops/v1` operations and schedules writes), every request
+that is not `GET` or `HEAD` is still `405`, with `Allow: GET, HEAD`
 ([production evidence browser](production-evidence-browser.md#methods)), and `test/command-api.test.ts` asserts that for `/api/meta` and
 `/api/evidence/v1/meta` while the command flag is on.
 
@@ -718,8 +719,8 @@ deployment facts are:
   explicitly in `src/worker.ts` before the GET-only check, behind the same
   `auth.ts` gate as every read route, with bounded bodies, `no-store` and the
   same closed 401/403 answers. Everything outside them is refused with 405
-  and `Allow: GET, HEAD`; a method other than POST on one of them is 405
-  with `Allow: POST`
+  and `Allow: GET, HEAD`; a method other than POST on one of their POST
+  routes is 405 with `Allow: POST`
   ([methods](production-evidence-browser.md#methods)).
 - The principal on both is the subject `authenticate` returned; no route reads
   an actor from a request body or a header.
