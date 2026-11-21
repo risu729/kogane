@@ -389,7 +389,7 @@ checks the shared request rule; the route's refusal tests in
 
 ## Amendment 2026-11-19: a summary that lists changed lines only
 
-- Status: proposed. **Owner approval is needed before merge**: it changes the
+- Status: accepted (merged 2026-11-20 in [#1459](https://github.com/risu729/kogane/pull/1459)). Owner approval was required before merge: it changes the
   published input schema and the default answer of
   `kogane.reported-holdings-change.read` and of its route.
 - Date: 2026-11-19

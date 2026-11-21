@@ -139,7 +139,7 @@ writer or command is added, and no candidate's eligibility changes.
 
 ## Amendment 2026-11-18: a statement total that is not exact keeps its reason
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1424](https://github.com/risu729/kogane/pull/1424))
 - Date: 2026-11-18
 - Owner approval: required before merge. The published answer of
   `kogane.card-settlements.debit-accounts` changes for a non-exact total, and
@@ -222,8 +222,8 @@ the page renders the total through `SettlementQuantity` only.
 
 ## Amendment 2026-11-19: the `upcoming` view answers each card's next bill and whether its account covers it
 
-- Status: proposed. It changes the published input schema and answers of
-  `kogane.card-settlements.debit-accounts`, so it needs the owner's approval
+- Status: accepted (merged 2026-11-20 in [#1456](https://github.com/risu729/kogane/pull/1456)). It changes the published input schema and answers of
+  `kogane.card-settlements.debit-accounts`, so it needed the owner's approval
   before merge (decision D3 of the 2026-11-19 MCP proposal v2). No catalogue
   operation is added.
 - Date: 2026-11-19
@@ -445,7 +445,7 @@ command or catalogue operation is added.
 
 ## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1438](https://github.com/risu729/kogane/pull/1438))
 - Date: 2026-11-19
 - Owner approval: required before merge. No field or type changes, but for
   the cards it affects the published answer of

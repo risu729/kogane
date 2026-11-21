@@ -1,8 +1,8 @@
 # ADR 0127: What was recorded since a time, per source, as `kogane.changes.since`
 
-- Status: proposed. A new published MCP tool (`kogane.changes.since`), a new
-  catalogue operation (`changes.since`) and a new read route: **the owner's
-  approval is needed before merge**, as for every published tool change
+- Status: accepted (merged 2026-11-20 in [#1469](https://github.com/risu729/kogane/pull/1469)). A new published MCP tool (`kogane.changes.since`), a new
+  catalogue operation (`changes.since`) and a new read route: the owner's
+  approval was required before merge, as for every published tool change
   (AGENTS.md, merging: an agent or MCP operation added to `catalogue.ts`).
   The owner allowed new tools where needed for issue #1414 (2026-11-19, "you
   may add new tools if needed"); that allows the proposal, not this tool.
@@ -242,8 +242,8 @@ tool off the parity guard's list of tools without a UI route.
 
 ## Amendment: the events handler names `since` (2026-11-20)
 
-- Status: proposed. The digest's `handlers` are part of its published answer:
-  **the owner's approval is needed before merge**.
+- Status: accepted (merged 2026-11-21 in [#1493](https://github.com/risu729/kogane/pull/1493)). The digest's `handlers` are part of its published answer:
+  the owner's approval was required before merge.
 - Date: 2026-11-20
 
 ### Context

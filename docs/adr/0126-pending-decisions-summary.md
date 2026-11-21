@@ -1,7 +1,7 @@
 # ADR 0126: One compact list of what waits for the owner's decision, as `kogane.decisions.pending` and on ホーム
 
-- Status: proposed. A new published MCP tool (`kogane.decisions.pending`) and
-  a new operator route: **the owner's approval is needed before merge**, as for
+- Status: accepted (merged 2026-11-20 in [#1457](https://github.com/risu729/kogane/pull/1457)). A new published MCP tool (`kogane.decisions.pending`) and
+  a new operator route: the owner's approval was required before merge, as for
   every published tool change. The owner allowed new tools where needed for
   issue #1414 (2026-11-19, "you may add new tools if needed"); that allows the
   proposal, not this tool.
