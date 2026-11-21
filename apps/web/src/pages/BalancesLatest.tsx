@@ -15,7 +15,7 @@ import {
 } from "../api.ts";
 import type { MeasureView } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { Amount, Badge, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
-import { Pagination } from "../pagination.tsx";
+import { CursorPager } from "../pagination.tsx";
 import { OrganizedSourceAccount } from "../organization.tsx";
 import { balanceMeaning } from "../balance-display.tsx";
 
@@ -107,6 +107,7 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
         <LatestBody
           page={page}
           copy={copy}
+          fetching={query.isFetching}
           canGoBack={trail.length > 0}
           onNext={() => {
             if (page.page.nextCursor === null) return;
@@ -136,6 +137,7 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
 function LatestBody({
   page,
   copy,
+  fetching,
   canGoBack,
   onNext,
   onBack,
@@ -143,6 +145,8 @@ function LatestBody({
 }: {
   page: LatestBalancePage;
   copy: (typeof VIEW_COPY)[MeasureView];
+  /** A read of this snapshot is in flight; the pager waits for it. */
+  fetching: boolean;
   canGoBack: boolean;
   onNext: () => void;
   onBack: () => void;
@@ -223,16 +227,14 @@ function LatestBody({
             </tbody>
           </table>
         </div>
-        <Pagination
+        <CursorPager
           label={`${copy.title}のページ`}
-          status={page.page.hasMore ? "続きがあります" : "最後のページです"}
-          previous={{ label: "前へ", disabled: !canGoBack, onClick: onBack }}
-          next={{ label: "次へ", disabled: !page.page.hasMore, onClick: onNext }}
-          actions={
-            <button className="button" type="button" onClick={onRefresh}>
-              最新の状態に更新
-            </button>
-          }
+          fetching={fetching}
+          canGoBack={canGoBack}
+          hasMore={page.page.hasMore}
+          onPrevious={onBack}
+          onNext={onNext}
+          restart={{ label: "最新の状態に更新", onClick: onRefresh }}
         />
       </Panel>
     </>

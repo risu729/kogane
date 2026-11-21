@@ -60,3 +60,49 @@ export function Pagination({
     </div>
   );
 }
+
+/**
+ * The one cursor pager. A cursor list has no total, so its buttons say
+ * 前のページ / 次のページ, its status says whether more follows unless the page
+ * says more, and every button waits while a read is in flight: a click during
+ * a read would page from an answer about to be replaced.
+ */
+export function CursorPager({
+  label,
+  status,
+  fetching,
+  canGoBack,
+  hasMore,
+  onPrevious,
+  onNext,
+  restart,
+}: {
+  /** Accessible name of the row; one per pager on a page. */
+  label: string;
+  /** The announced count; by default whether the list continues. */
+  status?: ReactNode;
+  /** A read of this list is in flight. */
+  fetching: boolean;
+  canGoBack: boolean;
+  hasMore: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+  /** Reads the list again from its newest first page. */
+  restart?: { label: string; onClick: () => void };
+}): ReactNode {
+  return (
+    <Pagination
+      label={label}
+      status={status ?? (hasMore ? "続きがあります" : "最後のページです")}
+      previous={{ label: "前のページ", disabled: fetching || !canGoBack, onClick: onPrevious }}
+      next={{ label: "次のページ", disabled: fetching || !hasMore, onClick: onNext }}
+      actions={
+        restart === undefined ? undefined : (
+          <button className="button" type="button" disabled={fetching} onClick={restart.onClick}>
+            {restart.label}
+          </button>
+        )
+      }
+    />
+  );
+}

@@ -277,3 +277,34 @@ on-demand old-parse explanation, original evidence links, navigation while a
 read is pending, locally contained refusal/unavailable/malformed/mismatched
 answers, and excluded card/non-transaction details. These are synthetic test
 contracts, not production acceptance or evidence of writer enablement.
+
+## Amendment 2026-11-21: the panel's loading and failure through the shared boundary
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context and options
+
+The transaction-detail panel drew its own loading line and failure notice: the
+failure had no retry, no `role="alert"` and its own words
+(新規作成の条件を取得できませんでした), and a failed refresh hid the earlier
+answer. Every other read on the web client goes through `QueryBoundary`
+([frontend](../frontend.md#shared-primitives)). Options were to keep the panel's
+own states, add a retry to them, or move the panel onto the shared boundary.
+
+### Decision
+
+The panel reads through `QueryBoundary` labelled 新規作成の条件. A first read
+that fails shows the shared error state (an alert naming the read, the fixed
+message for its status or the correlation refusal, and 再試行); a refresh that
+fails keeps the earlier answer under the shared alert
+更新できませんでした。前回読み込んだ新規作成の条件を表示しています。 with its
+retry, so the earlier answer is labelled and never shown as current; a `401`
+or `403` hides it. Failure stays local to the panel, the read stays on demand
+and keyed as above, and nothing else in this ADR changes.
+
+### Consequences and verification
+
+`apps/web/test/economic-readiness.browser.test.ts` covers each failure as an
+alert with its retry, a retry that reads the diagnostic again, and a failed
+refresh that labels the earlier answer and clears the alert on retry.

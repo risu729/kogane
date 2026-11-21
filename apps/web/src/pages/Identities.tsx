@@ -161,6 +161,7 @@ export function IdentitiesPage(): ReactNode {
               <Pages
                 label="整理状況のページ"
                 offset={coverageOffset}
+                count={data.rows.length}
                 next={data.coverage.nextOffset}
                 change={setCoverageOffset}
               />
@@ -396,6 +397,7 @@ function AccountList({
           <Pages
             label="一覧のページ"
             offset={offset}
+            count={data.rows.length}
             next={data.coverage.nextOffset}
             change={change}
           />
@@ -459,6 +461,7 @@ function Accounts({
           <Pages
             label="一覧のページ"
             offset={offset}
+            count={data.rows.length}
             next={data.coverage.nextOffset}
             change={change}
           />
@@ -519,6 +522,7 @@ function Instruments({
           <Pages
             label="一覧のページ"
             offset={offset}
+            count={data.rows.length}
             next={data.coverage.nextOffset}
             change={change}
           />
@@ -527,23 +531,30 @@ function Instruments({
     </QueryBoundary>
   );
 }
-/** The shared pagination row, for lists paged by offset in memory. */
+/**
+ * The shared pagination row, for lists the server pages by offset. Like the
+ * カード利用 pager it names the rows this page shows; these reads count no
+ * total, so it names none.
+ */
 function Pages({
   label,
   offset,
+  count,
   next,
   change,
 }: {
   /** Names the list paged: the page shows the coverage and a list at once. */
   label: string;
   offset: number;
+  /** Rows on this page. */
+  count: number;
   next: number | null;
   change: (n: number) => void;
 }) {
   return (
     <Pagination
       label={label}
-      status={<>{offset + 1}件目から</>}
+      status={count === 0 ? "表示なし" : `${String(offset + 1)}–${String(offset + count)}件`}
       previous={{
         label: `前の${String(IDENTITY_PAGE_LIMIT)}件`,
         disabled: offset === 0,

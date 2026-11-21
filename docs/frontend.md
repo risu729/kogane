@@ -112,6 +112,13 @@ Pages compose these instead of writing their own markup or rules:
 | Review candidates             | A `.panel` with a `.settlement-head`, then a `.settlement-disclosure` open while a decision is due (see below)                        |
 | Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |
 
+A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
+`Pagination`): its buttons say 前のページ and 次のページ, its status says
+続きがあります or 最後のページです unless the page passes its own, and its
+buttons, its read-again action included, wait while a read of the list is in
+flight. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists use
+it.
+
 A review candidate (a card settlement on `カード照合` ("card reconciliation"), a pending-to-posted link on
 `カード利用` ("card usage")) is one panel. Its `.settlement-head` holds the title, a status
 `Badge` and the identifying `.settlement-facts`. The review sits under a

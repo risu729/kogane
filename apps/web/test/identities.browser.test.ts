@@ -212,6 +212,8 @@ describe.if(runnable)("identity coverage page", () => {
     // No row adds sources together.
     expect(await coverageRegion(tab).locator("tfoot").count()).toBe(0);
     expect(await coverageRegion(tab).innerText()).not.toContain("10");
+    // The offset pager names the rows shown, as the カード利用 pager does; no total is read.
+    await tab.getByText("整理状況のページ：1–2件", { exact: true }).waitFor();
     const note = await tab.getByRole("region", { name: "整理状況", exact: true }).innerText();
     expect(note).toContain("銘柄の照合率ではありません");
     // Every request is a GET of an identity read; nothing else is asked.
@@ -229,6 +231,7 @@ describe.if(runnable)("identity coverage page", () => {
     expect(await accounts.count()).toBe(2);
     expect(await accounts.nth(0).innerText()).toContain("識別済み");
     expect(await accounts.nth(1).innerText()).toContain("要確認");
+    await tab.getByText("一覧のページ：1–2件", { exact: true }).waitFor();
     await tab.getByRole("button", { name: "通貨・銘柄", exact: true }).click();
     await tab.getByRole("heading", { name: "整理済みの通貨・銘柄", exact: true }).waitFor();
     const instrument = tab
