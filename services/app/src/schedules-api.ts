@@ -288,17 +288,21 @@ async function scheduleWrite(
     if (decision === "reject") call.setRisk("R1");
   }
   let upstream: Response;
-  let text: string;
+  let bytes: ArrayBuffer;
   try {
     upstream = await relay(request, env, suffix, subject, body, call.envelopeHeaders());
-    text = await upstream.text();
+    // The bytes are relayed; the text is read from them only for the record.
+    // `Response.text()` would drop a leading byte-order mark and replace
+    // invalid UTF-8, so the relayed body would not be the Processor's bytes.
+    bytes = await upstream.arrayBuffer();
   } catch {
     // The answer is the one a lost relay always produced; the record says the
     // Processor's answer was lost (its own `applied` record, if any, stands).
     throw new UpstreamLost(503, "scheduling_unavailable");
   }
+  const text = new TextDecoder().decode(bytes);
   return {
-    response: relayed(upstream, text),
+    response: relayed(upstream, bytes),
     outcome: upstreamOutcome(upstream.status, upstream.headers, text, { result: "replayed" }),
   };
 }

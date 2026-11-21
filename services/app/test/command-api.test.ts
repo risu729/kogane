@@ -279,6 +279,8 @@ describe("the command boundary", () => {
   // The schedules relay follows the same rule (`schedules-relay.test.ts`).
   it("relays the Processor's status and bytes under its own JSON type, never its headers", async () => {
     const html = "<!doctype html><title>synthetic</title>";
+    // A leading byte-order mark, which a text read would drop: the bytes cross.
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(html)]);
     const response = await worker.fetch(
       new Request("https://fixture.test/api/command/v1/plan", {
         method: "POST",
@@ -292,7 +294,7 @@ describe("the command boundary", () => {
         ...enabled,
         PIPELINE: {
           fetch: async () =>
-            new Response(html, {
+            new Response(bytes, {
               status: 409,
               headers: {
                 "content-type": "text/html; charset=utf-8",
@@ -307,7 +309,7 @@ describe("the command boundary", () => {
     expect(response.headers.get("content-type")).toBe("application/json");
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect(response.headers.get("x-synthetic-upstream")).toBeNull();
-    expect(await response.text()).toBe(html);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
   });
 
   it("advertises the capability from the deployment flag, never from a constant", async () => {

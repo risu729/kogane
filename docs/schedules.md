@@ -479,7 +479,9 @@ chooses how the App's origin serves it; the App's own response headers apply
 as on every answer ([production evidence browser](production-evidence-browser.md#response-headers)).
 A summary is the App's own JSON of the snapshot, and a bootstrap success is
 the App's own JSON of the answer it checked. `services/app/test/schedules-relay.test.ts`
-serves a Processor answer labelled `text/html` on each of these paths.
+serves a Processor answer labelled `text/html` on each of these paths, and a
+body with a leading byte-order mark or invalid UTF-8, which crosses unchanged
+because a write's answer is read as bytes, not text.
 
 A write that loses its version check — another edit saved the job or the rule
 first, including one by the same operator in the same millisecond — writes

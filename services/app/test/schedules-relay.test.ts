@@ -45,7 +45,7 @@ afterEach(() => vi.restoreAllMocks());
 
 /** The Processor's answer to the relayed request: a body, a status and headers. */
 interface Upstream {
-  body: string;
+  body: string | Uint8Array;
   status: number;
   headers: Record<string, string>;
 }
@@ -182,5 +182,24 @@ describe("a relayed schedules answer is served under this Worker's own JSON type
     );
     expect(summaryRefusal.status).toBe(503);
     expect(await summaryRefusal.text()).toBe(refusal);
+  });
+
+  it("relays bytes a text read would change: a byte-order mark and invalid UTF-8", async () => {
+    // A leading byte-order mark is dropped and invalid UTF-8 is replaced by a
+    // text read, so each relay hands on the bytes, never a decoded string.
+    const json = new TextEncoder().encode('{"error":"version_conflict"}');
+    const bodies = [
+      new Uint8Array([0xef, 0xbb, 0xbf, ...json]),
+      new Uint8Array([...json.slice(0, -1), 0xff, 0x7d]),
+    ];
+    for (const { name, request } of [...RELAYS, { name: "a summary refusal", request: {} }])
+      for (const body of bodies) {
+        const response = await call(
+          { body, status: 409, headers: { "content-type": "application/json" } },
+          request,
+        );
+        expect(response.status, name).toBe(409);
+        expect(new Uint8Array(await response.arrayBuffer()), name).toEqual(body);
+      }
   });
 });
