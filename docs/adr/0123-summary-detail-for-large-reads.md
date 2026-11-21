@@ -1404,7 +1404,7 @@ Measured as the bytes of the tool's answer (`pageReadAnswerBytes`;
 - The `coverage` block costs about 100 bytes: on the synthetic store the
   summary is still one page.
 - The tool's description stays within the 2,048 characters a client accepts
-  (2,044), shortened elsewhere to make room.
+  (2,045), shortened elsewhere to make room.
 - A client that read the summary as one answer must follow
   `coverage.nextOffset`. The repository's only client of the route, the
   collection quality page, asks for `detail=full`.
