@@ -485,19 +485,22 @@ that holds is named, so a line with bills in two units and a bill that is not
 exact lists both. `cardBills` stays `missing` in the line's first bill's
 unit, with the reason `unit_mismatch` when the units differ, else
 `bill_not_exact`. Which lines are `unknown` does not change, only their
-reasons; the rule and schema versions stay, as with the 2026-11-18
-amendment's codes. The page labels the code, and the tool description lists
+reasons; the rule and schema versions stay (the view is computed on each
+read and stores nothing, and the 2026-11-18 amendment likewise kept its
+schema version). The page labels the code, and the tool description lists
 it.
 
 ### Consequences
 
 - A reader of a line in two units sees `unit_mismatch` and not a claim that a
   bill is not exact.
-- The closed list grows by one code: the wire check
+- The closed list grows by one code. The wire check
   (`packages/observation-shared/src/card-upcoming-bills-contract.ts`) reads
-  the domain list, and the page's words for every code are a typed record,
-  so a client that pinned the old list sees a code it did not know. The page
-  shows an unknown code as stored.
+  the domain list and the page's words for every code are a typed record, so
+  the page built with this change accepts and labels it. A page loaded
+  before the deploy refuses an answer with the code (its wire check knows
+  only the old list) until it is reloaded, and an MCP client that pinned the
+  old list sees a code it did not know.
 - Bills in two units are still never converted or added (INV03).
 
 ### Verification
@@ -507,7 +510,8 @@ it.
   change: `bill_not_exact`), the earlier yen-only line still compares, and a
   line with two units and a bill that is not exact lists both reasons.
 - `services/app/test/ui-mcp-parity.test.ts`: the published description names
-  every code of `COVERS_UNKNOWN_REASONS` and stays within 2,048 characters.
+  every code of `COVERS_UNKNOWN_REASONS`; `services/app/test/mcp-client.test.ts`:
+  it stays within 2,048 characters.
 
 ## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
 
