@@ -18,6 +18,7 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../src/query/collection-quality.ts";
+import { accountCoverageSummary } from "../src/query/collection-quality-detail.ts";
 import {
   ACCOUNT_COVERAGE_CELL_BOUND,
   ACCOUNT_COVERAGE_ENTRY_BOUND,
@@ -150,7 +151,40 @@ async function read(
   expect(validCollectionQualityResponse(`/api/collection-quality/other/accounts`, answer)).toBe(
     false,
   );
+  expectSummary(answer!);
   return answer!;
+}
+
+/**
+ * The answer's summary (ADR 0123, amendment 2026-11-20): every page passes the
+ * wire check under its own detail only, and together the pages list every
+ * account once, in order, with its periods counted, and every unattributed
+ * cell once.
+ */
+function expectSummary(answer: AccountCoverage): void {
+  const path = `/api/collection-quality/${answer.sourceId}/accounts`;
+  const accounts: string[] = [];
+  let periods = 0;
+  let apart = 0;
+  for (let offset: number | null = 0; offset !== null;) {
+    const page = accountCoverageSummary(answer, offset);
+    expect(validCollectionQualityResponse(path, page, "summary")).toBe(true);
+    expect(validCollectionQualityResponse(path, page, "full")).toBe(false);
+    accounts.push(...page.accounts.map((line) => line.accountId));
+    periods += page.accounts.reduce((sum, line) => sum + line.periods.count, 0);
+    apart += page.unattributed.reduce((sum, line) => sum + line.cells, 0);
+    offset = page.coverage.nextOffset;
+  }
+  expect(validCollectionQualityResponse(path, answer, "summary")).toBe(false);
+  expect(accounts).toEqual(answer.accounts.map((account) => account.accountId));
+  expect(periods).toBe(
+    answer.accounts.reduce(
+      (sum, account) =>
+        sum + account.dataTypes.reduce((inner, type) => inner + type.periods.length, 0),
+      0,
+    ),
+  );
+  expect(apart).toBe(answer.unattributed.length);
 }
 
 /** Every cell of the paged cell read, as the account read must cover it. */
