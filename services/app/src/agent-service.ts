@@ -128,14 +128,18 @@ function failure(
 /**
  * Everything the context pins, read from the shared read model once per call,
  * **inside the grant's source scope** (SC18). `visibleSources` is the granted
- * sources the store holds; `publicationHighWater` is the highest visible
- * parse run of those sources — what "current" means for this answer; and
- * `parserBuildDigest` covers the builds of the newest visible parse runs of
- * those sources, bounded by the read model's page limit. For a grant over
- * every source (`"*"`, which is also the browser reader's) the window is the
- * overview's own; for a listed grant it is read for the listed sources only,
- * so a source outside the grant can neither be named in a context nor move
- * its publication or parser digests.
+ * sources the store holds; `publicationHighWater` is what "current" means for
+ * this answer: the highest visible parse run of those sources, the newest
+ * publication event and the number of runs excluded from financial views
+ * (`publicationMarks`). The last two move with an activation, a rollback or an
+ * exclusion, which change the rows a page reads without recording a newer
+ * parse run (INV09, ADR 0091 amendment). `parserBuildDigest` covers the
+ * builds of the newest visible parse runs of those sources, bounded by the
+ * read model's page limit. For a grant over every source (`"*"`, which is
+ * also the browser reader's) the window and the marks are the whole store's;
+ * for a listed grant they are read for the listed sources only, so a source
+ * outside the grant can neither be named in a context nor move its
+ * publication or parser digests.
  */
 async function contextInputs(context: ToolContext, overview: Overview): Promise<ContextInputs> {
   const grant = context.grant;
@@ -147,12 +151,15 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
     grant.scopes.sources === "*"
       ? overview.parseRuns
       : await context.reader.sourceParseRuns(visibleSources);
+  const marks = await context.reader.publicationMarks(
+    grant.scopes.sources === "*" ? null : visibleSources,
+  );
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
   return {
     now: context.now,
-    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}`,
+    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}+publication-events@${String(marks.publicationEvent)}+exclusions@${String(marks.exclusions)}`,
     parserBuildDigest: await canonicalDigest(builds),
     visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),

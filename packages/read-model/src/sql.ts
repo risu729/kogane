@@ -94,6 +94,27 @@ export const SOURCE_PARSE_RUNS_SQL = `SELECT p.id, p.parser_name, p.parser_versi
  WHERE a.source_id IN (SELECT value FROM json_each(?1))
  ORDER BY p.id DESC LIMIT ${PAGE_LIMIT}`;
 
+/**
+ * `publicationMarks` over every source: the newest publication event and the
+ * number of runs excluded from financial views. Both tables are append-only
+ * (migrations 0026 and 0003), so each mark moves with every pointer change
+ * and every exclusion, including the ones that record no newer parse run.
+ */
+export const PUBLICATION_MARKS_SQL = `SELECT
+  (SELECT coalesce(max(id), 0) FROM publication_events) AS publication_event,
+  (SELECT count(*) FROM fetch_run_annotations
+    WHERE annotation_kind = 'exclude_from_financial_views') AS exclusions`;
+
+/** `publicationMarks` over the listed sources only: no other source's change moves them. */
+export const SOURCE_PUBLICATION_MARKS_SQL = `SELECT
+  (SELECT coalesce(max(e.id), 0) FROM publication_events e
+    JOIN fetch_artifacts a ON a.id = e.fetch_artifact_id
+   WHERE a.source_id IN (SELECT value FROM json_each(?1))) AS publication_event,
+  (SELECT count(*) FROM fetch_run_annotations n
+    JOIN fetch_runs r ON r.id = n.fetch_run_id
+   WHERE n.annotation_kind = 'exclude_from_financial_views'
+     AND r.source_id IN (SELECT value FROM json_each(?1))) AS exclusions`;
+
 export const OVERVIEW_PARSE_RUNS_SQL = `SELECT id, fetch_artifact_id, parser_name, parser_version, parsed_at, status,
        error, warnings_json, superseded_by_parse_run_id
   FROM ${visibleEvidence.parseRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;

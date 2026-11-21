@@ -104,6 +104,18 @@ export interface SourceParseRun {
   parser_version: string;
 }
 
+/**
+ * Marks of what the publication gate and the run exclusions have done: the
+ * newest `publication_events` id and the number of `exclude_from_financial_views`
+ * annotations. An activation or a rollback moves an artifact's published run
+ * without recording a newer parse run, and an exclusion hides a run without
+ * one; each still moves these marks.
+ */
+export interface PublicationMarks {
+  publicationEvent: number;
+  exclusions: number;
+}
+
 /** One source's visible fetch runs, counted over its whole history. */
 export interface SourceFetchRunCount {
   source_id: string;
@@ -126,6 +138,12 @@ export interface ObservationReader {
    * place in it. An empty list reads nothing.
    */
   sourceParseRuns(sources: readonly string[]): Promise<SourceParseRun[]>;
+  /**
+   * `PublicationMarks` of the listed sources, or of every source for `null`.
+   * A listed source's marks never move with another source's events; an
+   * empty list reads nothing and is zero.
+   */
+  publicationMarks(sources: readonly string[] | null): Promise<PublicationMarks>;
   /**
    * D13 partial-update signal: partial fetch runs that refreshed some units of
    * a dataset on the `unit` eligibility scope. Empty for every dataset on the

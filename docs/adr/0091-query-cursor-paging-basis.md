@@ -87,7 +87,9 @@ intent or filter, or a stated knowledge cutoff that differs.
   A page read after such a change can repeat or skip rows of the page before
   it. The old binding did not detect this either; it only made every later
   page `stale_context`. `contextId` pins the same marker. A marker that moves
-  with every publication event is not built.
+  with every publication event is not built. (The
+  [amendment of 2026-11-21](#amendment-2026-11-21-a-publication-marker-that-moves-with-every-publication-change),
+  proposed, builds it.)
 - `executeQuery` names a source `no_rows_in_scope` only when every scope pair
   that could hold its rows was read to its end. A whole-store read stops once
   it has the page and its lookahead row, so a source whose rows all lie past
@@ -110,3 +112,83 @@ intent or filter, or a stated knowledge cutoff that differs.
 - `services/app/test/agent-api.test.ts`: over the real Worker, the page after
   `{"intent":"activity","limit":1}`, asked two seconds later, is `200` with
   the next row and its own `contextId`.
+
+## Amendment 2026-11-21: a publication marker that moves with every publication change
+
+- Status: proposed
+- Date: 2026-11-21
+- Carried by: `services/app/src/agent-service.ts` (`contextInputs`),
+  `packages/read-model/src/observation-reader.ts` (`publicationMarks`,
+  `PUBLICATION_MARKS_SQL`, `SOURCE_PUBLICATION_MARKS_SQL` in `sql.ts`),
+  `packages/domain/src/context.ts` (`financial-context-v2`)
+
+**Context.** The Consequences above recorded a limit: `publicationHighWater`
+was the highest visible parse run id of the grant's sources, and "a marker that
+moves with every publication event is not built". The `activity` and
+`reported-state` rows are read from the published parse runs of visible,
+not-excluded runs. Two changes move those rows without recording a newer parse
+run, so the marker, the paging basis and, at one evaluation clock, the
+`contextId` stayed equal while the answer changed (INV09,
+[ADR 0001](0001-domain-axes.md)):
+
+- an activation of an artifact's candidate run, or a rollback, moves its
+  `published_parse_runs` pointer to a run older than the newest visible one;
+- an `exclude_from_financial_views` annotation hides a run whose parse runs
+  are not the newest visible one.
+
+`services/app/test/query-paging-basis.test.ts` reproduced both on origin/main
+(8ba0e3b5): the first page's row changed, while the cursor's `basisRef` and
+the `contextId` did not, and the earlier cursor was answered `200` from the
+changed rows. The parser build set was held equal on purpose; an activation
+onto a build no visible run used moved the parser build digest and hid the gap.
+
+**Options considered.**
+
+1. Keep the limit. Rejected: it is an INV09 gap in a published id, and a page
+   read after the change repeats or skips rows.
+2. Pin CORE's `core_source_revision`. It moves with every write the balance
+   projection reads (migration 0038), but it is one counter for the whole
+   store: a change in a source outside a listed grant would move that grant's
+   marker, which the context must not let happen (SC18,
+   [ADR 0047](0047-mcp-client-connection.md) point 4). It also moves with
+   writes these rows never read (mappings, decisions), so every cursor would
+   go stale far more often.
+3. Pin a digest of every published pointer of the grant's sources. Exact, but
+   it reads one row per (artifact, parser) on every query.
+4. Pin two marks of the append-only tables those changes write, read within
+   the grant's sources: the newest `publication_events` id (every pointer
+   change appends one, migration 0026) and the number of
+   `exclude_from_financial_views` annotations (append-only, migrations 0003
+   and 0043). Each is one indexed or small read.
+
+**Decision.** Option 4. `publicationHighWater` is
+`published-parse-runs@<id>+publication-events@<id>+exclusions@<n>`. For a
+whole-store grant the marks are the whole store's
+(`PUBLICATION_MARKS_SQL`); for a listed grant they are read through
+`fetch_artifacts` and `fetch_runs` for the listed visible sources only
+(`SOURCE_PUBLICATION_MARKS_SQL`). The context schema becomes
+`financial-context-v2`; its keys are unchanged.
+
+**Consequences.**
+
+- An activation, a rollback or an exclusion makes an earlier cursor
+  `stale_context`, and two answers at one clock across it carry different
+  `contextId`s and `resultRef`s.
+- Every `contextId`, `resultRef` and paging basis changes once at deploy, and a
+  cursor issued before it is `stale_context`. Nothing stores them.
+- A denied source's publication or exclusion still moves no listed grant's
+  context (`services/app/test/coverage-scope.test.ts`).
+- Limits: the marks are read before the rows, in separate statements, so a
+  change that lands between them is answered under the earlier marker. The
+  marker covers what the store records; a deploy that changes the read SQL
+  between two pages keeps the basis, as before.
+
+**Verification.** `services/app/test/query-paging-basis.test.ts`: over the
+real read model and CORE migrations, an unchanged store keeps the rows, the
+`contextId` and the basis; an activation onto an older candidate run and an
+exclusion of a run below the newest visible one each change the first page,
+the `contextId` at one clock and the basis, and the earlier cursor is
+`409 stale_context`. Reverting `contextInputs` to the parse-run marker fails
+both change cases. `packages/read-model/test/publication-marks.test.ts`: the
+listed marks move only with the listed sources' events and exclusions, and
+the whole-store marks with any.
