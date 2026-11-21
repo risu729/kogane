@@ -434,9 +434,11 @@ occurrence of that job.
   not applied either, and the caller gets the writer's failure (the
   schedules' `503 scheduling_unavailable`, the survey's
   `503 decision_record_failed`, a command's 5xx, and the proposal tool's
-  existing `409 idempotency_conflict`, which it answers for every failed
-  append). The command, operations and schedule writers act only for a
-  principal whose subject the actor shape admitted (`principalFor`); the
+  `500 internal_error`; its `409 idempotency_conflict` is only for a
+  proposal whose decision is already recorded,
+  [agent API](agent-api.md#proposals-are-not-adoptions)). The command,
+  operations and schedule writers act only for a principal whose subject the
+  actor shape admitted (`principalFor`); the
   proposal tool acts for any proved caller (ADR 0084: every one holds the
   whole-store grant), so a subject outside the actor shape can read but
   cannot propose.

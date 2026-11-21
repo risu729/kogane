@@ -905,8 +905,9 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     } finally {
       await env.DB.prepare("DROP TRIGGER review_audit_write_fails").run();
     }
-    // The proposal tool answers any failed append with its existing code.
-    expect(answer).toMatchObject({ status: 409, body: { code: "idempotency_conflict" } });
+    // Nothing was recorded, so this is the store's failure, never a duplicate
+    // the agent is told not to resend (`idempotency_conflict`).
+    expect(answer).toMatchObject({ status: 500, body: { error: "internal_error" } });
     expect(await rows()).toEqual(before);
   });
 });

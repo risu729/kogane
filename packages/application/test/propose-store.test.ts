@@ -65,6 +65,21 @@ describe("commandProposalStore", () => {
     expect(db.query("SELECT count(*) n FROM entity_relations").get()).toEqual({ n: 1 });
     db.close();
   });
+
+  test("proposalRecorded tells a duplicate apart from a write that recorded nothing", async () => {
+    const db = migratedDatabase();
+    const store = commandProposalStore(sqliteCommandStore(db));
+    expect(await store.proposalRecorded(PROPOSAL.decisionRevisionId)).toBe(false);
+    // A refused write (here a relation kind the schema does not hold) leaves
+    // neither row, so it is not a duplicate of anything.
+    await expect(
+      store.appendProposal({ ...PROPOSAL, kind: "unknown_kind" as StoredProposal["kind"] }),
+    ).rejects.toThrow();
+    expect(await store.proposalRecorded(PROPOSAL.decisionRevisionId)).toBe(false);
+    await store.appendProposal(PROPOSAL);
+    expect(await store.proposalRecorded(PROPOSAL.decisionRevisionId)).toBe(true);
+    db.close();
+  });
 });
 
 describe("storeHasFeature", () => {

@@ -61,6 +61,12 @@ export interface ProposalStore {
   resolveTarget(ref: string): Promise<ResolvedRef | null>;
   resolveEvidence(ref: string): Promise<ResolvedRef | null>;
   appendProposal(proposal: StoredProposal): Promise<void>;
+  /**
+   * Whether a proposal decision with this id is already recorded: what tells
+   * a refused append that collided with an earlier identical proposal apart
+   * from a write the store could not make.
+   */
+  proposalRecorded(decisionRevisionId: string): Promise<boolean>;
 }
 
 export interface ProposalReceipt {
@@ -198,10 +204,15 @@ export async function proposeReconciliation(input: {
   };
   try {
     await store.appendProposal(proposal);
-  } catch {
+  } catch (error) {
     // The append-only triggers refuse a replacement; the same proposal body in
-    // the same instant is the only way to collide. Nothing else is reported.
-    return fail("idempotency_conflict", [`proposal:${suffix}`]);
+    // the same instant is the only way to collide, and then its decision is
+    // already recorded. Any other refused write recorded nothing: it is the
+    // store's failure (the Worker's `500 internal_error`), never a duplicate
+    // the caller is told not to resend.
+    if (await store.proposalRecorded(proposal.decisionRevisionId))
+      return fail("idempotency_conflict", [`proposal:${suffix}`]);
+    throw error;
   }
   return {
     ok: true,

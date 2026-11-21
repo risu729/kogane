@@ -2013,6 +2013,18 @@ and `method` `ai` or `manual`, and an `entity_relations` row with
 `status = 'proposed'`. The relation's provenance trigger requires its decision
 to exist first, so a failed guard leaves neither row.
 
+The two rows' ids are a digest of the principal, the context (whose id
+includes the whole-second clock), the kind, both targets, the sorted evidence
+refs, the reason and the recording instant, so the same proposal sent twice in
+one second collides with itself. That refused write is `409
+idempotency_conflict` naming the `proposal:` id, and only when that proposal's
+decision is already recorded (`proposalRecorded`). Any other refused write (a
+store outage, or an audit record the batch could not write) recorded nothing
+and is the store's failure, `500 internal_error` on both transports, never a
+duplicate the caller is told not to resend
+(`services/app/test/audit.test.ts`). The same
+proposal sent in another second is a second proposal.
+
 No reader adopts a `proposed` relation, so a proposal cannot change a mapping,
 a balance, a total or any adopted set. `test/agent-api.test.ts` proves it by
 snapshotting every answer a reader can get before and after a successful
