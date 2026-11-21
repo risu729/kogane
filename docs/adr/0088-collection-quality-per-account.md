@@ -15,6 +15,9 @@
   client holds the whole-store grant)
 - Amends: `kogane.collection-quality.read` (ADR 0045's 2026-11-07 amendment,
   #1082) with a `view` argument
+- Amended by: [ADR 0123, amendment of 2026-11-20](0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)
+  (proposed): the route and the view take `detail`, the full answer below
+  being `detail: "full"` and the default a paged summary
 
 ## Context
 

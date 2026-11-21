@@ -240,3 +240,91 @@ describe("account coverage wire check", () => {
     expect(validAccountCoverage(answer({ accounts: [stalest] }))).toBe(false);
   });
 });
+
+// The summary detail (ADR 0123, amendment 2026-11-20): one line per account,
+// then per unit of unattributed cells, paged by line.
+const summary = (overrides: Record<string, unknown> = {}) => ({
+  apiVersion: 3,
+  detail: "summary",
+  freshnessAsOf: answer().freshnessAsOf,
+  dataTypesVersion: "provider-data-types-v1",
+  dataTypes: { collected: ["card_usage", "card_statement"], partial: [], notCollected: [] },
+  sourceId: "vpass",
+  latestFetchRun: answer().latestFetchRun,
+  cells: 2,
+  accounts: [
+    {
+      accountId: "synthetic-a",
+      label: "Synthetic account",
+      statuses: ["identified"],
+      freshness: period.freshness,
+      kinds: ["transaction"],
+      dataTypes: 1,
+      providerTypes: ["card_usage", "card_statement"],
+      periods: { count: 1, first: "209901", last: "209901" },
+      standings: { current: 1, olderCurrent: 0, newestNotCurrent: 0 },
+      cellStates: { current: 1, olderCurrent: 0, noCurrent: 0 },
+      newestCapturedAt: period.capture.capturedAt,
+      reasons: ["retention_not_assessed"],
+    },
+  ],
+  unattributed: [
+    {
+      dataset: null,
+      parser: null,
+      unitKey: "synthetic-unit-b",
+      cells: 1,
+      periods: { first: null, last: null },
+      current: 0,
+      olderCurrent: 0,
+      noCurrent: 1,
+      reasons: ["unit_without_artifacts", "no_current_capture"],
+    },
+  ],
+  coverage: {
+    accounts: 1,
+    unattributedCells: 1,
+    lines: 2,
+    limit: 20,
+    offset: 0,
+    truncated: false,
+    nextOffset: null,
+  },
+  ...overrides,
+});
+
+describe("account coverage summary wire check", () => {
+  test("each detail passes only where it was asked for, under its own source's path", () => {
+    const path = "/api/collection-quality/vpass/accounts";
+    expect(validCollectionQualityResponse(path, summary())).toBe(true);
+    expect(validCollectionQualityResponse(path, summary(), "summary")).toBe(true);
+    expect(validCollectionQualityResponse(path, summary(), "full")).toBe(false);
+    expect(validCollectionQualityResponse(path, answer(), "full")).toBe(true);
+    expect(validCollectionQualityResponse(path, answer(), "summary")).toBe(false);
+    expect(
+      validCollectionQualityResponse("/api/collection-quality/myjcb/accounts", summary()),
+    ).toBe(false);
+    // The cell route's summary path never takes it.
+    expect(validCollectionQualityResponse("/api/collection-quality/vpass", summary())).toBe(false);
+  });
+
+  test("refuses a page that miscounts or mispages", () => {
+    const path = "/api/collection-quality/vpass/accounts";
+    const base = summary();
+    for (const bad of [
+      summary({ coverage: { ...base.coverage, lines: 3 } }),
+      summary({ coverage: { ...base.coverage, truncated: true, nextOffset: 2 } }),
+      summary({ coverage: { ...base.coverage, accounts: 2 } }),
+      summary({ unattributed: [{ ...base.unattributed[0]!, cells: 2 }] }),
+      summary({
+        dataTypes: { collected: ["card_usage"], partial: ["card_usage"], notCollected: [] },
+      }),
+      summary({
+        accounts: [{ ...base.accounts[0]!, periods: { count: 2, first: null, last: null } }],
+      }),
+      summary({ accounts: [{ ...base.accounts[0]!, freshness: { state: "stale", ageDays: 9 } }] }),
+      summary({ detail: "full" }),
+    ])
+      expect(validCollectionQualityResponse(path, bad, "summary")).toBe(false);
+  });
+});
