@@ -500,7 +500,11 @@ report is stored. Rows published before the second read and re-parsed away
 before the check bring an in-scope row onto the second page behind rows that
 sort after it; with a bound of 485 the report is the one a read of the
 settled store gives, and with the read kept in arrival order that test
-fails. `packages/read-model/test/position-cut.test.ts` checks
+fails. `services/processor/test/report-job-order.test.ts` checks that sort
+against SQLite's `ORDER BY` on 1000 seeded random sets of text (ASCII,
+Japanese, combining marks, characters above U+FFFF) and ids (small and
+52-bit), shuffled and already in order; with UTF-16 string comparison or
+text comparison of ids it fails. `packages/read-model/test/position-cut.test.ts` checks
 `POSITION_CUT_SQL` against an oracle (the final cut read with nothing moving)
 on 40 seeded random stores where a re-parse, a newer complete capture, a new
 parse or nothing lands between two page reads: the check passes exactly when

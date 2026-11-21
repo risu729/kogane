@@ -704,6 +704,10 @@ would discard later collection and later decisions (docs/operations.md).
   republished between two page reads read again as one cut, a cut that
   keeps moving refused as `snapshot_changed`, and a row read out of page
   order kept in page order under the bound;
+  `services/processor/test/report-job-order.test.ts` — that sort against
+  SQLite's `ORDER BY` on 1000 seeded random sets of ASCII, Japanese,
+  combining-mark and astral-plane text with small and 52-bit ids, shuffled
+  and already in order;
   `packages/read-model/test/position-cut.test.ts` — `POSITION_CUT_SQL`
   against an oracle on seeded random stores, and its plan without
   statistics.

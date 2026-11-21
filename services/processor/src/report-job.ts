@@ -255,7 +255,7 @@ function binaryText(left: string, right: string): number {
 }
 
 /** The reader's position page order (`ORDER_KEYS.positionsByScope`): source, account, code, id. */
-function pageOrder(left: PositionWithValuations, right: PositionWithValuations): number {
+export function pageOrder(left: PositionWithValuations, right: PositionWithValuations): number {
   return (
     binaryText(left.position.source_id, right.position.source_id) ||
     binaryText(left.position.source_account, right.position.source_account) ||
