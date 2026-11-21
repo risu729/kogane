@@ -411,6 +411,13 @@ Limits:
   per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
+- A statement's due date (`latestStatement.paymentDate`) and a settlement's
+  debit date (`answer.debitDate`, `latest.debitDate`) are null without a
+  reason: the due date when it is absent or not a civil date, the debit date
+  when the candidate's stored bank debit date is not a civil date (any reason
+  it stored is not carried). The page names what is missing,
+  年月日として読める記録なし, and gives no reason; `照合候補のない請求` shows a
+  null due date the same way.
 
 ### Upcoming bills
 
