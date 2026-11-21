@@ -9,7 +9,15 @@
 // exists. A step that reads a growing table from end to end fails the test
 // unless it is listed below with the reason it is bounded or the document that
 // accepts it. A statement a tick does not reach on this store (work this store
-// does not have) is not checked here.
+// does not have) is not checked here: the Vpass binding insert of the identity
+// sweep's empty-parse batch is one.
+//
+// Only `SCAN` steps are checked. A keyed `SEARCH` nested under another
+// table's rows (the Vpass binding insert searches every Vpass artifact once
+// per binding artifact), an automatic index built over a whole table each
+// call, and correlated subqueries run once per scanned row all pass here; what
+// a statement reads per call, and how that grows with history, is measured by
+// tick-rows-read.test.ts (ADR 0129).
 //
 // Synthetic throughout: one balance capture of a synthetic amount.
 import { afterAll, beforeAll, expect } from "bun:test";
@@ -74,18 +82,19 @@ const ACCEPTED: readonly { statement: string; step: RegExp; reason: string }[] =
     statement: "snapshot_policies(parser_name, dataset, required_version",
     step: /^SCAN (a USING INDEX idx_fetch_artifacts_source_dataset_time|t USING INDEX idx_fetch_run_reports_one_terminal)$/u,
     reason:
-      "the latest-state reads group the whole active set first (docs/read-model.md, Queries); the snapshot CTEs read each artifact once (Cost)",
+      "the latest-state reads group the whole active set first (docs/read-model.md, Queries). Not once per artifact: the latest balances read scans every artifact three times (its active chain, eligible_snapshots, eligible_artifact_containers) and walks every terminal run report twice more (MyJCB past months, V Point runs), the positions read walks every terminal report and scans twice, each pass probing the run, units, parse, claim and warnings per artifact, so rows read grow linearly with history (docs/read-model.md, Cost; tick-rows-read.test.ts; ADR 0129)",
   },
   {
     statement: "WITH ranked_myjcb_snapshots AS",
     step: /^SCAN a USING INDEX (idx_fetch_artifacts_source_dataset_time|sqlite_autoindex_fetch_artifacts_1)$/u,
-    reason: "the card usage snapshot CTEs read each artifact once (docs/read-model.md, Cost)",
+    reason:
+      "not once per artifact: the card usage read scans every artifact twice (Vpass statement eligibility, MyJCB ledger ranking), probing each one's run, units and parse, so rows read grow linearly with history (docs/read-model.md, Cost; tick-rows-read.test.ts; ADR 0129)",
   },
   {
     statement: "WITH current_keys AS MATERIALIZED",
     step: /^SCAN k USING INDEX sqlite_autoindex_card_purchase_recognition_keys_1$/u,
     reason:
-      "the stale-key read runs only while the retirement proof is dirty (ADR 0037, docs/economic-events.md)",
+      "the stale-key read runs only while the retirement proof is dirty (ADR 0037, docs/economic-events.md), and every move of the CORE revision and every new capture dirties it (migration 0064); besides this walk of every live key, the card usage CTEs it composes walk every terminal run report twice through an automatic index, so rows read grow linearly with history (docs/read-model.md, Cost; tick-rows-read.test.ts; ADR 0129)",
   },
   {
     statement: "WITH page AS MATERIALIZED ( SELECT * FROM card_statement_facts",
