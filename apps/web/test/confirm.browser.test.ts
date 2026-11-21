@@ -75,7 +75,8 @@ describe.if(runnable)("change confirmation screen", () => {
   let commands = true;
   let stale = false;
   let published = false;
-  // The subject has no current revision and the plan reaches no source.
+  // The server reports no current revision for the subject (it reads one only
+  // for a pinned subject, 0 when none exists) and the plan reaches no source.
   let vanished = false;
   const posted: string[] = [];
   /**
@@ -248,7 +249,7 @@ describe.if(runnable)("change confirmation screen", () => {
       .getByRole("region", { name: "変更の対象", exact: true })
       .locator("tbody tr");
     expect(await targets.count()).toBe(1);
-    expect(await targets.first().locator("td").nth(1).innerText()).toBe("現在の版なし");
+    expect(await targets.first().locator("td").nth(1).innerText()).toBe("現在の版の報告なし");
     const diff = await page
       .getByRole("region", { name: "サーバーが計算した差分", exact: true })
       .innerText();

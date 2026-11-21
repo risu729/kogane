@@ -570,7 +570,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                           <td>
                             <Nullable
                               value={data.currentRevisions[row.subjectRef]}
-                              placeholder="現在の版なし"
+                              placeholder="現在の版の報告なし"
                             />
                           </td>
                           <td>{targetLabel(row.currentTargetRef)}</td>
