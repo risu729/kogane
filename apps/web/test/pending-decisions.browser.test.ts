@@ -275,8 +275,9 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       current = recovered;
       held = new Promise((resolve) => (release = resolve));
       const before = requested;
+      const asked = (): boolean => requested > before;
       await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-      while (requested === before) await Bun.sleep(10);
+      while (!asked()) await Bun.sleep(10);
       expect(await failed.count()).toBe(1);
       expect(await total.count()).toBe(0);
       // The read succeeds: the heading shows its total, not the earlier one.
