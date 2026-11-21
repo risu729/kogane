@@ -11,7 +11,7 @@ import {
 } from "../../../read-model/src/account-history.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { grantAllows, type Grant } from "../grants.ts";
+import { wholeStoreReadRefusal, type Grant } from "../grants.ts";
 import { ACCOUNT_SOURCE_ACCOUNT_ID } from "./account-candidates.ts";
 
 export type AccountHistoryEntry = AccountHistoryRow;
@@ -39,12 +39,8 @@ export async function readAccountHistoryForGrant(input: {
     ok: false,
     error: financialError(code, REQUEST_ID, refs),
   });
-  if (!grantAllows(grant, "records.read")) return fail("unauthorized", ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (typeof sourceAccountId !== "string" || !ACCOUNT_SOURCE_ACCOUNT_ID.test(sourceAccountId))
     return fail("invalid_query", ["sourceAccountId"]);
   if (

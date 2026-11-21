@@ -21,6 +21,7 @@ import {
   financialError,
   type Grant,
   grantAllows,
+  narrowedScopeRefs,
   REWARD_EXPIRY_DETAILS,
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
@@ -549,8 +550,7 @@ function refusedRefs(grant: Grant, definition: PageReadTool<z.ZodType>): string[
     ...(definition.scheduleScope && grant.scopes.scheduleSources !== "*"
       ? ["scope:scheduleSource"]
       : []),
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+    ...narrowedScopeRefs(grant),
   ];
 }
 
