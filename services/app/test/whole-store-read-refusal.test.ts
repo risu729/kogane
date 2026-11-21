@@ -78,6 +78,9 @@ const GRANTS: Record<string, Grant> = {
   "every axis narrowed": grant({ sources: ["s"], accounts: ["a"], scheduleSources: [] }),
 };
 
+/** An argument every one of these reads refuses once past its gate. */
+const BAD = { bad: "!bad" };
+
 const expected = (operation: string, refs: string[]) => {
   const code = refs[0]!.startsWith("capability:") ? "unauthorized" : "evidence_restricted";
   return JSON.stringify({
@@ -96,11 +99,20 @@ describe("the App's whole-store gates refuse byte for byte as before", () => {
       for (const [label, granted] of Object.entries(GRANTS)) {
         const refs = legacyRefs(granted, capabilities, scheduleScope);
         if (refs.length === 0) continue;
-        // The grant is graded before the argument is read: `{}` is never checked.
-        const answer = await callPageReadTool(name as PageReadToolName, {}, env, granted);
+        // The grant is graded before the argument is read: `BAD` is never checked.
+        const answer = await callPageReadTool(name as PageReadToolName, BAD, env, granted);
         expect(JSON.stringify(answer), label).toBe(expected(name.slice("kogane.".length), refs));
       }
     });
+
+  it("refuses BAD for a whole-store grant, so a read that checked it first would fail above", async () => {
+    for (const name of Object.keys(PAGE_READS)) {
+      const answer = await callPageReadTool(name as PageReadToolName, BAD, env, whole);
+      expect(answer.status, name).toBe(400);
+    }
+    const reported = await callReadTool("kogane.reported-state.read", BAD, env, whole);
+    expect(reported.status).toBe(400);
+  });
 
   it("lists to each grant exactly the page reads its gate lets it call", async () => {
     for (const [label, granted] of Object.entries(GRANTS)) {
@@ -118,7 +130,7 @@ describe("the App's whole-store gates refuse byte for byte as before", () => {
     for (const [label, granted] of Object.entries(GRANTS)) {
       const refs = legacyRefs(granted, ["records.read"], false);
       if (refs.length === 0) continue;
-      const answer = await callReadTool("kogane.reported-state.read", {}, env, granted);
+      const answer = await callReadTool("kogane.reported-state.read", BAD, env, granted);
       expect(JSON.stringify(answer), label).toBe(expected("reported-state.read", refs));
     }
   });

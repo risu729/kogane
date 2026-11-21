@@ -6,7 +6,9 @@
 // frozen, and each read keeps its outcome wrapper. So the move changes no
 // byte: the same code, request id, remedy, refs and ref order. This file
 // imports only the reads, so it runs unchanged against the code before the
-// move. Synthetic grants only; no store is read (`untouched` throws).
+// move. Each call carries an argument the read refuses past its gate, so a
+// read that checked it first would fail here. Synthetic grants only; no store
+// is read (`untouched` throws).
 import { describe, expect, it } from "bun:test";
 import type { FinancialError } from "../../domain/src/result.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -58,6 +60,12 @@ const untouched: SqlExecutor = {
 };
 
 const NOW = "2026-01-15T00:00:00Z";
+/**
+ * Arguments each read refuses, or throws on, once past its gate: a read that
+ * checked its argument before its grant would answer that refusal instead.
+ */
+const BAD = "!bad";
+const BEYOND = Number.MAX_SAFE_INTEGER;
 const whole = fullGrant("synthetic");
 const narrowed = (scopes: Partial<Grant["scopes"]>, capabilities = whole.capabilities): Grant => ({
   ...whole,
@@ -93,6 +101,12 @@ function wrapped(
   return wrapper === "ok" ? { ok: false, error } : { status: "refused", error };
 }
 
+/** The reads whose gate is the only check before the store: they take no argument. */
+const WITHOUT_ARGUMENT = new Set([
+  "card-settlements.debit-accounts",
+  "changes.since (the adapters' gate)",
+]);
+
 /** Every read that refuses a grant short of the whole store: its wrapper, request id, capability and call. */
 const READS: Record<
   string,
@@ -102,13 +116,14 @@ const READS: Record<
     "ok",
     "accounts.candidates",
     "records.read",
-    (grant) => reviewAccountCandidates({ grant, sql: untouched, request: { offset: 0 } as never }),
+    (grant) =>
+      reviewAccountCandidates({ grant, sql: untouched, request: { offset: BEYOND } as never }),
   ],
   "accounts.history": [
     "ok",
     "accounts.history",
     "records.read",
-    (grant) => readAccountHistoryForGrant({ grant, sql: untouched, sourceAccountId: "sa_1" }),
+    (grant) => readAccountHistoryForGrant({ grant, sql: untouched, sourceAccountId: BAD }),
   ],
   "card-settlements.debit-accounts": [
     "ok",
@@ -120,26 +135,31 @@ const READS: Record<
     "status",
     "card-settlements.read",
     "records.read",
-    (grant) => readCardSettlementsForGrant({ grant, sql: untouched, request: {} }),
+    (grant) => readCardSettlementsForGrant({ grant, sql: untouched, request: { bad: BAD } }),
   ],
   "card-settlements.statements": [
     "status",
     "card-settlements.statements",
     "records.read",
-    (grant) => readCardSettlementStatementsForGrant({ grant, sql: untouched, request: {} }),
+    (grant) =>
+      readCardSettlementStatementsForGrant({ grant, sql: untouched, request: { bad: BAD } }),
   ],
   "card-settlements.ownership": [
     "status",
     "card-settlements.ownership",
     "records.read",
-    (grant) => readCardOwnershipForGrant({ grant, sql: untouched, request: {} }),
+    (grant) => readCardOwnershipForGrant({ grant, sql: untouched, request: { bad: BAD } }),
   ],
   "card-settlements.unmatched": [
     "ok",
     "card-settlements.unmatched",
     "records.read",
     (grant) =>
-      reviewUnmatchedCardStatements({ grant, sql: untouched, request: { offset: 0 } as never }),
+      reviewUnmatchedCardStatements({
+        grant,
+        sql: untouched,
+        request: { offset: BEYOND } as never,
+      }),
   ],
   "changes.since (the adapters' gate)": [
     "bare",
@@ -156,7 +176,7 @@ const READS: Record<
         grant,
         sql: untouched,
         served: { events: true },
-        request: { since: NOW },
+        request: { since: BAD },
         now: NOW,
       }),
   ],
@@ -164,56 +184,57 @@ const READS: Record<
     "status",
     "economic-readiness.read",
     "records.read",
-    (grant) => readEconomicRowReadinessForGrant({ grant, sql: untouched, request: {} }),
+    (grant) => readEconomicRowReadinessForGrant({ grant, sql: untouched, request: { bad: BAD } }),
   ],
   "instruments.candidates": [
     "ok",
     "instruments.candidates",
     "records.read",
     (grant) =>
-      reviewInstrumentCandidates({ grant, sql: untouched, request: { offset: 0 } as never }),
+      reviewInstrumentCandidates({ grant, sql: untouched, request: { offset: BEYOND } as never }),
   ],
   "instruments.coverage": [
     "ok",
     "instruments.coverage",
     "summary.read",
-    (grant) => readInstrumentCoverage({ grant, sql: untouched, source: null }),
+    (grant) => readInstrumentCoverage({ grant, sql: untouched, source: "" }),
   ],
   "instruments.history": [
     "ok",
     "instruments.history",
     "records.read",
-    (grant) => readInstrumentHistoryForGrant({ grant, sql: untouched, identifierId: "id_1" }),
+    (grant) => readInstrumentHistoryForGrant({ grant, sql: untouched, identifierId: BAD }),
   ],
   "decisions.pending": [
     "ok",
     "decisions.pending",
     "records.read",
-    (grant) => readPendingDecisions({ grant, sql: untouched, served: {} as never, now: NOW }),
+    (grant) => readPendingDecisions({ grant, sql: untouched, served: {} as never, now: BAD }),
   ],
   "purchases.explain": [
     "ok",
     "purchases.explain",
     "records.read",
-    (grant) => explainCardPurchases({ grant, sql: untouched, request: {} as never }),
+    (grant) =>
+      explainCardPurchases({ grant, sql: untouched, request: { offset: BEYOND } as never }),
   ],
   "purchases.explain (cards)": [
     "ok",
     "purchases.explain",
     "records.read",
-    (grant) => explainCardPurchaseCards({ grant, sql: untouched, request: {} as never }),
+    (grant) => explainCardPurchaseCards({ grant, sql: untouched, request: { bad: BAD } as never }),
   ],
   "purchases.explain (lines)": [
     "ok",
     "purchases.explain",
     "records.read",
-    (grant) => explainCardPurchaseLines({ grant, sql: untouched, request: {} as never }),
+    (grant) => explainCardPurchaseLines({ grant, sql: untouched, request: { bad: BAD } as never }),
   ],
   "reconstructed-state.read": [
     "reconstructed",
     "",
     "records.read",
-    (grant) => readReconstructedState({ grant, sql: untouched, body: {}, now: NOW }),
+    (grant) => readReconstructedState({ grant, sql: untouched, body: { bad: BAD }, now: NOW }),
   ],
 };
 
@@ -228,6 +249,21 @@ describe("a whole-store read refuses a narrower grant byte for byte as its own g
         );
       }
     });
+
+  it("gives each read an argument it refuses, or throws on, once past its gate", async () => {
+    for (const [read, [, , , call]] of Object.entries(READS)) {
+      if (WITHOUT_ARGUMENT.has(read)) continue;
+      const outcome = await call(whole).then(
+        (answer) => JSON.stringify(answer),
+        (error: unknown) => String(error),
+      );
+      // A read that took the argument would reach the store, which throws `read`.
+      expect(outcome, read).not.toBe(String(new Error("read")));
+      expect(outcome, read).not.toMatch(
+        /unauthorized|evidence_restricted|capability_missing|scope_restricted/u,
+      );
+    }
+  });
 
   it("covers every refusal shape: the capability first, then each narrowed axis in order", () => {
     const refs = Object.values(GRANTS).map((grant) => legacyGate(grant, "records.read")?.refs);

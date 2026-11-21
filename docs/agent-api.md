@@ -2076,8 +2076,8 @@ Converting them to JSON does not make them instructions.
   `since` (64) and `after` (100), `kogane.card-settlements.read`
   `statementKey` (1,024), `kogane.audit.search` `cursor` (400),
   `kogane.command.plan` `baseContextId` (256) and `kogane.command.approve`
-  `scope` items (512). The values of `kogane.audit.search` `filters` have no
-  length bound in the schema.
+  `scope` items (512). The keys of both open maps, and the values of
+  `kogane.audit.search` `filters`, have no length bound in the schema.
 - `explain` returns identifiers only — `account_mapping:`, `parse_run:`,
   `fetch_artifact:`, `raw:<sha256>`. The provider URL an artifact was fetched
   from is never in a graph, at any capability.
