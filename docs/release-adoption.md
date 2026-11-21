@@ -130,8 +130,10 @@ projection with it: no projection is written without its inputs, and neither
 a parse nor `/metadata/differences` can read one. A projection an earlier call
 wrote is the key the batch skips, so a refused input adds nothing to it. Limit:
 a projection the earlier writer (before the two were one batch) left without
-its inputs stays so, since projections are append-only and nothing repairs
-them; a later call with inputs the schema accepts adds them to it.
+its inputs is not repaired, since projections are append-only. Every later
+attempt that reaches it with the same refused input raises again, so no parse
+records it as its input, but `/metadata/differences` can list it; a later call
+whose inputs the schema accepts adds them to it.
 
 `input_digest` and `output_digest` are the literal string `unknown` for the
 rows migration 0027 backfills: the inputs and code digest of the historical
