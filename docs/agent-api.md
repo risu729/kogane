@@ -344,6 +344,14 @@ refused with `unsupported_semantics`. An unknown request key or an unknown
 filter key is refused the same way rather than ignored: silently dropping a
 filter answers a different question from the one that was asked.
 
+The refusal's `refs` name the unknown keys (a filter key as `filter:<key>`).
+A key is the caller's own text, so the tools that name unknown keys —
+`financial.query`, `context.open`, `explain`, `reconcile.propose`,
+`instruments.candidates` and `purchases.explain` — name at most the first
+ten, each cut to its first 64 UTF-16 code units (the first four through
+`unknownKeyRefs` in `packages/application/src/errors.ts`): a body of long
+keys is never repeated back whole.
+
 The `activity` intent reads provider transaction observations, not recognised
 purchase events, so its rows and the purchase figures below answer different
 questions, and neither is a complete card history.

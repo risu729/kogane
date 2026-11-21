@@ -34,6 +34,21 @@ export function financialError(
   };
 }
 
+/** The most unknown keys one refusal names. */
+export const UNKNOWN_KEY_REFS_MAX = 10;
+/** The most UTF-16 code units of one unknown key a refusal repeats. */
+export const UNKNOWN_KEY_REF_LENGTH = 64;
+
+/**
+ * The refs of an `unsupported_semantics` refusal of unknown keys: the first
+ * ten keys, each cut to its first 64 code units. A key is the caller's own
+ * text, so it is named only far enough to be recognised, and a body full of
+ * long keys is never repeated back whole.
+ */
+export function unknownKeyRefs(keys: readonly string[]): string[] {
+  return keys.slice(0, UNKNOWN_KEY_REFS_MAX).map((key) => key.slice(0, UNKNOWN_KEY_REF_LENGTH));
+}
+
 /** HTTP status for each code. Auth failures keep the transport's own closed responses. */
 export const ERROR_STATUS: Record<FinancialErrorCode, number> = {
   needs_scope_resolution: 422,
