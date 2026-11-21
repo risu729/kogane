@@ -400,11 +400,14 @@ interface DecidedEntities {
 /**
  * The account entities a subject stands for towards a subject no decision
  * relates to it directly, read from every accepted decision, a scope with no
- * candidate in the target included. A subject holds the entities of every
- * scope an accepted `same` joins it to (one measurement) and of every scope a
- * decision makes a part of one of those, transitively; it lies inside the
- * entities of those `same` scopes and of every scope it is decided a part of,
- * transitively. Two subjects may overlap when an entity one holds is held by
+ * candidate in the target included (its entity is not known here). Scopes an
+ * accepted `same` joins (one measurement) and references of one entity (may
+ * be one) are read as one scope. A subject holds the entities of every scope
+ * so joined to it and of every scope a decision makes a part of one of those,
+ * transitively; it lies inside the entities of those scopes and of every
+ * scope one of them is decided a part of, transitively. A nesting or common
+ * part no entity marks is not read (ADR 0001's open limit). Two subjects may
+ * overlap when an entity one holds is held by
  * the other or holds the other; two scopes that only lie inside one entity
  * (two pockets of one account) do not overlap by that alone.
  *
@@ -413,8 +416,9 @@ interface DecidedEntities {
  * and `b`; with `a ⊂ w` decided and `a` sharing `b`'s entity, `w ⊥ b` became
  * `a ⊥ b` by step 7's one-step derivation, and both were adopted; with
  * `p ⊂ w` decided and `w` sharing `b`'s entity, `p ⊥ b` adopted `p` and `b`
- * once `p` covered `w`; and a part two decisions deep was counted in its
- * outer whole and in another reference of its entity.
+ * once `p` covered `w`; a part two decisions deep was counted in its outer
+ * whole and in another reference of its entity; and with `q ⊂ w` decided, `p`
+ * sharing `q`'s entity and `w` sharing `b`'s, `p ⊥ b` adopted both.
  */
 function decidedEntities(
   subjects: ReadonlyMap<string, Subject>,
@@ -427,10 +431,21 @@ function decidedEntities(
       at = next;
     return at;
   };
+  const join = (left: string, right: string) => {
+    const [x, y] = [root(left), root(right)];
+    if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
+  };
   for (const relation of decisions)
-    if (relation.relation === "same") {
-      const [x, y] = [root(relation.fromScopeKey), root(relation.toScopeKey)];
-      if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
+    if (relation.relation === "same") join(relation.fromScopeKey, relation.toScopeKey);
+  // Two references of one entity may be one measurement, so the walk reads
+  // them as one: with `p ≈ q ⊂ w ≈ b` (≈ an entity shared), `p` lies inside
+  // `b`'s entity although no decision touches `p` or `b`.
+  const holder = new Map<string, string>();
+  for (const [key, subject] of subjects)
+    for (const entity of subject.accountEntities) {
+      const first = holder.get(entity);
+      if (first === undefined) holder.set(entity, key);
+      else join(first, key);
     }
   const bit = new Map<string, number>();
   for (const subject of subjects.values())

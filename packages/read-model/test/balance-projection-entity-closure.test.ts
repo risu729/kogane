@@ -3,9 +3,10 @@
 // share an account entity or keep their own, at two sources and two authority
 // ranks. Every scope, entity and amount is synthetic.
 //
-// The oracle reads the decisions on their own, transitively: a scope holds
-// the money of every scope a decision makes the same as it or a part of it,
-// and lies inside every scope it is decided the same as or a part of. Two
+// The oracle walks scopes, transitively: a scope holds the money of every
+// scope a decision makes the same as it or a part of it, and lies inside
+// every scope it is decided the same as or a part of; two references of one
+// entity may be one measurement, so the walk passes between them too. Two
 // adopted candidates count one entity twice when an entity one of them holds
 // is held by, or holds, the other. Two references inside one entity (two
 // pockets of one account) do not overlap by that alone.
@@ -14,7 +15,8 @@
 // through a scope outside the target, with no entity on the way, are a limit
 // of the disjointness policy that predates the entity rule (it reads no
 // decision but the pair's own): the first property only checks that the
-// entity rule never adds one.
+// entity rule never adds one. A common part no entity marks is the same
+// limit (ADR 0001), and this oracle does not count it as shared either.
 import { describe, expect, test } from "bun:test";
 import {
   buildBalanceProjection,
@@ -116,8 +118,15 @@ function graph(seed: number): Graph {
   return { candidates, relations };
 }
 
-/** The scopes each scope holds (`down`) and lies inside (`up`), itself included. */
-function closures(relations: readonly DerivedScopeRelation[]) {
+/**
+ * The scopes each scope holds (`down`) and lies inside (`up`), itself
+ * included. With `candidates`, two references of one entity are read as one
+ * (they may be one measurement), so a chain may pass through an entity.
+ */
+function closures(
+  relations: readonly DerivedScopeRelation[],
+  candidates: readonly ProjectionCandidate[] = [],
+) {
   const edges = (direction: "down" | "up") => {
     const map = new Map<string, Set<string>>();
     const add = (from: string, to: string) => {
@@ -135,6 +144,10 @@ function closures(relations: readonly DerivedScopeRelation[]) {
         else add(relation.fromScopeKey, relation.toScopeKey);
       }
     }
+    for (const left of candidates)
+      for (const right of candidates)
+        if (left.accountEntity !== null && left.accountEntity === right.accountEntity)
+          add(left.subjectScopeKey, right.subjectScopeKey);
     return (start: string): Set<string> => {
       const seen = new Set([start]);
       const stack = [start];
@@ -163,7 +176,7 @@ const meets = (left: Set<string>, right: Set<string>): boolean =>
 
 /** Whether the decided closures of two scopes put one entity on both sides. */
 function closureShares(left: string, right: string, { candidates, relations }: Graph): boolean {
-  const { down, up } = closures(relations);
+  const { down, up } = closures(relations, candidates);
   const [leftDown, rightDown] = [down(left), down(right)].map((scopes) =>
     entitiesOf(scopes, candidates),
   ) as [Set<string>, Set<string>];

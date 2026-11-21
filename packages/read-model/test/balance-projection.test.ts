@@ -755,6 +755,49 @@ describe("balance projection builder", () => {
           reasonCode: "account_entity_shared",
         });
     });
+
+    test("a chain that passes through an entity still carries it", () => {
+      // The route's pocket line shares the bank pocket's entity and is
+      // decided a part of the route's account line, which shares the bank
+      // account's entity. No decision touches the bank pocket or the bank
+      // account, and the closure read only their own decisions, so the two
+      // were declared disjoint (listed apart) and both adopted: the pocket's
+      // money inside the account, counted twice.
+      const pocket = deposit("m-pocket", "source_account:smbc:pocket", "1000", {
+        accountEntity: "account:synthetic:pocket",
+      });
+      const account = deposit("m-account", "source_account:smbc:account", "3000", {
+        accountEntity: "account:synthetic:account",
+      });
+      const pocketLine = routeLine(
+        "m-pocket-line",
+        "source_account:route:pocket",
+        "account:synthetic:pocket",
+      );
+      const accountLine = routeLine(
+        "m-account-line",
+        "source_account:route:account",
+        "account:synthetic:account",
+      );
+      const build = buildBalanceProjection(
+        [pocket, account, pocketLine, accountLine],
+        [relation("source_account:route:pocket", "source_account:route:account", "subset")],
+      );
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-pocket", "m-account"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      expect(
+        build.relations.some(
+          (entry) =>
+            entry.source === "policy" &&
+            [entry.fromScopeKey, entry.toScopeKey].sort().join(" ") ===
+              "source_account:smbc:account source_account:smbc:pocket",
+        ),
+      ).toBe(false);
+    });
   });
 
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {

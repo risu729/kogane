@@ -100,13 +100,16 @@ writer fencing and captured CORE references; the contract is in
    rank, with `account_entity_shared` instead of `overlap_unknown`. Towards
    a scope no decision relates to it directly, a scope also stands for the
    entities accepted decisions put it with, transitively and through scopes
-   outside the target: those it holds (its `same` scopes and their parts)
-   and those it lies inside (its `same` scopes and their wholes). Two scopes
-   share an entity when one holds an entity the other holds or lies inside,
-   so a decision cannot carry a shared entity past the policy (a part's
-   entity made disjoint through its whole, a `same` partner's, or a whole's
-   entity made disjoint through its part); two pockets of one account do not
-   share it by that alone. The
+   outside the target, reading two references of one entity as one scope:
+   those it holds (its `same` scopes and their parts) and those it lies
+   inside (its `same` scopes and their wholes). Two scopes share an entity
+   when one holds an entity the other holds or lies inside, so a decision
+   cannot carry a shared entity past the policy (a part's entity made
+   disjoint through its whole, a `same` partner's, or a whole's entity made
+   disjoint through its part); two pockets of one account do not share it by
+   that alone. A scope with no candidate in the target carries no entity,
+   and a nesting or common part no entity marks is not read (the ADR's open
+   limits). The
    entity is then shown and not counted until a decision accepts the two
    references as `same_account` (one is adopted, the other is
    `duplicate_evidence`) or a mapping revision separates them
