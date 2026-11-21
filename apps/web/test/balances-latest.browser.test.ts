@@ -150,14 +150,26 @@ describe.if(runnable)("latest balance read model paging", () => {
         release = resolve;
       });
       const before = latestReads;
-      await button("最新の状態に更新", false).click();
+      // Pressed from the keyboard, so the focus it keeps is checked too.
+      await button("最新の状態に更新", false).focus();
+      await page.keyboard.press("Enter");
       await page.getByText("最新の残高を更新中…", { exact: false }).waitFor();
       // The read is held on the server: the earlier page stays, and no button pages from it.
       expect(latestReads).toBe(before + 1);
       for (const name of ["前のページ", "次のページ", "最新の状態に更新"])
         expect(await pager.getByRole("button", { name, exact: true }).isDisabled()).toBe(true);
+      // Waiting never takes the focus away from the button the owner pressed.
+      const focused = () => page.evaluate(() => document.activeElement?.textContent ?? null);
+      expect(await focused()).toBe("最新の状態に更新");
+      // A waiting button ignores a press: no second read starts, and no page turns.
+      await page.keyboard.press("Enter");
+      await pager.getByRole("button", { name: "次のページ", exact: true }).click({ force: true });
+      expect(latestReads).toBe(before + 1);
       held = null;
       release();
+      await button("次のページ", false).waitFor();
+      await pager.getByText("続きがあります", { exact: false }).waitFor();
+      expect(latestReads).toBe(before + 1);
       await button("次のページ", false).click();
       await pager.getByText("最後のページです", { exact: false }).waitFor();
       await button("次のページ", true).waitFor();
