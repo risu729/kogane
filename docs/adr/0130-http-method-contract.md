@@ -111,5 +111,7 @@ requests, the schedules settings writes and the schedule bootstrap) answer
   is 401 with no `Allow`; and on 24 reads (200s, 404s and 400s) `HEAD`
   answers the `GET`'s status and headers with no body, and a relayed body it
   does not send is cancelled. Before this change 44 of its 62 checks fail.
+- `services/app/test/ops-api.test.ts`: `GET` and `HEAD` on an operations
+  acceptance route are its 404 with no `Allow` (`HEAD` was 405 before).
 - `experiments/observation-pipeline-local/test/api.test.ts`: each refused
   write method carries `Allow: GET, HEAD`.
