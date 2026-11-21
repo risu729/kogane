@@ -133,13 +133,16 @@ not read):
 
 - A parser with a snapshot policy (`SNAPSHOT_DATASETS` and
   `ARTIFACT_SNAPSHOT_CONTAINERS` in `packages/parsers/src/snapshot-query.ts`)
-  contributes only its current complete capture, so every key of a group
-  comes from one response: the fetch instant, which the
+  contributes only its current complete capture: `CURRENT_SNAPSHOT` admits
+  one fetch run per source, parser, dataset and unit, each such parser has
+  one dataset, and a group's key holds the parser and the unit, so every key
+  of a group comes from one capture. The keys are the fetch instant, which the
   `observation_fetch_artifacts` view always writes in UTC with milliseconds
   (Mizuho, Prestia, SBI Shinsei, Money Forward, MyJCB J-POINT history); one
   provider time for the whole response (SBI VC Trade `statusDate`, else
   `meta.timestamp`; Sony Bank `updateDttm`; the SMBC and St.George recorded
-  instant; Vpass `shokaiDate`); or SBI foreign cash balances' per-row
+  instant; Vpass `shokaiDate`, while the Vpass revolving rows carry neither
+  `as_of` nor `observed_at`); or SBI foreign cash balances' per-row
   `businessDate`.
 - Every other group spans captures, and its parser writes one shape: a
   calendar date (Mobile Suica, the MyJCB statement total, Vpass statement
@@ -157,9 +160,10 @@ the code accepts and nobody has observed:
   offset the provider wrote. Cashflow balances span captures, so an
   `eventDatetime` sent in UTC would put `Z` and `+09:00` text in one group,
   and the ranking could then be up to nine hours wrong.
-- SBI foreign cash balances keep `businessDate` verbatim as any string; only
-  `YYYY-MM-DD` is seen. Rows of one capture with differently shaped dates
-  would rank by their text.
+- SBI foreign cash balances keep `businessDate` verbatim as any string; the
+  fixtures, which mirror the captured shape, carry only `YYYY-MM-DD`. Rows of
+  one capture with differently shaped dates would rank by their text, and a
+  row whose `businessDate` is not a string has an empty key and ranks last.
 
 Where a parser leaves `as_of` empty, `observed_at` (when the source displayed
 a value) stands in for `as_of` (the time the value describes), and the two
