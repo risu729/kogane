@@ -55,7 +55,12 @@ const OPERATOR: Principal = {
 };
 const COMMAND_NOW = "2098-01-01T00:00:00.000Z";
 
-async function review(w: World, kind: ChangeKind, candidate: CardPurchaseCandidate) {
+async function review(
+  w: World,
+  kind: ChangeKind,
+  candidate: CardPurchaseCandidate,
+  operationId = "merged-posted-gone-1",
+) {
   const store = d1CommandStore(w.db);
   const planned = await createPlan(
     kind,
@@ -79,7 +84,7 @@ async function review(w: World, kind: ChangeKind, candidate: CardPurchaseCandida
   });
   if (!approval.ok) throw new Error("approval " + JSON.stringify(approval));
   const result = await commit(store, {
-    operationId: "merged-posted-gone-1",
+    operationId,
     principal: OPERATOR,
     planId: planned.plan.planId,
     approvalId: approval.approval.approvalId,
@@ -156,4 +161,54 @@ test("a merged event whose posted row left the display is retired even while its
     conflicts: 0,
     failed: 0,
   });
+}, 120_000);
+
+test("a merged event whose posted row left with no replacement is unresolved until the link is withdrawn", async () => {
+  const w = await world();
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    rows: [ROW],
+  });
+  await w.myjcb({
+    state: "confirmed",
+    period: "detailMonth-1",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    rows: [ROW],
+  });
+  await w.sweep();
+  const posted = (await events(w)).find((event) => event.roles === "posted")!;
+  const page = await queryCardPurchases(executor(w), { eventId: posted.event_id });
+  const [candidate] = page.items[0]?.candidates ?? [];
+  if (!candidate) throw new Error("no candidate");
+  await review(w, "relation.accept", candidate);
+  const [merged] = await events(w);
+
+  // A newer confirmed capture no longer shows the purchase, while the pending
+  // capture is not taken again. The merged event follows its posted row and is
+  // retired; its pending row stays held by it, so the purchase is in neither
+  // total, only an unresolved event (ADR 0002, amendment 2026-11-21: an open
+  // limit).
+  await w.myjcb({
+    state: "confirmed",
+    period: "detailMonth-1",
+    fetchedAt: "2026-06-13T00:00:00.000Z",
+    rows: [],
+  });
+  expect(await w.sweep()).toMatchObject({ retired: 1, recognized: 0, conflicts: 0, failed: 0 });
+  expect(await events(w)).toEqual([
+    { event_id: merged!.event_id, state: "unknown", roles: "posted,pending" },
+  ]);
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "0", unresolved: 1 });
+
+  // Withdrawing the link splits it: the pending row's own event is authorized
+  // again on the next pass, and the posted event stays retired.
+  await review(w, "relation.reject", candidate, "merged-posted-gone-2");
+  await w.sweep();
+  expect((await events(w)).map((event) => [event.state, event.roles]).sort()).toEqual([
+    ["authorized", "pending"],
+    ["unknown", "posted"],
+  ]);
+  expect(await w.totals()).toMatchObject({ captured: "0", authorized: "800", unresolved: 1 });
 }, 120_000);

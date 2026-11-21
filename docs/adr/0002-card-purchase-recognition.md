@@ -149,6 +149,14 @@ replacement is never counted beside it.
   replacement row is its own captured event, which a reviewer can link to a
   new pending row as before. If the posted row reappears, the merged event is
   captured again, as before.
+- Open limit: when the posted row leaves the display with no replacement the
+  writer recognises (the confirmed row withdrawn, or captured again in a shape
+  the writer skips) while the pending row is still current, the purchase is in
+  neither the captured nor the authorized total; it shows only as the merged
+  event, `unknown` (`provider_status_absent`), counted as unresolved. Before
+  this amendment it stayed captured on its pending key alone. Withdrawing the
+  link (`relation.reject` of the accepted link) splits it, and the pending
+  row's own event is authorized again on the next pass.
 - Every other revision is reported exactly as before: the read returns the
   shipped text's rows plus exactly the keys of revisions holding a posted key,
   none of them current, and a current pending key.
@@ -164,7 +172,10 @@ replacement is never counted beside it.
   under another key while the pending capture stays current: the merged event
   is retired holding both keys, the replacement is the one captured event, the
   captured total is the purchase once, and a second pass writes nothing. It
-  failed before the change (captured total twice the purchase).
+  failed before the change (captured total twice the purchase). A second case
+  pins the open limit: the confirmed row gone with no replacement leaves the
+  purchase in neither total, one unresolved event, until a `relation.reject`
+  of the link authorizes the pending row's own event again.
 - `packages/read-model/test/card-purchase-keys.test.ts`: the same shape on the
   card store fixture, reported stale with both keys.
 - `packages/read-model/test/card-purchase-stale-reference.ts`, used by

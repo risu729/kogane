@@ -934,7 +934,11 @@ A MyJCB pending capture stays current beside the confirmed one until its
 position is captured again, so a reviewed merge can hold a current pending
 key; kept captured after its posted row is replaced under another key, it
 would count the purchase a second time beside the replacement's event. Its
-pending row stays held by the retired event, so it is not recognised again. A
+pending row stays held by the retired event, so it is not recognised again:
+when the posted row leaves with no replacement the writer recognises, the
+purchase is in neither the captured nor the authorized total, only an
+unresolved `unknown` event, until the posted row returns or a review withdraws
+the link (the pending row's own event is then authorized again). A
 row that stays current but can no longer be recognised (its binding lost, say)
 keeps its last revision: the provider still shows it.
 
@@ -1260,7 +1264,8 @@ event already retired keeps the period it had.
   row is then captured under another key while the pending capture stays
   current, is retired holding both keys and the replacement is the one
   captured event (the captured total counted the purchase twice before ADR
-  0002's 2026-11-21 amendment).
+  0002's 2026-11-21 amendment); with no replacement it is in neither total
+  until the link is withdrawn.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split
   batches on the full CORE: order, cross-id supersession, replay and stale
   batches writing nothing, a key held elsewhere, the one-live-holder trigger
