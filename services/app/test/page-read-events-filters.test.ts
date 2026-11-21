@@ -268,6 +268,54 @@ describe("the filtered activity list", () => {
     });
   });
 
+  it("takes every instant whose UTC form is in the years 0000 to 9999, to the millisecond", async () => {
+    for (const [query, args, compared, expected] of [
+      // Years 0 to 99 are not read as 1900 to 1999.
+      [
+        "account=account_x&since=0000-01-01T00:00:00Z",
+        { account: "account_x", since: "0000-01-01T00:00:00Z" },
+        { since: "0000-01-01T00:00:00.000Z", before: null },
+        ["ev-a", "ev-c"],
+      ],
+      [
+        "account=account_x&before=0000-01-01T00:30:00-01:00",
+        { account: "account_x", before: "0000-01-01T00:30:00-01:00" },
+        { since: null, before: "0000-01-01T01:30:00.000Z" },
+        [],
+      ],
+      [
+        "account=account_x&since=0050-06-15T12:00:00Z",
+        { account: "account_x", since: "0050-06-15T12:00:00Z" },
+        { since: "0050-06-15T12:00:00.000Z", before: null },
+        ["ev-a", "ev-c"],
+      ],
+      [
+        "account=account_x&before=9999-12-31T23:59:59.999Z",
+        { account: "account_x", before: "9999-12-31T23:59:59.999Z" },
+        { since: null, before: "9999-12-31T23:59:59.999Z" },
+        ["ev-a", "ev-c"],
+      ],
+      [
+        "account=account_x&since=9999-12-31T22:00:00-01:59",
+        { account: "account_x", since: "9999-12-31T22:00:00-01:59" },
+        { since: "9999-12-31T23:59:00.000Z", before: null },
+        [],
+      ],
+    ] as [string, Record<string, unknown>, Record<string, unknown>, string[]][]) {
+      const answer = await page.expectSameAnswer(`/api/v2/activity?${query}`, EVENTS, {
+        collection: "activity",
+        ...args,
+      });
+      expect(answer.status, query).toBe(200);
+      const body = answer.body as {
+        filters: Record<string, unknown>;
+        items: { eventId: string }[];
+      };
+      expect(body.filters, query).toMatchObject(compared);
+      expect(ids(body), query).toEqual(expected);
+    }
+  });
+
   it("refuses a malformed filter, cursor or offset with a closed code naming it", async () => {
     for (const [query, args, error, refs] of [
       ["since=2099-02-01", { since: "2099-02-01" }, "invalid_query", ["since:format"]],
@@ -289,6 +337,19 @@ describe("the filtered activity list", () => {
       [
         "before=0000-01-01T00:30:00%2B01:00",
         { before: "0000-01-01T00:30:00+01:00" },
+        "invalid_query",
+        ["before:format"],
+      ],
+      // Just past each end: `+010000-01-01T00:00:00Z` and `-000001-12-31T23:59:00Z`.
+      [
+        "since=9999-12-31T23:59:00-00:01",
+        { since: "9999-12-31T23:59:00-00:01" },
+        "invalid_query",
+        ["since:format"],
+      ],
+      [
+        "before=0000-01-01T00:00:00%2B00:01",
+        { before: "0000-01-01T00:00:00+00:01" },
         "invalid_query",
         ["before:format"],
       ],

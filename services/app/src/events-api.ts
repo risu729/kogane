@@ -77,17 +77,11 @@ function instantOf(text: string): string | null {
   if (parts === null || !Number.isFinite(at)) return null;
   const [, year, month, day, hour, minute, second = "0"] = parts;
   // A parser that rolls `02-30` or `24:00` over to another instant is not
-  // trusted with it (as `kogane.changes.since` checks its `since`).
-  const civil = new Date(
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      Number(second),
-    ),
-  );
+  // trusted with it (as `kogane.changes.since` checks its `since`). The year
+  // is set as written: `Date.UTC` would read years 0 to 99 as 1900 to 1999.
+  const civil = new Date(0);
+  civil.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  civil.setUTCHours(Number(hour), Number(minute), Number(second));
   if (
     civil.getUTCFullYear() !== Number(year) ||
     civil.getUTCMonth() !== Number(month) - 1 ||
