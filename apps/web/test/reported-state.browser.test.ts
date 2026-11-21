@@ -117,9 +117,12 @@ describe.if(runnable)("reported state on a date", () => {
     expect(main).toContain("50,000 JPY");
     // An unreadable balance stays unknown, never zero.
     expect(main).toContain("不明（stored:unparsed） · JPY");
-    // Nothing is added: no sum of the JPY figures appears anywhere.
-    for (const combined of ["62000", "80000", "92000", "112000"])
+    // Nothing is added: no sum of the JPY figures appears anywhere, grouped
+    // as the shared formatter writes it or not.
+    for (const combined of ["62000", "80000", "92000", "112000"]) {
       expect(main).not.toContain(combined);
+      expect(main).not.toContain(`${combined.slice(0, -3)},${combined.slice(-3)}`);
+    }
     expect(main).toContain("この一覧は資産や負債の合計ではありません。");
     await page.close();
   }, 30_000);

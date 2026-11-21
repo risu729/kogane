@@ -161,8 +161,10 @@ describe.if(runnable)("card purchase explanation", () => {
       "1件 取得元に表示されなくなった利用",
     ]);
     const main = await page.locator("main").innerText();
-    // No figure adds captured and authorized, or subtracts a refund.
-    for (const combined of ["2434", "2734", "934", "2134"]) expect(main).not.toContain(combined);
+    // No figure adds captured and authorized, or subtracts a refund, grouped
+    // as the shared formatter writes it or not.
+    for (const combined of ["2434", "2734", "934", "2134", "2,434", "2,734", "2,134"])
+      expect(main).not.toContain(combined);
     expect(main).toContain("引落は購入費用に加算しません");
     // The unrecognised count is across every statement month, and says so.
     expect(main).toContain("3 件は、カード利用として認識されていないため、どの請求月の一覧にも");

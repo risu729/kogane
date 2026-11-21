@@ -315,9 +315,8 @@ describe.if(runnable)("reconstructed state", () => {
     expect(table).toContain("9,000 JPY");
     expect(table).toContain("49,900 JPY");
     expect(table).toContain("49,800 JPY");
-    // Nothing totalled across the two accounts.
-    expect(table).not.toContain("58,900 JPY");
-    expect(table).not.toContain("58,800 JPY");
+    // Nothing totalled across the two accounts, grouped or not.
+    for (const total of ["58,900", "58,800", "58900", "58800"]) expect(table).not.toContain(total);
     const accounts = await page
       .getByRole("region", { name: "口座ごとの状況", exact: true })
       .innerText();
