@@ -347,7 +347,8 @@ or the parser left the date so (ADR 0004).
   statement with no `_kogane.paymentDate` and one with `2099-02-30` give
   `payment_date_absent` and `payment_date_invalid`, alike on the route and
   through the tool; `ui-mcp-parity.test.ts` and the unmatched test check the
-  descriptions name the fields and codes, within 2,048 characters.
+  descriptions name the fields and codes, and `mcp-client.test.ts` that every
+  description stays within 2,048 characters.
 - `apps/web/test/card-settlement.browser.test.ts`: the sections show
   `不明（payment_date_absent）`, `不明（debit_date_invalid）` and
   `不明（payment_date_invalid）`, and refuse a null date without its reason
