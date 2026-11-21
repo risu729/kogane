@@ -1,8 +1,10 @@
 // The rewritten current card usage reads against the text #233 and #236
 // shipped (card-usage-legacy-sql.ts), row for row, on small random card stores
 // (card-usage-random-store.ts, which lists the states each seed draws at
-// random). The last test checks that the seeds together drew every one of
-// those states. Every value is synthetic.
+// random). The stale keys are the shipped text's plus exactly the revisions
+// ADR 0002's 2026-11-21 amendment adds (card-purchase-stale-reference.ts).
+// The last test checks that the seeds together drew every one of those
+// states. Every value is synthetic.
 import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
@@ -10,16 +12,15 @@ import {
   type CurrentCardUsageRow,
   currentCardUsageSql,
   type PageSql,
-  type StaleCardPurchaseKeyRow,
   staleCardPurchaseKeysSql,
   unrecognizedCardUsageCountSql,
 } from "../src/index";
 import {
   LEGACY_CURRENT_CARD_USAGE_SQL,
   STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
-  STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
   STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
 } from "./card-usage-legacy-sql";
+import { addedStaleKeys, expectStaleKeys } from "./card-purchase-stale-reference";
 import { all, drawn, RandomStore, SEED_COUNT, SEEDS } from "./card-usage-random-store";
 
 /** One read by the current text and by the shipped text; they must return the same rows. */
@@ -61,15 +62,14 @@ function expectSameReads(db: Database): void {
         currentCardUsageSql({ afterId: row.observation_id, limit }),
         STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
       );
+  // The stale keys are the shipped text's plus exactly the revisions ADR
+  // 0002's 2026-11-21 amendment adds (card-purchase-stale-reference.ts).
   for (const limit of [1, 3, 100, 1000]) {
-    const stale = same<StaleCardPurchaseKeyRow>(
-      db,
-      staleCardPurchaseKeysSql(limit),
-      STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
-    );
+    const stale = expectStaleKeys(db, staleCardPurchaseKeysSql(limit));
     if (stale.length > 0) drawn.add("stale keys");
     if (stale.some((row) => row.key_count > 1)) drawn.add("stale merged revision");
   }
+  if (addedStaleKeys(db).length > 0) drawn.add("merged revision stale by its posted key alone");
   same(db, unrecognizedCardUsageCountSql(), STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL);
 
   // The MyJCB rules the stores exercise: each is recorded when dropping it
@@ -152,6 +152,7 @@ describe("the rewritten reads equal the shipped reads on random card stores", ()
         "identity v1 superseded by v2",
         "malformed extras",
         "merged revision",
+        "merged revision stale by its posted key alone",
         "mistyped extras",
         "myjcb confirmed",
         "myjcb run failure",
