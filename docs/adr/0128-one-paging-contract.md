@@ -95,7 +95,8 @@ paging: {
 
 Invariants, checked by one shared validator: `hasMore` is false exactly when `stoppedBy` is null;
 `next` is non-null exactly when `hasMore` is true and `stoppedBy` is not `budget`; `returned <= limit`
-when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`.
+when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`; `returned < limit` when
+`stoppedBy` is `walk` and `limit` is a number.
 
 - **Why `paging`, not `page`.** `page` already names an input (`store.read`, `evidence.read`) and two
   versioned result shapes with exact keys: `snapshot-page-v1`'s page info (balances, reward expiry,
@@ -109,14 +110,17 @@ when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`.
 - **Why `stoppedBy`.** It separates "the page is full" (`limit`), "the answer reached its byte bound"
   (`bytes`, purchase lines, changes since) and "rows follow but this grant may not read them"
   (`budget`, today `nextPage: "budget_exceeded"`, and today silent on the candidate reads).
-- **`walk`** (added 2026-11-20 for the events-filters branch, approved with this ADR): a scan bound
-  ended the page. A filtered read that walks at most so many rows per call (the filtered
-  `events.read` activity list walks at most 5,000 live revisions) can stop before it has `limit`
-  matches: `returned` may be below `limit`, even zero, and `hasMore` is true, because the read
-  continues where the walk stopped (`next` names that position). None of the other three is honest
-  for that page: it is not full (`limit`), no byte bound applied (`bytes`), and nothing is withheld
-  (`budget`). A client treats it like any other continuing page and calls again with
-  `next.arguments`; a short or empty `walk` page is never the end of the list.
+- **`walk`** (added 2026-11-20 in review, for the events-filters branch; the owner asked for one
+  paging contract, not for this value, which needs the owner's approval with the rest of this ADR):
+  a scan bound ended the page before it was full. A filtered read that walks at most so many rows
+  per call (the filtered `events.read` activity list walks at most 5,000 live revisions) can stop
+  before it has `limit` matches: `returned` is below `limit`, perhaps zero, and `hasMore` is true,
+  because the read continues where the walk stopped (`next` names that position). A page that holds
+  `limit` items says `limit`, even when the walk ended at the same row. None of the other three is
+  honest for a short page: it is not full (`limit`), no byte bound applied (`bytes`), and nothing is
+  withheld (`budget`). A client treats it like any other continuing page and calls again with
+  `next.arguments`; a short or empty `walk` page is never the end of the list. No S1 read answers
+  it.
 
 ### 3. Argument names
 
@@ -168,11 +172,18 @@ approves it.
   `kogane.reported-holdings-change.read` (summary), `kogane.card-settlements.read`, `.statements`
   and `.unmatched`, `kogane.purchases.explain` (`view: events` and `lines`, at the wrapper's top
   level), `kogane.ops.operation.list`, `kogane.audit.search` and `kogane.schedules.maintenance.read`
-  (summary), and on their routes (`/api/identity/*`, `/api/v2/activity`, `/api/v2/obligations`,
-  `/api/v2/reports`, `/api/evidence/v1/.../runs` and `.../artifacts`,
-  `/api/v2/reported-holdings-change`, `/api/v2/reconciliation/card-settlements[/statements]`,
-  `/api/v2/reconciliation/card-statements-unmatched`, `/api/ops/v1/operations`, `/api/v2/audit`). Every other field
-  is unchanged.
+  (summary), and on their routes (`/api/identity/account-list`, `accounts`, `instruments` and
+  `coverage`, not `connections`; `/api/v2/activity`, `/api/v2/obligations`, `/api/v2/reports`,
+  `/api/evidence/v1/.../runs` and `.../artifacts`, `/api/v2/reported-holdings-change` (summary),
+  `/api/v2/reconciliation/card-settlements[/statements]`,
+  `/api/v2/reconciliation/card-statements-unmatched`, `/api/ops/v1/operations`, `/api/v2/audit`;
+  `kogane.purchases.explain` and `kogane.schedules.maintenance.read` have no route, and
+  `GET /api/v2/card-purchases` is unchanged). Every other field is unchanged.
+- **The stop values S1 answers**: `limit`; `budget` on the card settlement reads and
+  `kogane.purchases.explain` when the grant's `maxRows` withholds the next page (`next: null`,
+  `hasMore: true`; the card settlement reads already said this as `nextPage: "budget_exceeded"`);
+  `bytes` on `kogane.purchases.explain` `view: lines` when the byte bound ends a page short. The
+  contract and the agent API doc also define `walk` (§2), which no S1 read answers.
 - **`audit.search` and `GET /api/v2/audit`**: a cursor issued under other filters, `409
   stale_context`, becomes `400 cursor_mismatch` with `mustMatch` (the six filter parameters on the
   route, `["filters"]` on the tool); a cursor that does not decode, `400 invalid_query`, becomes
@@ -180,13 +191,23 @@ approves it.
 - **`ops.operation.list` and `GET /api/ops/v1/operations`**: a cursor that names no operation,
   `404 receipt_not_found` with ref `cursor`, becomes `400 invalid_cursor` with ref `cursor`.
   `kogane.ops.operation.get` keeps `404 receipt_not_found` for an id that names nothing.
-- **Descriptions** of the twelve tools name `next.arguments`, `paging` and the deprecated fields.
+  `invalid_cursor` joins the command error codes (400).
+- **Audit records** of those refused calls carry the new codes as their `resultCode`
+  (`cursor_mismatch`, `invalid_cursor`), so `kogane.audit.search` lists them under the new codes.
+- **Descriptions** of the twelve tools name `next.arguments` and `paging`; eleven also name their
+  deprecated fields. `kogane.purchases.explain`'s does not (`nextPage`, `data.nextOffset`,
+  `data.nextCursor`): it is 2,028 characters of the 2,048 a description may hold, so the agent API
+  doc's list of kept fields is where an agent learns they go. Those of `kogane.audit.search` and
+  `kogane.ops.operation.list` also name their new refusals.
+- **Web UI**: the 監査ログ and 依頼の一覧 pages explain a refused cursor by the new codes (the
+  operations page's message for `invalid_cursor` is new); no page reads `next` or `paging` yet.
 
 ### 5. Migration
 
 - **Outputs are additive for one release.** Each converted read keeps its old continuation fields
   (`nextOffset`, `nextCursor`, `nextPage`, `coverage.truncated`, `pageSize`, audit's result `cursor`)
-  beside `next` and `paging`; its description says they are deprecated in favour of `next`. They go in
+  beside `next` and `paging`; its description says they are deprecated in favour of `next` (in S1, every
+  converted description but `kogane.purchases.explain`'s, which has no room; see the S1 list above). They go in
   S9, after every slice has been deployed for one release. The reason is the asymmetry of the two
   failures: a removed input is refused loudly by a closed schema (`400 invalid_request`), but a removed
   output is silent: an agent session that listed the tools before the deploy and looks for

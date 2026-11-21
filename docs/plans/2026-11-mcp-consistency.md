@@ -142,9 +142,12 @@ filtered activity list paged by a keyset `cursor`, where `walk.bound` can end a 
 conflict in `services/app/src/events-api.ts` and in the `events.read` description in
 `page-read-tools.ts`. Whichever merges second resolves it: if events-filters merges first, S1 is
 rebased so a filtered page answers `next: {arguments: {cursor}}`, and a page the walk bound ended
-early says `stoppedBy: "walk"` (added to the contract for this, ADR 0128 §2); if S1 merges first, events-filters adds `next` and
-`paging` to its filtered branch, and its walk tests follow `next.arguments`. Moving `events.read`
-out of S1 into its own slice after events-filters avoids the conflict entirely.
+early says `stoppedBy: "walk"` (added to the contract for this, ADR 0128 §2; a full page says
+`limit`); if S1 merges first, events-filters builds its filtered page's `next` and `paging` with the
+shared `pagedFields`. Since its commit `6ffd4d5a4` (2026-11-20) the events-filters branch already
+answers `next` and `paging` on the filtered page with its own builder (`filteredPaging`), which says
+`walk` only for a page shorter than `limit`, as §2 requires. Moving `events.read` out of S1 into its
+own slice after events-filters avoids the conflict entirely.
 
 ### What S1 leaves for later
 
