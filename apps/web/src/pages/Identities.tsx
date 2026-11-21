@@ -104,7 +104,11 @@ export function IdentitiesPage(): ReactNode {
             <>
               {data.rows.length === 0 ? (
                 <div className="panel-body">
-                  <EmptyState>条件に一致する対象記録がありません。</EmptyState>
+                  <EmptyState>
+                    {coverageOffset === 0
+                      ? "条件に一致する対象記録がありません。"
+                      : LATER_PAGE_EMPTY}
+                  </EmptyState>
                 </div>
               ) : (
                 <div
@@ -346,7 +350,9 @@ function AccountList({
           {!data.rows.length ? (
             <div className="panel-body">
               <EmptyState>
-                整理済みの口座がありません。上の整理状況で未処理件数を確認できます。
+                {offset === 0
+                  ? "整理済みの口座がありません。上の整理状況で未処理件数を確認できます。"
+                  : LATER_PAGE_EMPTY}
               </EmptyState>
             </div>
           ) : (
@@ -423,7 +429,9 @@ function Accounts({
           {!data.rows.length ? (
             <div className="panel-body">
               <EmptyState>
-                整理済みの口座記録がありません。上の整理状況で未処理件数を確認できます。
+                {offset === 0
+                  ? "整理済みの口座記録がありません。上の整理状況で未処理件数を確認できます。"
+                  : LATER_PAGE_EMPTY}
               </EmptyState>
             </div>
           ) : (
@@ -486,7 +494,11 @@ function Instruments({
         <>
           {!data.rows.length ? (
             <div className="panel-body">
-              <EmptyState>この条件で整理された通貨・銘柄の記録がありません。</EmptyState>
+              <EmptyState>
+                {offset === 0
+                  ? "この条件で整理された通貨・銘柄の記録がありません。"
+                  : LATER_PAGE_EMPTY}
+              </EmptyState>
             </div>
           ) : (
             <div className="identity-grid">
@@ -531,6 +543,12 @@ function Instruments({
     </QueryBoundary>
   );
 }
+/**
+ * A list can shrink while a later page is open (a mapping changes, the page is
+ * read again), so only an empty first page says the list is empty (#1400).
+ */
+const LATER_PAGE_EMPTY = `このページに表示する項目はありません。一覧の件数が減った可能性があります。前の${String(IDENTITY_PAGE_LIMIT)}件に戻って確認してください。`;
+
 /**
  * The shared pagination row, for lists the server pages by offset. Like the
  * カード利用 pager it names the rows this page shows; these reads count no

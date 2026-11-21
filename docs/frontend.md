@@ -116,8 +116,16 @@ A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
 `Pagination`): its buttons say 前のページ and 次のページ, its status says
 続きがあります or 最後のページです unless the page passes its own, and its
 buttons, its read-again action included, wait while a read of the list is in
-flight. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists use
-it.
+flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`,
+so a button the owner pressed, or sits on during a background read, keeps the
+focus; a button with nowhere to go (no earlier page, no more rows) is
+`disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
+use it.
+
+The 口座・銘柄 lists the server pages by offset name the rows a page shows
+(1–2件); these reads count no total. A page with no rows says 表示なし, and only
+an empty first page says the list is empty: a later page that comes back empty,
+because the list shrank, says that this page lists nothing and keeps its pager.
 
 A review candidate (a card settlement on `カード照合` ("card reconciliation"), a pending-to-posted link on
 `カード利用` ("card usage")) is one panel. Its `.settlement-head` holds the title, a status

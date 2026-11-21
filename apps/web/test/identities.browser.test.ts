@@ -120,11 +120,15 @@ describe.if(runnable)("identity coverage page", () => {
   let origin: string;
   // Which inconsistency the coverage answer carries, if any.
   let broken: "sum" | "excess" | null = null;
+  // The account list offers a second page that comes back empty, as it does
+  // when the list shrank after the first page was read.
+  let shrunk = false;
   const requests: { method: string; url: URL }[] = [];
   const bodies: Record<string, unknown> = {};
 
   beforeEach(() => {
     broken = null;
+    shrunk = false;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -163,6 +167,13 @@ describe.if(runnable)("identity coverage page", () => {
                   : { ...row, organized: 8, unresolved: 5 };
             if (broken) return Response.json(page(rows.map(bad)));
             return Response.json(page(rows));
+          }
+          if (shrunk && url.pathname === "/api/identity/account-list") {
+            const later = url.searchParams.get("offset") !== "0";
+            return Response.json({
+              rows: later ? [] : ACCOUNT_LIST,
+              coverage: { limit: 100, nextOffset: later ? null : 100, truncated: false },
+            });
           }
           const body = bodies[url.pathname];
           return body
@@ -263,6 +274,25 @@ describe.if(runnable)("identity coverage page", () => {
       true,
     );
     await tab.close();
+  }, 30_000);
+
+  test("an emptied later page says this page is empty, never that the list is", async () => {
+    shrunk = true;
+    const tab = await open();
+    try {
+      await tab.getByRole("button", { name: "口座一覧", exact: true }).click();
+      const pager = tab.getByRole("group", { name: "一覧のページ", exact: true });
+      await tab.getByText("一覧のページ：1–1件", { exact: true }).waitFor();
+      await pager.getByRole("button", { name: "次の100件", exact: true }).click();
+      await tab.getByText("一覧のページ：表示なし", { exact: true }).waitFor();
+      await tab.getByText("このページに表示する項目はありません。", { exact: false }).waitFor();
+      expect(await tab.locator("main").innerText()).not.toContain("整理済みの口座がありません。");
+      // The pager stays, so the owner can step back to rows that exist.
+      await pager.getByRole("button", { name: "前の100件", exact: true }).click();
+      await tab.getByText("一覧のページ：1–1件", { exact: true }).waitFor();
+    } finally {
+      await tab.close();
+    }
   }, 30_000);
 
   test("filtering by source narrows the coverage read and the list", async () => {
