@@ -155,9 +155,11 @@ when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`; `retu
   the same without `requestId` (page reads already do). The read tools still drop `refs` from an
   `HttpError` they catch (`services/app/src/read-tools.ts`); none of the S1 paging refusals carries
   refs, and keeping them there is left to the slice that next edits that path. **Keep** `financial-error-v1` for the agent query path: it is a
-  versioned schema whose remedies `kogane.capabilities` publishes; **fix later** (S7): it gains
-  `invalid_cursor` and `cursor_mismatch` (400, argument names as `argument:<name>` refs) and answers
-  `context_expired` at 410.
+  versioned schema whose remedies `kogane.capabilities` publishes. **Open** (S7, the owner's
+  decision, [below](#s7-open-decision)): whether it gains `invalid_cursor` and `cursor_mismatch` (400,
+  argument names as `argument:<name>` refs) and answers `context_expired` at 410 in place, or a
+  `financial-error-v2` carries them. Until the owner decides, the agent query path answers its
+  refusals exactly as before.
 - **Keep** `invalid_request` (400, refs naming the argument) for a token that fails its published
   pattern, and `invalid_offset` for a malformed offset on a route: those are the argument's form, not
   its meaning. **Keep** `413 raw_too_large`: no argument set retrieves a larger object.
@@ -202,6 +204,64 @@ approves it.
 - **Web UI**: the 監査ログ and 依頼の一覧 pages explain a refused cursor by the new codes (the
   operations page's message for `invalid_cursor` is new); no page reads `next` or `paging` yet.
 
+### Published changes in S6 and S7, for the owner's approval
+
+Implemented on the branch stacked on this ADR's pull request
+(`claude/adoring-faraday-co4por-mcp-consistency-s6-s7`). Every item changes what a published tool
+or route answers; none merges before the owner approves it.
+
+- **S6, new result fields** `next` and `paging` on `kogane.accounts.candidates` and
+  `kogane.instruments.candidates` and their routes (`/api/identity/account-candidates`,
+  `/api/identity/instrument-candidates`), beside the deprecated `nextOffset`; their descriptions
+  name `next.arguments`, `paging`, the `budget` stop and the deprecated `nextOffset`.
+- **S6, a stop that was silent**: a page whose next page the grant's `maxRows` refuses says
+  `stoppedBy: "budget"` with `hasMore: true` and `next: null`. `nextOffset` is null there as before,
+  as it is on the last page, so only the new fields tell the two apart. The stop values S6 answers:
+  `limit` and `budget`.
+- **S7, new result fields** `next` and `paging` on `kogane.financial.query` and
+  `GET /api/v2/query`, for the row intents only (`activity`, `reported-state`): at the top level of
+  `kogane-query-response-v1`, beside `result`, not inside `financial-result-v1` (see the open
+  decision below). `next.arguments` is `{cursor}`, the token `result.nextCursor` already carries;
+  `paging.limit` is the resolved page size. `coverage` and `holdings` answer whole and carry
+  neither field. The stop value S7 answers: `limit`. The description names `next.arguments` and
+  `paging`, and says `result.nextCursor` names the same cursor; it does not call
+  `result.nextCursor` deprecated, because removing it from `financial-result-v1` is part of the
+  open decision.
+- Nothing else in any of the three answers changes: with `next` and `paging` removed, each answer
+  is byte for byte the one shipped before (the differential tests under Verification). No refusal
+  changes: the candidate reads keep `413 budget_exceeded` for a page past `maxRows`, and the agent
+  query keeps every `financial-error-v1` code and status.
+- **Web UI**: none of its pages reads the new fields yet; the shared validators check them when
+  present (`validApiResponse` for both candidate routes and `/api/v2/query`).
+
+### S7: open decision
+
+The owner has not decided whether `financial-error-v1` gains the paging refusals in place or moves
+to a v2 (plan, owner decision 5). S7 implements nothing that depends on the answer:
+
+- **Refusals, unchanged.** A cursor this context or query did not issue, or one that does not
+  decode, stays `409 stale_context` with the context id as its ref; `context_expired` stays 409;
+  a page past `maxRows` stays `413 budget_exceeded`. Neither `invalid_cursor` nor
+  `cursor_mismatch` is answered on the agent query path, and `kogane.capabilities` publishes the
+  same remedies.
+- **Where `next` and `paging` sit.** Inside `financial-result-v1` they would change a versioned
+  shape whose validator checks exact keys (`packages/domain/src/result.ts`), which is the same
+  in-place-or-v2 question; beside `result`, in the open `kogane-query-response-v1` wrapper, they
+  are additive and pre-empt nothing. If the owner chooses a v2, the fields can move into
+  `financial-result-v2`; in place, they can stay where they are.
+- **No budget stop.** The query offers its cursor whenever rows follow, and a continued call
+  whose `offset + limit + 1` passes `maxRows` is refused `413 budget_exceeded`, where the other
+  reads withhold the page (`stoppedBy: "budget"`). Withholding would null `result.nextCursor`, a
+  `financial-result-v1` field, and the honest refusal for the continued call is a code of the
+  open decision (a `413 result_limit_exceeded` with `retryWith: {arguments: {limit}}`, since a
+  smaller `limit` reads the same position). Until the decision, `next` says exactly what
+  `nextCursor` says, and the limit is written in the agent API doc.
+- **The options.** (a) In place: `financial-error-v1` adds `invalid_cursor` and `cursor_mismatch`
+  to `FINANCIAL_ERROR_CODES`, maps `context_expired` to 410, and splits today's `stale_context`
+  on a cursor into the two; a client keyed on `409 stale_context` for a bad cursor silently
+  changes branch. (b) A `financial-error-v2` (and with it, if wanted, a `financial-result-v2`
+  holding `next` and `paging`) for the agent query path; v1 stays as it is until clients move.
+
 ### 5. Migration
 
 - **Outputs are additive for one release.** Each converted read keeps its old continuation fields
@@ -238,13 +298,21 @@ and converts the reads no in-flight branch touches, except `rewards.read`, whose
 needs a decision first (S1b); S2–S7 convert the rest after the branches named in the plan merge; S8 binds offsets; S9 removes the deprecated fields. The plan's §3 names each slice and
 what it waits for.
 
+| Slice  | State                                                                                                                                                    |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1     | implemented on this ADR's branch                                                                                                                         |
+| S6     | implemented on the stacked branch `claude/adoring-faraday-co4por-mcp-consistency-s6-s7` (#1457, which it waited for, has merged)                         |
+| S7     | `next` and `paging` implemented on the same stacked branch; the `financial-error-v1` refusals wait for the owner's decision ([above](#s7-open-decision)) |
+| others | proposed (plan §3)                                                                                                                                       |
+
 ## Consequences
 
 - An agent learns one rule: "if `next` is not null, call again with `next.arguments` merged in; if a
   refusal carries `retryWith`, call again with `retryWith.arguments` merged in". It never has to know
   whether the read is keyset or offset.
 - Rows that follow but the grant withholds are said everywhere (`stoppedBy: "budget"`), including the
-  candidate reads where they are silent today (S6).
+  candidate reads where they were silent before S6, except `kogane.financial.query`, which offers
+  its cursor and refuses the continued call until the S7 decision.
 - Answers grow by about 100 bytes (`next` and `paging`); byte-bounded answers count them inside their
   bound, so no answer passes its published size.
 - Until S9 a converted answer says the same thing twice; a test checks the two never disagree.
@@ -275,3 +343,17 @@ what it waits for.
 - The frozen-handler differential tests of the card settlement routes strip `next` and `paging` only
   after checking they agree with `nextOffset` and `nextPage`, so every other byte is still compared.
 - The web UI's schema tests accept the converted answers with the new fields.
+- S6 and S7: `services/app/test/paging-conformance-candidates.test.ts` walks both candidate reads
+  over `/mcp` by `next.arguments` alone, each page the same answer on its route, the agent HTTP
+  path and `/mcp`, and the `budget` stop at `maxRows` 99 and 100;
+  `services/app/test/paging-conformance-query.test.ts` walks `activity` and `reported-state`,
+  checks the three transports page for page, and pins the unchanged refusals of the open
+  decision. `packages/observation-shared/test/paged-answers-s6-s7-contract.test.ts` refuses
+  fields that disagree with `nextOffset` and `total`, or with `result.nextCursor`.
+- Differential, S6 and S7: `packages/application/test/candidate-reviews-paging-differential.test.ts`
+  runs both candidate readers beside their frozen pre-S6 text (`candidate-reviews-legacy.ts`) on
+  the synthetic worlds, scaled stores and seeded random ones, over every view, offsets and grant
+  budgets around the page edges; `services/app/test/paging-conformance-query.test.ts` runs
+  `queryResponse` beside its frozen pre-S7 text (`query-response-frozen.ts`) over every intent,
+  limits, filters, every page of each walk and three refusals. Every answer without `next` and
+  `paging` is byte-identical to the frozen one, and every refusal is identical.

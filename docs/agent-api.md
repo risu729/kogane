@@ -83,14 +83,14 @@ The owner removed `AGENT_API_GRANTS`, the table from principal to grant, on
 必要になったら追加しますが、個人利用なので今のところ不要」). A leftover value in a
 deployment is ignored, and `403 agent_api_not_configured` no longer exists.
 
-| Capability               | Allows                                                                                                                                                                                                                                                                                                                                                                                                 | Notes                                                |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                                                                                                                                                                                                                     |                                                      |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `accounts.history`, `card-settlements.unmatched`, `card-settlements.debit-accounts`, `changes.since`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.statements`, `card-settlements.ownership`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                        |
-| `audit.read`             | `audit.search` and `audit.get`                                                                                                                                                                                                                                                                                                                                                                         |                                                      |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`); the collection-quality and evidence pages and raw bytes up to 1 MiB (`kogane.collection-quality.read`, `kogane.evidence.read`, `kogane.evidence.raw.read`) on a whole-store scope                                                                                                                                                         | A separate grant; never implied by `records.read`    |
-| `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                                                                                                                                                                                                                    | Proposals only; never adoption                       |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`; with whole-store `evidence.read`, the schedules page (`kogane.schedules.read`) over `"*"` schedule sources                                                                                                                                                                                                                                  | Not a financial read; implied by no other capability |
+| Capability               | Allows                                                                                                                                                                                                                                                                                                                                                                                                                      | Notes                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                                                                                                                                                                                                                                          |                                                      |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `accounts.history`, `card-settlements.unmatched`, `card-settlements.debit-accounts`, `decisions.pending`, `changes.since`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.statements`, `card-settlements.ownership`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                        |
+| `audit.read`             | `audit.search` and `audit.get`                                                                                                                                                                                                                                                                                                                                                                                              |                                                      |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`); the collection-quality and evidence pages and raw bytes up to 1 MiB (`kogane.collection-quality.read`, `kogane.evidence.read`, `kogane.evidence.raw.read`) on a whole-store scope                                                                                                                                                                              | A separate grant; never implied by `records.read`    |
+| `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                                                                                                                                                                                                                                         | Proposals only; never adoption                       |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`; with whole-store `evidence.read`, the schedules page (`kogane.schedules.read`) over `"*"` schedule sources                                                                                                                                                                                                                                                       | Not a financial read; implied by no other capability |
 
 The whole-store grant holds all six, with `"*"` for `sources`, `accounts` and
 `scheduleSources`, and the published bounds (`GRANT_LIMITS`): `maxRows` 1000,
@@ -153,7 +153,7 @@ recognition and an eighth while it serves the reconstructed state, one
 implementation each (`src/agent-service.ts`), reachable two ways. The read
 tools of `src/read-tools.ts` (`kogane.instruments.history`,
 `kogane.instruments.coverage`, `kogane.accounts.candidates`, `kogane.accounts.history`,
-`kogane.card-settlements.unmatched`, `kogane.card-settlements.debit-accounts`, `kogane.changes.since`, `kogane.economic-readiness.read`, `kogane.card-settlements.read`, `kogane.card-settlements.statements`, `kogane.card-settlements.ownership`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
+`kogane.card-settlements.unmatched`, `kogane.card-settlements.debit-accounts`, `kogane.decisions.pending`, `kogane.changes.since`, `kogane.economic-readiness.read`, `kogane.card-settlements.read`, `kogane.card-settlements.statements`, `kogane.card-settlements.ownership`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
 (`kogane.reported-state.read`) is served on the same condition as the eighth, the five card settlement reads (`kogane.card-settlements.read`, `.statements`, `.ownership`, `.unmatched` and `.debit-accounts`) while `cardSettlementReconciliation` is, and each is listed only to a grant its service
 would answer, which the whole-store grant always is ([below](#instrument-coverage),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
@@ -178,6 +178,7 @@ the other delegated MCP tools are described there too.
 | `kogane.accounts.history`                | `POST /api/agent/v1/accounts.history`                | `kogane.accounts.history`                | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-history))                                                                                                                                                                                                                                                                                                                  |
 | `kogane.card-settlements.unmatched`      | `POST /api/agent/v1/card-settlements.unmatched`      | `kogane.card-settlements.unmatched`      | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                                                                                                                                                                              |
 | `kogane.card-settlements.debit-accounts` | `POST /api/agent/v1/card-settlements.debit-accounts` | `kogane.card-settlements.debit-accounts` | `records.read` on `"*"` sources and accounts and `maxRows` of at least 100, while `cardSettlementReconciliation` is served; listed only to such a grant ([below](#each-cards-debit-account))                                                                                                                                                                                                                           |
+| `kogane.decisions.pending`               | `POST /api/agent/v1/decisions.pending`               | `kogane.decisions.pending`               | `records.read` on `"*"` sources and accounts; the survey line also `schedules.read`, the plans line `interpretation.propose`; listed only to such a grant ([below](#what-waits-for-a-decision))                                                                                                                                                                                                                        |
 | `kogane.changes.since`                   | `POST /api/agent/v1/changes.since`                   | `kogane.changes.since`                   | `records.read` on `"*"` sources and accounts; `runs` and `captures` also `evidence.read`; listed only to such a grant ([below](#changes-since-a-time), [ADR 0127](adr/0127-changes-since-digest.md))                                                                                                                                                                                                                   |
 | `kogane.economic-readiness.read`         | `POST /api/agent/v1/economic-readiness.read`         | `kogane.economic-readiness.read`         | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                                                                                                                                                                                                                                                                             |
 | `kogane.card-settlements.read`           | `POST /api/agent/v1/card-settlements.read`           | `kogane.card-settlements.read`           | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; `offset + 50` within `maxRows`, and no next page offered past it (`nextPage`); the `カード照合` pages' own read: a page, one statement (`statementKey`), one review (`proposalId`) or its competitors (`relatedTo`) ([card settlements](card-settlements.md#agent-reads), [ADR 0081](adr/0081-ui-parity-through-mcp.md)) |
@@ -669,8 +670,13 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 `kogane-instrument-candidates-v1` with the manifest (policy, bounds, every
 closed code), the summary counts, `decisions: "change-lifecycle"`, `total`,
 at most 50 `items` with their `evidenceRefs`, `nextOffset` (null past the
-last page and where the next page would exceed the grant's `maxRows`) and the
-identifiers the items name.
+last page and where the next page would exceed the grant's `maxRows`), the
+identifiers the items name, and `next` and `paging`
+([one paging contract](#one-paging-contract-adr-0128)): `next.arguments` is
+`{offset}` while a next page is offered, and a page whose next page the
+grant's `maxRows` refuses says `paging.stoppedBy: "budget"` with `hasMore:
+true` and `next: null`, where `nextOffset` alone is null as on the last page.
+`nextOffset` is deprecated in their favour and kept for one release.
 
 Each call walks every current identity observation, linear in captured
 history (ADR 0055 amendment, Cost). Routine polling of this tool needs a
@@ -714,8 +720,12 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 6,400) and `sourceAccountId` (only the items naming that source account).
 Output: `kogane-account-candidates-v1` with the manifest (policy, bounds,
 every closed code), the summary, `decisions: "change-lifecycle"`, `total`, at
-most 50 `items`, `nextOffset` and the named source accounts with their
-current mappings.
+most 50 `items`, `nextOffset`, the named source accounts with their
+current mappings, and `next` and `paging`
+([one paging contract](#one-paging-contract-adr-0128)), as for the instrument
+candidates: a next page the grant's `maxRows` refuses is
+`stoppedBy: "budget"`, `next: null`. `nextOffset` is deprecated in their
+favour and kept for one release.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,
@@ -890,6 +900,70 @@ Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
 Ten cards are about 5.7 KB. Each served agent call records one audit read
 whose row count is the bills plus the cards not listed.
 
+### What waits for a decision
+
+`kogane.decisions.pending` answers "what is waiting for my decision?" in one
+call and under 8 KB ([ADR 0126](adr/0126-pending-decisions-summary.md), gap
+G9 of the MCP everyday-questions audit, [#1414](https://github.com/risu729/kogane/issues/1414)).
+It is the ホーム page's `判断待ち` panel's own service (`readPendingDecisions`,
+`packages/application/src/query/pending-decisions.ts`), read there from
+`GET /api/v2/decisions/pending` (operator-only), so an agent and the page read
+one answer. It is listed on `/mcp` only to a grant holding `records.read`
+over the whole store.
+
+Input: an empty object; any key is `400 invalid_request`. Output:
+`kogane-pending-decisions-v1` with `asOf`, the `bounds` (`idsShown` 5,
+`idBytes` 640, `countBound` 1,000, `maxBytes` 8,192), one line per kind in a
+fixed order, `notCovered` and `decisions: "elsewhere"`. Each line has its
+`kind`, `state` (`counted` or `unavailable` with `reason` `not_served`,
+`unauthorized` or `budget_exceeded`), `count`, `complete` (false when the
+count reached `countBound`: at least that many), the first `ids` (at most 5
+and 640 bytes, in the line's order), `oldestAt` and `timeBasis` (`created`,
+or `not_recorded` for the derived candidates, which carry no proposal time),
+and its `handler`: the existing `page` and read `tool`, the `idArgument` an id
+goes in (or null), the tool's fixed `arguments`, and `decidedBy`
+(`kogane.command.plan`, `kogane.command.approve` or
+`kogane.schedules.survey.decide`).
+
+| Kind                                 | Counts                                                                                                                                      | Ids                                                       | Handler                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `card-settlement.statement`          | statements with an undecided candidate and no live acceptance; readiness is not judged (the statements page judges it, ten at a time)       | each statement's newest undecided candidate, newest first | `kogane.card-settlements.read` with `proposalId`, page `/reconciliation/{id}`                       |
+| `card-ownership.account`             | accounts (per role) an undecided candidate of such a statement resolved, with no current accepted `liable_party` / `beneficial_owner` claim | the newest undecided candidate naming each                | `kogane.card-settlements.ownership` with `proposalId`                                               |
+| `account-candidate.open`, `.held`    | the account candidate review's `open` and `held` views (`total`)                                                                            | candidate ids in the review's order                       | `kogane.accounts.candidates` with `view`                                                            |
+| `instrument-candidate.open`, `.held` | the instrument candidate review's `open` and `held` views (`total`)                                                                         | candidate ids in the review's order                       | `kogane.instruments.candidates` with `view`                                                         |
+| `pending-posted.link`                | stage-B `pending_to_posted` proposals not yet decided                                                                                       | proposal ids, oldest first                                | `kogane.purchases.explain` (no id argument: a candidate shows under its purchase)                   |
+| `maintenance-survey.proposal`        | re-survey proposals no decision names, of the grant's `scheduleSources` (the survey read's `attention`)                                     | proposal ids in id order                                  | `kogane.schedules.survey.read`; decided by `kogane.schedules.survey.decide`                         |
+| `change-plan.open`                   | plans `planned` or `approved` whose `expires_at` is after now                                                                               | plan ids, oldest first                                    | `kogane.command.simulate` with `planId`, page `/confirm/{id}`; approved by `kogane.command.approve` |
+
+A line whose page the deployment does not serve (the card settlement views,
+card purchase recognition, `SCHEDULES_ENABLED`, `COMMANDS_ENABLED`) is
+`not_served`; a line whose handler's read tool needs a capability the grant
+lacks is `unauthorized` and its table is not read (the survey line without
+`schedules.read`, the plans line without `interpretation.propose`, which
+`kogane.command.simulate` needs; so the HTTP agent route's reader grant sees no
+plan id); an
+account or instrument line whose review's own read is refused past its bounds
+is `budget_exceeded`. The other lines still answer. `notCovered` names the
+queues it leaves out, with a closed reason: `economic-event.proposal` and
+`card-purchase.review` (`no_decision_path`: no planner is registered),
+`relation.agent-proposal` (`no_list`: no page or tool lists relations an agent
+proposed) and `identity.unresolved-mapping` (`no_proposal`: nothing proposes a
+mapping; `kogane.identity.read` `coverage` counts them).
+
+Authorization: `records.read`, else `403 unauthorized`; sources and accounts
+both `"*"`, else `403 evidence_restricted`; both decided before the store is
+read. It reads and never writes; each served agent call records one audit read
+with the number of lines, truncated when a counted line is not `complete`.
+Cost: the card settlement lines read the candidates once, as the statements
+page does, with each decision, each statement's candidates and each ownership
+claim by key; the account and instrument lines run their reviews' own bounded
+reads; the other three each read one index range
+(`reconciliation_proposals_status`, `change_plans_status`) or, for the survey,
+the proposals with each decision by key, as the survey read does, each capped
+at `countBound` + 1 rows. `packages/application/test/pending-decisions.test.ts`
+and `services/processor/test/pending-decisions.test.ts` check the plans without
+table statistics.
+
 ### Changes since a time
 
 `kogane.changes.since` answers "what was recorded since this instant?" per
@@ -926,7 +1000,9 @@ count's items: `kogane.evidence.read` for runs (`page: runs`, `source`) and
 captures (`page: artifacts`, `runId`), `kogane.observations.get` for the newest
 parse's artifact, `kogane.observations.list` for observations,
 `kogane.events.read` for events and `kogane.collection-quality.read` for why a
-source is unchanged. Counts, closed codes, times and ids only: no amount,
+source is unchanged. `kogane.evidence.read` shows only the configured
+source's runs, so for any other source the runs and captures handlers answer
+`404 not_found`. Counts, closed codes, times and ids only: no amount,
 label or provider text.
 
 Bounds: the newest 500 fetch runs per source, 5,000 parse runs and 2,000
@@ -935,18 +1011,21 @@ capture rows and 50,000 observation rows per kind are counted. A walk whose
 next row is also new makes its counts lower bounds, named in `cut` (`parses`
 and `observations` on every source when the parse walk is cut) or by the
 events line's `complete: false`. The answer is cut between sources before
-8,192 bytes; `next.after` is the `after` that continues it. More than 200
+8,192 bytes; `next.after` is the `after` that continues it. `after` is a
+place in source id order (an id no source has continues from where it sorts),
+and each answer is a fresh read of the sources after it. More than 200
 visible sources is `413 budget_exceeded`. The events line counts revisions,
 but `kogane.events.read` does not filter by date yet (the next slice in the
 ADR).
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; both decided before the request is
-checked or the store is read. Without `evidence.read`, `runs` and `captures`
-are `null` and their tables are not read. It reads and never writes; each
-served agent call records one audit read with the number of sources it
-covers, truncated when the answer continues, a count is cut or the events walk
-is incomplete.
+checked or the store is read, the tool's body included. Without
+`evidence.read`, `runs` and `captures` are `null` and their tables are not
+read, and a source whose only new rows are runs is listed in `unchanged`. It
+reads and never writes; each served agent call records one audit read with
+the number of sources it covers, truncated when the answer continues, a count
+is cut or the events walk is incomplete.
 
 ### Reported state on a date
 
@@ -1743,7 +1822,7 @@ whatever their cursor kind:
   arguments), `410 context_expired` (its fixed context is gone) or
   `413 result_limit_exceeded`.
 
-Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
+Converted in slice S1: `kogane.identity.read`, `kogane.events.read`,
 `kogane.reports.read` (list), `kogane.evidence.read` (runs, artifacts),
 `kogane.reported-holdings-change.read` (summary), `kogane.card-settlements.read`,
 `.statements` and `.unmatched`, `kogane.purchases.explain` (`view: events` and
@@ -1751,11 +1830,34 @@ Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
 `kogane.schedules.maintenance.read` (summary), with their routes. Each keeps its
 previous continuation fields (`nextOffset`, `nextCursor`, `nextPage`,
 `coverage.nextOffset`, `page.nextCursor`, audit's result `cursor`) beside
-`next` and `paging` for one release; they always agree. The other paged reads
-(`kogane.financial.query` above, `observations.list`, `balances.read`,
-`rewards.read`, `collection-quality.read`, `changes.since`, the candidate
-reads) still page as their sections say, until their slice of the
-[MCP consistency plan](plans/2026-11-mcp-consistency.md).
+`next` and `paging` for one release; they always agree.
+
+Converted in slice S6: `kogane.accounts.candidates` and
+`kogane.instruments.candidates` and their routes
+(`/api/identity/account-candidates`, `/api/identity/instrument-candidates`):
+`next` and `paging` beside the deprecated `nextOffset`, and a page whose next
+page the grant's `maxRows` refuses now says so (`stoppedBy: "budget"`), where
+`nextOffset: null` alone looked like the last page
+([account candidates](#account-candidates),
+[instrument candidates](#instrument-candidates)).
+
+Converted in slice S7, the part that waits for no decision:
+`kogane.financial.query` and `GET /api/v2/query`. An `activity` or
+`reported-state` answer carries `next` and `paging` at the top level, beside
+`result` ([result contract](#result-contract)); `next.arguments` is
+`{cursor}`, the same token as `result.nextCursor`, and `paging.limit` is the
+resolved page size. `coverage` and `holdings` answer whole and carry neither.
+Two limits stay until the owner decides
+([ADR 0128, S7: open decision](adr/0128-one-paging-contract.md#s7-open-decision)):
+a refused cursor is still `financial-error-v1` (`409 stale_context` for a
+cursor this context or query did not issue, never `invalid_cursor` or
+`cursor_mismatch`), and the query does not withhold by budget, so a page can
+offer a cursor whose continued call, at the same `limit`, is
+`413 budget_exceeded` (when `offset + 2 × limit + 1` passes `maxRows`).
+
+The other paged reads (`observations.list`, `balances.read`, `rewards.read`,
+`collection-quality.read`, `changes.since`) still page as their sections say,
+until their slice of the [MCP consistency plan](plans/2026-11-mcp-consistency.md).
 
 ## Result contract
 
@@ -1768,8 +1870,17 @@ Every successful query returns
   "resultRef": "result:<64 hex>",
   "unresolvedInputs": [/* defaults the server chose */],
   "result": {/* financial-result-v1, packages/domain/src/result.ts */},
+  // activity and reported-state only (ADR 0128 slice S7):
+  "next": { "arguments": { "cursor": "…" } }, // null on the last page
+  "paging": { "limit": 100, "returned": 100, "hasMore": true, "stoppedBy": "limit" },
 }
 ```
+
+`next` and `paging` sit beside `result`, not inside it: `financial-result-v1`
+is a versioned shape with exact keys, and whether it changes in place is part
+of the owner's open S7 decision. They say exactly what `result.nextCursor`
+says (`packages/application/src/query/query-paging.ts`), and the browser's
+validator refuses an answer whose two fields disagree with it.
 
 `result` is the `FinancialResult<T>` of addendum 10 §4: `completeness`
 (`complete` / `partial` / `unavailable`), `data`, `coverage` (scope, covered
@@ -2548,6 +2659,7 @@ owner's agreement.
    | `/api/v2/audit`                                                                                                                            | `kogane.audit.search`                                                                                                                                          |
    | `/api/v2/reconciliation/card-statements-unmatched`                                                                                         | `kogane.card-settlements.unmatched`                                                                                                                            |
    | `/api/v2/reconciliation/card-debit-accounts`                                                                                               | `kogane.card-settlements.debit-accounts`                                                                                                                       |
+   | `/api/v2/decisions/pending`                                                                                                                | `kogane.decisions.pending`                                                                                                                                     |
    | `/api/v2/reconciliation/card-settlements`                                                                                                  | `kogane.card-settlements.read`                                                                                                                                 |
    | `/api/v2/reconciliation/card-settlements/statements`                                                                                       | `kogane.card-settlements.statements`                                                                                                                           |
    | `/api/v2/reconciliation/card-settlements/ownership`                                                                                        | `kogane.card-settlements.ownership`                                                                                                                            |

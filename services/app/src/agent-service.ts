@@ -42,6 +42,7 @@ import {
   parseInstrumentCandidatesRequest,
   reviewInstrumentCandidates,
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
+import { financialQueryPaging } from "../../../packages/application/src/query/query-paging.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
@@ -351,6 +352,9 @@ export async function queryResponse(
       }),
       unresolvedInputs: opened.unresolvedInputs,
       result: outcome.result,
+      // `next` and `paging` (ADR 0128) of a row page, beside `result` and
+      // saying what its `nextCursor` says; `coverage` and `holdings` do not page.
+      ...financialQueryPaging(outcome.result),
     },
   };
 }

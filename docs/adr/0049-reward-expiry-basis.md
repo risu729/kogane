@@ -577,7 +577,7 @@ its path without `unit`.
 
 ## Amendment: a goal search's clock is today's Asia/Tokyo day
 
-- Status: proposed
+- Status: accepted (merged 2026-11-19 in [#1418](https://github.com/risu729/kogane/pull/1418))
 - Date: 2026-11-18
 
 ### Context

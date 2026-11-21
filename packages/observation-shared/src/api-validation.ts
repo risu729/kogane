@@ -36,7 +36,8 @@ import {
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
-import { validFinancialResult } from "../../domain/src/result.ts";
+import { PAGED_QUERY_INTENTS, validFinancialResult } from "../../domain/src/result.ts";
+import { pagedFieldsSay } from "./paging-contract.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import {
   ACCOUNT_CANDIDATES_PATH,
@@ -77,6 +78,7 @@ import {
   CARD_DEBIT_ACCOUNTS_PATH,
   validCardDebitAccountsReview,
 } from "./card-debit-accounts-contract.ts";
+import { PENDING_DECISIONS_PATH, validPendingDecisions } from "./pending-decisions-contract.ts";
 import { validUpcomingCardBills } from "./card-upcoming-bills-contract.ts";
 import { CHANGES_SINCE_PATH, validChangesSince } from "./changes-since-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
@@ -272,6 +274,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   reportedStateOnDate: optional(boolean),
   reconstructedStateOnDate: optional(boolean),
   reportArtifacts: optional(boolean),
+  pendingDecisions: optional(boolean),
   opsApi: boolean,
 });
 const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({
@@ -1267,7 +1270,34 @@ function validSharedQueryResponse(value: unknown): boolean {
         text(entry.reasonCode),
     ) &&
     validFinancialResult(value.result, record) &&
-    value.result.contextId === value.contextId
+    value.result.contextId === value.contextId &&
+    queryPagedFieldsAgree(value)
+  );
+}
+
+/**
+ * `next` and `paging` (ADR 0128) of a query answer: only a row intent's
+ * answer carries them, beside `result`, and they say what `result.nextCursor`
+ * says: the same cursor, the resolved `limit`, and the rows listed. An answer
+ * without them passes until slice S9; one of an intent that answers whole
+ * must not carry them.
+ */
+function queryPagedFieldsAgree(value: Record<string, unknown>): boolean {
+  const result = value["result"] as {
+    resolvedQuery: { intent: string; limit: number | null };
+    data: unknown;
+    nextCursor: string | null;
+  };
+  if (!(PAGED_QUERY_INTENTS as readonly string[]).includes(result.resolvedQuery.intent))
+    return !Object.hasOwn(value, "next") && !Object.hasOwn(value, "paging");
+  const rows = record(result.data) ? result.data["rows"] : undefined;
+  return (
+    Array.isArray(rows) &&
+    pagedFieldsSay(value, {
+      next: result.nextCursor === null ? null : { cursor: result.nextCursor },
+      limit: result.resolvedQuery.limit,
+      returned: rows.length,
+    })
   );
 }
 
@@ -1307,6 +1337,7 @@ export function validApiResponse(path: string, value: unknown, detail?: ReadDeta
     return (value as { view?: unknown } | null)?.view === "upcoming"
       ? validUpcomingCardBills(value)
       : validCardDebitAccountsReview(value);
+  if (path === PENDING_DECISIONS_PATH) return validPendingDecisions(value);
   if (path === CHANGES_SINCE_PATH) return validChangesSince(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
