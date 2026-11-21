@@ -747,6 +747,106 @@ export interface CashPerAccountPage {
 }
 
 /**
+ * `GET /api/balances` (the v1 grouped list, `kogane.observations.list`
+ * `{kind: "balances"}`) as its route answers it in full: up to 500 latest
+ * grouped balances from `latestOffset` and up to 500 history rows from
+ * `offset`, with that bound's coverage.
+ */
+export interface BalanceListPage {
+  latest: BalanceRow[];
+  history: BalanceHistoryRow[];
+  interpretationContext?: import("./api-schema.ts").InterpretationContext;
+  coverage: {
+    limit: number;
+    truncated: boolean;
+    nextOffset: number | null;
+    latestNextOffset: number | null;
+  };
+}
+
+/**
+ * At most this many lines of each list on one summary page of
+ * `GET /api/balances` (ADR 0123, amendment of 2026-11-20), the default page of
+ * `kogane.balances.read`'s summary.
+ */
+export const BALANCE_LIST_SUMMARY_LINES = 10;
+/**
+ * The most bytes a summary page of `GET /api/balances` serializes to as JSON
+ * (UTF-8). The tool result's text is that page inside the page read's
+ * envelope (`{"schemaVersion":"kogane-page-read-v1","data":...}`, 47 bytes
+ * more), so it stays under the 8 KB a client shows. A page stops before the
+ * line that would pass it; a first line that passes it alone is refused
+ * (`413 result_limit_exceeded`), so a page that answers holds at least one
+ * line whenever its window has one, and always moves on.
+ */
+export const BALANCE_LIST_SUMMARY_BYTES = 7_680;
+
+/**
+ * The measure a v1 balance line names, once per page: the provider metric
+ * within its source and the closed codes of the row's own interpretation
+ * (`interpretation.semantic`), null where an older policy release leaves one
+ * out. Keyed by all of them, so a line never resolves to a classification
+ * its own row does not carry. The interpretation's label and reason text
+ * are in `full` only.
+ */
+export interface BalanceListSummaryMetric {
+  ref: string;
+  source: string;
+  providerMetric: string;
+  kind: import("./balance-semantics.ts").BalanceSemantic["kind"];
+  measurementKind: NonNullable<
+    import("./balance-semantics.ts").BalanceSemantic["measurementKind"]
+  > | null;
+  assetClass: NonNullable<import("./balance-semantics.ts").BalanceSemantic["assetClass"]> | null;
+  timeBasis: NonNullable<import("./balance-semantics.ts").BalanceSemantic["timeBasis"]> | null;
+}
+
+/** The closed reason code of a v1 latest balance line. */
+export const BALANCE_LIST_LATEST_REASONS = ["interpretation:conflict"] as const;
+export type BalanceListLatestReason = (typeof BALANCE_LIST_LATEST_REASONS)[number];
+
+/**
+ * One latest grouped balance as a summary line. `duplicates` are the ids of
+ * the other observations the group folded into this one (the
+ * interpretation's evidence beside its representative), so every id stays
+ * readable; `interpretation:conflict` says its witnesses disagreed and were
+ * kept apart.
+ */
+export interface BalanceListLatestLine extends BalanceSummaryLine {
+  duplicates: number[];
+  reasons: BalanceListLatestReason[];
+}
+
+/**
+ * The summary detail of `GET /api/balances` and `kogane.observations.list`
+ * `{kind: "balances"}` (ADR 0123, amendment of 2026-11-20): the first lines
+ * of each list of the full answer, latest and history taken in turn, up to
+ * `BALANCE_LIST_SUMMARY_LINES` each and `BALANCE_LIST_SUMMARY_BYTES` in all.
+ * `coverage` has the full answer's keys for this page: `limit` is the lines
+ * a list may hold, `nextOffset` and `latestNextOffset` are where the next
+ * summary page of each list starts (null when nothing is left), and
+ * `truncated` says either list has more. It adds `next`, the one hint to
+ * follow.
+ */
+export interface BalanceListSummaryPage {
+  detail: "summary";
+  accounts: SummaryAccount[];
+  metrics: BalanceListSummaryMetric[];
+  latest: BalanceListLatestLine[];
+  history: BalanceHistorySummaryItem[];
+  coverage: BalanceListPage["coverage"] & {
+    /**
+     * The `offset` and `latestOffset` of the next summary page, null exactly
+     * when neither list has more. A list that has ended is given at its end,
+     * where it answers no line, so a caller that passes both (with the same
+     * filters) until `next` is null reads every line of both lists once and
+     * never starts a list again; leaving an offset out starts that list at 0.
+     */
+    next: { offset: number; latestOffset: number } | null;
+  };
+}
+
+/**
  * `GET /api/overview` as its route answers it in full: the reader's overview,
  * each list cut to 500 rows, with that bound's coverage.
  */

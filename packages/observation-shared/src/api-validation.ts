@@ -101,6 +101,8 @@ import type {
 } from "./organization-contract.ts";
 import {
   BALANCE_HISTORY_REASONS,
+  BALANCE_LIST_LATEST_REASONS,
+  BALANCE_LIST_SUMMARY_LINES,
   CASH_LEFT_OUT_METRICS,
   CASH_LEFT_OUT_REASONS,
   CASH_METRIC_IDS,
@@ -124,6 +126,10 @@ import type {
   BalanceHistoryPage,
   BalanceHistorySummaryItem,
   BalanceHistorySummaryPage,
+  BalanceListLatestLine,
+  BalanceListPage,
+  BalanceListSummaryMetric,
+  BalanceListSummaryPage,
   CashAmount,
   CashLeftOut,
   CashLine,
@@ -965,7 +971,7 @@ function refsNamed(entries: readonly { ref: string }[], named: readonly string[]
 }
 function accountsNamed(value: {
   accounts: SummaryAccount[];
-  metrics: SummaryMetric[];
+  metrics: readonly { ref: string }[];
   items: { account: string; metric: string }[];
 }): boolean {
   return (
@@ -1129,6 +1135,93 @@ const fullPage =
   <T>(check: Check<T>): Check<T> =>
   (value): value is T =>
     check(value) && !Object.hasOwn(value as object, "detail");
+
+// The v1 grouped balance list (`GET /api/balances`) in full and as its
+// summary (ADR 0123, amendment of 2026-11-20).
+// The full list is checked as before: the local store's carries no coverage
+// record (it does not page), the central store's does.
+const balanceList = fullPage(
+  object<Omit<BalanceListPage, "coverage">>({
+    latest: array(balance),
+    history: array(balanceHistory),
+    interpretationContext: optional(validInterpretationContext),
+  }),
+);
+const balanceListSummaryMetric = object<BalanceListSummaryMetric>({
+  ref: text,
+  source: text,
+  providerMetric: text,
+  kind: literal("asset", "liability", "statement", "aggregate", "period_total", "other"),
+  measurementKind: nullable(
+    literal(
+      "balance",
+      "aggregate_balance",
+      "period_total",
+      "statement_amount",
+      "capacity",
+      "unknown",
+    ),
+  ),
+  assetClass: nullable(literal("cash", "prepaid", "reward", "mixed", "unknown")),
+  timeBasis: nullable(
+    literal(
+      "reported_snapshot",
+      "event_report",
+      "previous_calendar_month",
+      "statement_month",
+      "unknown",
+    ),
+  ),
+});
+const balanceListLatestLine: Check<BalanceListLatestLine> = (
+  value,
+): value is BalanceListLatestLine =>
+  object<BalanceListLatestLine>({
+    ...historySummaryFields,
+    duplicates: array(identifier),
+    reasons: (reasons): reasons is BalanceListLatestLine["reasons"] =>
+      subset(BALANCE_LIST_LATEST_REASONS)(reasons),
+  })(value) &&
+  // A group folds in one other witness at most, never its own id, and a
+  // conflict keeps its witnesses apart (`validBalanceInterpretation`).
+  value.duplicates.length <= 1 &&
+  !value.duplicates.includes(value.observationId) &&
+  (value.duplicates.length === 0 || value.reasons.length === 0);
+const balanceListSummary: Check<BalanceListSummaryPage> = (
+  value,
+): value is BalanceListSummaryPage =>
+  object<BalanceListSummaryPage>({
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(balanceListSummaryMetric),
+    latest: array(balanceListLatestLine),
+    history: array(historySummaryItem),
+    coverage: object<BalanceListSummaryPage["coverage"]>({
+      limit: literal(BALANCE_LIST_SUMMARY_LINES),
+      truncated: boolean,
+      nextOffset: nullableIdentifier,
+      latestNextOffset: nullableIdentifier,
+      next: nullable(object({ offset: identifier, latestOffset: identifier })),
+    }),
+  })(value) &&
+  value.latest.length <= value.coverage.limit &&
+  value.history.length <= value.coverage.limit &&
+  value.coverage.truncated ===
+    (value.coverage.nextOffset !== null || value.coverage.latestNextOffset !== null) &&
+  // `next` is there exactly while a list has more, and carries each list's
+  // own next offset where it has one.
+  (value.coverage.next === null) === !value.coverage.truncated &&
+  (value.coverage.next === null ||
+    ((value.coverage.nextOffset === null ||
+      value.coverage.next.offset === value.coverage.nextOffset) &&
+      (value.coverage.latestNextOffset === null ||
+        value.coverage.next.latestOffset === value.coverage.latestNextOffset))) &&
+  // Accounts and metrics are named once per page, across both lists.
+  accountsNamed({
+    accounts: value.accounts,
+    metrics: value.metrics,
+    items: [...value.latest, ...value.history],
+  });
 
 const rewardBucket = object<RewardBucketRow>({
   bucketRef: text,
@@ -1379,11 +1472,10 @@ const endpoints: Record<string, Check<unknown>> = {
     transactions: TransactionRow[];
     interpretationContext?: InterpretationContext;
   }>({ transactions: array(transaction), interpretationContext: context }),
-  "/api/balances": object<{
-    latest: BalanceRow[];
-    history: BalanceHistoryRow[];
-    interpretationContext?: InterpretationContext;
-  }>({ latest: array(balance), history: array(balanceHistory), interpretationContext: context }),
+  // The central store answers its summary unless asked for `full`; the local
+  // store answers its full list only.
+  "/api/balances": (value): value is BalanceListPage | BalanceListSummaryPage =>
+    balanceList(value) || balanceListSummary(value),
   "/api/positions": object<{
     positions: PositionWithValuations[];
     interpretationContext?: InterpretationContext;
@@ -1409,6 +1501,7 @@ const pagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
     summary: balanceHistorySummaryPage,
   },
   "/api/overview": { full: fullPage(overview), summary: overviewSummary },
+  "/api/balances": { full: balanceList, summary: balanceListSummary },
 };
 
 /**

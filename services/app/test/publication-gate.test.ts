@@ -163,9 +163,9 @@ describe("publication gate: candidate invisibility", () => {
     expect(await status(`/api/observations/balance/${candidate.bal}`)).toBe(404);
     expect(await status(`/api/observations/transaction/${candidate.tx}`)).toBe(404);
     expect((await api(`/api/artifacts/${A2}`)).parseRuns).toEqual([]);
-    expect((await api("/api/balances")).latest.map((r: { id: number }) => r.id)).toEqual([
-      published.bal,
-    ]);
+    expect(
+      (await api("/api/balances?detail=full")).latest.map((r: { id: number }) => r.id),
+    ).toEqual([published.bal]);
     // Identity eligibility and organization follow the same gate.
     expect(await api(`/api/identity/coverage?source=${SB}`)).toMatchObject({
       rows: [{ eligible: 4, organized: 0 }],

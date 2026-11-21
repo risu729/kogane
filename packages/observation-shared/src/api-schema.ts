@@ -359,6 +359,9 @@ export const LIST_REQUEST_SCHEMA = {
     offset: "paginationVersion:offset-v1",
     latestOffset: "paginationVersion:offset-v1",
     identityRead: "identityReadModes",
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-20),
+    // gated as on `/api/overview`: the local store answers its full list only.
+    detail: "sharedQuery",
   },
   "/api/positions": {
     source: "collectionFilters",
