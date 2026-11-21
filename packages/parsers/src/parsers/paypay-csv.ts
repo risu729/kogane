@@ -173,8 +173,11 @@ export const paypayCsv: Parser = {
   // field before any label is matched by substring, and the outgoing JPY
   // column never matches a label naming 海外, so an overseas amount listed
   // before 出金金額（円） is no longer read as a yen outflow (and the yen
-  // column dropped as undocumented). A header in the documented order and
-  // labels reads exactly as in 0.2.3.
+  // column dropped as undocumented). A row whose every cell is blank (only
+  // separators) is skipped with the closed warning `row N: blank row skipped`
+  // instead of becoming a transaction with no date, amount or id. A header in
+  // the documented order and labels, and every row with a non-blank cell,
+  // read exactly as in 0.2.3.
   // 0.2.2: an outgoing or incoming amount that carries its own sign (-, +,
   // △, ▲ or parentheses) is left without an amount, with a closed warning,
   // instead of being negated (outgoing) or transcribed (incoming); every
@@ -206,6 +209,13 @@ export const paypayCsv: Parser = {
     const observations: Observation[] = [];
     rows.slice(1).forEach((cells, offset) => {
       const rowNumber = offset + 2; // 1-based, counting the header as row 1
+      // A row of separators only (",,,," as a spreadsheet saves a trailing
+      // blank line) states nothing, as an empty line does, which the CSV
+      // reader already drops; it is not a transaction (0.2.4).
+      if (cells.every((cell) => cell.trim() === "")) {
+        warnings.push(`row ${rowNumber}: blank row skipped`);
+        return;
+      }
       if (cells.length !== header.length) {
         warnings.push(`row ${rowNumber}: expected ${header.length} columns, got ${cells.length}`);
       }

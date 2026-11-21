@@ -123,8 +123,9 @@ How `paypay-csv` reads these columns today (parser 0.2.4): each column is
 found by its documented label first, then by a distinguishing part of the
 label, and only then by position; the outgoing yen column is never the one
 whose label names 海外 (the overseas amount), so a reordered header keeps the
-yen amount in the yen field
-([observations](../observations.md#paypay-csv-each-column-is-read-by-its-documented-label-first-parser-024)).
+yen amount in the yen field. A row of separators only is skipped with a
+warning
+([observations](../observations.md#paypay-csv-columns-read-by-documented-label-first-separator-only-rows-skipped-parser-024)).
 The direction of a row comes from its column, outgoing as negative and
 incoming as positive.
 An amount that carries its own sign in either column (`-`, `+`, `△`, `▲` or

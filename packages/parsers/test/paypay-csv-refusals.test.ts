@@ -153,4 +153,22 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
     expect(variant.amountMinor).toBe(-1800);
     expect(variant.extra["overseas"]).toMatchObject({ amount: "12", currency: "USD" });
   });
+
+  test("a row of separators only is skipped, not read as a transaction (0.2.4)", () => {
+    // A spreadsheet saving the export can leave trailing ",,,," lines; 0.2.3
+    // turned each into a transaction with no date, amount or id.
+    const blank = ",".repeat(12);
+    const result = parse(
+      `\uFEFF${HEADER}\r\n${row("2026/08/01 00:00:00", "100", "")}\r\n${blank}\r\n , ,\r\n`,
+    );
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0]).toMatchObject({ amountMinor: -100, rawLocator: "csv:row=2" });
+    expect(result.warnings).toEqual(["row 3: blank row skipped", "row 4: blank row skipped"]);
+    // A blank row between data rows keeps every later row's number.
+    const between = parse(
+      `${HEADER}\n${blank}\n${row("2026/08/02 00:00:00", "", "50")}\n`,
+    ).observations;
+    expect(between).toHaveLength(1);
+    expect(between[0]).toMatchObject({ amountMinor: 50, rawLocator: "csv:row=3" });
+  });
 });

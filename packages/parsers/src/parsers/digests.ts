@@ -79,7 +79,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb.ts":
       "eda9addc03cd8f2a1a2b83019f28073f3b2e27d0f86dac032c98b7308125e798",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
-      "9e8d8056f43bb10d765be7b5a99b2e094ea37b481db379b1877a3dc13aa39d0a",
+      "882e849064b56df5d6baccb339766e367d1e0293a59d09f8e19438c248b74333",
     "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
       "aa24f5018ae32b1019713dfc675de63e137b1f9c16f2622e2d66c8fec4e6f861",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -471,7 +471,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "paypay-csv": {
       version: "0.2.4",
-      codeDigest: "ebb2a983f768d3368fd228b06cbaf9e63d45dafc4b6466039d4a701008033b51",
+      codeDigest: "eafbf3f72877919607f9d762b42f4d3d5fe38bc3dc2a97a02b0807505b97f173",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
