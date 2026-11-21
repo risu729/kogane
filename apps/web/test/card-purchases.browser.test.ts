@@ -154,8 +154,8 @@ describe.if(runnable)("card purchase explanation", () => {
     const figures = page.getByRole("list", { name: "状態ごとの利用額" });
     const tiles = await figures.getByRole("listitem").allInnerTexts();
     expect(tiles.map((text) => text.replace(/\s+/gu, " ").trim())).toEqual([
-      "1234 JPY 確定",
-      "1200 JPY 未確定",
+      "1,234 JPY 確定",
+      "1,200 JPY 未確定",
       "300 JPY 返金（対応不明）",
       "0 JPY 未確定の返金（対応不明）",
       "1件 取得元に表示されなくなった利用",
@@ -173,7 +173,7 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(main).not.toContain("理由は一部の明細についてだけ数えています");
     // The statement total is reference only, behind its own disclosure.
     await page.getByText("カード会社の請求総額（参考）", { exact: true }).click();
-    expect(await page.locator("main").innerText()).toContain("1734 JPY");
+    expect(await page.locator("main").innerText()).toContain("1,734 JPY");
     const rows = page.getByRole("region", { name: "カード利用の一覧" }).locator("tbody tr");
     expect(await rows.count()).toBe(4);
     expect(await rows.nth(3).innerText()).toContain("取得元に表示されなくなった");
@@ -208,7 +208,7 @@ describe.if(runnable)("card purchase explanation", () => {
       "請求",
       "引落",
       "2026-09 請求分",
-      "1734 JPY",
+      "1,734 JPY",
       "採用済み",
       "三井住友銀行",
     ])

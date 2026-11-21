@@ -24,7 +24,14 @@ and its JavaScript regex engine. Tokens become escaped React text with fixed CSS
 classes; the content security policy does not need inline styles, script execution,
 or WebAssembly permissions. No additional component, state, or chart library is required.
 Navigation keeps the existing small History API router. Monetary values stay
-as decimal strings and use the shared exact formatter; provider text remains
+as decimal strings and use the shared exact formatters in `apps/web/src/money.ts`:
+`formatAmount` for integer minor units, and `formatDecimal` (or
+`formatDecimalText` for a compact wire quantity) for an exact decimal such as
+a settlement, reward, report or subtotal quantity. Both group integer digits
+in threes and keep the sign and every fraction digit, by string work only;
+`test/money.test.ts` holds them to the same text for each known currency.
+Counts are printed as plain digits, without separators, and nothing in the
+client calls `toLocaleString` or `Intl.NumberFormat`. Provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
 Transaction filters, search, sort, and page selection, balance source/account,

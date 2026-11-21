@@ -112,9 +112,9 @@ describe.if(runnable)("reported state on a date", () => {
     expect(main).toContain("4日以上前の取得");
     expect(main).toContain("3日以内に取得");
     // Provider valuations in the provider's currency, side by side.
-    expect(main).toContain("12000 JPY");
+    expect(main).toContain("12,000 JPY");
     expect(main).toContain("150.25 USD");
-    expect(main).toContain("50000 JPY");
+    expect(main).toContain("50,000 JPY");
     // An unreadable balance stays unknown, never zero.
     expect(main).toContain("不明（stored:unparsed） · JPY");
     // Nothing is added: no sum of the JPY figures appears anywhere.
