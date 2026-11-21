@@ -343,6 +343,12 @@ describe.if(runnable)("card settlement review", () => {
   let detailRevision = 0;
   let planRevision = 0;
   let action = "accept";
+  /**
+   * Set once a commit is answered: as the server does, the candidate then
+   * reads accepted at the next revision, and a simulate of the plan is
+   * refused (`stale_context`: the candidate is no longer proposed).
+   */
+  let committed = false;
   let older: ReturnType<typeof settlementReview>[] = [];
   let leadSearch = "not_searched";
   /** A second statement's candidates, newest first; empty serves one statement. */
@@ -366,6 +372,7 @@ describe.if(runnable)("card settlement review", () => {
     detailRevision = 0;
     planRevision = 0;
     action = "accept";
+    committed = false;
     older = [];
     leadSearch = "not_searched";
     second = [];
@@ -465,10 +472,12 @@ describe.if(runnable)("card settlement review", () => {
         if (url.pathname === "/api/v2/reconciliation/card-settlements")
           return Response.json({
             items: [
-              {
-                ...review,
-                revision: url.searchParams.has("proposalId") ? detailRevision : review.revision,
-              },
+              committed
+                ? { ...review, revision: planRevision + 1, status: "accepted" }
+                : {
+                    ...review,
+                    revision: url.searchParams.has("proposalId") ? detailRevision : review.revision,
+                  },
             ],
             nextOffset: null,
             nextPage: "none",
@@ -529,6 +538,8 @@ describe.if(runnable)("card settlement review", () => {
             status: "planned",
           };
           if (operation === "plan") return Response.json({ plan });
+          if (operation === "simulate" && committed)
+            return Response.json({ error: "stale_context" }, { status: 409 });
           if (operation === "simulate")
             return Response.json({
               report: {
@@ -549,6 +560,7 @@ describe.if(runnable)("card settlement review", () => {
                 usesRemaining: 1,
               },
             });
+          committed = true;
           return Response.json({
             receipt: {
               operationId: "op-synthetic",
@@ -1042,6 +1054,19 @@ describe.if(runnable)("card settlement review", () => {
       .filter({ hasText: "読み取りモデルへの反映はまだ完了" })
       .waitFor();
     expect(posted.map((row) => row.operation)).toContain("commit");
+    // The candidate is read again after the commit and shows the decision;
+    // the revision the commit itself wrote is not reported as a change made
+    // since planning, and the plan, not simulated again (the server would
+    // refuse it), reads as committed.
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    const after = await page.locator("main").innerText();
+    expect(after).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(after).not.toContain("この候補では計画した操作を実行できません");
+    expect(after).not.toContain("古い承認は適用されません");
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
     await page.close();
   });
 

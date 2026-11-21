@@ -114,8 +114,14 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   // same operation, so a lost response never commits twice (addendum 10 §6).
   const [operationId, setOperationId] = useState<string | null>(null);
 
+  // A committed plan is not simulated again: its own commit moved the
+  // revisions it pinned, so the server would answer it stale, or refuse it
+  // (a card settlement no longer proposed), and either answer would read as a
+  // refused approval. The screen keeps the plan it confirmed, labelled as read
+  // before the commit; the receipt below says what the commit did.
   const report = useQuery({
     queryKey: ["command", "simulate", planId],
+    enabled: receipt === null,
     queryFn: ({ signal }) =>
       postCommand<{ report: SimulationReportView }>("simulate", { planId }, signal).then(
         (value) => value.report,
@@ -272,7 +278,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     },
     onSuccess: (value) => {
       setReceipt(value);
-      void client.invalidateQueries({ queryKey: ["command", "simulate", planId] });
+      // A re-read already in flight (a refocused window) would land the stale answer.
+      void client.cancelQueries({ queryKey: ["command", "simulate", planId] });
+      // Read the item the plan reviewed again, so its panel shows it after
+      // the decision rather than the answer read before it.
+      for (const queryKey of [["card-settlements"], ["card-ownership"], ["card-purchases"]])
+        void client.invalidateQueries({ queryKey });
     },
   });
 
@@ -301,6 +312,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       .finally(() => setCheckingReceipt(false));
   }, [operationId]);
 
+  // A committed plan's own decision moves the revisions it pinned, so the
+  // reviewed item, read again after the commit, no longer matches the plan's
+  // pins or offers its action. The checks below guard approval and commit;
+  // once the receipt is on screen they are done, and their warnings would
+  // misstate the commit as refused.
+  const committed = receipt !== null;
   const stale = report.data?.stale === true;
   const canAct =
     report.data !== undefined &&
@@ -331,7 +348,11 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   : undefined
               }
             >
-              {data.stale ? (
+              {committed ? (
+                <Notice role="status">
+                  この計画は確定しました。この画面の計画の内容は確定前に読んだものです。確定の結果は下の操作の記録で確認してください。
+                </Notice>
+              ) : data.stale ? (
                 <Notice tone="bad" role="alert">
                   この計画が読み取った版から対象が変わりました。古い承認は適用されません。再試算した計画で
                   確認し直してください。
@@ -343,13 +364,15 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     <code>{data.planId}</code>
                   </KvRow>
                   <KvRow label="状態">
-                    {data.stale ? (
+                    {committed ? (
+                      <Badge tone="ok">確定済み</Badge>
+                    ) : data.stale ? (
                       <Badge tone="bad">対象が変更されています</Badge>
                     ) : (
                       <Badge tone="ok">確認した内容のまま</Badge>
                     )}
                   </KvRow>
-                  {data.stale ? (
+                  {data.stale && !committed ? (
                     <KvRow label="再試算後の計画ID">
                       <code>{data.resimulatedPlanId}</code>
                     </KvRow>
@@ -404,7 +427,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!ownershipReady && ownership.isSuccess ? (
+                  {!committed && !ownershipReady && ownership.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       口座または保有者の記録が計画作成後に変わっています。新しい計画で確認し直してください。
                     </Notice>
@@ -441,12 +464,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!settlementRevisionMatches && settlement.isSuccess ? (
+                  {!committed && !settlementRevisionMatches && settlement.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       候補の判断が計画作成後に更新されています。新しい計画で確認し直してください。
                     </Notice>
                   ) : null}
-                  {!settlementActionAllowed && settlement.isSuccess ? (
+                  {!committed && !settlementActionAllowed && settlement.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。条件と根拠を一覧で確認し直してください。
                     </Notice>
@@ -520,12 +543,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {receipt === null && linkCandidate !== undefined && !linkPinsMatch ? (
+                  {!committed && linkCandidate !== undefined && !linkPinsMatch ? (
                     <Notice tone="bad" inline role="alert">
                       候補の判断または利用の記録が計画作成後に変わっています。新しい計画で確認し直してください。
                     </Notice>
                   ) : null}
-                  {receipt === null && linkCandidate !== undefined && !linkActionAllowed ? (
+                  {!committed && linkCandidate !== undefined && !linkActionAllowed ? (
                     <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。カード利用の画面で条件と根拠を確認し直してください。
                     </Notice>
@@ -550,7 +573,11 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               ) : (
                 <div className="table-scroll" role="region" aria-label="変更の対象" tabIndex={0}>
                   <table className="settlement-targets">
-                    <caption>対象ごとの版と対応先。版は計画時とサーバーの現在の値です。</caption>
+                    <caption>
+                      {committed
+                        ? "対象ごとの版と対応先。版は計画時と、確定前に読んだサーバーの値です。"
+                        : "対象ごとの版と対応先。版は計画時とサーバーの現在の値です。"}
+                    </caption>
                     <thead>
                       <tr>
                         <th scope="col">対象</th>

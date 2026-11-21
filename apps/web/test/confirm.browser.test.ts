@@ -5,6 +5,9 @@
 //  * a stale plan cannot be approved or committed from the screen,
 //  * the server-computed diff is what is shown (the client never recomputes),
 //  * `accepted` and `published` are shown as different states,
+//  * after a commit the plan, which the server would report stale because the
+//    commit moved its pins, is not simulated again and reads as committed,
+//    never as a refused approval,
 //  * a pending-to-posted card usage review compares every pinned revision
 //    with the candidate the server shows now, names its invalidation and its
 //    effect, and cannot be approved while any of them disagrees.
@@ -75,6 +78,10 @@ describe.if(runnable)("change confirmation screen", () => {
   let commands = true;
   let stale = false;
   let published = false;
+  // Set once a commit is answered: as the server does, a later simulate of
+  // the plan reports the pinned subject at the revision the commit wrote, so
+  // the plan reads as stale.
+  let committed = false;
   const posted: string[] = [];
   /**
    * A pending-to-posted review plan: its kind, its pins, the proposal status
@@ -93,6 +100,7 @@ describe.if(runnable)("change confirmation screen", () => {
   let purchaseAdvertised = true;
   const purchaseReads: string[] = [];
   beforeEach(() => {
+    committed = false;
     link = null;
     purchaseAdvertised = true;
     purchaseReads.length = 0;
@@ -169,9 +177,9 @@ describe.if(runnable)("change confirmation screen", () => {
                 planDigest: PLAN_ID,
                 simulation,
                 expectedRevisions: { [SUBJECT]: 7 },
-                currentRevisions: { [SUBJECT]: stale ? 8 : 7 },
-                stale,
-                resimulatedPlanId: stale ? "b".repeat(64) : PLAN_ID,
+                currentRevisions: { [SUBJECT]: stale || committed ? 8 : 7 },
+                stale: stale || committed,
+                resimulatedPlanId: stale || committed ? "b".repeat(64) : PLAN_ID,
               },
             });
           if (operation === "approve")
@@ -185,6 +193,7 @@ describe.if(runnable)("change confirmation screen", () => {
                 usesRemaining: 1,
               },
             });
+          if (operation === "commit") committed = true;
           const receipt = {
             operationId: "op-synthetic",
             operationKind: "identity.assign",
@@ -265,6 +274,20 @@ describe.if(runnable)("change confirmation screen", () => {
       "判断は保存されました。読み取りモデルへの反映はまだ完了していません。",
     );
     expect(accepted).not.toContain("2098-01-01T00:05:00.000Z");
+    // The plan is not simulated again: the commit moved the revision it
+    // pinned, so the server would report it stale. The screen says the plan is
+    // committed and that what it shows was read before the commit, never that
+    // its approval does not apply.
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    expect(
+      await page.getByRole("status").filter({ hasText: "この計画は確定しました" }).count(),
+    ).toBe(1);
+    const committedText = await page.locator("main").innerText();
+    expect(committedText).toContain("版は計画時と、確定前に読んだサーバーの値です。");
+    expect(committedText).not.toContain("古い承認は適用されません");
+    expect(committedText).not.toContain("対象が変更されています");
+    expect(committedText).not.toContain("再試算後の計画ID");
+    expect(await page.getByRole("alert").count()).toBe(0);
     // Accepted is not published: the screen offers a re-check, not a claim.
     published = true;
     await page.getByRole("button", { name: "反映状況を再確認" }).click();
@@ -273,13 +296,12 @@ describe.if(runnable)("change confirmation screen", () => {
       .getByText("反映済み", { exact: true })
       .waitFor();
     expect(await page.locator("main").innerText()).toContain("2098-01-01T00:05:00.000Z");
-    // The commit re-reads the plan from the server rather than mutating a
-    // local copy of it.
+    // The commit neither simulates the committed plan again nor mutates a
+    // local copy of it; the receipt is re-read on request only.
     expect(posted).toEqual([
       "/api/command/v1/simulate",
       "/api/command/v1/approve",
       "/api/command/v1/commit",
-      "/api/command/v1/simulate",
       "/api/command/v1/operation",
     ]);
     await page.close();

@@ -754,8 +754,19 @@ advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
 (addendum 11 §5); one re-check runs at a time, so an earlier answer never
-replaces a later one. A refusal from any step (simulate, approve, commit or the
-re-check) is shown by a fixed message for its closed code, and every code in
+replaces a later one. A committed plan is not simulated again: its own commit
+moves the revisions it pinned, so the server would answer it `stale` with
+another re-simulated plan id, or refuse it (`stale_context`: a card
+settlement no longer proposed, a pending-to-posted review already decided).
+Once the receipt is on screen the screen says the plan is committed
+(`確定済み`), that the plan it shows was read before the commit, and drops the
+warnings that guard approval and commit: the stale plan, the re-simulated plan
+id, and a pin that moved or an action no longer offered. The commit reads the
+reviewed item (the settlement candidate, the ownership review, the purchases)
+again, so its panel shows it after the decision, at a revision newer than the
+plan pinned and without a warning. A refusal from any step (simulate,
+approve, commit or the re-check) is shown by a fixed message for its closed
+code, and every code in
 `COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the
 server's text is never shown. Of the codes outside that list only the App's
 `command_executor_unavailable` has its own message; any other (such as the
