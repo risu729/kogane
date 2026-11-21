@@ -765,14 +765,19 @@ commit the server refuses (a client error other than a timeout, or
 shows its re-simulated plan id. A commit without such an answer (no response,
 a timeout, a server fault) may have landed: the plan stays as read, and the
 same confirmation sent again, with the same operation id, answers with its
-receipt. Once a receipt is on screen the screen says that the plan it shows
+receipt. Until the server refuses it the reviewed item's checks neither warn
+nor block that resend: the item, read again (a refocused window, a
+reconnect), may show the decision the commit wrote, and a resend that did not
+land is checked against every pinned revision by the server again. Once a receipt is on screen the screen says that the plan it shows
 was read before the commit, and drops the warnings that guard approval and
 commit: the stale plan, the re-simulated plan id, and a pin that moved or an
 action no longer offered. Every receipt is written in the batch that writes
 its decision, so this holds for any status; an `accepted` or `published`
 receipt reads as committed (`確定済み`), and any other (`failed`) says the
 decision was saved but the operation is recorded as failed, and points to the
-receipt. The commit reads the reviewed item (the settlement candidate, the
+receipt. No writer sets `failed` today: the outbox dispatcher moves a receipt
+only to `published`, so the screen's `failed` wording has not been seen on a
+real receipt. The commit reads the reviewed item (the settlement candidate, the
 ownership review, the purchases) again, so its panel shows it after the
 decision, at a revision newer than the plan pinned and without a warning. A refusal from any step (simulate,
 approve, commit or the re-check) is shown by a fixed message for its closed

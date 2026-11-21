@@ -352,15 +352,20 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   // (`failed`) says so and points to the receipt panel.
   const decided = receipt !== null;
   const committed = receipt?.status === "accepted" || receipt?.status === "published";
+  // A commit sent and not refused may have landed, so its decision may be what
+  // the reviewed item, read again (a refocused window, a reconnect), now
+  // shows. Its warnings would misstate that decision as a change since
+  // planning, and its checks would block the resend of the same operation id,
+  // which answers with the receipt if it landed and is checked against every
+  // pinned revision again by the server if it did not (addendum 10 §6).
+  const checksDone = decided || commitSent;
   const stale = report.data?.stale === true;
   const canAct =
     report.data !== undefined &&
     features.known &&
     features.commands &&
     !stale &&
-    settlementReady &&
-    ownershipReady &&
-    purchaseLinkReady;
+    (commitSent || (settlementReady && ownershipReady && purchaseLinkReady));
 
   return (
     <>
@@ -467,7 +472,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!decided && !ownershipReady && ownership.isSuccess ? (
+                  {!checksDone && !ownershipReady && ownership.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       口座または保有者の記録が計画作成後に変わっています。新しい計画で確認し直してください。
                     </Notice>
@@ -504,12 +509,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!decided && !settlementRevisionMatches && settlement.isSuccess ? (
+                  {!checksDone && !settlementRevisionMatches && settlement.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       候補の判断が計画作成後に更新されています。新しい計画で確認し直してください。
                     </Notice>
                   ) : null}
-                  {!decided && !settlementActionAllowed && settlement.isSuccess ? (
+                  {!checksDone && !settlementActionAllowed && settlement.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。条件と根拠を一覧で確認し直してください。
                     </Notice>
@@ -583,12 +588,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!decided && linkCandidate !== undefined && !linkPinsMatch ? (
+                  {!checksDone && linkCandidate !== undefined && !linkPinsMatch ? (
                     <Notice tone="bad" inline role="alert">
                       候補の判断または利用の記録が計画作成後に変わっています。新しい計画で確認し直してください。
                     </Notice>
                   ) : null}
-                  {!decided && linkCandidate !== undefined && !linkActionAllowed ? (
+                  {!checksDone && linkCandidate !== undefined && !linkActionAllowed ? (
                     <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。カード利用の画面で条件と根拠を確認し直してください。
                     </Notice>
@@ -614,7 +619,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                 <div className="table-scroll" role="region" aria-label="変更の対象" tabIndex={0}>
                   <table className="settlement-targets">
                     <caption>
-                      {decided
+                      {checksDone
                         ? "対象ごとの版と対応先。版は計画時と、確定前に読んだサーバーの値です。"
                         : "対象ごとの版と対応先。版は計画時とサーバーの現在の値です。"}
                     </caption>
