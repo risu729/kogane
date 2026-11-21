@@ -207,6 +207,12 @@ describe.if(runnable)("reconstructed state", () => {
       .getByRole("region", { name: "イベントの扱いの一覧" })
       .innerText();
     expect(dispositions).toContain("ev-settle@1#0");
+    // A row with no gap says so in words, never a dash (INV05).
+    const reasons = await page
+      .getByRole("region", { name: "イベントの扱いの一覧" })
+      .locator("tbody tr td:last-child")
+      .allInnerTexts();
+    expect(reasons).toEqual(["なし", "なし"]);
     expect(requests.at(-1)?.searchParams.get("account")).toBe(WORLD_BANK);
     await page.close();
   }, 30_000);
