@@ -863,8 +863,8 @@ here, which the collection quality page asks for
 [agent API](agent-api.md#ui-read-pages)). Each summary pages its lines by
 `offset`: up to 20 a page, fewer when the next would carry the tool's answer
 past 8,192 bytes, with `coverage.nextOffset` where the next page starts; a
-page whose first line alone passes that is `413 result_limit_exceeded`, never
-cut ([ADR 0123, amendment of 2026-11-21](adr/0123-summary-detail-for-large-reads.md#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21)).
+page whose first line alone passes that (on the summary, with its jobs under
+no source) is `413 result_limit_exceeded`, never cut ([ADR 0123, amendment of 2026-11-21](adr/0123-summary-detail-for-large-reads.md#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21)).
 `offset` with `detail=full` on the summary or the accounts is
 `400 invalid_query`.
 

@@ -1669,8 +1669,10 @@ Measured as the bytes of the tool's answer (`pageReadAnswerBytes`;
   so a run recorded between two pages can change a line or whether two
   sources share one, moving lines across a page boundary; `coverage.lines`
   then shows it, as on the other two summaries. `otherSchedules` is repeated
-  on every page and is not paged: 60 jobs under no source would make every
-  page `413` (today there is one). `view: status` is one line per job with
+  on every page and is not paged: with jobs shaped like a failing Vpass job
+  (a failure code and two terminal codes, about 200 bytes a line), 38 under
+  no source make every page `413`, and a page with a long first line is
+  refused with fewer (today there is one such job). `view: status` is one line per job with
   no byte bound (about 5 KB on the synthetic store; up to 200 jobs); it is
   left as it is.
 
