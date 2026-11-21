@@ -401,3 +401,103 @@ with `truncated` held `false` in the manifest that test fails on reuse.
 the stored v1 one, and refuses a v2 manifest missing one of its added
 fields, with an unsorted rule list, a `truncated` that is not a boolean or
 an extra field, a v1 manifest with the v2 fields, and an unknown version.
+
+## Amendment: the report job reads its positions from one cut (2026-11-21)
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context
+
+The report job (`services/processor/src/report-job.ts`) reads the current
+positions through the evidence reader's `listPositions`, 500 positions a page
+at offsets 0, 500, 1000, … in the order source, account, security code, id,
+until the in-scope set passes `maxRows` or the store ends. Each page is a
+separate read of whatever is current at that moment; nothing pins a
+publication mark, snapshot id or instant across the pages (the knowledge
+cutoff only drops rows whose artifact was recorded after it). The job kept a
+row once per observation id, which covers a row that a parse published
+between two reads shifts onto the next page under the same id.
+
+It did not cover a republish. A re-parse published in place of an
+artifact's run (a release re-parse, or any later parse of an artifact
+recorded before the cutoff), or a newer complete capture that becomes the
+dataset's current snapshot, brings the same holdings back under new
+observation ids. When it lands between two page reads and adds a row that
+sorts before the next offset, the next page starts one row earlier, on the
+new run's copy of the holding the previous page read last: the report held
+that holding twice, under two ids, and counted it twice in its subtotal
+(INV06). A republish that removes a row before the offset skips a row
+instead. Both need more than one page of positions; a store that fits one
+page is read in one statement.
+
+### Options considered
+
+1. Keep one row per holding key (source, account, code) instead of per id.
+   Rejected: it merges two snapshots into one report silently, keeping the
+   first page's run for some holdings and the next page's for the others,
+   and it would also merge two positions a store holds under one key.
+2. Pin a mark before the first page (the newest `publication_events` id, the
+   exclusions and the snapshot policies) and compare it after the last.
+   Rejected for this job: the current positions also depend on fetch run
+   seals, terminal reports and unit reports, so a mark has to list every
+   relation the snapshot predicates read and stay in step with them.
+3. After the last page, check the ids read against the current positions
+   with the same predicate the pages use, start again from the first page
+   when they are not one cut, and refuse when the cut keeps moving.
+
+### Decision
+
+Option 3. `POSITION_CUT_SQL` (`packages/read-model/src/sql.ts`) reads, over
+the same current-positions text `positionsSql` pages, the number of current
+rows, how many of the ids read are among them, and how many current rows
+sort at or before the greatest row read. The job sends every id the pages
+returned, those recorded after the cutoff included. The read is one cut when
+all three answers agree with the number of ids read (the current-row count
+only when the pages reached the store's end): every row read is still
+current, and the rows read are exactly the current rows up to the last one,
+so none was skipped and no holding came back under a second id. When they
+disagree, the job reads every page again from the first; when the second
+read is not one cut either, it stores nothing and returns
+`skipped: "snapshot_changed"`, and the next sweep tries again.
+
+### Consequences
+
+- The manifest, the body and `REPORT_BUILD_RELEASE` do not change: a read
+  that was one cut gives the same ids, and so the same report, as before. A
+  report already stored from a moved cut names ids of two runs; a later read
+  of the same store names one run's ids, so it is a new report, and the
+  stored one keeps its id and body.
+- `snapshot_changed` joins `flag_off` and `invalid_knowledge_cutoff` as a
+  closed `skipped` code in the `report_job` lane's result.
+- Cost: one more read per attempt that makes the same whole-store snapshot
+  passes as one page, reaches the bound row by key and reads the id list
+  once; a moved cut costs one more read of every page.
+- Limits: the check proves the read was one cut at the moment of the check;
+  the decimals, the prices and the knowledge boundary are read after it, as
+  before, and the prices are named by id in the manifest. A cut that holds
+  one holding twice by itself (two current captures of a dataset without a
+  snapshot policy listing the same account and code) is not a paging fault
+  and is not refused here. Rows a parse adds before the next offset between
+  two reads are no longer left out silently: the check fails and the read
+  starts again.
+
+### Verification
+
+`services/processor/test/report-job-page.test.ts` re-parses the second
+artifact between the first and second page read with one more holding that
+sorts first: before this amendment the report held 502 rows for 501
+holdings, one of them twice; now the job reads again and stores the report a
+read of the republished store alone gives (502 holdings, each once). A store
+republished between every two reads is refused as `snapshot_changed` and no
+report is stored. `packages/read-model/test/position-cut.test.ts` checks
+`POSITION_CUT_SQL` against an oracle (the final cut read with nothing moving)
+on 40 seeded random stores where a re-parse, a newer complete capture, a new
+parse or nothing lands between two page reads: the check passes exactly when
+the ids read are a prefix of the final cut (and all of it when the pages
+reached the end), and whenever it passes no holding was read twice. With
+either the read-ids or the prefix comparison dropped from the pass rule, that
+test fails. Its plan check on the complete CORE schema without table statistics
+finds no scan the page read does not make besides the JSON argument, the
+bound row searched by key, and the id lists and the bound each evaluated
+once.

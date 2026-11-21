@@ -97,6 +97,20 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
   `413 result_limit_exceeded`. A result is never silently cut to look complete.
 - `/api/artifacts` walks an immutable descending id cursor; derived lists use
   deterministic total orderings (each ends in `id`) with an offset.
+- Each offset page is its own read of what is current then, so pages read
+  while a parse is published can repeat or skip a row, and a republished
+  snapshot brings its holdings back under new ids, so one holding can appear
+  on two pages under two ids. `POSITION_CUT_SQL` lets a caller that reads the
+  unscoped positions page by page check afterwards that the ids it read are
+  one cut: over the same text `positionsSql` pages, it counts the current
+  rows, the read ids still current, and the current rows that sort at or
+  before the greatest row read. The report job uses it and reads again or
+  refuses
+  ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21));
+  the evidence browser's pages do not. `test/position-cut.test.ts` checks it
+  against an oracle on seeded random stores and checks its plan without
+  table statistics: the same whole-store snapshot passes as one page, the
+  bound row searched by key, the id lists read once.
 
 ### Coverage run counts
 

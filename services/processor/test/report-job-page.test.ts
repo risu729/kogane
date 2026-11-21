@@ -1,7 +1,8 @@
 // The report job's position set when the store holds more than one reader
 // page (501 rows) of positions and some of the first page were recorded after
-// the knowledge cutoff (AT63). Every row is synthetic: made-up accounts,
-// security codes and quantities.
+// the knowledge cutoff (AT63), and when the store changes between two page
+// reads (INV06). Every row is synthetic: made-up accounts, security codes and
+// quantities.
 import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { runReportJob, type ReportJobEnv } from "../src/report-job.ts";
@@ -144,8 +145,106 @@ test("a row the offset shifts onto the next page is read once", async () => {
     },
     { ...options, maxRows: 600 },
   );
-  // The late rows are excluded and no row is counted twice, so the input set,
-  // and with it the context, is the clean run's (INV06).
+  // The five new rows were never read, so the pages were not one cut: the job
+  // reads again, the late rows are excluded and no row is counted twice, so
+  // the input set, and with it the context, is the clean run's (INV06).
   expect(shifted.contextId).toBe(clean.contextId);
   expect(shifted.truncated).toBe(false);
+}, 120_000);
+
+/**
+ * Re-parse artifact 7002 (account "b-known") and publish the new run, which
+ * replaces the earlier parse as the artifact's adopted result: the same
+ * holdings come back under new observation ids, plus the `extra` codes. Each
+ * re-parse is a new parser version, as a release re-parse is.
+ */
+let reparses = 0;
+async function republishKnown(extra: readonly string[]): Promise<void> {
+  reparses += 1;
+  const parse = await env.DB.prepare(
+    `INSERT INTO parse_runs (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+     VALUES (7002,'synthetic-positions',?,'2026-09-08T00:00:00Z','ok','[]') RETURNING id`,
+  )
+    .bind(`2.${reparses}`)
+    .first<{ id: number }>();
+  const codes = [
+    ...extra,
+    ...Array.from({ length: 501 }, (_, i) => `SYN-${String(i).padStart(4, "0")}`),
+  ];
+  await env.DB.prepare(
+    `INSERT INTO position_observations (parse_run_id,source_account,security_code,quantity_text,quantity_scale,raw_locator,extra_json)
+     SELECT ?, 'b-known', value, '1', 0, '$', '{}' FROM json_each(?)`,
+  )
+    .bind(parse!.id, JSON.stringify(codes))
+    .run();
+  await publishParse(env.DB, parse!.id, "2026-09-08T00:00:00.000Z");
+}
+
+/** The stored body's rows of a report, read back from R2. */
+async function bodyRows(reportId: string): Promise<{ subjectRef: string; scopeRef: string }[]> {
+  const stored = await env.DB.prepare("SELECT storage_ref FROM report_artifacts WHERE report_id=?")
+    .bind(reportId)
+    .first<{ storage_ref: string }>();
+  const object = await env.EVIDENCE.get(stored!.storage_ref);
+  return ((await object!.json()) as { rows: { subjectRef: string; scopeRef: string }[] }).rows;
+}
+
+test("a snapshot republished between two page reads never counts a holding twice", async () => {
+  // The store holds 15 late rows, then account "b-known"'s 501 holdings: the
+  // first page ends at its 485th holding. A re-parse published between the
+  // two reads adds one holding that sorts first, so the second page starts
+  // one row earlier, on the new run's copy of the holding the first page
+  // read last. Kept by observation id, both copies were counted (INV06).
+  const republished = await runReportJob(
+    { ...jobEnv, DB: publishingBetweenPages(env.DB, () => republishKnown(["AAA-0000"])) },
+    { ...options, maxRows: 600 },
+  );
+  expect(republished.generated).toBe(1);
+  expect(republished.skipped).toBeNull();
+  const rows = await bodyRows(republished.reportId!);
+  const holdings = rows.map((row) => `${row.scopeRef}|${row.subjectRef}`);
+  // Every holding of the republished snapshot once, and nothing else.
+  expect(new Set(holdings).size).toBe(holdings.length);
+  expect(rows.length).toBe(502);
+  // The report is the one a read of the republished store alone gives.
+  const settled = await runReportJob(jobEnv, { ...options, maxRows: 600 });
+  expect(settled.contextId).toBe(republished.contextId);
+}, 120_000);
+
+test("a cut that moves on every read is refused as snapshot_changed and stores nothing", async () => {
+  const before = await env.DB.prepare("SELECT count(*) AS n FROM report_artifacts").first<{
+    n: number;
+  }>();
+  let republishes = 0;
+  const moving = new Proxy(env.DB, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property);
+      if (property !== "prepare") return typeof value === "function" ? value.bind(target) : value;
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (!sql.includes("coalesce(a.recorded_at_ms, a.fetched_at_ms) > ?")) return statement;
+        return {
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            return {
+              all: async <T>() => {
+                const rows = await bound.all<T>();
+                republishes += 1;
+                await republishKnown([`AAB-${String(republishes).padStart(4, "0")}`]);
+                return rows;
+              },
+            };
+          },
+        };
+      };
+    },
+  });
+  const result = await runReportJob({ ...jobEnv, DB: moving }, { ...options, maxRows: 600 });
+  expect(result.skipped).toBe("snapshot_changed");
+  expect(result.generated).toBe(0);
+  expect(result.reportId).toBeNull();
+  const after = await env.DB.prepare("SELECT count(*) AS n FROM report_artifacts").first<{
+    n: number;
+  }>();
+  expect(after!.n).toBe(before!.n);
 }, 120_000);
