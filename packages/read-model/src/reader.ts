@@ -105,15 +105,24 @@ export interface SourceParseRun {
 }
 
 /**
- * Marks of what the publication gate and the run exclusions have done: the
- * newest `publication_events` id and the number of `exclude_from_financial_views`
- * annotations. An activation or a rollback moves an artifact's published run
- * without recording a newer parse run, and an exclusion hides a run without
- * one; each still moves these marks.
+ * Marks of what the publication gate, the run exclusions and the dataset
+ * policies have done: the newest `publication_events` id, the number of
+ * `exclude_from_financial_views` annotations, and the policy columns the
+ * current lists read. An activation or a rollback moves an artifact's
+ * published run without recording a newer parse run, an exclusion hides a run
+ * without one, and an operator's policy update (a dataset named for the `unit`
+ * eligibility scope, another snapshot policy) changes which published runs are
+ * current without one; each still moves these marks.
  */
 export interface PublicationMarks {
   publicationEvent: number;
   exclusions: number;
+  /**
+   * The policy rows of the read sources as canonical text: one JSON array per
+   * row, sorted, so equal policies give equal text whatever order the store
+   * returns them in. `"[]"` when no row names those sources.
+   */
+  snapshotPolicies: string;
 }
 
 /** One source's visible fetch runs, counted over its whole history. */

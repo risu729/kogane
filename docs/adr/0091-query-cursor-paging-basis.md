@@ -119,24 +119,30 @@ intent or filter, or a stated knowledge cutoff that differs.
 - Date: 2026-11-21
 - Carried by: `services/app/src/agent-service.ts` (`contextInputs`),
   `packages/read-model/src/observation-reader.ts` (`publicationMarks`,
-  `PUBLICATION_MARKS_SQL`, `SOURCE_PUBLICATION_MARKS_SQL` in `sql.ts`),
+  `PUBLICATION_MARKS_SQL`, `SOURCE_PUBLICATION_MARKS_SQL` in `sql.ts`,
+  `PublicationMarks` in `reader.ts`),
   `packages/domain/src/context.ts` (`financial-context-v2`)
 
 **Context.** The Consequences above recorded a limit: `publicationHighWater`
 was the highest visible parse run id of the grant's sources, and "a marker that
 moves with every publication event is not built". The `activity` and
 `reported-state` rows are read from the published parse runs of visible,
-not-excluded runs. Two changes move those rows without recording a newer parse
-run, so the marker, the paging basis and, at one evaluation clock, the
+not-excluded runs, under each dataset's snapshot and eligibility policy.
+Three changes move those rows without recording a newer parse run, so the marker, the paging basis and, at one evaluation clock, the
 `contextId` stayed equal while the answer changed (INV09,
 [ADR 0001](0001-domain-axes.md)):
 
 - an activation of an artifact's candidate run, or a rollback, moves its
   `published_parse_runs` pointer to a run older than the newest visible one;
 - an `exclude_from_financial_views` annotation hides a run whose parse runs
-  are not the newest visible one.
+  are not the newest visible one;
+- an operator's in-place update of `dataset_snapshot_policies`
+  ([parser coverage](../parser-coverage.md): naming a dataset for the `unit`
+  eligibility scope, or another snapshot policy) changes which published runs
+  are current. The table is operational state, not append-only, and the
+  update records no event.
 
-`services/app/test/query-paging-basis.test.ts` reproduced both on origin/main
+`services/app/test/query-paging-basis.test.ts` reproduced each on origin/main
 (8ba0e3b5): the first page's row changed, while the cursor's `basisRef` and
 the `contextId` did not, and the earlier cursor was answered `200` from the
 changed rows. The parser build set was held equal on purpose; an activation
@@ -155,40 +161,67 @@ onto a build no visible run used moved the parser build digest and hid the gap.
    go stale far more often.
 3. Pin a digest of every published pointer of the grant's sources. Exact, but
    it reads one row per (artifact, parser) on every query.
-4. Pin two marks of the append-only tables those changes write, read within
-   the grant's sources: the newest `publication_events` id (every pointer
-   change appends one, migration 0026) and the number of
-   `exclude_from_financial_views` annotations (append-only, migrations 0003
-   and 0043). Each is one indexed or small read.
+4. Pin three marks of what those changes write, read within the grant's
+   sources: the newest `publication_events` id (every pointer change appends
+   one, migration 0026; the table is append-only, so a new id is always the
+   highest), the number of `exclude_from_financial_views` annotations
+   (append-only, migrations 0003 and 0043; the kind is the only one the table
+   allows and one run holds it at most once, so nothing revokes an exclusion
+   without a migration), and a digest of the policy columns the lists read
+   from `dataset_snapshot_policies` (`source_id`, `parser_name`, `dataset`,
+   `policy_id`, `required_parser_version`,
+   `replaces_previous_on_complete_empty`, `unit_scope`,
+   `snapshot_selection`). The first is one primary-key search, the second
+   scans the exclusions, the third the policy rows (245 on the migrated
+   schema, one per parser and dataset, not one per capture).
 
 **Decision.** Option 4. `publicationHighWater` is
-`published-parse-runs@<id>+publication-events@<id>+exclusions@<n>`. For a
-whole-store grant the marks are the whole store's
+`published-parse-runs@<id>+publication-events@<id>+exclusions@<n>+snapshot-policies@<digest>`.
+For a whole-store grant the marks are the whole store's
 (`PUBLICATION_MARKS_SQL`); for a listed grant they are read through
-`fetch_artifacts` and `fetch_runs` for the listed visible sources only
-(`SOURCE_PUBLICATION_MARKS_SQL`). The context schema becomes
+`fetch_artifacts` and `fetch_runs` for the listed visible sources only, and
+the policy rows that name a listed source (`SOURCE_PUBLICATION_MARKS_SQL`). The context schema becomes
 `financial-context-v2`; its keys are unchanged.
 
 **Consequences.**
 
-- An activation, a rollback or an exclusion makes an earlier cursor
+- An activation, a rollback, an exclusion or a policy update makes an earlier cursor
   `stale_context`, and two answers at one clock across it carry different
   `contextId`s and `resultRef`s.
 - Every `contextId`, `resultRef` and paging basis changes once at deploy, and a
   cursor issued before it is `stale_context`. Nothing stores them.
-- A denied source's publication or exclusion still moves no listed grant's
-  context (`services/app/test/coverage-scope.test.ts`).
-- Limits: the marks are read before the rows, in separate statements, so a
-  change that lands between them is answered under the earlier marker. The
-  marker covers what the store records; a deploy that changes the read SQL
+- A denied source's publication, exclusion or policy update still moves no
+  listed grant's context. Every proved caller holds a whole-store grant over
+  the Worker ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)),
+  so a listed grant is the shared service's; the tests below call it directly.
+- Cost on D1 (workerd `rows_read`, the migrated CORE schema): the whole-store
+  statement reads 247 rows, of which 245 are the policy rows, and returns
+  about 27 KB of policy text, whatever the number of publication events; the
+  listed statement reads the listed sources' artifacts, events and runs
+  through `idx_fetch_artifacts_source_dataset_time`,
+  `publication_events_target` and `idx_fetch_runs_source` (plans without
+  table statistics).
+- Limits: the overview, the marks and the rows are read in separate
+  statements, so a change that lands between the marks and the rows is
+  answered under the earlier marker: that answer's `contextId` is the one of
+  the unchanged store, and a cursor checked against that marker resumes over
+  the changed rows. A policy row counts for the source it names; a row whose
+  `source_id` is not the source of the artifacts it matches moves no listed
+  grant that holds only those artifacts. A deploy that changes the read SQL
   between two pages keeps the basis, as before.
 
 **Verification.** `services/app/test/query-paging-basis.test.ts`: over the
 real read model and CORE migrations, an unchanged store keeps the rows, the
-`contextId` and the basis; an activation onto an older candidate run and an
-exclusion of a run below the newest visible one each change the first page,
-the `contextId` at one clock and the basis, and the earlier cursor is
-`409 stale_context`. Reverting `contextInputs` to the parse-run marker fails
-both change cases. `packages/read-model/test/publication-marks.test.ts`: the
-listed marks move only with the listed sources' events and exclusions, and
-the whole-store marks with any.
+`contextId` and the basis; an activation onto an older candidate run, an
+exclusion of a run below the newest visible one and a dataset named for the
+`unit` eligibility scope each change the first page, the `contextId` at one
+clock and the basis, and the earlier cursor is `409 stale_context`; and all
+three in a source outside a listed grant move the whole-store context but
+leave the listed grant's rows, `contextId` and basis equal and its cursor
+`200`. Reverting `contextInputs` to the parse-run marker fails the three
+change cases, leaving the policy digest out fails the third, and reading the
+whole-store marks for a listed grant fails the last.
+`packages/read-model/test/publication-marks.test.ts`: the listed marks move
+only with the listed sources' events, exclusions and policy updates, the
+whole-store marks with any, and a policy column the lists do not read
+(`updated_at_ms`) moves none.

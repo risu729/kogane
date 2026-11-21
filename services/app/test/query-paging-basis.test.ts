@@ -1,11 +1,14 @@
 // The paging basis of `kogane.financial.query` over the real read model and
 // the real CORE migrations (INV09, ADR 0091). A cursor resumes only while
-// every input its rows were read from holds. Two changes move the rows a page
-// reads without recording a newer parse run: an activation of an artifact's
-// already parsed candidate run, and a run excluded from financial views. Each
-// case changes only that input and checks that both the first page and the
-// basis its cursor carries change, and that the earlier cursor is refused.
-// Every value is invented.
+// every input its rows were read from holds. Three changes move the rows a
+// page reads without recording a newer parse run: an activation of an
+// artifact's already parsed candidate run, a run excluded from financial
+// views, and the operator step that names a dataset for the `unit`
+// eligibility scope (`dataset_snapshot_policies`). Each case changes only that
+// input and checks that both the first page and the basis its cursor carries
+// change, and that the earlier cursor is refused. The last case makes all
+// three changes in a source outside a listed grant and checks that the grant's
+// answer, context and cursor hold (SC18). Every value is invented.
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { callTool, toolContext } from "../src/agent-service";
@@ -46,11 +49,14 @@ interface Page {
   result: { nextCursor: string | null; data: { rows: { observationRef: string }[] } };
 }
 
-async function query(cursor?: string): Promise<{ status: number; body: Page }> {
+async function query(
+  cursor?: string,
+  grant: Grant = GRANT,
+): Promise<{ status: number; body: Page }> {
   const result = await callTool(
     "kogane.financial.query",
     { intent: "activity", limit: 1, ...(cursor === undefined ? {} : { cursor }) },
-    toolContext(env as Env, GRANT, NOW),
+    toolContext(env as Env, grant, NOW),
   );
   return { status: result.status, body: result.body as Page };
 }
@@ -141,5 +147,74 @@ describe("the paging basis moves with every input the rows are read from (INV09)
     const resumed = await query(before.body.result.nextCursor!);
     expect(resumed.status).toBe(409);
     expect(resumed.body).toMatchObject({ code: "stale_context" });
+  });
+
+  it("moves the basis when a dataset's eligibility policy changes", async () => {
+    // A sealed run the collector reported partial: unit `card-a` succeeded.
+    // Its published line is not current while the dataset is on the seeded
+    // `run` scope, and it is once the operator names the `unit` scope.
+    const partial = await seedRun({
+      source: "sony-bank",
+      dataset: "paging-unit",
+      outcome: "partial",
+      units: [{ key: "card-a", outcome: "success", count: 1 }],
+    });
+    const rescued = await parse(partial.artifacts[0]!.id, "1");
+    await publishParse(rescued);
+    await line(rescued, "paging-c", "2026-09-08", "c-1");
+    const before = await query();
+    await env.DB.prepare(`INSERT INTO dataset_snapshot_policies
+      (source_id,dataset,parser_name,policy_id,unit_scope,snapshot_selection,updated_at_ms)
+      VALUES ('sony-bank','paging-unit','paging-fixture','legacy-warning-compat-v1','unit',0,1)`).run();
+    const after = await query();
+    // The rescued unit's line is the newest one now.
+    expect(after.body.result.data.rows).not.toEqual(before.body.result.data.rows);
+    expect(after.body.contextId).not.toBe(before.body.contextId);
+    expect(basisOf(after.body)).not.toBe(basisOf(before.body));
+    const resumed = await query(before.body.result.nextCursor!);
+    expect(resumed.status).toBe(409);
+    expect(resumed.body).toMatchObject({ code: "stale_context" });
+  });
+
+  it("moves nothing of a listed grant when a source outside it changes (SC18)", async () => {
+    const listed: Grant = { ...GRANT, scopes: { sources: ["other-test"], accounts: "*" } };
+    // A source outside the grant: one artifact with a published run and a
+    // candidate of the same parser builds.
+    const outside = await seedRun({ count: 1, source: "sony-bank" });
+    const artifact = outside.artifacts[0]!.id;
+    const first = await parse(artifact, "1");
+    await publishParse(first);
+    const second = await parse(artifact, "2");
+    const before = { listed: await query(undefined, listed), store: await query() };
+    // Each change the whole-store marker pins, all in the source outside.
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO publication_events
+        (fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
+        VALUES (?,'paging-fixture',?,?,'activation','fixture-operator','fixture','2026-09-08T00:00:00Z')`).bind(
+        artifact,
+        first,
+        second,
+      ),
+      env.DB.prepare(`UPDATE published_parse_runs SET parse_run_id=?,parser_version='2',
+        publication_kind='activation' WHERE fetch_artifact_id=? AND parser_name='paging-fixture'`).bind(
+        second,
+        artifact,
+      ),
+      env.DB.prepare(`INSERT INTO fetch_run_annotations
+        (fetch_run_id,annotation_kind,reason_code,recorded_at_ms)
+        VALUES (?,'exclude_from_financial_views','fixture-exclusion',0)`).bind(outside.id),
+      env.DB.prepare(`INSERT INTO dataset_snapshot_policies
+        (source_id,dataset,parser_name,policy_id,unit_scope,snapshot_selection,updated_at_ms)
+        VALUES ('sony-bank','paging-outside','paging-outside','legacy-warning-compat-v1','unit',0,1)`),
+    ]);
+    // The whole store's context moved: the changes are inputs it pins.
+    expect((await query()).body.contextId).not.toBe(before.store.body.contextId);
+    // The listed grant's did not, and its cursor resumes.
+    const after = await query(undefined, listed);
+    expect(after.body.result.data.rows).toEqual(before.listed.body.result.data.rows);
+    expect(after.body.contextId).toBe(before.listed.body.contextId);
+    expect(basisOf(after.body)).toBe(basisOf(before.listed.body));
+    const resumed = await query(before.listed.body.result.nextCursor!, listed);
+    expect(resumed.status).toBe(200);
   });
 });

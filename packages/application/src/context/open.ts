@@ -45,8 +45,9 @@ export interface ContextInputs {
   /**
    * What "current" means for this context: a marker that moves with every
    * change of the published, visible rows (the App reads the highest visible
-   * parse run, the newest publication event and the run exclusions; ADR 0091
-   * amendment). It is pinned as given, in `publicationRef` and the paging basis.
+   * parse run, the newest publication event, the run exclusions and the
+   * dataset snapshot policies; ADR 0091 amendment). It is pinned as given,
+   * in `publicationRef` and the paging basis.
    */
   publicationHighWater: string;
   /** Digest over the parser builds behind the visible publications. */

@@ -64,17 +64,52 @@ describe("publication marks", () => {
     expect(excluded.bank.exclusions).toBe(published.bank.exclusions + 1);
     expect(excluded.vpass).toEqual(before.vpass);
     // Both lists together are the sum of their exclusions and the newer event.
-    expect(await reader.publicationMarks(["smbc-bank", "vpass", "smbc-bank"])).toEqual({
+    expect(await reader.publicationMarks(["smbc-bank", "vpass", "smbc-bank"])).toMatchObject({
       publicationEvent: excluded.bank.publicationEvent,
       exclusions: excluded.bank.exclusions + excluded.vpass.exclusions,
     });
+  });
+
+  test("move with a listed source's policy update, never with another source's", async () => {
+    const { store } = baseWorld();
+    const reader = createObservationReader(recording(store.db));
+    const marks = async () => ({
+      all: await reader.publicationMarks(null),
+      vpass: await reader.publicationMarks(["vpass"]),
+      bank: await reader.publicationMarks(["smbc-bank"]),
+    });
+    const before = await marks();
+    // The seeded smbc-bank row is one of the listed source's policies.
+    expect(before.bank.snapshotPolicies).toContain('"smbc-bank"');
+    expect(before.vpass.snapshotPolicies).not.toContain('"smbc-bank"');
+    // The operator step of docs/parser-coverage.md: an in-place update that
+    // records no parse run, no publication event and no exclusion.
+    store.db.run(
+      `UPDATE dataset_snapshot_policies SET unit_scope=CASE unit_scope WHEN 'unit' THEN 'run' ELSE 'unit' END
+        WHERE source_id='smbc-bank' AND dataset='balance-normalized'`,
+    );
+    const after = await marks();
+    expect(after.bank).toMatchObject({
+      publicationEvent: before.bank.publicationEvent,
+      exclusions: before.bank.exclusions,
+    });
+    expect(after.bank.snapshotPolicies).not.toBe(before.bank.snapshotPolicies);
+    expect(after.all.snapshotPolicies).not.toBe(before.all.snapshotPolicies);
+    expect(after.vpass).toEqual(before.vpass);
+    // A column the lists do not read moves nothing.
+    store.db.run("UPDATE dataset_snapshot_policies SET updated_at_ms=updated_at_ms+1");
+    expect(await marks()).toEqual(after);
   });
 
   test("reads nothing for an empty list and binds a repeated source once", async () => {
     const { store } = baseWorld();
     const executor = recording(store.db);
     const reader = createObservationReader(executor);
-    expect(await reader.publicationMarks([])).toEqual({ publicationEvent: 0, exclusions: 0 });
+    expect(await reader.publicationMarks([])).toEqual({
+      publicationEvent: 0,
+      exclusions: 0,
+      snapshotPolicies: "[]",
+    });
     expect(executor.binds).toEqual([]);
     await reader.publicationMarks(["vpass", "myjcb", "vpass"]);
     expect(executor.binds).toEqual([['["myjcb","vpass"]']]);

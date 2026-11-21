@@ -130,10 +130,11 @@ function failure(
  * **inside the grant's source scope** (SC18). `visibleSources` is the granted
  * sources the store holds; `publicationHighWater` is what "current" means for
  * this answer: the highest visible parse run of those sources, the newest
- * publication event and the number of runs excluded from financial views
- * (`publicationMarks`). The last two move with an activation, a rollback or an
- * exclusion, which change the rows a page reads without recording a newer
- * parse run (INV09, ADR 0091 amendment). `parserBuildDigest` covers the
+ * publication event, the number of runs excluded from financial views and a
+ * digest of the dataset snapshot and eligibility policies
+ * (`publicationMarks`). The last three move with an activation, a rollback,
+ * an exclusion or a policy update, which change the rows a page reads without
+ * recording a newer parse run (INV09, ADR 0091 amendment). `parserBuildDigest` covers the
  * builds of the newest visible parse runs of those sources, bounded by the
  * read model's page limit. For a grant over every source (`"*"`, which is
  * also the browser reader's) the window and the marks are the whole store's;
@@ -159,7 +160,7 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
   ].sort();
   return {
     now: context.now,
-    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}+publication-events@${String(marks.publicationEvent)}+exclusions@${String(marks.exclusions)}`,
+    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}+publication-events@${String(marks.publicationEvent)}+exclusions@${String(marks.exclusions)}+snapshot-policies@${await canonicalDigest(marks.snapshotPolicies)}`,
     parserBuildDigest: await canonicalDigest(builds),
     visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),

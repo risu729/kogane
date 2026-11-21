@@ -174,14 +174,23 @@ export function createObservationReader(
 
     async publicationMarks(sources): Promise<PublicationMarks> {
       const listed = sources === null ? null : [...new Set(sources)].sort();
-      if (listed !== null && listed.length === 0) return { publicationEvent: 0, exclusions: 0 };
-      const row = await one<{ publication_event: number; exclusions: number }>(
+      if (listed !== null && listed.length === 0)
+        return { publicationEvent: 0, exclusions: 0, snapshotPolicies: "[]" };
+      const row = await one<{
+        publication_event: number;
+        exclusions: number;
+        snapshot_policies: string | null;
+      }>(
         listed === null ? PUBLICATION_MARKS_SQL : SOURCE_PUBLICATION_MARKS_SQL,
         listed === null ? [] : [JSON.stringify(listed)],
       );
+      const policies = (JSON.parse(row?.snapshot_policies ?? "[]") as unknown[])
+        .map((policy) => JSON.stringify(policy))
+        .sort();
       return {
         publicationEvent: Number(row?.publication_event ?? 0),
         exclusions: Number(row?.exclusions ?? 0),
+        snapshotPolicies: `[${policies.join(",")}]`,
       };
     },
 
