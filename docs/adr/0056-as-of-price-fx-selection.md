@@ -539,9 +539,10 @@ not. No provider and no writer produces such an offset; a caller can still
 send one in a known-at request.
 
 The offsets the tz database has used since 1868 lie within -12:00 to +14:00;
-the only one outside is Alaska's local mean time before 1867, +15:02:19,
-which an RFC 3339 offset cannot spell. `Etc/GMT+12` and `Etc/GMT-14` exist;
-`Etc/GMT+13`, `Etc/GMT+14` and `Etc/GMT-15` do not.
+the only ones outside are local mean times that ended earlier: Alaska's
+until 1867 (+14:00:24 to +15:13:42) and those of Manila, Guam and other
+western Pacific zones until 1844 (-13:08:04 to -15:56:08). `Etc/GMT+12` and
+`Etc/GMT-14` exist; `Etc/GMT+13`, `Etc/GMT+14` and `Etc/GMT-15` do not.
 
 ### Options considered
 
