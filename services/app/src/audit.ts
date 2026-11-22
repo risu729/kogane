@@ -513,12 +513,16 @@ const MCP_TRANSPORT_CODES: Readonly<Record<number, string>> = {
  * than a JSON-RPC message, once, as `mcp.request`; never throws. JSON-RPC
  * answers (`200`, an unknown method or tool inside the envelope) and an
  * accepted notification (`202`) are the protocol's own and not recorded.
+ * So is `404`: the 2026-07-28 revision answers a method it does not have
+ * (`ping` among them) with the same `-32601` under that status, where the
+ * initialize-based revisions answer it inside a `200`, and a stateless
+ * transport has no session to be missing.
  */
 export async function recordTransportStatus(
   context: ExecuteContext,
   status: number,
 ): Promise<void> {
-  if (status < 400) return;
+  if (status < 400 || status === 404) return;
   const failed = status >= 500;
   const code = MCP_TRANSPORT_CODES[status] ?? (failed ? "internal_error" : "request_refused");
   await executeOperation(context, "mcp.request", () => Promise.resolve(null), {

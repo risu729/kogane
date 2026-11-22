@@ -822,6 +822,51 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     }
   });
 
+  it("records nothing for the protocol's own answers in the 2026-07-28 revision either", async () => {
+    // The 2026-07-28 revision answers a method it does not have (`ping` is
+    // not one of its methods) with -32601 under HTTP 404, where the
+    // initialize-based revisions answer it inside a 200. It is the same
+    // JSON-RPC answer, so it is recorded as there: not at all.
+    let id = 0;
+    const modern = (method: string, params: Record<string, unknown> = {}) =>
+      call("/mcp", {
+        via: "mcp",
+        subject: AGENT,
+        body: {
+          jsonrpc: "2.0",
+          id: ++id,
+          method,
+          params: {
+            ...params,
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientInfo": { name: "synthetic-client", version: "0" },
+              "io.modelcontextprotocol/clientCapabilities": {},
+            },
+          },
+        },
+        headers: {
+          ...MCP_CLIENT_HEADERS,
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": method,
+          ...(typeof params["name"] === "string" ? { "mcp-name": params["name"] } : {}),
+        },
+      });
+    for (const [method, params, status] of [
+      ["server/discover", {}, 200],
+      ["tools/list", {}, 200],
+      ["tools/call", { name: "kogane.nothing", arguments: {} }, 200],
+      ["resources/list", {}, 404],
+      ["ping", {}, 404],
+    ] as const) {
+      const answered = await modern(method, params);
+      expect(answered.response.status, method).toBe(status);
+      const message = (await answered.response.json()) as { error?: { code: number } };
+      if (status === 404) expect(message.error?.code, method).toBe(-32601);
+      expect(await recordsOf(answered.requestId), method).toEqual([]);
+    }
+  });
+
   it("records a tool that throws on /mcp once, as failed, though the transport rethrows it", async () => {
     // Every statement but the audit log's own fails, so the tool throws
     // inside the MCP SDK, which answers its JSON-RPC error and then rethrows.
