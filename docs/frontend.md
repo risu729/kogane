@@ -66,6 +66,10 @@ histories (`訂正履歴を見る` on an instrument candidate, `取得元の口�
 on an account candidate), which are read again when reopened. While the schedules page shows an earlier
 answer it also holds 依頼を送信 and the re-survey 採用/却下, which decide from what
 it shows ([schedules](schedules.md#schedule-administration)).
+The ホーム page's `判断待ち` panel does not go through `QueryBoundary`: a failed read
+there shows no total and no earlier lines (INV05). It uses the shared states directly: `Loading`
+(a status) while the first read waits, and `ErrorState` (an alert with
+`判断待ちの件数を再試行`) once a read fails, which stays while the next read is in flight.
 
 ## Design tokens and stylesheet layout
 

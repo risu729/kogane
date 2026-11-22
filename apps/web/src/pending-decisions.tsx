@@ -17,7 +17,7 @@ import type {
 } from "../../../packages/domain/src/pending-decisions.ts";
 import { PENDING_DECISIONS_PATH } from "../../../packages/observation-shared/src/pending-decisions-contract.ts";
 import { Link } from "./router.tsx";
-import { Badge, Panel } from "./ui.tsx";
+import { Badge, ErrorState, Loading, Panel } from "./ui.tsx";
 
 function usePendingDecisions(advertised: boolean) {
   return useQuery({
@@ -116,10 +116,18 @@ export function PendingDecisionsPanel(): ReactNode {
       count={waiting === null ? undefined : `${waiting}件${atLeast ? "以上" : ""}`}
       note="提案された対応や変更のうち、まだ判断していないものです。判断は各ページで行います。"
     >
-      {query.isPending ? (
-        <p className="dim">読み込んでいます…</p>
-      ) : query.error ? (
-        <p className="dim">判断待ちの件数を読み込めませんでした。</p>
+      {/* The shared loading status and error alert, with a retry named for
+          this read (docs/ui-guidelines.md#accessibility). The error comes
+          first: a read in flight after a failure leaves the failure standing. */}
+      {query.error ? (
+        <ErrorState
+          error={query.error}
+          label="判断待ちの件数"
+          onRetry={() => void query.refetch()}
+          retrying={query.isFetching}
+        />
+      ) : query.isPending ? (
+        <Loading label="判断待ちの件数" />
       ) : (
         <ul>
           {query.data.kinds.map((line) => (

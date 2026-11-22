@@ -1,7 +1,8 @@
 // The ホーム page's 判断待ち panel (ADR 0126) against a synthetic server: one
 // line per kind with its count, a link to the page that decides the first
 // item, the reason of a line that cannot be counted, no total from an earlier
-// answer once a later read fails, and no panel for a caller the route refuses
+// answer once a later read fails, a wait announced as a status and a failure
+// as an alert with a retry named for it, and no panel for a caller the route refuses
 // or on a store that does not advertise the route.
 // Every id is synthetic.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -151,7 +152,11 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
             : unavailable
-              ? Response.json({ error: "unavailable" }, { status: 503 })
+              ? // As the App answers a read that failed unexpectedly.
+                Response.json(
+                  { error: "internal_error", requestId: "req_synthetic" },
+                  { status: 500 },
+                )
               : Response.json(current);
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -257,7 +262,7 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
     const page = await browser.newPage();
     const panel = page.locator('section[aria-labelledby="pending-decisions"]');
     const total = panel.locator(".panel-head .count");
-    const failed = panel.getByText("判断待ちの件数を読み込めませんでした。");
+    const failed = panel.getByRole("alert").getByText("判断待ちの件数を読み込めませんでした");
     try {
       await page.goto(`${origin}/`);
       await panel.getByText("カード請求と引落の照合").waitFor();
@@ -290,6 +295,46 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       held = null;
       unavailable = false;
       current = answer;
+      await page.close();
+    }
+  }, 30_000);
+
+  test("loading is a status, and a failed read an alert whose retry is named for it", async () => {
+    refuse = false;
+    unavailable = true;
+    let release = (): void => {};
+    const page = await browser.newPage();
+    const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+    try {
+      // The first read waits: the panel says so as a status, and no total.
+      held = new Promise((resolve) => (release = resolve));
+      await page.goto(`${origin}/`);
+      await panel
+        .getByRole("status")
+        .getByText("判断待ちの件数を読み込んでいます…")
+        .waitFor({ timeout: 5_000 });
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      // It fails: an alert, announced, with a retry that says what it repeats.
+      release();
+      held = null;
+      const alert = panel.getByRole("alert");
+      await alert.getByText("判断待ちの件数を読み込めませんでした").waitFor({ timeout: 5_000 });
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      expect(await auditPage(page)).toEqual([]);
+      // The retry reads again, and the answer replaces the alert.
+      unavailable = false;
+      const before = requested;
+      await alert.getByRole("button", { name: "判断待ちの件数を再試行", exact: true }).click();
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(requested).toBe(before + 1);
+      expect(await alert.count()).toBe(0);
+      expect(await panel.locator(".panel-head .count").textContent()).toBe(
+        `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
+      );
+    } finally {
+      release();
+      held = null;
+      unavailable = false;
       await page.close();
     }
   }, 30_000);
