@@ -504,6 +504,11 @@ function checkpointStatement(
 
 export type RewardChunkOutcome = "written" | "lease_lost";
 
+/** "The build `?1` names is still building under the lease `param` names." */
+const HELD_BY_LEASE = (param: string): string =>
+  `EXISTS(SELECT 1 FROM reward_expiry_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='building' AND s.writer_lease=${param})`;
+
 // A row is skipped only when its primary key is already written: that is the
 // re-sent chunk of a retried batch, and the `chunk_conflict` trigger (BEFORE
 // INSERT, so it runs before the conflict is resolved) has already refused it
@@ -512,11 +517,15 @@ export type RewardChunkOutcome = "written" | "lease_lost";
 // `row_seq` and the triggers. `INSERT OR IGNORE` is not used here because it
 // also skips a CHECK or NOT NULL failure without an error: the row the schema
 // refused would be missing while the checkpoint moved past it.
+//
+// Each row is written only while the chunk's lease still holds the build, like
+// its checkpoint: a writer whose lease was taken writes no row.
 function insertEstimate(
   db: D1Like,
   snapshotId: string,
   row: RewardExpiryProjectionRow,
   digest: string,
+  lease: string,
 ): D1StatementLike {
   return db
     .prepare(
@@ -525,7 +534,8 @@ function insertEstimate(
         amount_coefficient,amount_scale,amount_status,unit_ref,provider_observed_json,
         policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,row_digest,
         expiry_basis_json)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
+       SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23
+       WHERE ${HELD_BY_LEASE("?24")}
        ON CONFLICT(snapshot_id,row_key) DO NOTHING`,
     )
     .bind(
@@ -552,6 +562,7 @@ function insertEstimate(
       JSON.stringify(row.basisRefs),
       digest,
       JSON.stringify(row.expiryBasis),
+      lease,
     );
 }
 
@@ -560,13 +571,15 @@ function insertSimulation(
   snapshotId: string,
   row: RewardSimulationProjectionRow,
   digest: string,
+  lease: string,
 ): D1StatementLike {
   return db
     .prepare(
       `INSERT INTO reward_conversion_simulations(snapshot_id,request_digest,row_seq,
         reproducibility,reason_code,request_json,offer_id,offer_version,result_json,
         search_coverage,evaluated_at,policy_release,row_digest)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+       SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13
+       WHERE ${HELD_BY_LEASE("?14")}
        ON CONFLICT(snapshot_id,request_digest) DO NOTHING`,
     )
     .bind(
@@ -583,6 +596,7 @@ function insertSimulation(
       row.evaluatedAt,
       row.policyRelease,
       digest,
+      lease,
     );
 }
 
@@ -601,7 +615,7 @@ export async function writeRewardEstimateChunk(
   if (rows.length === 0) return "written";
   const last = rows[rows.length - 1] as { row: RewardExpiryProjectionRow; digest: string };
   const results = await runBatch(db, [
-    ...rows.map((entry) => insertEstimate(db, snapshotId, entry.row, entry.digest)),
+    ...rows.map((entry) => insertEstimate(db, snapshotId, entry.row, entry.digest, context.lease)),
     checkpointStatement(
       db,
       snapshotId,
@@ -627,7 +641,9 @@ export async function writeRewardSimulationChunk(
   if (rows.length === 0) return "written";
   const last = rows[rows.length - 1] as { row: RewardSimulationProjectionRow; digest: string };
   const results = await runBatch(db, [
-    ...rows.map((entry) => insertSimulation(db, snapshotId, entry.row, entry.digest)),
+    ...rows.map((entry) =>
+      insertSimulation(db, snapshotId, entry.row, entry.digest, context.lease),
+    ),
     checkpointStatement(
       db,
       snapshotId,

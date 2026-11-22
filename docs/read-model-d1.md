@@ -168,7 +168,11 @@ A build writes rows while `building`, and:
   ([rewards.md](rewards.md#read-tables-migration-0002_reward_readsql-current-expiry-rows-use-0004_reward_unclassified_bucketssql)),
   and so does the balance writer (below);
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
-  longer write, seal or publish (G2-09);
+  longer write, seal or publish (G2-09). Every row, relation and checkpoint a
+  chunk writes restates that the build is still `building` under the chunk's
+  lease, in both writers (the reward provider sections also restate the
+  fence), so a displaced writer's chunk writes no row and reports
+  `lease_lost`;
 - the balance writer (`packages/storage-d1/src/read/writer.ts`) skips only a
   row or input ref whose primary key is already written:
   `ON CONFLICT(snapshot_id,scope_key) DO NOTHING` for

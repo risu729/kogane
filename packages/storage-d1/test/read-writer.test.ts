@@ -180,7 +180,7 @@ describe("writing a build", () => {
   });
 
   test("a writer whose lease was taken writes nothing and cannot seal (G2-09)", async () => {
-    const { db, instanceId } = await claimed();
+    const { db, sqlite, instanceId } = await claimed();
     const { snapshotId } = (await beginSnapshot(db, instanceId, await plan(), NOW))!;
     await claimWriterLease(db, snapshotId, "lease-1", 1_000, 60_000);
     // The lease expires and a second invocation takes the build over.
@@ -194,6 +194,19 @@ describe("writing a build", () => {
         rowsWritten: 0,
       }),
     ).toBe("lease_lost");
+    // Nothing means no row either: the rows are fenced on the lease like the
+    // checkpoint, not only reported as lost.
+    expect(
+      await writeScopeRelations(db, snapshotId, [decisionRelation("decision-1")], {
+        lease: "lease-1",
+        fence: 1,
+        now: NOW,
+      }),
+    ).toBe("lease_lost");
+    for (const table of ["current_balance_projection", "scope_relations", "read_build_checkpoints"])
+      expect(
+        sqlite.query(`SELECT count(*) AS n FROM ${table} WHERE snapshot_id=?1`).get(snapshotId),
+      ).toEqual({ n: 0 });
     expect(await writerFence(db, snapshotId, "lease-1")).toBeNull();
     const sealed = await sealAndPublish(
       db,

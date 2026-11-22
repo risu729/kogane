@@ -334,12 +334,16 @@ export async function rowDigest(row: ProjectionRow): Promise<string> {
  * order index already holds) raises and rolls the chunk back, instead of being
  * left out for `writtenRowsMatch` to report as `projection_rows_unverified`
  * without naming it.
+ *
+ * The row is written only while `lease` still holds the build, like the
+ * checkpoint of its chunk: a writer whose lease was taken writes no row.
  */
 function insertRow(
   db: D1Like,
   snapshotId: string,
   row: ProjectionRow,
   digest: string,
+  lease: string,
 ): D1StatementLike {
   return db
     .prepare(
@@ -351,8 +355,9 @@ function insertRow(
         source_id,source_account,metric,instrument,parser,observation_id,parse_run_id,
         fetch_artifact_id,amount_minor,amount_text,as_of,observed_at,measure_view,latest_in_group,
         row_digest)
-      VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
-        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)
+      SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
+        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38
+      WHERE ${HELD_BY_LEASE("?39")}
       ON CONFLICT(snapshot_id,scope_key) DO NOTHING`,
     )
     .bind(
@@ -394,8 +399,18 @@ function insertRow(
       row.measureView,
       row.latestInGroup ? 1 : 0,
       digest,
+      lease,
     );
 }
+
+/**
+ * "The build `?1` names is still building under the lease `param` names": the
+ * condition of every row, relation and checkpoint a chunk writes, so a writer
+ * whose lease was taken changes nothing.
+ */
+const HELD_BY_LEASE = (param: string): string =>
+  `EXISTS(SELECT 1 FROM balance_read_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='building' AND s.writer_lease=${param})`;
 
 function checkpointStatement(
   db: D1Like,
@@ -439,7 +454,7 @@ export async function writeRowChunk(
   if (rows.length === 0) return "written";
   const last = rows[rows.length - 1] as { row: ProjectionRow; digest: string };
   const results = await runBatch(db, [
-    ...rows.map((entry) => insertRow(db, snapshotId, entry.row, entry.digest)),
+    ...rows.map((entry) => insertRow(db, snapshotId, entry.row, entry.digest, context.lease)),
     checkpointStatement(
       db,
       snapshotId,
@@ -476,7 +491,8 @@ export async function writeScopeRelations(
         db
           .prepare(
             `INSERT INTO scope_relations(snapshot_id,from_scope_key,to_scope_key,relation,source,
-              decision_revision_id,release,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+              decision_revision_id,release,created_at) SELECT ?1,?2,?3,?4,?5,?6,?7,?8
+             WHERE ${HELD_BY_LEASE("?9")}
              ON CONFLICT(snapshot_id,from_scope_key,to_scope_key) DO UPDATE SET
               relation=excluded.relation,source=excluded.source,
               decision_revision_id=excluded.decision_revision_id`,
@@ -490,6 +506,7 @@ export async function writeScopeRelations(
             relation.decisionRevisionId,
             relation.release,
             context.now,
+            context.lease,
           ),
       ),
       checkpointStatement(
