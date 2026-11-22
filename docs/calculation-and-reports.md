@@ -522,7 +522,10 @@ The list returns catalogue columns only (id, context, purpose, schema,
 digest, creator, creation time), newest first by `created_at` then id, 50 per
 page with `nextCursor` and no total. It reads no body and derives no
 replayability; those come from re-displaying one report. Only one `offset`
-is accepted, and the route answers 404 where `report_artifacts` is absent.
+is accepted. Where `report_artifacts` is absent, every report path (the list,
+a report, its explanation and its export) answers 404 before it reads a
+parameter, as `reportArtifacts` on `/api/meta` is then false; it never queries
+the missing table (`readReportRoute` in `services/app/src/reports-api.ts`).
 
 The report job stores a report whose positions it cut at `maxRows` (500 by
 default; `coverage.truncated`) as `partial-verified-scope` even when every

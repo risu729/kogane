@@ -54,7 +54,7 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
       reportedStateOnDate: await reportedStateAvailable(env),
       // Where the reported state is, since it compares two of them.
       reconstructedStateOnDate: await reconstructedStateAvailable(env),
-      // Needs CORE 0034's catalogue, like the list route itself.
+      // Needs CORE 0034's catalogue, like every report route itself.
       reportArtifacts: await reportArtifactsAvailable(env),
       // Served wherever this Worker runs (ADR 0126); each line that needs a
       // table or flag the deployment lacks says `not_served` in the answer.
