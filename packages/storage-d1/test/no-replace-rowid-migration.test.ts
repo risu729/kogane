@@ -4,7 +4,7 @@
 // rowid, and SQLite's REPLACE conflict resolution deletes a row whose rowid
 // the new row names, whatever key it states, without firing DELETE triggers
 // while recursive_triggers is off (as on D1). Before 0106 the replacement
-// guards of 43 such tables (and of `decision_outbox`, whose rowid is an `id`
+// guards of 42 such tables (and of `decision_outbox`, whose rowid is an `id`
 // its guard does not check) named only declared keys, so a REPLACE by rowid
 // deleted a stored row past every guard. Every row and value here is
 // synthetic.

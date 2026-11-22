@@ -2792,10 +2792,12 @@ a `BEFORE INSERT` trigger when the insert names no rowid: SQLite documents the
 value there as undefined, bun:sqlite and Miniflare's D1 both give -1, a test
 pins it on bun:sqlite, and no writer names a rowid, so no stored row has -1.
 Acquisition history, identity and the decision log already had the same guard
-on their declared keys, but not on the rowid; since migration 0106 each of
-those guards, and every other replacement guard on a table with a hidden
-rowid, has a second trigger that refuses a stored rowid
-([design: mutation policy](design.md#mutation-policy)). No writer depends on a
+on their declared keys. Most acquisition-history tables are keyed by an
+INTEGER PRIMARY KEY, which is the rowid, and their guards name it; `raw_objects`,
+identity and the decision log keep a hidden rowid their guards did not check,
+and since migration 0106 each of those tables, like every other table whose
+guard left the rowid unchecked, has a second trigger that refuses a stored
+rowid ([design: mutation policy](design.md#mutation-policy)). No writer depends on a
 collision: the Processor inserts observations, issues and coverage claims
 without an id, and prices behind `WHERE NOT EXISTS`
 (`packages/storage-d1/test/observation-no-replace-migration.test.ts`).
