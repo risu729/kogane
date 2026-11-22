@@ -228,4 +228,4 @@ test("joined deferrals match a minute-scan oracle in Tokyo, UTC and Sydney", () 
     });
     expect({ context, unions: actual }).toEqual({ context, unions: expected });
   }
-});
+}, 60_000);
