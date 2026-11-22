@@ -818,7 +818,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"b".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -854,7 +854,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -884,6 +884,162 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("やめる after an unknown answer keeps the request: the next confirmation re-sends it", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "internal_error" }, { status: 500 })
+        : Response.json(
+            { operationId: `op_${"d".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.clock.setFixedTime(new Date("2026-11-08T14:59:00Z"));
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      // Backing out does not withdraw a request that may be stored, and the
+      // section keeps saying so.
+      await card.getByRole("button", { name: "やめる", exact: true }).click();
+      await card
+        .locator(".schedule-request")
+        .getByRole("status")
+        .getByText("やめても取り消されず実行されます", { exact: false })
+        .waitFor();
+      // The key lives in the page's state only, and the notice says so.
+      expect(
+        await card
+          .locator(".schedule-request")
+          .getByRole("status")
+          .getByText("ページを離れるか再読み込みすると、次の依頼は新しい依頼になります", {
+            exact: false,
+          })
+          .count(),
+      ).toBe(1);
+      // A new confirmation after JST midnight is still that request: the same
+      // key and window, so the server answers with the stored one if any.
+      await page.clock.setFixedTime(new Date("2026-11-08T15:01:00Z"));
+      fail = false;
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      const confirm = card.getByRole("group", { name: "ソニー銀行の収集依頼の確認" });
+      await confirm.getByText("同じ依頼として送ります", { exact: false }).waitFor();
+      await confirm.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"d".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[1]!.body).toEqual(collections[0]!.body);
+      // Once the server answered, the next confirmation is a new request.
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      expect(await confirm.getByText("同じ依頼として送ります", { exact: false }).count()).toBe(0);
+      await confirm.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await page.waitForFunction(() => document.body.textContent?.includes("依頼ID"));
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).waitFor();
+      expect(collections).toHaveLength(3);
+      expect(collections[2]!.body["idempotencyKey"]).not.toBe(
+        collections[0]!.body["idempotencyKey"],
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("やめる after a refusal starts over: nothing was stored under that key", async () => {
+    let refuse = true;
+    collectionResponse = async () =>
+      refuse
+        ? Response.json({ error: "invalid_request" }, { status: 400 })
+        : Response.json(
+            { operationId: `op_${"e".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("保存されていません（invalid_request）", { exact: false }).waitFor();
+      await card.getByRole("button", { name: "やめる", exact: true }).click();
+      expect(await card.locator(".schedule-request").getByRole("status").count()).toBe(0);
+      refuse = false;
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"e".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections[1]!.body["idempotencyKey"]).not.toBe(
+        collections[0]!.body["idempotencyKey"],
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused re-send keeps an earlier unknown send unresolved", async () => {
+    const answers = [
+      () => Response.json({ error: "internal_error" }, { status: 500 }),
+      () => Response.json({ error: "approval_required" }, { status: 403 }),
+      () =>
+        Response.json({ operationId: `op_${"9".repeat(64)}`, status: "running" }, { status: 202 }),
+    ];
+    collectionResponse = async () => answers[collections.length - 1]!();
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("管理者のログインが必要です。", { exact: true }).waitFor();
+      // The refusal stored nothing, but says nothing about the first send.
+      await card.getByRole("button", { name: "やめる", exact: true }).click();
+      await card
+        .locator(".schedule-request")
+        .getByRole("status")
+        .getByText("やめても取り消されず実行されます", { exact: false })
+        .waitFor();
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("状態は「進行中」", { exact: false }).waitFor();
+      expect(collections).toHaveLength(3);
+      expect(collections[2]!.body).toEqual(collections[0]!.body);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a re-send answered with the stored request's later status names it, not a new start", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "internal_error" }, { status: 500 })
+        : Response.json(
+            { operationId: `op_${"f".repeat(64)}`, status: "completed" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      const result = card.locator(".schedule-request").getByRole("status");
+      await result.getByText(`依頼ID op_${"f".repeat(64)}`, { exact: false }).waitFor();
+      const text = (await result.textContent()) ?? "";
+      expect(text).toContain("状態は「完了」");
+      expect(text).not.toContain("収集を始めます");
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).getAttribute("href")).toBe(
+        `/operations/op_${"f".repeat(64)}`,
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("a refused request says it was not stored instead of offering a retry", async () => {
     collectionResponse = async () =>
       Response.json({ error: "method_not_allowed" }, { status: 405 });
@@ -904,7 +1060,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
             { status: 202 },
