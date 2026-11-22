@@ -88,6 +88,14 @@ describe("local CLI output", () => {
         },
       }),
     ],
+    [
+      "a Proxy whose prototype read throws",
+      new Proxy(new Error(MARKER), {
+        getPrototypeOf() {
+          throw new Error(MARKER);
+        },
+      }),
+    ],
   ])("a session failure with %s is UnknownError", async (_label, thrown) => {
     const run = harness(() => Response.json({ meta: { status: "OK" }, body: {} }));
     run.deps.readSessionFile = async () => {
