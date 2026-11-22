@@ -19,11 +19,11 @@ import {
 } from "../../../packages/domain/src/reconcile.ts";
 import { identityKey } from "./identity-keys.ts";
 
-export const PROPOSAL_DECISION_ACTIONS = ["accept", "reject"] as const;
-export type ProposalDecisionAction = (typeof PROPOSAL_DECISION_ACTIONS)[number];
-export type ActorVerification = "server" | "legacy-unknown";
-export const PROPOSAL_DECISION_METHODS = ["manual", "rule", "ai"] as const;
-export type ProposalDecisionMethod = (typeof PROPOSAL_DECISION_METHODS)[number];
+const PROPOSAL_DECISION_ACTIONS = ["accept", "reject"] as const;
+type ProposalDecisionAction = (typeof PROPOSAL_DECISION_ACTIONS)[number];
+type ActorVerification = "server" | "legacy-unknown";
+const PROPOSAL_DECISION_METHODS = ["manual", "rule", "ai"] as const;
+type ProposalDecisionMethod = (typeof PROPOSAL_DECISION_METHODS)[number];
 
 export interface ProposalCommand {
   /** Caller-chosen idempotency key; a resend with the same payload replays the receipt. */
@@ -38,7 +38,7 @@ export interface ProposalCommand {
   reason: string;
 }
 
-export interface ProposalCommandReceipt {
+interface ProposalCommandReceipt {
   operationId: string;
   action: ProposalDecisionAction;
   proposalId: string;
@@ -50,7 +50,7 @@ export interface ProposalCommandReceipt {
   payloadDigest: string;
 }
 
-export type ProposalCommandError =
+type ProposalCommandError =
   | "invalid_command"
   | "idempotency_conflict"
   | "proposal_missing"
@@ -64,7 +64,7 @@ export type ProposalCommandResult =
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
 const PROPOSAL_ID_PATTERN = /^[^\u0000-\u001f]{1,512}$/u;
 
-export function validProposalCommand(value: unknown): value is ProposalCommand {
+function validProposalCommand(value: unknown): value is ProposalCommand {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
   return (
@@ -85,7 +85,7 @@ export function validProposalCommand(value: unknown): value is ProposalCommand {
 }
 
 /** The digest that makes a resend comparable; the actor and operation id are outside it. */
-export async function proposalCommandDigest(command: ProposalCommand): Promise<string> {
+async function proposalCommandDigest(command: ProposalCommand): Promise<string> {
   return canonicalDigest({
     action: command.action,
     proposalId: command.proposalId,
