@@ -232,8 +232,10 @@ TypeScript SDK (`@modelcontextprotocol/server`) for the initialize-based
 revisions and the stateless 2026-07-28 revision alike; what a client meets on
 it is in [Connecting an MCP client](#connecting-an-mcp-client). It holds no logic, no
 session state and no authorization of its own — including which tools exist:
-the adapter publishes the list it is handed and dispatches by name, so a tool
-set that is off is neither listed nor callable. `kogane.purchases.explain`
+the adapter publishes the list it is handed and dispatches by name. A tool
+set that is off is not listed; most are not callable either, but the delegated
+command, decision, schedule-job and survey-decision tools answer a refusal
+([contract](#contract-for-tools-on-mcp)). `kogane.purchases.explain`
 follows the operator route it shares a query with: while `/api/meta` reports
 `cardPurchaseRecognition: true` (CORE 0047 applied) it is appended to the six
 above, and otherwise its name is
@@ -1809,7 +1811,9 @@ side, 1,000 coverage rows) and the reported state's 5,000 rows a read.
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) (item 8) in slice S4 of
 the [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
 Both tools exist while `SCHEDULES_ENABLED` is on; otherwise their names are
-`unknown_tool`. Each call is recorded once through the common chokepoint
+`unknown_tool`. The revision is listed only where a Processor binding also
+exists: without one it is not listed, and a call answers
+`403 schedules_disabled`. Each call is recorded once through the common chokepoint
 ([audit log](audit-log.md)).
 
 **Reading** (`kogane.schedules.maintenance.read`, operation
@@ -1905,7 +1909,9 @@ bound of 200 shown proposals. It never carries page text.
 
 The decision is an operation an MCP client applies as itself
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), listed while
-`SCHEDULES_ENABLED` is on; it has no `/api/agent/v1` route. Its arguments are
+`SCHEDULES_ENABLED` is on and a Processor binding exists. While it is not
+listed it is still dispatched, and a call answers `403 schedules_disabled`. It
+has no `/api/agent/v1` route. Its arguments are
 `decision`, `source`, `proposalId`, `step` and `idempotencyKey`. A rejection is
 `step: "apply"` (R1). An acceptance adds `baseRevision` and takes
 `step: "prepare"`, then `"confirm"` with `confirmationDigest` (R2). Both go
@@ -1934,7 +1940,10 @@ Refusals are closed codes:
 The confirmation page's operations (`POST /api/command/v1/{plan,simulate,approve,commit,operation}`,
 catalogue `command.*`) are on `/mcp` as five tools, listed to every MCP client
 while `COMMANDS_ENABLED` is on and a Processor binding exists
-(`src/delegated-command-tools.ts`, `src/delegated-decision-tools.ts`). Both
+(`src/delegated-command-tools.ts`, `src/delegated-decision-tools.ts`). While
+they are not listed they are still dispatched: a call answers
+`403 commands_disabled` with `COMMANDS_ENABLED` off, and
+`503 command_executor_unavailable` without the binding. Both
 paths forward to the Processor's one command route, which runs
 `createPlan`, `simulate`, `approve` and `commit` in `packages/application`; the
 App writes no plan, approval, receipt or decision itself.
@@ -2518,8 +2527,27 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   list `agentApi` hands `handleMcp` (`src/agent-api.ts`), and a branch in the
   same dispatcher. The SDK publishes the list as given and routes
   `tools/call` by name; a name the dispatcher returns `null` for is
-  `unknown_tool`. A tool set that is off — for the deployment, or for this
-  caller — is neither listed nor dispatched.
+  `unknown_tool`. A tool set that is off is not listed. Most sets are not
+  dispatched either, so a call to one of their names is `unknown_tool` (a
+  JSON-RPC error, `-32602`). The delegated command, decision, schedule-job and
+  survey-decision tools are dispatched whatever the switches say: their
+  adapter answers a refusal, a tool result with `isError: true` and
+  `{ "error": <code> }`, recorded once like any refused call
+  (`test/mcp-off-tool-sets.test.ts`):
+
+  | Tool set                                                                                                                                                                                                                                                                                                            | Off when                                         | `tools/call` answers               |
+  | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
+  | the reads that exist only with some tables or views: `kogane.purchases.explain`, `kogane.reconstructed-state.read`, `kogane.reported-state.read`, the five `kogane.card-settlements.*` reads, `kogane.reported-holdings-change.read`, `kogane.reports.read`, `kogane.collection-quality.read`, `kogane.events.read` | the store lacks them                             | `unknown_tool`                     |
+  | `kogane.ops.*`                                                                                                                                                                                                                                                                                                      | `OPS_API_ENABLED` off                            | `unknown_tool`                     |
+  | `kogane.schedules.read`, `kogane.schedules.maintenance.read`, `kogane.schedules.survey.read`, `kogane.schedules.lease.release`, `kogane.schedules.maintenance.update`                                                                                                                                               | `SCHEDULES_ENABLED` off                          | `unknown_tool`                     |
+  | `kogane.schedules.maintenance.update`                                                                                                                                                                                                                                                                               | no Processor binding                             | `403 schedules_disabled`           |
+  | `kogane.schedules.job.update`, `kogane.schedules.survey.decide`                                                                                                                                                                                                                                                     | `SCHEDULES_ENABLED` off, or no Processor binding | `403 schedules_disabled`           |
+  | `kogane.command.plan`, `.simulate`, `.operation.get`, `.approve`, `.commit`                                                                                                                                                                                                                                         | `COMMANDS_ENABLED` off                           | `403 commands_disabled`            |
+  | the same five                                                                                                                                                                                                                                                                                                       | no Processor binding                             | `503 command_executor_unavailable` |
+
+  Every other tool has no switch: it is listed and dispatched on every
+  deployment.
+
 - **Input schema.** Generate `inputSchema` from the tool's Zod argument schema
   with `mcpInputSchema` (`src/mcp-input-schema.ts`), never with
   `z.toJSONSchema` directly. MCP requires `type: "object"` at the root, and the
