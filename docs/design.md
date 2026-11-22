@@ -105,16 +105,18 @@ immutable class.
 
 Migration 0043 ([#207](https://github.com/risu729/kogane/pull/207)) deleted
 synthetic bootstrap metadata. It selected the fetch runs of the dedicated
-`kogane-synthetic` source and the runs of `synthetic` acquisition sessions
-annotated `legacy-synthetic-bootstrap`, dropped the `*_no_delete` guards of
-nine tables (`ingestion_attempts`, `fetch_run_seals`, `run_inventory_items`,
-`run_inventories`, `fetch_artifacts`, `fetch_run_reports`,
-`fetch_run_annotations`, `fetch_runs`, `acquisition_sessions`), deleted
-those runs' rows and each acquisition session left with no fetch or
-collection run, and recreated the nine guards with their original text
-(0001, 0003). It also deleted the `kogane-synthetic` source and its registry
-rows, which have no delete guard. It deleted no raw object, and parsed
-observations of those runs would have made it fail through the restrictive
+`kogane-synthetic` source, and the fetch runs in acquisition sessions of the
+`synthetic` external-id namespace that carry an `exclude_from_financial_views`
+annotation with reason `legacy-synthetic-bootstrap`. It dropped the
+`*_no_delete` guards of nine tables (`ingestion_attempts`, `fetch_run_seals`,
+`run_inventory_items`, `run_inventories`, `fetch_artifacts`,
+`fetch_run_reports`, `fetch_run_annotations`, `fetch_runs`,
+`acquisition_sessions`), deleted those runs' rows from them and each of their
+acquisition sessions left with no fetch or collection run, and recreated the
+nine guards with their original text (0001, 0003). It also deleted the
+`kogane-synthetic` source and its registry rows, which have no delete guard.
+It deleted no raw object. A parse run of one of those runs' artifacts, and so
+any parsed observation, would have made it fail through the restrictive
 foreign keys rather than be removed. No ADR records this decision.
 
 The one exception declared in an ADR is migration 0063
@@ -126,8 +128,9 @@ columns of the retired importer's rows (`fetch_units.unit_key`,
 `transaction_observations.source_account` of the MoneyForward importer
 parses, `account_connection_reviews.connection_key`), drops and recreates
 their append-only guards with their exact text, and keeps every id, raw
-object and other column. No other migration may rewrite evidence without a
-new ADR.
+object and other column.
+
+No other migration may rewrite evidence without a new ADR.
 
 Evidence is not "the truth" — providers correct their own data. Evidence is a
 record of _what a source claimed at a point in time_. That is why nothing
