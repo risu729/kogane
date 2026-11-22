@@ -5,7 +5,8 @@
 // of their names is `unknown_tool`. The delegated command, decision,
 // schedule-job and survey-decision tools are dispatched whatever the switches
 // say, so a call reaches the adapter, answers its own refusal with `isError`
-// and is recorded once as `refused`; the Processor is never reached. This file
+// and is recorded once: `refused` for a 4xx, `failed` for the 5xx
+// `command_executor_unavailable` (ADR 0064); the Processor is never reached. This file
 // pins answers; it does not decide them. Synthetic identities and
 // configuration only.
 import { env } from "cloudflare:test";
@@ -130,7 +131,7 @@ async function expectRefused(
   expect(message.result?.structuredContent, name).toEqual({ error });
 }
 
-/** The audit records of this test's caller: one `refused` per refused call, none for `unknown_tool`. */
+/** The audit records of this test's caller: one per refused call, none for `unknown_tool`. */
 async function recorded(): Promise<{ operation: string; result: string }[]> {
   const rows = await env.DB.prepare(
     "SELECT operation, result FROM audit_records WHERE principal = ? ORDER BY recorded_at, audit_id",
@@ -139,8 +140,9 @@ async function recorded(): Promise<{ operation: string; result: string }[]> {
     .all<{ operation: string; result: string }>();
   return rows.results;
 }
-const refusedAs = (names: string[]) =>
-  names.map((name) => ({ operation: name.slice("kogane.".length), result: "refused" }));
+const recordedAs = (names: string[], result: "refused" | "failed") =>
+  names.map((name) => ({ operation: name.slice("kogane.".length), result }));
+const refusedAs = (names: string[]) => recordedAs(names, "refused");
 
 async function expectUnknown(name: string, configuration: Record<string, unknown>) {
   const message = await rpc("tools/call", { name, arguments: {} }, configuration);
@@ -166,6 +168,9 @@ describe("a tool set that is off on /mcp", () => {
     for (const name of COMMAND_TOOLS) expect(names).not.toContain(name);
     for (const name of COMMAND_TOOLS)
       await expectRefused(name, configuration, "command_executor_unavailable");
+    // A 5xx answer is a failure, not a refusal (ADR 0064): recorded once as `failed`.
+    expect(await recorded()).toEqual(expect.arrayContaining(recordedAs(COMMAND_TOOLS, "failed")));
+    expect(await recorded()).toHaveLength(COMMAND_TOOLS.length);
   });
 
   it("SCHEDULES_ENABLED off: no schedule tool is listed; the job and survey decisions answer schedules_disabled, the others unknown_tool", async () => {
@@ -190,6 +195,8 @@ describe("a tool set that is off on /mcp", () => {
     for (const name of SCHEDULE_GATED_TOOLS.filter((name) => !writes.includes(name)))
       expect(names).toContain(name);
     for (const name of writes) await expectRefused(name, configuration, "schedules_disabled");
+    expect(await recorded()).toEqual(expect.arrayContaining(refusedAs(writes)));
+    expect(await recorded()).toHaveLength(writes.length);
   });
 
   it("OPS_API_ENABLED off: the operations tools are not listed, and a call answers unknown_tool", async () => {
