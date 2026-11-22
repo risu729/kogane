@@ -1124,6 +1124,77 @@ describe.if(runnable)("operator schedule administration", () => {
       await page.close();
     }
   }, 30000);
+  test("a new proposal read back is accepted only when its own <source>-survey-<id> rule holds it", async () => {
+    // Synthetic: an earlier proposal's rule holds the same fields at revision 1.
+    const fetchedAt = "2026-10-05T00:00:00.000Z";
+    const fields = () => ({
+      source: "sony-bank",
+      timezone: "Asia/Tokyo",
+      pattern: { kind: "weekly" as const, weekdays: [0], start: "01:00", end: "04:00" },
+      enabled: true,
+      scope: "collection" as const,
+      referenceUrl: "https://example.test/sony-maintenance",
+    });
+    snapshot.maintenance = [
+      { ...fields(), id: "sony-bank-survey-1", verifiedAt: fetchedAt, revision: 1 },
+    ];
+    const proposal = (id: number) => ({
+      ...fields(),
+      id,
+      targetId: "sony-bank",
+      kind: "new" as const,
+      ruleId: null,
+      baseRevision: 0,
+      current: true,
+      status: "proposed" as const,
+      reasons: [],
+      fetchedAt,
+      sha256: "d".repeat(64),
+      createdAt: fetchedAt,
+    });
+    snapshot.survey = {
+      enabled: true,
+      attention: 2,
+      targets: [],
+      proposals: [proposal(2), proposal(3)],
+    };
+    const focused = (page: Page, text: string) =>
+      page.waitForFunction(
+        (expected) =>
+          document.activeElement?.getAttribute("role") === "status" &&
+          document.activeElement.textContent === expected,
+        text,
+      );
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      const rows = page
+        .locator('section[aria-labelledby="maintenance-survey"] li')
+        .filter({ hasText: "新しい停止時間" });
+      await rows.nth(1).waitFor();
+      writeAnswer = { after: lost };
+      // Rejected, the answer lost: the earlier proposal's rule does not make it accepted.
+      await rows.first().getByRole("button", { name: "却下", exact: true }).click();
+      await focused(
+        page,
+        "ソニー銀行の新しい停止時間：この提案は決定済みで、確認待ちの一覧から外れました。採用・却下のどちらになったかは、メンテナンス時間の一覧で確認してください。",
+      );
+      // Accepted, the answer lost: its own rule holds the change.
+      await rows.first().getByRole("button", { name: "採用", exact: true }).click();
+      await focused(
+        page,
+        "ソニー銀行の新しい停止時間：この提案は採用済みで、メンテナンス時間に反映されています。",
+      );
+      expect(snapshot.maintenance.map((r) => r.id).sort()).toEqual([
+        "sony-bank-survey-1",
+        "sony-bank-survey-3",
+      ]);
+      expect(writes.map((w) => w.body)).toEqual([{ decision: "reject" }, { decision: "accept" }]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
 
   test("収集を依頼 shows the history first and posts one stored request only after confirmation", async () => {
     snapshot.leases = [
