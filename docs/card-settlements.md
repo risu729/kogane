@@ -442,6 +442,9 @@ date, and nothing else but the account entities' labels.
   `deposit.balance` of the entity's references from the newest capture,
   never a sum of references. `covers` is `yes` or `no` only on exact figures
   with no reason; otherwise `unknown` with `debit_account_unknown`,
+  `unit_mismatch` (the bills the line counts are in more than one unit, so
+  `sumQuantities` does not add them and `cardBills` is `missing` with that
+  code),
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
   due by the date, so it may not show it; or on the due date of a bill the

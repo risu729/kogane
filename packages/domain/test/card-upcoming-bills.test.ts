@@ -314,6 +314,57 @@ describe("covers", () => {
     });
   });
 
+  test("bills in two units make the line's sum unit_mismatch, not bill_not_exact", () => {
+    const usd = (value: number): Quantity =>
+      exactQuantity("USD", integerDecimal(value), "decimal-v1");
+    const answer = upcomingCardBills({
+      date: DATE,
+      cards: [
+        card("yen", bill("2098-03-26", yen(100)), "a"),
+        card("dollar", bill("2098-03-27", usd(5)), "a"),
+      ],
+      accounts: new Map([["entity:a", balance(yen(1_000_000))]]),
+    });
+    // The first line counts the yen bill alone; the second counts both.
+    expect(
+      answer.byDebitAccount.map((line) => [
+        line.debitDate,
+        line.cardBills,
+        line.covers,
+        line.reasons,
+      ]),
+    ).toEqual([
+      ["2098-03-26", { value: "100", unit: "JPY", status: "exact" }, "yes", []],
+      [
+        "2098-03-27",
+        { unit: "JPY", status: "missing", reason: "unit_mismatch" },
+        "unknown",
+        ["unit_mismatch"],
+      ],
+    ]);
+    // Two units and a bill that is not exact: each reason that holds is named.
+    const both = upcomingCardBills({
+      date: DATE,
+      cards: [
+        // Bills are ordered by card: the yen bill is the line's first.
+        card("a-yen", bill("2098-03-26", yen(100)), "a"),
+        card("b-dollar", bill("2098-03-26", usd(5)), "a"),
+        card(
+          "c-unread",
+          bill("2098-03-26", absentQuantity("JPY", "unparsed", "stored:unparsed")),
+          "a",
+        ),
+      ],
+      accounts: new Map([["entity:a", balance(yen(1_000_000))]]),
+    });
+    expect(both.byDebitAccount[0]).toMatchObject({
+      bills: 3,
+      cardBills: { unit: "JPY", status: "missing", reason: "unit_mismatch" },
+      covers: "unknown",
+      reasons: ["unit_mismatch", "bill_not_exact"],
+    });
+  });
+
   test("a balance that is not exact, or none reported, is unknown", () => {
     for (const value of [
       absentQuantity("JPY", "missing", "balance_not_reported"),

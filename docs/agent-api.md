@@ -883,7 +883,10 @@ Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
   `label`, `since`, and `codes`: the answer's notes or its unknown reason).
 - `byDebitAccount`: one line per debit account and debit date. `bills` and
   `cardBills` count every bill to that account due on or before the line's
-  date (summed with `sumQuantities`; not exact when one bill is not);
+  date (summed with `sumQuantities`; `missing` with `unit_mismatch` when
+  they are in more than one unit, else not exact when one bill is not;
+  `reasons` below then also names `unit_mismatch`, between
+  `debit_account_unknown` and `bill_not_exact`);
   `balance` is the account's `deposit.balance` in the reported state for the
   date with `capturedAt` (null on the line of bills with no known account);
   `covers` is `yes` or `no` only when both are exact and no reason holds,
