@@ -372,7 +372,7 @@ page; `apps/web/test/card-settlement.browser.test.ts` shows the note and the
 
 ## Amendment 2026-11-19: a statement total that is not exact keeps its reason
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1434](https://github.com/risu729/kogane/pull/1434))
 - Date: 2026-11-19
 - Owner approval: required before merge. The published answer of
   `kogane.card-settlements.unmatched` changes for a non-exact total, and a

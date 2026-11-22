@@ -168,7 +168,7 @@ neither listed nor served without the table.
 
 ## Amendment: a report cut at its row bound is not complete (2026-11-18)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1422](https://github.com/risu729/kogane/pull/1422))
 - Date: 2026-11-18
 - Owner approval: required before merge, for the `partition` field added to
   the published `kogane.reports.read` answer (see Consequences)
@@ -261,7 +261,7 @@ refuses a detail whose `partition` is not its body's, and
 
 ## Amendment: a report id names the code that computed its body (2026-11-19)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1453](https://github.com/risu729/kogane/pull/1453))
 - Date: 2026-11-19
 - Owner approval: required before merge. The report ids, context ids and run
   ids the published `kogane.reports.read` answer names are minted from a
