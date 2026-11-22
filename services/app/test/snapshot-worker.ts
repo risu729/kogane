@@ -2,7 +2,7 @@
 import snapshot from "../demo-snapshot.json";
 import { authenticate } from "../src/auth";
 import { isAgentPath, SHARED_QUERY_PATH } from "../src/agent-api";
-import { HttpError, json, secureResponse } from "../src/http";
+import { assertMethod, errorResponse, HttpError, READ_METHODS, secureResponse } from "../src/http";
 import { downloadDisposition } from "../src/read";
 
 type DemoEnv = Pick<Env, "ASSETS" | "ACCESS_ISSUER" | "ACCESS_AUDIENCE">;
@@ -23,8 +23,7 @@ export default {
       // grant table and no write path. The agent API is not deployed here.
       if (isAgentPath(url.pathname) || url.pathname === SHARED_QUERY_PATH)
         throw new HttpError(403, "agent_api_not_configured");
-      if (request.method !== "GET" && request.method !== "HEAD")
-        throw new HttpError(405, "method_not_allowed");
+      assertMethod(request, READ_METHODS);
       if (snapshot.schemaVersion !== 1 || snapshot.classification !== "synthetic")
         throw new HttpError(503, "demo_not_configured");
       if (api) {
@@ -52,11 +51,9 @@ export default {
         response = await env.ASSETS.fetch(request);
       }
     } catch (error) {
-      const known = error instanceof HttpError;
-      errorCode = known ? error.code : "internal_error";
-      response = json({ error: errorCode, requestId }, known ? error.status : 500);
+      errorCode = error instanceof HttpError ? error.code : "internal_error";
+      response = errorResponse(error, requestId);
     }
-    if (response.status === 405) response.headers.set("allow", "GET, HEAD");
     console.log(
       JSON.stringify({
         event: "demo_request",

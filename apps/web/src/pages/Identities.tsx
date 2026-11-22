@@ -8,7 +8,7 @@ import {
   useIdentityConnections,
   useInstrumentCoverage,
 } from "../identity-api.ts";
-import { EmptyState, Kv, KvRow, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
+import { EmptyState, Kv, KvRow, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
   IDENTITY_PAGE_LIMIT,
   type IdentityAccountListRow,
@@ -385,8 +385,16 @@ function AccountList({
                       <td>{row.sources.join(", ")}</td>
                       <td className="num">{row.references}</td>
                       <td className="num">{row.observedCount}</td>
-                      <td>{row.connection === null ? "—" : CONNECTION_STATES[row.connection]}</td>
-                      <td>{row.lastFetchedAt ?? "—"}</td>
+                      <td>
+                        {row.connection === null ? (
+                          <Nullable value={null} placeholder="接続先の確認記録なし" />
+                        ) : (
+                          CONNECTION_STATES[row.connection]
+                        )}
+                      </td>
+                      <td>
+                        <Nullable value={row.lastFetchedAt} placeholder="取得の記録なし" />
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -44,7 +44,7 @@ import { instrumentHistoryApi } from "./instrument-history-api";
 import { accountHistoryApi } from "./account-history-api";
 import { instrumentCoverageApi } from "./instrument-coverage-api";
 import { reportsApi } from "./reports-api";
-import { HttpError, json, secureResponse } from "./http";
+import { assertMethod, errorResponse, HttpError, json, READ_METHODS, secureResponse } from "./http";
 import { catalogue, raw } from "./read";
 import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
 
@@ -123,8 +123,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // paths fall through to exactly the answers they give today.
   const opsResponse = await opsApi(request, env, url, subject);
   if (opsResponse) return opsResponse;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  // Every path below is a read (or the shell's assets, or a 404): GET, and
+  // HEAD as the same answer without its body.
+  assertMethod(request, READ_METHODS);
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
   // The operator's read of the audit record (ADR 0064); a page load, not recorded.
@@ -227,14 +228,8 @@ export default {
     try {
       response = await route(request, env, url);
     } catch (error) {
-      const known = error instanceof HttpError;
-      errorCode = known ? error.code : "internal_error";
-      const refs = known && error.refs.length > 0 ? { refs: error.refs } : {};
-      const hints = known ? error.hints : {};
-      response = json(
-        { error: errorCode, requestId, ...refs, ...hints },
-        known ? error.status : 500,
-      );
+      errorCode = error instanceof HttpError ? error.code : "internal_error";
+      response = errorResponse(error, requestId);
     }
     try {
       console.log(

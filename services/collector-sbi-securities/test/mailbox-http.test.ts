@@ -487,3 +487,14 @@ test("a refusal logs its step, hop, status and refused redirect target in closed
   ]);
   expect(logged.join("\n")).not.toMatch(/synthetic|secret|jsessionid|token|evil/iu);
 });
+
+test("calls the fetcher unbound, as the Workers runtime's fetch requires", async () => {
+  const { fetcher, calls } = sequence();
+  // workerd's fetch refuses any receiver other than the global scope.
+  const strict = function (this: unknown, input: string | URL | Request, init?: RequestInit) {
+    if (this !== undefined) throw new TypeError("Illegal invocation");
+    return fetcher(input, init);
+  };
+  await new MailboxHttp([], strict).open();
+  expect(calls.map((call) => call.url)).toContain(MAILBOX_APPLICATION);
+});

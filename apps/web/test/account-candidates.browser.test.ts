@@ -341,6 +341,32 @@ describe.if(runnable)("account candidate review", () => {
     await tab.close();
   }, 60_000);
 
+  test("a history read again that fails keeps the earlier entries only under the warning", async () => {
+    const tab = await open();
+    const card = tab.locator(".identity-card").first();
+    const toggle = card.getByRole("button", { name: "取得元の口座の訂正履歴を見る", exact: true });
+    await toggle.click();
+    await card.getByText("記録順の履歴です。", { exact: false }).waitFor();
+    const entries = await card.locator("ol li").count();
+    expect(entries).toBeGreaterThan(0);
+    const warning = "更新できませんでした。前回読み込んだ取得元の口座の訂正履歴を表示しています。";
+    expect(await card.getByText(warning, { exact: true }).count()).toBe(0);
+    // Closing and reopening reads the history again; that read is refused.
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を閉じる", exact: true }).click();
+    historyRows = 0;
+    await toggle.click();
+    await card.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+    expect(await card.locator("ol li").count()).toBe(entries);
+    expect(await auditView(tab)).toEqual([]);
+    // The read recovers on retry, and the warning goes.
+    historyRows = GRANT.budget.maxRows;
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を再試行", exact: true }).click();
+    await card.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+    expect(await card.locator("ol li").count()).toBe(entries);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
+
   test("a refused history shows the refusal alone, never an empty or partial list", async () => {
     // The direct account has at least its mapping revision; a budget of zero refuses it whole.
     historyRows = 0;

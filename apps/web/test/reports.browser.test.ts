@@ -168,13 +168,13 @@ describe.if(runnable)("fixed report artifacts", () => {
     await page.waitForFunction(() => document.title === "評価レポートの内容 | kogane");
     expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
     const rows = await page.getByRole("region", { name: "保有資産ごとの評価" }).innerText();
-    // Formatted by the shared formatter; a place JPY cannot hold is shown as stored.
+    // Formatted by the shared formatter; a place JPY cannot hold is kept, never rounded.
     expect(rows).toContain("1,200,000 JPY");
-    expect(rows).toContain("34567.5 JPY");
+    expect(rows).toContain("34,567.5 JPY");
     expect(rows).toContain("未評価 同じ取得結果の価格がない");
     expect(rows).not.toMatch(/(^|\s)0 JPY/u);
     const main = await page.locator("main").innerText();
-    expect(main).toContain("1234567.5 JPY");
+    expect(main).toContain("1,234,567.5 JPY");
     expect(main).toContain("評価できた保有資産だけの小計");
     expect(main).toContain("確認できた範囲のみ評価");
     expect(main).toContain("資産全体の合計でも、その下限でもありません");

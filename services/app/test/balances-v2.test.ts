@@ -551,7 +551,7 @@ describe("v2 balance read model", () => {
     const parse = await parseRun(run.artifacts[0].id, "v2-parity-fixture");
     await seedBalances(parse, "v2-parity-account", 40, "parity");
     expect((await build()).status).toBe("complete");
-    const base = "/api/balances?source=other-test&account=v2-parity-account";
+    const base = "/api/balances?source=other-test&account=v2-parity-account&detail=full";
     const legacy = (await (await call(base, { read: false })).json()) as {
       latest: unknown[];
     };

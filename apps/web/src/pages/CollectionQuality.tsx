@@ -427,8 +427,11 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
     queryKey: ["collection-quality", sourceId, "accounts"],
     queryFn: ({ signal }) =>
       getJson<AccountCoverage>(
-        // A literal suffix (ACCOUNT_COVERAGE_SUFFIX), so the UI/MCP parity scan sees the route.
-        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}/accounts`,
+        // A literal suffix (ACCOUNT_COVERAGE_SUFFIX), so the UI/MCP parity scan
+        // sees the route. The page shows every period: it asks for the full
+        // answer, the route's default being the summary (ADR 0123, amendment
+        // 2026-11-20).
+        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}/accounts?detail=full`,
         signal,
       ),
   });

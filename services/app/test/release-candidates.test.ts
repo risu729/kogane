@@ -105,9 +105,9 @@ describe("release candidates are invisible to every reader", () => {
     const balanceOptions = await reader.filterOptions({ kind: "balances" });
     expect(balanceOptions.metrics).toEqual(["adopted-metric"]);
     expect(balanceOptions.instruments).toEqual(["JPY"]);
-    expect((await api("/api/balances")).latest.map((row: { id: number }) => row.id)).toEqual([
-      adopted.bal,
-    ]);
+    expect(
+      (await api("/api/balances?detail=full")).latest.map((row: { id: number }) => row.id),
+    ).toEqual([adopted.bal]);
     expect((await api(`/api/identity/accounts?source=${SB}`)).rows).toEqual([]);
     const organization = await observationOrganizations(d1Executor(env.DB), [
       { kind: "transaction", id: candidate.tx },

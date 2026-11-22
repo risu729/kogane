@@ -86,6 +86,19 @@ const ACCOUNT_LIST: IdentityAccountListRow[] = [
     connection: "unresolved",
     lastFetchedAt: "2099-01-02T03:04:05.000Z",
   },
+  {
+    // No connection record and no fetch: both are named, never a dash (INV05).
+    account: "synthetic-account-2",
+    label: "合成口座B",
+    labelOrigin: "mapping",
+    role: "deposit",
+    status: "unresolved",
+    sources: ["synthetic-bank"],
+    references: 1,
+    observedCount: 0,
+    connection: null,
+    lastFetchedAt: null,
+  },
 ];
 const INSTRUMENTS: IdentityInstrumentRow[] = [
   {
@@ -240,13 +253,13 @@ describe.if(runnable)("identity coverage page", () => {
     await tab.close();
   }, 30_000);
 
-  test("the account list shows one line per account with its name and where the name came from", async () => {
+  test("the account list shows one line per account with its name and where the name came from, and names what it lacks", async () => {
     const tab = await open();
     await tab.getByRole("button", { name: "口座一覧", exact: true }).click();
     await tab.getByRole("heading", { name: "口座一覧", exact: true }).waitFor();
     const rows = tab.getByRole("region", { name: "口座一覧の表", exact: true }).locator("tbody tr");
     await rows.first().waitFor();
-    expect(await rows.count()).toBe(1);
+    expect(await rows.count()).toBe(2);
     const text = await rows.first().innerText();
     for (const part of [
       "合成銀行（MoneyForward連携）（個別口座未確定）",
@@ -256,6 +269,10 @@ describe.if(runnable)("identity coverage page", () => {
       "2099-01-02T03:04:05.000Z",
     ])
       expect(text).toContain(part);
+    const cells = rows.nth(1).locator("td");
+    expect(await cells.nth(7).innerText()).toBe("接続先の確認記録なし");
+    expect(await cells.nth(8).innerText()).toBe("取得の記録なし");
+    expect(await rows.nth(1).innerText()).not.toContain("—");
     expect(requests.some((entry) => entry.url.pathname === "/api/identity/account-list")).toBe(
       true,
     );

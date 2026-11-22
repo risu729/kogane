@@ -7,6 +7,7 @@ import {
   balanceHistoryKeysetSql,
   PROJECTION_INPUTS_SQL,
   type ProjectionInputsRow,
+  type ProjectionMeasureRow,
   type ProjectionPageRow,
 } from "./balance-projection-sql";
 import type { SqlExecutor } from "./reader";
@@ -135,6 +136,13 @@ export interface BalanceProjectionReader {
     scope: CollectionScope,
     metricIds: readonly string[],
   ): Promise<SubtotalRow[] | null>;
+  /**
+   * Every latest measurement of the filter scope, adopted or not, in compact
+   * columns (`projectionMeasureSql`). `null` when the scope holds more rows
+   * than the subtotal bound: the cash read refuses an oversized scope rather
+   * than answering part of it.
+   */
+  measureRows(snapshotId: string, scope: CollectionScope): Promise<ProjectionMeasureRow[] | null>;
   historyPage(
     highWaterParseRunId: number,
     scope: CollectionScope,
