@@ -105,7 +105,7 @@ Pages compose these instead of writing their own markup or rules:
 | Page header                   | `.page-head` with the `<h1>` and a `.lede`; `.footnote` for caveats                                                                   |
 | Grouped content               | `Panel` (`.panel` with `.panel-head`, `.panel-note`, `.panel-body`); content inside a panel always sits in `.panel-body`              |
 | Key/value facts               | `Kv` / `KvRow`                                                                                                                        |
-| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, never blank                                                    |
+| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, in words naming what is absent, never blank                    |
 | Loading, error, empty, stale  | `QueryBoundary` (with `isEmpty`/`empty`), `ErrorState`, `EmptyState`                                                                  |
 | Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |

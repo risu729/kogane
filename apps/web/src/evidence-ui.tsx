@@ -71,7 +71,9 @@ export function RecordedTime({
       <span className="cell-time">
         <Nullable value={value} />
       </span>
-      <div className="dim">日時の根拠：{basis === null ? "未記録" : BASES[basis]}</div>
+      <div className="dim">
+        日時の根拠：{basis === null ? <Nullable value={null} /> : BASES[basis]}
+      </div>
     </>
   );
 }

@@ -176,6 +176,11 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(await page.locator("main").innerText()).toContain("1734 JPY");
     const rows = page.getByRole("region", { name: "カード利用の一覧" }).locator("tbody tr");
     expect(await rows.count()).toBe(4);
+    // A purchase not yet on a statement has no debit to follow, and says so
+    // in words beside the statement reason, never a dash (INV05).
+    const unbilled = rows.filter({ hasText: "架空の喫茶店" });
+    expect(await unbilled.locator("td").nth(4).innerText()).toBe("未請求");
+    expect(await unbilled.locator("td").nth(5).innerText()).toBe("引落をたどれません");
     expect(await rows.nth(3).innerText()).toContain("取得元に表示されなくなった");
     expect(await rows.nth(3).innerText()).toContain("合計に含めていません");
     expect(requests[0]?.searchParams.get("offset")).toBe("0");
