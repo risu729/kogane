@@ -607,6 +607,22 @@ id is the digest of that manifest, so:
   (this closes the limit the
   [amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)
   recorded).
+- the positions come from one cut of the current positions. The job reads
+  them in reader pages of 500, and a re-parse or a newer capture published
+  between two page reads brings holdings back under new ids, so one holding
+  could be read twice (INV06) or one skipped. After the last page,
+  `POSITION_CUT_SQL` checks that every id read is still current and that the
+  ids read are exactly the current rows up to the last one (and all of them
+  when the pages reached the end); when they are not, the job reads every
+  page again, and when the second read moved too it stores nothing and
+  returns `skipped: "snapshot_changed"`
+  ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21)).
+  A passing read is sorted back into the page order before `maxRows` applies,
+  so a truncated report keeps the cut's first rows even when a row arrived on
+  a later page than rows that sort behind it.
+  A read that was one cut names the same ids as before, so no release
+  changes. Decimals, prices and the knowledge boundary are read after the
+  check, as before.
 
 ## 6. Replayability and evidence-use restrictions
 
@@ -728,7 +744,19 @@ would discard later collection and later decisions (docs/operations.md).
   changed in turn giving a new report with no reuse while the earlier one
   keeps its id and body; `services/processor/test/report-job-truncated.test.ts`
   — a truncated report is `partial-verified-scope`, and the same kept
-  positions with and without positions past the bound give two reports.
+  positions with and without positions past the bound give two reports;
+  `services/processor/test/report-job-page.test.ts` — positions past the
+  first reader page, a row shifted onto the next page read once, a snapshot
+  republished between two page reads read again as one cut, a cut that
+  keeps moving refused as `snapshot_changed`, and a row read out of page
+  order kept in page order under the bound;
+  `services/processor/test/report-job-order.test.ts` — that sort against
+  SQLite's `ORDER BY` on 1000 seeded random sets of ASCII, Japanese,
+  combining-mark and astral-plane text with small and 52-bit ids, shuffled
+  and already in order;
+  `packages/read-model/test/position-cut.test.ts` — `POSITION_CUT_SQL`
+  against an oracle on seeded random stores, and its plan without
+  statistics.
 - `services/app/test/reports-api.test.ts` — re-display, Access and
   method gates, refusal of explanation and export under a restriction, the
   decimal policy selection contract, the list's order, paging and query

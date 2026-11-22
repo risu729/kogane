@@ -43,6 +43,7 @@ import {
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
+import { POSITION_CUT_SQL } from "../../../packages/read-model/src/sql";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
 const INPUT_MANIFEST_VERSION = "report-inputs-v2";
@@ -50,6 +51,11 @@ const DEFAULT_MAX_ROWS = 500;
 /** Positions one reader page returns with their valuations (`PAGE_LIMIT` less its probe row). */
 const POSITION_PAGE = PAGE_LIMIT - 1;
 const DECIMAL_LOOKUP_CHUNK = 80;
+/**
+ * Reads of the whole position set before the job refuses a cut that keeps
+ * moving (`snapshot_changed`): the first, and one more from the first page.
+ */
+const POSITION_CUT_ATTEMPTS = 2;
 
 /** Feature flag. Off unless the deployment explicitly sets the string "true". */
 export function reportsEnabled(flag: string | undefined): boolean {
@@ -166,6 +172,96 @@ async function recordedAfterCutoff(
     for (const row of rows.results) late.add(row.id);
   }
   return late;
+}
+
+/**
+ * The in-scope positions of one cut of the current positions, in page order,
+ * read until they exceed `maxRows` or the store ends; `null` when every
+ * attempt saw the cut move.
+ *
+ * The reader answers pages of `POSITION_PAGE` positions plus one row that
+ * only says another page exists (and carries no valuations). Positions
+ * recorded after the cutoff are dropped page by page, so the in-scope set is
+ * read until it exceeds the bound or the store ends: dropping late rows from
+ * the first page alone would leave the rows behind it unread and the report
+ * would claim a shorter set is the whole scope.
+ *
+ * The pages are separate reads at moving offsets. A parse published between
+ * two of them shifts the next page, so a row comes back or one is never read;
+ * a snapshot republished between them replaces rows an earlier page returned
+ * with the same holdings under new ids, so one holding can come back under
+ * two ids and both would be counted (INV06). After the last page one more
+ * read (`POSITION_CUT_SQL`) checks that the ids read, late ones included, are
+ * exactly the current positions up to the last one read, and all of them when
+ * the store ended. When they are not, the whole read starts again from the
+ * first page; a cut that moves on every attempt is refused, never merged.
+ *
+ * The check is on the set read, not on the order it arrived in: a row
+ * published between two reads can arrive on a later page than rows that sort
+ * after it while the set still passes (rows added before the offset and gone
+ * again by the check). A passing set is sorted back into page order, so the
+ * first `maxRows` are the ones a read of that one cut keeps.
+ */
+async function readPositionCut(
+  db: D1Database,
+  reader: ReturnType<typeof createD1ObservationReader>,
+  cutoffMs: number,
+  maxRows: number,
+): Promise<PositionWithValuations[] | null> {
+  for (let attempt = 0; attempt < POSITION_CUT_ATTEMPTS; attempt += 1) {
+    const kept: PositionWithValuations[] = [];
+    const seen = new Set<number>();
+    let ended = false;
+    for (let offset = 0; ; offset += POSITION_PAGE) {
+      const page = await reader.listPositions({ offset });
+      const entries = page.slice(0, POSITION_PAGE);
+      const late = await recordedAfterCutoff(
+        db,
+        entries.map((entry) => entry.position.id),
+        cutoffMs,
+      );
+      for (const entry of entries) {
+        if (seen.has(entry.position.id)) continue;
+        seen.add(entry.position.id);
+        if (!late.has(entry.position.id)) kept.push(entry);
+      }
+      ended = page.length <= POSITION_PAGE;
+      if (kept.length > maxRows || ended) break;
+    }
+    const cut = await db
+      .prepare(POSITION_CUT_SQL)
+      .bind(JSON.stringify([...seen]))
+      .first<{ current_rows: number; read_current: number; prefix_rows: number }>();
+    if (
+      cut !== null &&
+      cut.read_current === seen.size &&
+      cut.prefix_rows === seen.size &&
+      (!ended || cut.current_rows === seen.size)
+    )
+      return kept.sort(pageOrder);
+  }
+  return null;
+}
+
+const utf8 = new TextEncoder();
+
+/** SQLite `BINARY` order of two TEXT values: their UTF-8 bytes, compared bytewise. */
+function binaryText(left: string, right: string): number {
+  if (left === right) return 0;
+  const a = utf8.encode(left);
+  const b = utf8.encode(right);
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) if (a[i] !== b[i]) return a[i]! - b[i]!;
+  return a.length - b.length;
+}
+
+/** The reader's position page order (`ORDER_KEYS.positionsByScope`): source, account, code, id. */
+export function pageOrder(left: PositionWithValuations, right: PositionWithValuations): number {
+  return (
+    binaryText(left.position.source_id, right.position.source_id) ||
+    binaryText(left.position.source_account, right.position.source_account) ||
+    binaryText(left.position.security_code, right.position.security_code) ||
+    left.position.id - right.position.id
+  );
 }
 
 /**
@@ -408,34 +504,8 @@ export async function runReportJob(
   const reader = createD1ObservationReader(env.DB);
   const cutoffMs = Date.parse(options.knowledgeCutoff);
   if (!Number.isFinite(cutoffMs)) return { ...empty, skipped: "invalid_knowledge_cutoff" };
-  // The reader answers pages of `POSITION_PAGE` positions plus one row that
-  // only says another page exists (and carries no valuations). Positions
-  // recorded after the cutoff are dropped page by page, so the in-scope set
-  // is read until it exceeds the bound or the store ends: dropping late rows
-  // from the first page alone would leave the rows behind it unread and the
-  // report would claim a shorter set is the whole scope. The pages are
-  // separate reads: a parse published between two of them shifts the offset,
-  // so a row can come back on the next page, and it is kept once (INV06).
-  // A shift the other way (a snapshot replaced between reads) can leave a row
-  // unread; that is a limit of offset pages, and the manifest still names
-  // exactly the ids the report used.
-  const all: PositionWithValuations[] = [];
-  const read = new Set<number>();
-  for (let offset = 0; ; offset += POSITION_PAGE) {
-    const page = await reader.listPositions({ offset });
-    const entries = page.slice(0, POSITION_PAGE);
-    const late = await recordedAfterCutoff(
-      env.DB,
-      entries.map((entry) => entry.position.id),
-      cutoffMs,
-    );
-    for (const entry of entries) {
-      if (late.has(entry.position.id) || read.has(entry.position.id)) continue;
-      read.add(entry.position.id);
-      all.push(entry);
-    }
-    if (all.length > maxRows || page.length <= POSITION_PAGE) break;
-  }
+  const all = await readPositionCut(env.DB, reader, cutoffMs, maxRows);
+  if (all === null) return { ...empty, skipped: "snapshot_changed" };
   const truncated = all.length > maxRows;
   const positions = all.slice(0, maxRows);
 
