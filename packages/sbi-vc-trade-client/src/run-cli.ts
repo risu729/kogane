@@ -57,14 +57,23 @@ export async function runCli(
 }
 
 function safeFailure(error: unknown): { errorType: string; httpStatus?: number } {
-  const name = error instanceof Error ? error.name : "UnknownError";
   const status = error instanceof GatewayError ? error.httpStatus : undefined;
   return {
-    errorType: ERROR_TYPES.has(name) ? name : "UnknownError",
+    errorType: closedErrorType(error),
     ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
       ? { httpStatus: status }
       : {}),
   };
+}
+
+/** One of `ERROR_TYPES`, else `UnknownError`; a `name` getter that throws names nothing. */
+function closedErrorType(error: unknown): string {
+  try {
+    const name = error instanceof Error ? error.name : undefined;
+    return typeof name === "string" && ERROR_TYPES.has(name) ? name : "UnknownError";
+  } catch {
+    return "UnknownError";
+  }
 }
 
 function parseArgs(values: readonly string[]): Args {

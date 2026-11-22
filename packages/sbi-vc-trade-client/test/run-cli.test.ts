@@ -77,6 +77,31 @@ describe("local CLI output", () => {
     expect(run.err.join("\n")).not.toContain(MARKER);
   });
 
+  test.each([
+    ["a custom name", Object.assign(new Error(MARKER), { name: MARKER })],
+    ["a non-Error value", MARKER],
+    [
+      "a throwing name getter",
+      Object.defineProperty(new Error(MARKER), "name", {
+        get() {
+          throw new Error(MARKER);
+        },
+      }),
+    ],
+  ])("a session failure with %s is UnknownError", async (_label, thrown) => {
+    const run = harness(() => Response.json({ meta: { status: "OK" }, body: {} }));
+    run.deps.readSessionFile = async () => {
+      throw thrown;
+    };
+    expect(await runCli(ARGS, run.deps)).toBe(1);
+    expect(JSON.parse(run.err[0]!)).toEqual({
+      status: "failed",
+      stage: "session",
+      errorType: "UnknownError",
+    });
+    expect(run.err.join("\n") + run.out.join("\n")).not.toContain(MARKER);
+  });
+
   test("a successful run prints counts only", async () => {
     const run = harness(() =>
       Response.json({ meta: { status: "OK" }, body: { list: [], totalSize: 0 } }),

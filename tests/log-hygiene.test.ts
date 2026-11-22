@@ -127,12 +127,6 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "matched against exact runtime phrases; only the mapped closed reason is kept",
   },
-  "services/collector-sbi-shinsei/src/local/cli.ts": {
-    count: 1,
-    reason:
-      "local operator CLI on the operator's own terminal: the collector's own literal messages, " +
-      "credential-shaped values redacted and bounded; nothing from the provider is thrown with text",
-  },
   "services/collector-sbi-vc-trade/src/documents.ts": {
     count: 1,
     reason:
@@ -178,12 +172,6 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
   "services/collector-st-george/src/worker-policy.ts": {
     count: 1,
     reason: "compared with the lease refusal code only; the message is never logged or returned",
-  },
-  "services/collector-vpoint-pay/src/state.ts": {
-    count: 1,
-    reason:
-      "the redacted failure message of a run the disabled app path can no longer start; " +
-      "the terminal and the log line carry closed codes only",
   },
   "services/processor/src/schedule-alarm.ts": {
     count: 1,

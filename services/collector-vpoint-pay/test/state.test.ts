@@ -143,6 +143,7 @@ describe("V Point Pay run counts are reported only when the collection finished"
     inquiryPeriod?: string;
     failingPath?: string;
     noTransactions?: boolean;
+    thrown?: unknown;
   }) {
     setSystemTime(new Date("2026-08-31T00:00:00Z"));
     const lines: Array<Record<string, unknown>> = [];
@@ -152,6 +153,7 @@ describe("V Point Pay run counts are reported only when the collection finished"
       });
     spyOn(globalThis, "fetch").mockImplementation((async (input: string | URL | Request) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
+      if (Object.hasOwn(options, "thrown")) throw options.thrown;
       if (options.failingPath !== undefined && url.pathname.endsWith(options.failingPath))
         return new Response(PRIVATE, { status: 503 });
       if (url.pathname.endsWith("/token"))
@@ -235,5 +237,35 @@ describe("V Point Pay run counts are reported only when the collection finished"
       expect(Object.hasOwn(result, field)).toBe(false);
       expect(Object.hasOwn(line, field)).toBe(false);
     }
+  });
+
+  // The run's failure entry states closed codes only: a thrown name is
+  // whatever its thrower chose and a message can carry provider text, so
+  // neither is kept (docs/collection.md, `v-point-pay`).
+  test.each([
+    ["a custom name", Object.assign(new Error(PRIVATE), { name: "PrivateProviderName" })],
+    ["a non-Error value", PRIVATE],
+    [
+      "a throwing name getter",
+      Object.defineProperty(new Error(PRIVATE), "name", {
+        get() {
+          throw new Error(PRIVATE);
+        },
+      }),
+    ],
+  ])("a failure thrown with %s is stored as closed codes", async (_label, thrown) => {
+    const { result } = await run({ stored: credential, thrown });
+    expect(result.status).toBe("failed");
+    expect(result.failures).toEqual([
+      { operation: "collect", errorType: "UnknownError", message: "operation_failed" },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("Private");
+    expect(JSON.stringify(result)).not.toContain(PRIVATE);
+  });
+  test("a provider HTTP failure keeps its own closed name and code", async () => {
+    const { result } = await run({ stored: credential, failingPath: "/balance" });
+    expect(result.failures).toEqual([
+      { operation: "collect", errorType: "VPointPayHttpError", message: "provider_http_failed" },
+    ]);
   });
 });

@@ -365,6 +365,31 @@ export interface SafeErrorDetails {
   code?: string;
 }
 
+/**
+ * A thrown value's name as a closed code. An error's `name` is whatever its
+ * thrower chose (a provider page script or a dependency included), so a log
+ * line or a stored record carries it only when it is one of `ERROR_TYPES` or
+ * one of the caller's own error names; any other name, a thrown value that is
+ * not an `Error`, and a `name` getter that throws read `UnknownError`.
+ */
+export function closedErrorType(error: unknown, own: readonly string[] = []): string {
+  try {
+    return error instanceof Error ? closedErrorName(error.name, own) : "UnknownError";
+  } catch {
+    return "UnknownError";
+  }
+}
+
+/**
+ * A name received as data (from a container or another process), checked the
+ * way `closedErrorType` checks a thrown one.
+ */
+export function closedErrorName(name: unknown, own: readonly string[] = []): string {
+  return typeof name === "string" && (ERROR_TYPES.has(name) || own.includes(name))
+    ? name
+    : "UnknownError";
+}
+
 export function safeErrorDetails(error: unknown): SafeErrorDetails {
   try {
     return inspectError(error);
@@ -380,7 +405,7 @@ function inspectError(error: unknown): SafeErrorDetails {
     typeof stepCode === "string" ? GLOBALPASS_STEP_CATEGORIES.get(stepCode) : undefined;
   const details: SafeErrorDetails = {
     category: "unknown",
-    errorType: ERROR_TYPES.has(name) ? name : "UnknownError",
+    errorType: closedErrorName(name),
   };
   if (!(error instanceof Error)) return details;
   // An exception message is inspected only for known shapes; it is never emitted.
