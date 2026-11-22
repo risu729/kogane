@@ -33,6 +33,12 @@ import {
 import { displayLabel } from "../labels.ts";
 import { Link, navigate } from "../router.tsx";
 import { Badge, EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
+import {
+  PlanRefreshNotice,
+  PlanRefreshScope,
+  PlanRefusal,
+  usePlanRefresh,
+} from "../plan-refresh.tsx";
 
 const VIEWS: { view: InstrumentCandidateView; label: string; empty: string }[] = [
   { view: "open", label: "確認待ち", empty: "確認待ちの候補はありません。" },
@@ -62,7 +68,9 @@ function DecisionActions({
 }): ReactNode {
   const features = useFeatures();
   const [reason, setReason] = useState("");
+  const refresh = usePlanRefresh();
   const plan = useMutation({
+    ...refresh,
     mutationFn: (decision: CandidateDecision) =>
       planCandidateDecision(candidate, decision, reason, { anchor, subject }),
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
@@ -105,11 +113,7 @@ function DecisionActions({
           別の銘柄として扱う内容を確認
         </button>
       </div>
-      {plan.isError ? (
-        <Notice tone="bad" inline role="alert">
-          {plan.error.message}
-        </Notice>
-      ) : null}
+      <PlanRefusal error={plan.error} />
       {features.known && !features.commands ? (
         <p className="footnote">この接続先では確認操作が有効になっていません。</p>
       ) : null}
@@ -241,7 +245,7 @@ export function InstrumentCandidatesPage(): ReactNode {
   const current = VIEWS.find((entry) => entry.view === view)!;
   if (!features.known) return <Loading label="銘柄の同一性の候補" />;
   return (
-    <>
+    <PlanRefreshScope queryKeys={[["instrument-candidates"]]}>
       <div className="page-head">
         <h1>銘柄の同一性の候補</h1>
         <p className="lede">
@@ -252,6 +256,7 @@ export function InstrumentCandidatesPage(): ReactNode {
           <Link to="/identities">口座・銘柄の整理に戻る</Link>
         </p>
       </div>
+      <PlanRefreshNotice />
       {!features.identities ? (
         <EmptyState>この接続先は銘柄の整理を提供していません。</EmptyState>
       ) : (
@@ -337,6 +342,6 @@ export function InstrumentCandidatesPage(): ReactNode {
           </QueryBoundary>
         </Panel>
       )}
-    </>
+    </PlanRefreshScope>
   );
 }

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
@@ -1403,4 +1403,113 @@ describe.if(runnable)("card settlement review", () => {
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);
+
+  /** Answers every plan with the refusal the server gives, as `fail` in the Processor does. */
+  async function refusePlans(page: Page, status: number, error: string): Promise<void> {
+    await page.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status,
+        json: { error, refs: [`card-settlement:${review.proposalId}`] },
+      }),
+    );
+  }
+
+  /** The next answer to a read of the candidate list or of one candidate. */
+  function nextRead(page: Page, view: "statements" | "detail") {
+    return page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return view === "statements"
+        ? url.pathname === "/api/v2/reconciliation/card-settlements/statements"
+        : url.pathname === "/api/v2/reconciliation/card-settlements" &&
+            url.searchParams.has("proposalId");
+    });
+  }
+
+  test("a plan refused as stale reads the list again, and a candidate accepted meanwhile shows its refusal at the top", async () => {
+    const page = await open();
+    // After the list was shown, the candidate was accepted elsewhere: the
+    // server refuses to plan its acceptance (`stale_context`, not proposed).
+    review = { ...review, status: "accepted", revision: 1 };
+    await refusePlans(page, 409, "stale_context");
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = nextRead(page, "statements");
+    await page.getByRole("button", { name: "採用内容を確認", exact: true }).click();
+    await reread;
+    // The card reads accepted, collapsed as an accepted candidate starts; its
+    // own refusal is hidden with it, so the page shows it and moves focus there.
+    const notice = page.getByRole("alert").filter({ hasText: "読み直した表示には" });
+    await notice.waitFor();
+    expect(await notice.innerText()).toContain("対象が変更されました");
+    expect(await notice.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(await page.locator(".settlement-head .badge").first().innerText()).toBe("採用済み");
+    expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(0);
+    expect(new URL(page.url()).pathname).toBe("/reconciliation");
+    await page.close();
+  });
+
+  test("on a candidate's own page, a stale refusal reads it again and keeps the refusal on the card", async () => {
+    const page = await open(`/reconciliation/${review.proposalId}`);
+    review = { ...review, status: "accepted", revision: 1 };
+    detailRevision = 1;
+    await refusePlans(page, 409, "stale_context");
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = nextRead(page, "detail");
+    await page.getByRole("button", { name: "採用内容を確認", exact: true }).click();
+    await reread;
+    // The accepted candidate offers its withdrawal instead; the pressed
+    // button is gone, so focus moves to the refusal beside it.
+    await page.getByRole("button", { name: "採用を解除する内容を確認", exact: true }).waitFor();
+    const alert = page.locator(".settlement-decision").getByRole("alert");
+    await page.waitForFunction(
+      () => !!document.activeElement?.closest(".settlement-decision [role=alert]"),
+    );
+    expect(await alert.innerText()).toContain("対象が変更されました");
+    expect(await page.getByRole("alert").count()).toBe(1);
+    await page.close();
+  });
+
+  test("a candidate that is gone is read again on its own page", async () => {
+    const page = await open(`/reconciliation/${review.proposalId}`);
+    await refusePlans(page, 400, "target_missing");
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = nextRead(page, "detail");
+    await page.getByRole("button", { name: "却下内容を確認", exact: true }).click();
+    await reread;
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "対象の記録が見つかりません" })
+      .first()
+      .waitFor();
+    expect(posted.filter((row) => row.operation === "plan")).toEqual([]);
+    await page.close();
+  });
+
+  test("a plan pinned to a newer revision than shown reads the list again", async () => {
+    planRevision = 1;
+    const page = await open();
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = nextRead(page, "statements");
+    await page.getByRole("button", { name: "却下内容を確認", exact: true }).click();
+    await reread;
+    await page.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/reconciliation");
+    await page.close();
+  });
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const page = await open();
+    const lists: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/api/v2/reconciliation/card-settlements"))
+        lists.push(request.url());
+    });
+    // As the planner answers a candidate whose facts are not eligible.
+    await refusePlans(page, 400, "needs_scope_resolution");
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await page.getByRole("button", { name: "却下内容を確認", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "口座や保有者の対応が未解決です" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(lists).toEqual([]);
+    await page.close();
+  });
 });

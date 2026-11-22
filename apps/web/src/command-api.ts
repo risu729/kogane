@@ -110,6 +110,35 @@ export class CommandError extends Error {
   }
 }
 
+/**
+ * A plan the page refused itself because what it showed has changed since it
+ * was read: the candidate read again before planning differs, or the plan
+ * pinned another revision than the one on screen.
+ */
+export class StalePlanError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StalePlanError";
+  }
+}
+
+/**
+ * The plan refusals that mean "the item changed since the page read it", so
+ * the page reads it again (`PlanRefreshScope`): `stale_context` (the item is
+ * no longer in the state the plan needs, or a pin moved) and `target_missing`
+ * (the item is gone), the two codes the plan route answers about its target,
+ * and the page's own `StalePlanError`. No other refusal (a missing grant, an
+ * invalid payload, evidence or scope that is not ready, a budget) says the
+ * page is behind.
+ */
+export function planRefusedAsStale(error: unknown): boolean {
+  return (
+    error instanceof StalePlanError ||
+    (error instanceof CommandError &&
+      (error.code === "stale_context" || error.code === "target_missing"))
+  );
+}
+
 function refusalIsFinal(status: number, code: string): boolean {
   return (
     code === "budget_exceeded" ||

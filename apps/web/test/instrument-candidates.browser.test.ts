@@ -510,4 +510,66 @@ describe.if(runnable)("instrument candidate review", () => {
     expect(await auditView(tab)).toEqual([]);
     await tab.close();
   }, 60_000);
+
+  test("a plan the server refuses as stale reads the list again and keeps the refusal on the card", async () => {
+    const tab = await open();
+    const first = (await page("open", 0)).items[0] as ReviewCandidate;
+    // As the server answers a candidate whose pins moved after the read before planning.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status: 409,
+        json: { error: "stale_context", refs: [first.candidateId] },
+      }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = tab.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/identity/instrument-candidates" &&
+        !url.searchParams.has("identifierId")
+      );
+    });
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "対象が変更されました" }).waitFor();
+    await reread;
+    // The candidate is still listed: its refusal stays on its card, and focus
+    // stays on the card (on the pressed button, or on the refusal when the
+    // button had let it go while the plan was in flight).
+    await card.getByRole("alert").filter({ hasText: "対象が変更されました" }).waitFor();
+    await tab.waitForFunction(() =>
+      document.querySelector(".identity-card")?.contains(document.activeElement),
+    );
+    expect(await tab.getByRole("alert").count()).toBe(1);
+    expect(tab.url()).toContain("/identities/instrument-candidates");
+    await tab.close();
+  });
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const tab = await open();
+    const lists: string[] = [];
+    tab.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === "/api/identity/instrument-candidates" &&
+        !url.searchParams.has("identifierId")
+      )
+        lists.push(url.search);
+    });
+    // As the App answers a subject this deployment grants nothing.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({ status: 403, json: { error: "subject_not_granted" } }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "権限が付与されていません" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(lists).toEqual([]);
+    await tab.close();
+  });
 });
