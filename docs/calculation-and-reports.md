@@ -480,6 +480,32 @@ Three operations are deliberately distinct:
 An agent therefore cannot rewrite a submission through one ambiguous
 "regenerate".
 
+The report job writes in this order: the `building` run, its results in one
+batch, the body and explanation node in R2, then one batch that marks the run
+`complete` and inserts the `report_artifacts` row and its `generated` event.
+A run is therefore never marked `complete` by this job before its artifact
+exists: a failure at any earlier step (an R2 write, a refused batch, an
+interrupted invocation) leaves the run `building` with no artifact, and the
+next sweep over the same inputs, whose run id is the same manifest digest,
+offers the same results again (`ON CONFLICT DO NOTHING`), rewrites the same
+content-addressed bytes and finishes it. If the inputs change first, that run
+stays `building` with its results and no artifact; no report names it, and
+nothing removes it. Before this order, the run was marked
+`complete` ahead of the R2 writes, so a failure between the two left a
+complete run no report named, and every later sweep over that manifest was
+refused by `calculation_results_run_building`, which fires before the conflict
+clause is considered. A run in that state is finished too: the job reads the
+run's status first and, when it is already `complete`, offers no results (the
+run already holds them, since they were written before it was marked) and
+writes only the artifact and its event; the run's status, `completed_at` and
+results are left as they are. The `generated` event is inserted only when
+the report has none, so two jobs that both found the same run unfinished
+write one artifact and one event. The Processor's tick is dispatched by the
+single `processor-tick` alarm, so two report jobs do not normally overlap;
+the status read and the results batch are separate statements, and a job
+whose results batch meets a run another job has just finished fails that
+tick and reuses the report on the next.
+
 ### Listing and the 評価レポート pages
 
 [ADR 0072](adr/0072-report-artifact-pages.md) adds the catalogue and the
@@ -684,6 +710,13 @@ would discard later collection and later decisions (docs/operations.md).
   (`packages/read-model/test/dated-state.test.ts` for its quantity read).
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
+- `services/processor/test/report-job-retry.test.ts` — a failed R2 write
+  and a refused artifact batch each leave the run `building` with no
+  artifact, and the next run finishes it and is then reused; a batch D1
+  itself refuses part-way rolls the completion back; a complete run with its
+  results and no artifact, as the earlier order could leave, is finished
+  without a new result; two concurrent jobs over the same run write one
+  artifact and one `generated` event.
 - `services/processor/test/reports.test.ts` — migration 0034 on
   0017-0037, append-only triggers, retention-class seed, the flag, provider
   value beside own valuation (AT30), reuse, a corrected price giving a new
