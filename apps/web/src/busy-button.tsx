@@ -3,7 +3,7 @@
 // not `disabled`: a focused element that becomes disabled loses focus to the
 // document body, so a keyboard user who pressed it would be thrown back to the
 // top of the page when the answer, a refusal included, arrives
-// (docs/ui-guidelines.md). The same rule as the pager buttons.
+// (docs/ui-guidelines.md). The same rule as the shell's 表示を更新.
 import type { ReactNode } from "react";
 
 export function BusyButton({

@@ -89,9 +89,12 @@ page passes when:
   page. The shell's 表示を更新 and the review pages' plan buttons
   (`BusyButton` on 口座の対応候補, 銘柄の同一性の候補, 請求と引落の照合候補,
   口座の保有者を確認 and カード利用の説明) do this, and the review pages'
-  browser tests check that focus stays after a refusal. Open limit: the
-  pagers, the schedules page's writes and the confirmation screen's 承認する
-  and 確定する still become `disabled` while their request is in flight.
+  browser tests check that focus stays after a refusal. Open limit: these
+  still become `disabled` while their request is in flight and drop focus:
+  the cursor pagers and their read-again buttons on 監査ログ, 依頼の一覧 and
+  the evidence browser's lists, the operation page's 最新の状態を読み直す,
+  a failed read's 再試行, the schedules page's writes, and the confirmation
+  screen's 承認する, 確定する and 反映状況を再確認.
 - Every visible table has a caption (visually hidden when the panel title
   already says it) and every header cell a `scope`; every `.table-scroll` is
   a named `role="region"` with `tabIndex={0}` at every width. Anything else
