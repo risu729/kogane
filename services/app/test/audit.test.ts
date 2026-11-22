@@ -444,6 +444,46 @@ describe("the operations routes (ui)", () => {
       },
     ]);
   });
+
+  it("a percent-encoded spelling of a route is 404 and stores nothing, so no request goes unrecorded", async () => {
+    // The path that names the operation and the path that runs it are one
+    // path: a spelling the operation classifier does not know is never served.
+    const operations = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+    const before = await operations();
+    const body = {
+      source: "sony-bank",
+      requestedScope: { from: "2026-01-01", to: "2026-01-31" },
+      idempotencyKey: "audit-encoded-path",
+    };
+    for (const [method, path] of [
+      ["POST", "/api/ops/v1/coll%65ctions"],
+      ["POST", "/api/ops/v1/%63ollections"],
+      ["POST", "/api/ops/v1/project%69ons"],
+      ["POST", "/api/ops/v1/sessions/sony-bank/refres%68"],
+      ["GET", "/api/ops/v1/operation%73"],
+    ] as const) {
+      const answer = await call(path, method === "POST" ? { body } : {});
+      expect(answer.response.status, path).toBe(404);
+      expect(await answer.response.json(), path).toMatchObject({ error: "not_found" });
+      expect(await recordsOf(answer.requestId), path).toEqual([]);
+    }
+    expect(await operations()).toBe(before);
+    // The variable segment may be encoded: the route is named, served and recorded.
+    const accepted = await call("/api/ops/v1/sessions/sony%2Dbank/refresh", {
+      body: { idempotencyKey: "audit-encoded-segment" },
+    });
+    expect(accepted.response.status).toBe(202);
+    const { operationId } = (await accepted.response.json()) as { operationId: string };
+    expect((await recordsOf(accepted.requestId)).map(brief)).toMatchObject([
+      { operation: "ops.session.refresh", result: "accepted" },
+    ]);
+    const read = await call(`/api/ops/v1/operations/%6F${operationId.slice(1)}`);
+    expect(read.response.status).toBe(200);
+    expect((await recordsOf(read.requestId)).map(brief)).toMatchObject([
+      { operation: "ops.operation.get", result: "read" },
+    ]);
+  });
 });
 
 describe("another site's Origin on the command and operations routes (ADR 0078)", () => {
@@ -509,6 +549,18 @@ describe("the schedule settings routes (ui)", () => {
     expect(conflict.response.status).toBe(409);
     expect(
       (await recordsOf(conflict.requestId)).map((row) => [row["result"], row["result_code"]]),
+    ).toEqual([["refused", "revision_conflict"]]);
+    // The answer crosses as its bytes, a leading byte-order mark included; the
+    // record reads a decoded copy, which drops the mark as a text read did, so
+    // the refusal keeps its closed code.
+    const conflictBytes = new TextEncoder().encode('{"error":"revision_conflict"}');
+    const marked = await settings(
+      "/sony-bank",
+      () => new Response(new Uint8Array([0xef, 0xbb, 0xbf, ...conflictBytes]), { status: 409 }),
+    );
+    expect(marked.response.status).toBe(409);
+    expect(
+      (await recordsOf(marked.requestId)).map((row) => [row["result"], row["result_code"]]),
     ).toEqual([["refused", "revision_conflict"]]);
     const saved = await settings(
       "/leases/sony-bank",
@@ -905,9 +957,86 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     } finally {
       await env.DB.prepare("DROP TRIGGER review_audit_write_fails").run();
     }
-    // The proposal tool answers any failed append with its existing code.
-    expect(answer).toMatchObject({ status: 409, body: { code: "idempotency_conflict" } });
+    // Nothing was recorded, so this is the store's failure, never a duplicate
+    // the agent is told not to resend (`idempotency_conflict`).
+    expect(answer).toEqual({
+      status: 500,
+      body: { error: "internal_error", requestId: expect.any(String) },
+    });
     expect(await rows()).toEqual(before);
+  });
+
+  it("a proposal whose batch fails is internal_error on both transports, recorded once as failed", async () => {
+    const count = async () =>
+      (await env.DB.prepare(
+        "SELECT (SELECT count(*) FROM decision_revisions) AS decisions,(SELECT count(*) FROM entity_relations) AS relations",
+      ).first<{ decisions: number; relations: number }>())!;
+    const before = await count();
+    const body = (reason: string) => ({
+      kind: "same_account",
+      from: `source_account:${sourceAccounts[0]}`,
+      to: `source_account:${sourceAccounts[1]}`,
+      evidenceRefs: [`fetch_artifact:${artifactId}`],
+      reason,
+      method: "ai",
+    });
+    // The relation insert, the batch's second statement, raises: the
+    // decision before it is rolled back, and the audit log itself still works.
+    await env.DB.prepare(
+      "CREATE TRIGGER review_relation_write_fails BEFORE INSERT ON entity_relations BEGIN SELECT RAISE(ABORT,'synthetic_relation_failure'); END",
+    ).run();
+    let answers: { path: string; requestId: string; status: number; text: string }[];
+    try {
+      const http = await call("/api/agent/v1/reconcile.propose", {
+        subject: AGENT,
+        body: body("synthetic proposal whose batch fails over http"),
+      });
+      const mcp = await call("/mcp", {
+        via: "mcp",
+        subject: AGENT,
+        headers: MCP_HEADERS,
+        body: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "kogane.reconcile.propose",
+            arguments: body("synthetic proposal whose batch fails over mcp"),
+          },
+        },
+      });
+      answers = [];
+      for (const [path, sent] of [
+        ["agent-http", http],
+        ["mcp", mcp],
+      ] as const)
+        answers.push({
+          path,
+          requestId: sent.requestId,
+          status: sent.response.status,
+          text: await sent.response.text(),
+        });
+    } finally {
+      await env.DB.prepare("DROP TRIGGER review_relation_write_fails").run();
+    }
+    for (const answer of answers) {
+      expect(answer.status, answer.path).toBe(500);
+      expect(answer.text, answer.path).not.toContain("synthetic_relation_failure");
+      expect(JSON.parse(answer.text), answer.path).toEqual({
+        error: "internal_error",
+        requestId: answer.requestId,
+      });
+      expect(
+        (await recordsOf(answer.requestId)).map((row) => [
+          row["path"],
+          row["operation"],
+          row["result"],
+          row["result_code"],
+        ]),
+        answer.path,
+      ).toEqual([[answer.path, "reconcile.propose", "failed", "internal_error"]]);
+    }
+    expect(await count()).toEqual(before);
   });
 });
 

@@ -268,10 +268,10 @@ describe("collection quality", () => {
     }
   });
 
-  it("serves one source's cells regrouped by account, unpaged, and writes nothing (ADR 0088)", async () => {
+  it("serves one source's cells regrouped by account, unpaged in full, and writes nothing (ADR 0088)", async () => {
     const before = await counts();
     const path = `${PATH}/sony-bank/accounts`;
-    const response = await call(path);
+    const response = await call(`${path}?detail=full`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = (await response.json()) as {
@@ -280,7 +280,8 @@ describe("collection quality", () => {
       accounts: unknown[];
       unattributed: { dataset: string | null; state: string }[];
     };
-    expect(validApiResponse(path, body)).toBe(true);
+    expect(validApiResponse(path, body, "full")).toBe(true);
+    expect(validApiResponse(path, body, "summary")).toBe(false);
     // The path names the source the answer is about; another source's path refuses it.
     expect(validApiResponse(`${PATH}/vpass/accounts`, body)).toBe(false);
     expect(body.sourceId).toBe("sony-bank");
@@ -290,13 +291,33 @@ describe("collection quality", () => {
     expect(body.unattributed).toMatchObject([
       { dataset: "yen-history-page-0001", state: "current" },
     ]);
+    // The default is the summary (ADR 0123, amendment 2026-11-20): the same
+    // cell on one line, counted.
+    const summary = await call(path);
+    expect(summary.status).toBe(200);
+    const lines = (await summary.json()) as Record<string, unknown>;
+    expect(validApiResponse(path, lines, "summary")).toBe(true);
+    expect(validApiResponse(path, lines, "full")).toBe(false);
+    expect(lines).toMatchObject({
+      detail: "summary",
+      sourceId: "sony-bank",
+      cells: 1,
+      accounts: [],
+      unattributed: [
+        { dataset: "yen-history-page-0001", cells: 1, current: 1, olderCurrent: 0, noCurrent: 0 },
+      ],
+      coverage: { accounts: 0, unattributedCells: 1, lines: 1, offset: 0, truncated: false },
+    });
     for (const [refusedPath, status, code] of [
       [`${PATH}/no-such-source/accounts`, 404, "not_found"],
       [`${PATH}/kogane-synthetic/accounts`, 404, "not_found"],
       [`${PATH}/Sony_Bank/accounts`, 404, "not_found"],
       [`${PATH}/accounts/accounts`, 404, "not_found"],
       [`${PATH}/sony-bank/accounts/extra`, 404, "not_found"],
-      [`${path}?offset=0`, 400, "invalid_query"],
+      [`${path}?detail=full&offset=0`, 400, "invalid_query"],
+      [`${path}?detail=compact`, 400, "invalid_query"],
+      [`${path}?view=accounts`, 400, "invalid_query"],
+      [`${path}?offset=x`, 400, "invalid_offset"],
     ] as const) {
       const refused = await call(refusedPath);
       expect(refused.status, refusedPath).toBe(status);

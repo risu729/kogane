@@ -1,6 +1,6 @@
 # ADR 0120: One readable label per account, and a per-account identity list
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1473](https://github.com/risu729/kogane/pull/1473))
 - Date: 2026-11-20
 - Tracking: [issue 1357](https://github.com/risu729/kogane/issues/1357),
   [issue 1414](https://github.com/risu729/kogane/issues/1414)

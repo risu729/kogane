@@ -125,11 +125,16 @@ writer fencing and captured CORE references; the contract is in
 | `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                    |
 | `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
 | `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                      |
-| `stale`      | The newest published attempt over the same source and dataset did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                        |
+| `stale`      | The newest published attempt over the same source, dataset and fetch unit did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                            |
 
 Freshness is recorded separately (`current` / `stale` / `unknown`) with the
 `snapshotEligibility` reason code of the failing claim, so "we could not
-observe" is never rendered as "the balance is gone".
+observe" is never rendered as "the balance is gone". The attempt compared is
+the newest published coverage claim of the candidate's own fetch unit (an
+artifact with no unit is its own group), as the latest-balance query keys a
+measurement by its unit: another card or connection of the same dataset can
+neither re-observe the scope nor fail to, so its newer attempt neither marks
+the row stale nor hides the failure of the row's own unit.
 
 ### Build budgets
 
@@ -195,7 +200,11 @@ Each latest item carries:
   evidence count is the number of witnesses of one measurement, which is not
   the number of balances shown (addendum 11 §4);
 - `temporal` — a `TemporalReference`: a date stays a date, an instant keeps its
-  offset, and anything else is `unknown` with a reason;
+  offset, and anything else is `unknown` with a reason. An instant is named
+  by its fixed-offset zone (`+09:00` is `Etc/GMT-9`) only for a whole-hour
+  offset a zone uses, -12:00 to +14:00; any other offset, `+15:00` say,
+  which the domain parses but no zone uses, is `unknown` with
+  `offset_zone_unsupported`;
 - `freshness` — `{ state, reasonCode }`.
 
 The latest page also carries `subtotals`:
@@ -223,7 +232,22 @@ a subject that appears twice in the same unit makes the subtotal unavailable
 several units (an exchange account's cash per asset, a broker's foreign cash
 per currency) counts once in each unit's figure: the subtotal is per unit, so
 that is not a second count of anything. Above 5,000 adopted rows the subtotal
-is `null` with `scope_exceeds_subtotal_bound`.
+is `null` with `scope_exceeds_subtotal_bound`. The subject is the provider
+reference: an account entity reached through two references of one source
+that the within-source policy lists apart is added once per reference here
+(an open limit; the cash read below counts neither).
+
+`GET /api/v2/balances/cash` (`kogane.balances.read` `collection: cash`)
+answers the same snapshot's cash per account: one line per account entity
+with its references and amounts, exact subtotals per unit and per source, and
+every other latest measurement counted under a closed reason. Its counted
+amounts are the known-assets subtotal's, except that two adopted amounts of
+one unit on one account entity are both left uncounted with
+`cash:account_reported_twice`. Its lines page under the cursor below, whole
+lines up to `limit` measurements and 8 KB a page; its page and the rules of what is cash are
+in [agent API: UI read pages](agent-api.md#ui-read-pages) and
+[ADR 0123](adr/0123-summary-detail-for-large-reads.md) (amendment of
+2026-11-20).
 
 ### Cursor contract
 
@@ -260,7 +284,12 @@ page is not bound to its cursor either: a page read as `summary` continues as
 `full` and the reverse.
 
 The reader is never moved silently to a newer list. "Read the newest
-snapshot" is an explicit action: drop the cursor.
+snapshot" is an explicit action: drop the cursor. Under `identityRead: latest`
+the organization overlay (labels, mapping revision) is re-read on each page,
+while membership and order stay pinned: the rows come from the cursor's
+snapshot (for history, the record up to its high-water parse run), and only
+their organization is read again per page (`organizeRows` in
+`services/app/src/balances-v2.ts`).
 
 Order is the recorded effective time descending, then the scope key
 ascending, made dense as `row_seq`. A row with no recorded time sorts last and
@@ -275,6 +304,22 @@ read. Its `dataCoverage.completeness` is always `unknown`: a history window is
 not a membership claim. It is not bounded by the 5,000 candidate limit, so it
 routinely holds more rows than the latest list.
 
+The pin is a parse run id, not a moment: `balanceHistoryKeysetSql` keeps the
+rows of the parse runs visible now (`recordedParses`) whose id is at most the
+high-water mark, and visibility is read again on every page. A parse run with
+an id at most the mark that becomes visible after the snapshot was built can
+therefore still add rows between two pages (a snapshot that is behind stays
+pageable): a release activation publishes its candidate runs, a rollback
+publishes the run the activation replaced, and a run still `pending` when the
+snapshot was built that is later marked `error` (an interrupted parse) is
+visible with the observations it had already written. A row that sorts after
+the cursor then appears on a later page, and one that sorts before it is not
+shown on that walk. The run an activation or a rollback moves the pointer
+away from is no longer published, and neither path sets its
+`superseded_by_parse_run_id`, so unless it was already marked superseded it
+stops being visible and its rows drop out of the later pages. That is an open
+limit; dropping the cursor reads the history again from the first page.
+
 ## Capabilities and the v1 route
 
 `/api/meta` advertises `balancesV2` and `balancesV2Pagination` only when a
@@ -283,7 +328,10 @@ is present and answer `503 read_model_unavailable` until that snapshot is
 published. With no READ binding those paths answer 404. The v1 routes keep
 `paginationVersion: "offset-v1"`.
 
-`/api/balances` is unchanged. When READ is bound and a snapshot is published
+`/api/balances` keeps its rows. Its default answer on the central store is a
+summary of the rows ([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
+amendment of 2026-11-20), and `detail=full` gives the list unchanged. When
+READ is bound and a snapshot is published
 it is served through a compat adapter over the same projection — identical
 rows, order, offset window and `interpretation` record, proved by a parity
 test on one synthetic fixture. The adapter declines when the snapshot is
@@ -363,9 +411,14 @@ invocation, committing each chunk with its checkpoint in one batch; after the
 last row the written rows are verified against the build, and the snapshot is
 sealed and published in one further batch, so a reader that selects
 `status='complete'` never observes a partial build. Two complete snapshots are
-retained so a reader with an open cursor survives one rebuild; older builds are
-retired first and only then lose their rows, and the published one is never
-retired.
+retained so a reader with an open cursor survives one rebuild. An older build
+is retired and loses its rows in one batch (`retireOldSnapshots`,
+`abandonSnapshot` in `packages/storage-d1/src/read/writer.ts`): a failed batch
+leaves it as it was (`complete` or `building`) with its rows for the next pass,
+never retired with rows no pass selects again. The published one is never
+retired: the retirement restates that in its own statement, so a build the
+pointer is switched to after the selection read it stays complete, and
+abandoning a build another writer has sealed leaves it as it is.
 
 Rebuild is currently whole-context, not per scope: the snapshot id changes on
 any published parse, and the build recomputes every candidate. That is bounded

@@ -277,3 +277,56 @@ on-demand old-parse explanation, original evidence links, navigation while a
 read is pending, locally contained refusal/unavailable/malformed/mismatched
 answers, and excluded card/non-transaction details. These are synthetic test
 contracts, not production acceptance or evidence of writer enablement.
+
+## Amendment 2026-11-21: the panel's loading and failure through the shared boundary
+
+- Status: accepted (merged 2026-11-22 in [#1521](https://github.com/risu729/kogane/pull/1521))
+- Date: 2026-11-21
+
+### Context
+
+The transaction-detail panel drew its own loading line and failure notice: the
+failure had no retry, no `role="alert"` and its own words
+(新規作成の条件を取得できませんでした), and a failed refresh hid the earlier
+answer, so that it was never displayed as current. Every other read on the web
+client goes through `QueryBoundary`
+([frontend](../frontend.md#shared-primitives)), which keeps an earlier answer
+under an alert after a failed refresh.
+
+Keeping an earlier answer is safe here only because the answer gates nothing:
+the panel offers no action, no button is enabled from it, and the wire guard
+above rejects any answer whose writer or proposal flag is enabled, so even an
+outdated 識別条件を満たしています cannot start an economic event. Should a
+writer or a create action ever be offered from this panel, it must re-read the
+diagnostic (and the server re-check it) instead of trusting a shown answer.
+
+### Options considered
+
+1. Keep the panel's own states. Rejected: no retry and no alert.
+2. Add a retry to the panel's own states. Rejected: a second copy of the
+   shared boundary's wording and rules.
+3. Move the panel onto `QueryBoundary`. Chosen.
+
+### Decision
+
+The panel reads through `QueryBoundary` labelled 新規作成の条件. A first read
+that fails shows the shared error state (an alert naming the read, the fixed
+message for its status or the correlation refusal, and 再試行). A refresh that
+fails keeps the earlier answer under the shared alert
+更新できませんでした。前回読み込んだ新規作成の条件を表示しています。 with its
+retry, so the earlier answer is labelled and never shown as current; while a
+refresh is in flight the earlier answer stays under 新規作成の条件を更新中…. A
+`401` or `403` hides it. Failure stays local to the panel, the read stays on
+demand and keyed as above, and nothing else in this ADR changes.
+
+### Consequences
+
+The owner keeps the earlier explanation in view through a transient failure
+instead of losing it, and retries in place. The earlier answer is visibly
+labelled as earlier; it was hidden before.
+
+### Verification
+
+`apps/web/test/economic-readiness.browser.test.ts` covers each failure as an
+alert with its retry, a retry that reads the diagnostic again, and a failed
+refresh that labels the earlier answer and clears the alert on retry.

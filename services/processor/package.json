@@ -8,12 +8,12 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "@types/node": "26.6.6",
-    "cf": "1.0.0-rc.0",
+    "cf": "1.0.0-rc.2",
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
-    "undici": "8.12.4",
-    "wrangler": "4.163.0"
+    "undici": "8.13.1",
+    "wrangler": "4.166.0"
   }
 }

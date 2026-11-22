@@ -16,7 +16,7 @@ import {
   dispatchDecisionOutbox,
   type OutboxRow,
 } from "../src/decision-outbox.ts";
-import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { publishParse, seedArtifact, seedUnitRun, startPipeline } from "./harness.ts";
 import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
@@ -493,4 +493,89 @@ test("a later decision on a relation triple supersedes an earlier one in the pro
       .filter((row) => row.id.startsWith("rel_sup_"))
       .map((row) => row.id),
   ).toEqual(["rel_sup_1", "rel_sup_3", "rel_sup_5", "rel_sup_7", "rel_sup_8", "rel_sup_a"]);
+}, 60000);
+
+test("freshness reads the newest attempt over the candidate's own fetch unit", async () => {
+  // Two connections of one source and dataset, each its own fetch unit (as a
+  // per-card collector catalogues them). Synthetic ids and amounts only.
+  const source = "unit-freshness-test";
+  const dataset = "unit-balances";
+  const attempt = async (id: number, unit: string, failed: boolean, account: string | null) => {
+    await seedUnitRun(env, {
+      id,
+      source,
+      dataset,
+      runOutcome: "success",
+      units: [
+        {
+          id,
+          key: unit,
+          outcome: "success",
+          artifacts: [{ id, key: `${unit}/b.json`, payload: { id } }],
+        },
+      ],
+    });
+    const run = await parse(id, "unit-freshness-fixture");
+    if (account !== null) await balance(run, account, "cash", 100, "2026-09-08");
+    // A failed attempt publishes a claim that observed nothing; a complete
+    // one replaces the previous capture of its unit.
+    await env.DB.prepare(
+      `INSERT INTO parse_coverage_claims
+         (parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,
+          expected_count,evidence_refs_json,policy_version,failure_cause,absence_meaning,
+          parent_run_status,parent_run_failure_count)
+       VALUES (?1,?2,?3,'complete-container',?4,?5,?6,NULL,'[]','coverage-v1',?7,?8,'success',0)`,
+    )
+      .bind(
+        run,
+        `cov:unit:${String(id)}`,
+        `${source}/${dataset}/${unit}`,
+        failed ? "unknown" : "complete",
+        failed ? 0 : 1,
+        failed ? 0 : 1,
+        failed ? "fetch_failed" : null,
+        failed ? "not-observed" : "not-applicable",
+      )
+      .run();
+  };
+  const freshness = async () => {
+    const result = await runBalanceProjection(on());
+    expect(result.status).toBe("complete");
+    const rows = await env.READ.prepare(
+      `SELECT source_account,state,freshness,freshness_reason FROM current_balance_projection
+       WHERE snapshot_id=?1 AND source_id=?2 ORDER BY source_account`,
+    )
+      .bind(result.snapshotId, source)
+      .all<Record<string, unknown>>();
+    return rows.results;
+  };
+
+  await attempt(601, "conn-a", false, "unit:a");
+  await attempt(602, "conn-b", false, "unit:b");
+  // Connection b's newest attempt failed. Connection a's own newest attempt
+  // re-observed its balance, so only b's row is stale.
+  await attempt(603, "conn-b", true, null);
+  expect(await freshness()).toEqual([
+    { source_account: "unit:a", state: "adopted", freshness: "current", freshness_reason: null },
+    {
+      source_account: "unit:b",
+      state: "stale",
+      freshness: "stale",
+      freshness_reason: "no_new_observation",
+    },
+  ]);
+
+  // Connection a's newest attempt fails and connection b succeeds after it:
+  // b's success re-observes nothing of a, so a's row is stale, not current.
+  await attempt(604, "conn-a", true, null);
+  await attempt(605, "conn-b", false, "unit:b");
+  expect(await freshness()).toEqual([
+    {
+      source_account: "unit:a",
+      state: "stale",
+      freshness: "stale",
+      freshness_reason: "no_new_observation",
+    },
+    { source_account: "unit:b", state: "adopted", freshness: "current", freshness_reason: null },
+  ]);
 }, 60000);

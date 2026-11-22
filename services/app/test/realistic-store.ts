@@ -39,8 +39,15 @@ async function route(source: string): Promise<void> {
   ]);
 }
 
+/** The names one account is seeded under; the defaults are the realistic store's. */
+interface AccountNames {
+  rawAccount: string;
+  label: string;
+  metrics: readonly string[];
+}
+
 /** One account's published parse with ten balances, organized under a synthetic label. */
-async function seedAccount(index: number): Promise<void> {
+export async function seedAccount(index: number, names?: AccountNames): Promise<void> {
   const source = SOURCES[index % SOURCES.length]!;
   const run = await seedRun({ count: 1, source });
   const parse = await env.DB.prepare(
@@ -50,11 +57,12 @@ async function seedAccount(index: number): Promise<void> {
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
   await publishParse(parse!.id, "2026-11-18T21:06:00Z");
-  const rawAccount = `synthetic-account-${String(index).padStart(3, "0")}`;
+  const rawAccount = names?.rawAccount ?? `synthetic-account-${String(index).padStart(3, "0")}`;
+  const metrics = names?.metrics ?? METRICS;
   const ids: number[] = [];
-  for (const [position, metric] of METRICS.entries()) {
+  for (const [position, metric] of metrics.entries()) {
     // Every eleventh value is unparsed: a non-exact value keeps its reason.
-    const unparsed = (index * METRICS.length + position) % 11 === 0;
+    const unparsed = (index * metrics.length + position) % 11 === 0;
     const minor = String(100_000 + index * 7_919 + position * 104_729);
     const row = await env.DB.prepare(
       `INSERT INTO balance_observations
@@ -89,7 +97,12 @@ async function seedAccount(index: number): Promise<void> {
     ),
     env.DB.prepare(
       `INSERT INTO account_mappings VALUES (?,?,1,?,'rule','provider-scope',1,'2026-11-18T21:07:00Z',?,'provider-local')`,
-    ).bind(`${prefix}am`, `${prefix}ref`, entity, `合成カード口座（カード${index}）`),
+    ).bind(
+      `${prefix}am`,
+      `${prefix}ref`,
+      entity,
+      names?.label ?? `合成カード口座（カード${index}）`,
+    ),
     env.DB.prepare("INSERT INTO instruments VALUES (?,'money','日本円','identified')").bind(unit),
     env.DB.prepare("INSERT INTO instrument_identifiers VALUES (?,'iso-4217',?,'JPY','{}')").bind(
       `${prefix}identifier`,
@@ -157,9 +170,14 @@ async function seedOccurrences(): Promise<void> {
   await env.DB.batch(statements);
 }
 
+/** Give each source the realistic store spreads accounts over its ingest route. */
+export async function routeSources(): Promise<void> {
+  for (const source of SOURCES) await route(source);
+}
+
 /** Seed the store once; `seedRegistry` must have run. */
 export async function seedRealisticStore(): Promise<void> {
-  for (const source of SOURCES) await route(source);
+  await routeSources();
   for (let index = 0; index < REALISTIC_ACCOUNTS; index++) await seedAccount(index);
   await runBalanceProjection(
     { ...env, BALANCE_PROJECTION_ENABLED: "1", READ_PROJECTION_ENABLED: "true" } as never,

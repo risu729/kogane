@@ -30,6 +30,8 @@ import {
 } from "../src/dated-state";
 import { parserModules } from "../../parsers/scripts/parser-digests";
 import { PARSERS } from "../../parsers/src/parsers/registry";
+import { snapshotCtes } from "../../parsers/src/snapshot-query";
+import { SNAPSHOT_RELATIONS } from "../src/concepts";
 import { DatedStore } from "./dated-state-fixture";
 
 const SBI = {
@@ -206,6 +208,43 @@ describe("the snapshot a cutoff chooses", () => {
     expect(snapshots(store, "2026-09-10").map((row) => row.parser_name)).not.toContain(
       "sony-bank-gross-balance",
     );
+  });
+
+  test("MoneyForward, an aggregator, is neither read nor expected, though its policy selects", () => {
+    // The aggregator restates accounts the direct sources list (ADR 0019,
+    // decision 2). Its detail container has a selecting policy row (0091), so
+    // the perimeter must leave it out by source, not rely on the policy table.
+    const store = new DatedStore();
+    store.capture({
+      source: "moneyforward-me",
+      dataset: "account-detail",
+      parser: "moneyforward-detail-balances",
+      version: "1.0.1",
+      unitKey: "synthetic-connection",
+      claim: "complete",
+      fetchedAt: "2026-09-08T01:00:00Z",
+      balances: [
+        {
+          account: "moneyforward-me:synthetic-connection",
+          metric: "reported_account_value_jpy",
+          instrument: "JPY",
+          minor: 1_000,
+        },
+      ],
+    });
+    store.capture({ ...SMBC, fetchedAt: "2026-09-08T02:00:00Z", balances: [] });
+    // The MoneyForward capture is complete and eligible as the current state's.
+    expect(
+      all<{ n: number }>(
+        store,
+        `WITH ${snapshotCtes(SNAPSHOT_RELATIONS)} SELECT count(*) AS n FROM current_snapshots WHERE source_id='moneyforward-me'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    expect(balances(store, "2026-09-10")).toEqual([]);
+    const perimeter = snapshots(store, "2026-09-10");
+    expect(perimeter.map((row) => row.perimeter_source_id)).not.toContain("moneyforward-me");
+    expect(perimeter.map((row) => row.source_id)).not.toContain("moneyforward-me");
+    expect(perimeter.map((row) => row.parser_name)).toContain("smbc-direct-balance");
   });
 });
 

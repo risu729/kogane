@@ -26,6 +26,7 @@ import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import {
+  IdentityObservationBoundExceeded,
   INSTRUMENT_AUTO_ADOPTION_LANE,
   instrumentAutoAdoptionLane,
 } from "./instrument-auto-adoption.ts";
@@ -81,6 +82,7 @@ import {
 import {
   collectionScan,
   handleTerminalNotification,
+  safeFailureCode,
   type ScanSummary,
 } from "./collection/index.ts";
 import {
@@ -94,7 +96,11 @@ import {
 import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
 import { collectorBinding } from "./collector-binding.ts";
 import { dispatchOperations, type CollectorRpc, type DispatchEnv } from "./operations/dispatch.ts";
-import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
+import {
+  RewardClaimWriteRefused,
+  rewardClaimsEnabled,
+  rewardClaimsStage,
+} from "./reward-claims-job.ts";
 import {
   rewardReadProjectionEnabled,
   rewardReadProjectionStage,
@@ -131,7 +137,60 @@ const LEASE_MS = 10 * 60 * 1000;
 const MAX_ISSUES = 10_000;
 const ISSUE_CHUNK = 500;
 const MAX_COVERAGE_CLAIMS = 100;
-class PipelineError extends Error {}
+/** The closed codes the pipeline throws; a failed lane may be logged and recorded with one. */
+const PIPELINE_CODES = [
+  "artifact_not_eligible",
+  "artifact_too_large",
+  "metadata_release_unknown",
+  "observation_limit_exceeded",
+  "observation_payload_too_large",
+  "observation_row_too_large",
+  "parse_contract_invalid",
+  "parse_lease_expired",
+  "parse_run_insert_failed",
+  "parser_no_longer_accepts",
+  "parser_release_conflict",
+  "parser_version_invalid",
+  "raw_checksum_mismatch",
+  "raw_object_missing",
+  "raw_size_mismatch",
+  "release_manifest_mismatch",
+] as const;
+type PipelineCode = (typeof PIPELINE_CODES)[number];
+class PipelineError extends Error {
+  readonly code: PipelineCode;
+  constructor(code: PipelineCode) {
+    super(code);
+    this.code = code;
+  }
+}
+/**
+ * The Processor's own lane errors whose class is their documented code
+ * (docs/rewards.md, ADR 0055), matched by identity, never by name.
+ */
+const LANE_ERROR_CLASSES = [
+  [RewardClaimWriteRefused, "RewardClaimWriteRefused"],
+  [IdentityObservationBoundExceeded, "IdentityObservationBoundExceeded"],
+] as const;
+/**
+ * The code a failed lane or queue message is logged with, and a failed lane
+ * tick stored with (docs/processor.md §6.1): a pipeline code, one of the
+ * lane error classes above, else the error's built-in class
+ * (`safeFailureCode`: `TypeError`, `Error`, …, or `unknown`). Never a class
+ * name or message the thrower chose, and it never throws, whatever the value.
+ */
+function laneFailureCode(error: unknown): string {
+  try {
+    if (error instanceof PipelineError) {
+      const code: unknown = error.code;
+      if ((PIPELINE_CODES as readonly unknown[]).includes(code)) return code as PipelineCode;
+    }
+    for (const [type, code] of LANE_ERROR_CLASSES) if (error instanceof type) return code;
+  } catch {
+    // A hostile proxy may throw while instanceof walks its prototype chain.
+  }
+  return safeFailureCode(error);
+}
 interface ArtifactRow {
   id: number;
   fetch_run_id: number;
@@ -1254,7 +1313,7 @@ async function inspectPlan(env: Env, id: number): Promise<Response> {
     .all<{ status: string; count: number }>();
   const jobs = { pending: 0, running: 0, done: 0, failed: 0 };
   for (const row of counts.results)
-    if (row.status in jobs) jobs[row.status as keyof typeof jobs] = row.count;
+    if (Object.hasOwn(jobs, row.status)) jobs[row.status as keyof typeof jobs] = row.count;
   // The plan owns only its attached jobs. Show matching work left in other
   // lanes too, so zero created jobs cannot be mistaken for completed parsing.
   const scopeJobs = await env.DB.prepare(`SELECT j.lane,j.status,
@@ -1421,26 +1480,31 @@ async function replayCommand(env: Env, action: string, request: Request): Promis
   return refused ?? inspectPlan(env, id);
 }
 
-async function status(env: Env): Promise<Response> {
-  const now = Date.now();
-  const jobs = await env.DB.prepare(
-    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
-  ).all();
-  const laneRows = await env.DB.prepare(
-    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
-  ).all<{ lane: Lane; status: string; count: number; oldest: number | null }>();
-  const lanes: Record<
-    Lane,
-    Record<"pending" | "running" | "done" | "failed", number> & {
-      oldestPendingAgeMs: number | null;
-    }
-  > = {
+interface LaneJobRow {
+  lane: string;
+  status: string;
+  count: number;
+  oldest: number | null;
+}
+
+type LaneJobCounts = Record<"pending" | "running" | "done" | "failed", number> & {
+  oldestPendingAgeMs: number | null;
+};
+
+/** The `lanes` block of `/status`: parse-job counts per lane the 0035 CHECK
+ * allows. A stored lane outside them is skipped; the own-key lookup keeps a
+ * name such as `__proto__` or `constructor` from reaching an inherited member. */
+export function laneJobCounts(
+  rows: readonly LaneJobRow[],
+  now: number,
+): Record<Lane, LaneJobCounts> {
+  const lanes: Record<Lane, LaneJobCounts> = {
     incremental: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
     repair: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
     replay: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
   };
-  for (const row of laneRows.results) {
-    const lane = lanes[row.lane];
+  for (const row of rows) {
+    const lane = Object.hasOwn(lanes, row.lane) ? lanes[row.lane as Lane] : undefined;
     if (!lane) continue;
     if (
       row.status === "pending" ||
@@ -1451,6 +1515,18 @@ async function status(env: Env): Promise<Response> {
       lane[row.status] = row.count;
     if (row.oldest !== null) lane.oldestPendingAgeMs = now - row.oldest;
   }
+  return lanes;
+}
+
+async function status(env: Env): Promise<Response> {
+  const now = Date.now();
+  const jobs = await env.DB.prepare(
+    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
+  ).all();
+  const laneRows = await env.DB.prepare(
+    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
+  ).all<LaneJobRow>();
+  const lanes = laneJobCounts(laneRows.results, now);
   const workItems = await env.DB.prepare(
     "SELECT count(*) AS unprocessed,min(enqueued_at_ms) AS oldest FROM observation_work_items WHERE processed_at_ms IS NULL",
   ).first<{ unprocessed: number; oldest: number | null }>();
@@ -2039,12 +2115,7 @@ export async function runScheduled(
       log(JSON.stringify({ event, ...result }));
       tick = { outcome: "ran", result };
     } catch (error) {
-      const code =
-        error instanceof PipelineError
-          ? error.message
-          : error instanceof Error
-            ? error.constructor.name
-            : "unknown";
+      const code = laneFailureCode(error);
       // Whether the platform refused the invocation at a documented limit is
       // the one thing the probe keeps from the error; the text is dropped.
       const limit = platformLimitError(error);
@@ -2109,13 +2180,8 @@ export async function consumeTerminalNotifications(
       }
       observation.finish("ran", result);
     } catch (error) {
-      // Safe codes only: never the exception text, never a key or a value.
-      const code =
-        error instanceof PipelineError
-          ? error.message
-          : error instanceof Error
-            ? error.constructor.name
-            : "unknown";
+      // Closed codes only: never the exception text, a class name, a key or a value.
+      const code = laneFailureCode(error);
       const limit = platformLimitError(error);
       if (limit) context.limitErrors += 1;
       event = { event: "collection_notification_failed", code, ...(limit ? { limit: true } : {}) };

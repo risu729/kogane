@@ -537,7 +537,9 @@ bounds is not declared captured. These manifest-based ranges do not prove the
 aggregator's underlying provider data is fresh or its full history is retained;
 one `terminal` report carries the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
-aggregator currently shows) listing the accounts as `unitKeys`.
+aggregator currently shows) listing the accounts as `unitKeys`. Every account
+is asked for the same 12 JST calendar months, computed once from the run's
+`startedAt` ([source notes](sources/moneyforward.md#collection-surfaces-and-run-boundaries)).
 
 The unit key is the account identity the parser requires,
 `moneyforward-account-v2-<64 hex>`
@@ -555,6 +557,21 @@ carries `identity: derived` or one closed code (`identity_tuple_absent`,
 themselves. The parsers also accept the importer's `moneyforward-account-v1-`
 identities, which are a different account from the v2 identity of the same
 service ([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
+
+Run result: `runSharedCollection` returns the run's id, status, artifact and
+failure counts, persistence outcome and terminal key. `accountDetailCount` and
+`monthlyFragmentCount` are in that result and in the collector's
+`manifest.json` only when the collection finished; a finished run with no
+account reports a known 0 for both. A run that stopped earlier (no credential,
+a refused sign-in, a refused account or month page) never learned them, so
+they are absent, not 0 (INV05); its failure code is the reason. Such a run is
+`failed` and keeps no artifact, so it writes no `manifest.json` at all. A
+`success` input that carries no `accountDetailCount` cannot be checked against
+its identities, so its units stay positional (`identity_incomplete`;
+[ADR 0027, amendment 2026-11-21](adr/0027-moneyforward-collector-account-identity.md#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)). Until
+2026-11-21 a stopped run reported both counts as 0 in its result. Verified
+with a synthetic passkey provider behind a mocked `fetch` in
+`services/collector-moneyforward/test/diagnostics.test.ts`.
 
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
@@ -939,6 +956,20 @@ page stops the collection (`premature-end`) instead of ending the walk: an
 early end of history has not been observed. Only the first V Money page may
 answer with an empty `results`, read as an empty history.
 
+`results.total` is read as a count only when the page states one: a
+non-negative safe integer number, or a string of at most 16 ASCII digits whose
+value is a safe integer. Anything else (`null`, an empty or blank string, a
+boolean, an array, an exponent or hex string, a fraction) stops the collection
+as `invalid-total`. Until 2026-11-21 `Number()` read most of these as 0, so a
+page of rows under a missing total ended the walk as a complete history of zero
+rows (INV05). A page whose rows carry the walk past the stated total stops it as
+`rows-exceed-total`: the walk ends only on a page whose rows reach the total
+exactly. Both are synthetic cases in
+`services/collector-vpoint/test/vpoint.test.ts`; neither shape has been
+observed. Like every other stopped walk, these keep no page: `collectVPoint`
+returns no artifacts, so the run's terminal is `failed` with no artifact, not
+a `partial` run of its finished pages.
+
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the
 bytes are `Response.text()` encoded again as UTF-8, the same content but not
@@ -963,6 +994,18 @@ stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 `safeErrorCode` from the run's first safe failure code (`collector_failed` when
 a failure carried none). `ranges` and `reports` are empty; `transformations`
 holds the `reencoded` steps above.
+
+Run outcome and log: `runCollection` returns the run's manifest, and the
+`vpoint-collection-persisted` log line carries its status, counts and closed
+codes (artifact, failure and object counts, terminal outcome, key and digest,
+and `reasonCode` when the terminal was not written). `historyTotal`,
+`historyPageCount`, `vMoneyHistoryTotal` and `vMoneyHistoryPageCount` are in
+both only when both history walks finished. A run that stopped earlier (no
+session, a refused read, a stopped walk) never learned them, so they are
+absent, not 0 (INV05); its failure codes are the reason. Until 2026-11-21
+such a run reported all four as 0. Verified with mocked `fetch` responses and
+a session stub with no session in
+`services/collector-vpoint/test/diagnostics.test.ts`.
 
 Not carried over: the V Point Pay email reconciliation report. It was built by
 listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
@@ -1042,6 +1085,26 @@ When the month window is unknown — a run that failed before the balance
 response — the scope is `unspecified` and no range is stated rather than a
 guessed one.
 
+Run outcome and log: the Durable Object's `runCollection` returns the run's
+manifest. Its failure entry is `{operation, errorType, message}` in closed
+codes only: `errorType` is one of the collector's own error names
+(`VPointPayHttpError`, `VPointPayProtocolError`,
+`VPointPayReauthenticationRequiredError`,
+`VPointPayCredentialConfigurationError`) or of the shared set of
+`closedErrorType` (`packages/collector-diagnostics`), else `UnknownError`,
+and `message` is the failure's machine code above. Until 2026-11-22 the entry
+kept the thrown `name` as it was and a redacted provider message. The
+`vpoint-pay-collection-persisted` log line carries its
+status, month bounds, counts and closed codes (artifact and failure counts,
+terminal outcome, key and digest). `transactionMonthCount` and
+`transactionCount` are in both only when the collection finished; a finished
+run whose months hold no transaction reports a known 0. A run that stopped
+earlier (no credential, a refused token, balance or month request) never
+learned them, so they are absent, not 0 (INV05); its failure codes are the
+reason. Until 2026-11-21 such a run reported both as 0. Verified with a mocked
+`fetch` and a stub Durable Object storage in
+`services/collector-vpoint-pay/test/state.test.ts`.
+
 This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
 answer 410, there is no cron, and the notification mail this source is actually
 observed through is collected by `services/collector-vpoint` as
@@ -1084,6 +1147,20 @@ collector proved it reached the end of the history; an unproven boundary is
 The media type in the terminal is `text/html`: `terminal-v1` media types carry
 no parameters, and `text/html` is what the central descriptor already declares
 for this artifact, with the CP932 charset a constant of the source.
+
+Run log: the `mobile-suica-collection-persisted` line carries the run's
+status, counts and closed codes (artifact and failure counts, terminal
+outcome, key and digest, and `reasonCode` when the terminal was not written).
+`transactionCount` and `pageCount` are in it, and in the run's returned
+manifest, only when the history walk finished; a finished walk over an empty
+history reports a known 0 transactions on its one page. A run that stopped
+earlier (no credential, a failed browser bootstrap, a refused or invalid
+history page) never learned them, so they are absent, not 0 (INV05); its
+failure code is the reason. The pages a stopped walk kept are counted in
+`artifactCount`, not as its `pageCount`. Until 2026-11-21 a stopped run
+reported a transaction count of 0 and its kept pages as its page count.
+Verified with a stubbed browser bootstrap and a mocked `fetch` in
+`services/collector-mobile-suica/test/run-counts.test.ts`.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
@@ -1428,7 +1505,18 @@ Processor maps it to the CORE source `global-pass`), producer
   the month or any text. A page the sanitizer refuses still counts in its
   month's decision.
 - Failure entries have the keys `operation`, `errorType`, `errorCode`,
-  `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
+  `artifactKey`, and on a sanitizer refusal also `expectationCode`.
+  `errorType` is a closed code, never a thrown `name` as such: a name is
+  whatever its thrower chose, a page script's included. The Worker keeps a
+  name only when it is in the shared set of `closedErrorType`
+  (`packages/collector-diagnostics`) or is its own `CollectionContractError`
+  or `PaginationError`; the container sends `Error`, `TypeError`,
+  `SyntaxError`, `TimeoutError` or `AbortError` (`closedErrorType` in
+  `container/diagnostics.mjs`), and the Worker checks a received name against
+  the same shared set. Any other name, a thrown value that is not an `Error`
+  and a `name` getter that throws are `UnknownError` (until 2026-11-22 any
+  identifier-shaped name was kept; `test/worker-collection.test.ts`,
+  `test/container-collection.test.mjs`). A page
   the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with
   the check's closed code: `globalpass_html_contract_invalid`,
   `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed` or
@@ -1556,6 +1644,28 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   still excludes that whole account unit. Neither another run's successful
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
+- Failure codes: a thrown error becomes a code through `classifyError`
+  (`src/error-code.ts`) for the manifest's failure of the session load and
+  list reads and its `account` and `full-cashflows` units, and for the
+  `reports` failure and `report-year-range` unit when the report step throws
+  as a whole (so the terminal's `safeErrorCode`); for the session health
+  record's
+  `lastErrorCode` (prefixed with the keepalive stage) and
+  `lastReauthErrorCode`; and for the `sbi_vc_keepalive` and `sbi_vc_reauth`
+  log lines. The per-report and leverage units keep their own closed sets,
+  else `report_collection_failed` / `leverage_execution_collection_failed`.
+  `classifyError` keeps a message only when it is one of the collector's own
+  codes (`SBI_VC_ERROR_CODES`, hyphens folded to underscores) or
+  `collector_http_<status>` / `passkey_http_<status>` with a three-digit
+  status from 100 to 599; any other message, however code-shaped, gives
+  `json_parse_failed`, a `crypto_*` code, `type_error` or `unexpected_error`
+  by the error's class. It never throws: a `message` or `name` getter or a
+  prototype read that throws only takes that step away.
+  `test/error-code.test.ts` checks that every error the collector's sources
+  construct takes a whole literal in the set, one of the reviewed message
+  templates the set covers, or the classified crypto code. Until 2026-11-22
+  any lowercase code-shaped message was kept as it was; records written
+  before then are not rewritten.
 - `transformations`: one `redacted` step per JSON dataset
   (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
   is not retained. Each PDF/ZIP document states an `extracted` step instead.

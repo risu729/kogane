@@ -38,6 +38,14 @@ export function periodMeasureSql(source: string, parser: string, metric: string)
   return `((${source} = 'myjcb' AND ${parser} LIKE 'myjcb-credit-past-month-balances@%' AND ${metric} = 'credit_statement_payment_amount') OR (${source} = 'v-point' AND ${parser} LIKE 'v-point-smfg-point@%' AND ${metric} = 'displayed_point_balance') OR (${source} = 'myjcb' AND ${parser} LIKE 'myjcb-jpoint-history@%' AND ${metric} IN ('jpoint_acquisition_earned','jpoint_acquisition_used','jpoint_acquisition_expired')))`;
 }
 
+/**
+ * True for a row whose `as_of` starts with a real calendar date
+ * (`YYYY-MM-DD`): the only rows a `from`/`to` window can place. A null
+ * `as_of`, a year-month, an impossible day and any other text make it NULL or
+ * false, so `(CALENDAR_DATED_AS_OF) IS NOT 1` is its exact complement.
+ */
+export const CALENDAR_DATED_AS_OF = "date(substr(as_of,1,10), '+0 days') = substr(as_of,1,10)";
+
 export interface Predicates {
   where: string;
   args: unknown[];
@@ -63,7 +71,7 @@ export function scopePredicates(scope: CollectionScope, allowed: readonly ScopeK
   }
   if (scope.from || scope.to) {
     // Only rows whose as_of starts with a real calendar date take part in a range.
-    predicates.push("date(substr(as_of,1,10), '+0 days') = substr(as_of,1,10)");
+    predicates.push(CALENDAR_DATED_AS_OF);
     if (scope.from) {
       predicates.push("substr(as_of,1,10) >= ?");
       args.push(scope.from);

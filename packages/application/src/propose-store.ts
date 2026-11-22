@@ -38,6 +38,7 @@ function observationSql(kind: keyof typeof OBSERVATION_TABLES): string {
     WHERE o.id = ?`;
 }
 
+const PROPOSAL_RECORDED_SQL = `SELECT 1 AS found FROM decision_revisions WHERE id = ?`;
 const INSERT_DECISION = `INSERT INTO decision_revisions
  (id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,
   reason,evidence_refs_json,previous_revision,superseded_by,created_at)
@@ -77,6 +78,11 @@ export function commandProposalStore(store: CommandStore, audit?: OperationCall)
         return resolve(observationSql(observation[1] as "transaction"), Number(observation[2]));
       const artifact = ARTIFACT_REF.exec(ref);
       return artifact ? resolve(ARTIFACT_SQL, Number(artifact[1])) : null;
+    },
+    async proposalRecorded(decisionRevisionId) {
+      return (
+        (await store.first<{ found: number }>(PROPOSAL_RECORDED_SQL, [decisionRevisionId])) !== null
+      );
     },
     async appendProposal(proposal: StoredProposal) {
       const evidence = JSON.stringify(proposal.evidenceRefs);
