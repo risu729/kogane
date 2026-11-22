@@ -1086,7 +1086,15 @@ response — the scope is `unspecified` and no range is stated rather than a
 guessed one.
 
 Run outcome and log: the Durable Object's `runCollection` returns the run's
-manifest, and the `vpoint-pay-collection-persisted` log line carries its
+manifest. Its failure entry is `{operation, errorType, message}` in closed
+codes only: `errorType` is one of the collector's own error names
+(`VPointPayHttpError`, `VPointPayProtocolError`,
+`VPointPayReauthenticationRequiredError`,
+`VPointPayCredentialConfigurationError`) or of the shared set of
+`closedErrorType` (`packages/collector-diagnostics`), else `UnknownError`,
+and `message` is the failure's machine code above. Until 2026-11-22 the entry
+kept the thrown `name` as it was and a redacted provider message. The
+`vpoint-pay-collection-persisted` log line carries its
 status, month bounds, counts and closed codes (artifact and failure counts,
 terminal outcome, key and digest). `transactionMonthCount` and
 `transactionCount` are in both only when the collection finished; a finished
@@ -1497,7 +1505,18 @@ Processor maps it to the CORE source `global-pass`), producer
   the month or any text. A page the sanitizer refuses still counts in its
   month's decision.
 - Failure entries have the keys `operation`, `errorType`, `errorCode`,
-  `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
+  `artifactKey`, and on a sanitizer refusal also `expectationCode`.
+  `errorType` is a closed code, never a thrown `name` as such: a name is
+  whatever its thrower chose, a page script's included. The Worker keeps a
+  name only when it is in the shared set of `closedErrorType`
+  (`packages/collector-diagnostics`) or is its own `CollectionContractError`
+  or `PaginationError`; the container sends `Error`, `TypeError`,
+  `SyntaxError`, `TimeoutError` or `AbortError` (`closedErrorType` in
+  `container/diagnostics.mjs`), and the Worker checks a received name against
+  the same shared set. Any other name, a thrown value that is not an `Error`
+  and a `name` getter that throws are `UnknownError` (until 2026-11-22 any
+  identifier-shaped name was kept; `test/worker-collection.test.ts`,
+  `test/container-collection.test.mjs`). A page
   the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with
   the check's closed code: `globalpass_html_contract_invalid`,
   `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed` or
