@@ -62,16 +62,16 @@ an older capture said.
 
 Listed (`dated-state-perimeter-v1`): every container in the snapshot policy
 table with `snapshot_selection = 1` and the artifact containers
-(`ARTIFACT_SNAPSHOT_CONTAINERS`), except the two aggregates below. Not listed,
-and named in `coverage.excluded`:
+(`ARTIFACT_SNAPSHOT_CONTAINERS`), except the two aggregates and the MoneyForward
+source below. Not listed, and named in `coverage.excluded`:
 
-| Scope                                    | Why                                                              |
-| ---------------------------------------- | ---------------------------------------------------------------- |
-| MoneyForward                             | An aggregator: it restates accounts the direct sources list      |
-| `sbi-account-assets-current`             | A provider total over the accounts the other SBI containers list |
-| `sony-bank-gross-balance`                | A provider total (assets and loans) over the Sony accounts       |
-| Balances restated after each transaction | Registry `timeBasis: event-reported`; counted in `excludedRows`  |
-| Reward units                             | Registry `unitDimension: reward`; counted in `excludedRows`      |
+| Scope                                    | Why                                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MoneyForward                             | An aggregator: it restates accounts the direct sources list (source `moneyforward-me`, left out by `DATED_STATE_EXCLUDED_SOURCES` although its detail container has a selecting policy row) |
+| `sbi-account-assets-current`             | A provider total over the accounts the other SBI containers list                                                                                                                            |
+| `sony-bank-gross-balance`                | A provider total (assets and loans) over the Sony accounts                                                                                                                                  |
+| Balances restated after each transaction | Registry `timeBasis: event-reported`; counted in `excludedRows`                                                                                                                             |
+| Reward units                             | Registry `unitDimension: reward`; counted in `excludedRows`                                                                                                                                 |
 
 A perimeter container with no snapshot before the cutoff is listed in
 `coverage.containersWithoutSnapshot` with `no_complete_snapshot_before_cutoff`.

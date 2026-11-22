@@ -199,6 +199,44 @@ describe("coverage", () => {
     expect(state.coverage.payablesFromPaymentDate).toBe("2026-08-10");
   });
 
+  test("MoneyForward is excluded as the coverage says: no account, no missing container", async () => {
+    // Before and after its first capture alike: the aggregator restates the
+    // direct sources' accounts, so it is never listed nor expected.
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.capture({
+      source: "moneyforward-me",
+      dataset: "account-detail",
+      parser: "moneyforward-detail-balances",
+      version: "1.0.1",
+      unitKey: "synthetic-connection",
+      claim: "complete",
+      fetchedAt: "2026-09-10T01:00:00Z",
+      balances: [
+        {
+          account: "moneyforward-me:synthetic-connection",
+          metric: "reported_account_value_jpy",
+          instrument: "JPY",
+          minor: 57_000,
+        },
+      ],
+    });
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    for (const state of [before, after]) {
+      expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward");
+      expect(state.accounts.map((a) => a.sourceId)).not.toContain("moneyforward-me");
+      expect(state.snapshots.map((s) => s.sourceId)).not.toContain("moneyforward-me");
+      expect(state.coverage.containersWithoutSnapshot.map((c) => c.sourceId)).not.toContain(
+        "moneyforward-me",
+      );
+      expect(validReportedState(JSON.parse(JSON.stringify({ apiVersion: 2, ...state })))).toBe(
+        true,
+      );
+    }
+    // Nothing the answer reads changed, so neither did its context.
+    expect(after.contextId).toBe(before.contextId);
+  });
+
   test("a date before every capture lists no account and names every container", async () => {
     const state = await queryDatedState(executor(holdings()), { date: "2026-09-01" });
     expect(state.accounts).toEqual([]);
