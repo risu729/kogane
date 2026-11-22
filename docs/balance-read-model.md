@@ -200,7 +200,11 @@ Each latest item carries:
   evidence count is the number of witnesses of one measurement, which is not
   the number of balances shown (addendum 11 §4);
 - `temporal` — a `TemporalReference`: a date stays a date, an instant keeps its
-  offset, and anything else is `unknown` with a reason;
+  offset, and anything else is `unknown` with a reason. An instant is named
+  by its fixed-offset zone (`+09:00` is `Etc/GMT-9`) only for a whole-hour
+  offset a zone uses, -12:00 to +14:00; any other offset, `+15:00` say,
+  which the domain parses but no zone uses, is `unknown` with
+  `offset_zone_unsupported`;
 - `freshness` — `{ state, reasonCode }`.
 
 The latest page also carries `subtotals`:
