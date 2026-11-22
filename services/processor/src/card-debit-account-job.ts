@@ -207,6 +207,21 @@ export async function debitAccountStatementForParse(
   };
 }
 
+/**
+ * The `smbc-direct-transactions` releases whose published transactions carry
+ * the selected account (`extra_json.$._kogane.bankAccount`) the debit-account
+ * policy compares (ADR 0034). A release is listed only once it is known to
+ * keep that context; a debit parsed by any other release stays uncomparable.
+ * The deployed release must be listed (card-debit-account.test.ts), so a
+ * parser bump cannot silently drop every new debit out of account matching
+ * and the readiness diagnostics.
+ */
+export const SMBC_DEBIT_CONTEXT_PARSER_VERSIONS = ["1.1.0", "1.1.1"] as const;
+/** The list above as SQL literals, for `parser_version IN (...)`. */
+export const SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL = SMBC_DEBIT_CONTEXT_PARSER_VERSIONS.map(
+  (version) => `'${version}'`,
+).join(",");
+
 /** How many source accounts of one bank the rule may be given; beyond this
  * uniqueness is not judged and the caller records nothing. */
 const KNOWN_BANK_ACCOUNT_LIMIT = 100;
@@ -249,7 +264,7 @@ export async function knownBankAccounts(
         JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
         WHERE t.id=?1 AND t.parse_run_id=?2 AND t.source_account=?3
           AND a.source_id='smbc-bank' AND p.parser_name='smbc-direct-transactions'
-          AND p.parser_version IN ('1.1.0','1.1.1')`)
+          AND p.parser_version IN (${SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL})`)
         .bind(Number(id), Number(parseRun), debit.sourceAccount)
         .first<{ extra_json: string }>();
       if (evidence) {

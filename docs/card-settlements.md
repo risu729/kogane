@@ -286,7 +286,13 @@ Limits:
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
   artifacts; parser releases 1.1.0 and 1.1.1 preserve this context, and both
-  qualify for account matching and readiness diagnostics. Policy v3 compares only the
+  qualify for account matching and readiness diagnostics
+  (`SMBC_DEBIT_CONTEXT_PARSER_VERSIONS` in
+  `services/processor/src/card-debit-account-job.ts`, read by both). A debit
+  parsed by any other release is uncomparable, so
+  `card-debit-account.test.ts` fails while the deployed
+  `smbc-direct-transactions` release is not listed: a parser bump adds it
+  there once it is known to keep the context. Policy v3 compares only the
   candidate debit's own published transaction/parse context and cites that
   observation. A later balance or another capture never supplies missing
   historical digits (ADR 0034). Unenriched account lists are cached once per
