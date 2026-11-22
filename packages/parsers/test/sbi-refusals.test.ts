@@ -182,6 +182,50 @@ describe("sbi-foreign-cash-balances demotes membership instead of skipping silen
     });
   });
 
+  test("a business date that is not a calendar YYYY-MM-DD date is no as_of and breaks membership", () => {
+    // The fixtures' schedule rows state `YYYY-MM-DD`; as_of ranks the latest
+    // balance by text, so any other value must never become one (0.2.2).
+    for (const businessDate of [
+      "2026-02-30",
+      "2026-13-01",
+      "",
+      "20260820",
+      "2026/08/20",
+      null,
+      7,
+    ]) {
+      const result = parse(usd([{ businessDate, daysLater: 0, keepCash: "10.00" }]));
+      const balance = result.observations[0];
+      if (balance?.kind !== "balance") throw new Error("expected balance");
+      expect(balance.asOf).toBeUndefined();
+      expect(balance).toMatchObject({ metric: "keep_cash", amountMinor: 1000 });
+      expect((balance.extra["row"] as Record<string, unknown>)["businessDate"]).toEqual(
+        businessDate,
+      );
+      expect(result.issues).toEqual([
+        {
+          code: "row_unreadable",
+          locator:
+            "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].businessDate",
+          severity: "error",
+          impact: "membership",
+          message:
+            "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].businessDate: not a calendar YYYY-MM-DD date; the row's balances carry no as_of",
+        },
+      ]);
+      expect(result.warnings).toEqual([result.issues![0]!.message]);
+      expect(result.coverage![0]).toMatchObject({
+        completeness: "partial",
+        membershipComplete: false,
+        failureCause: "row_unreadable",
+      });
+    }
+    const valid = parse(usd([{ businessDate: "2026-02-28", daysLater: 0, keepCash: "10.00" }]));
+    expect(valid.observations[0]?.asOf).toBe("2026-02-28");
+    expect(valid.issues).toEqual([]);
+    expect(valid.coverage![0]).toMatchObject({ completeness: "complete" });
+  });
+
   test("precision beyond the currency scale is kept as text, never rounded", () => {
     const result = parse(usd([{ businessDate: "2026-08-20", buyPossibleAmount: "1.005" }]));
     const balance = result.observations[0];

@@ -17,6 +17,42 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## SBI Securities: a foreign cash schedule date that is not a date is no as_of (cash balances 0.2.2)
+
+2026-11-22. `sbi-foreign-cash-balances` 0.2.1 copied a schedule row's
+`businessDate` into `as_of` whenever it was a string, so `2026-02-30`, an
+empty string, `20260820` or `2026/08/20` became an `as_of` with no issue and
+the container still claimed complete. The latest balance ranks by
+`COALESCE(as_of, observed_at, '')` as text, so such a value could outrank the
+real schedule dates of the same metric and currency; a stated non-string
+(`null`, a number) gave no `as_of`, also without an issue, leaving the row's
+day (T+0, T+2, ...) unstated. 0.2.2 reads only a calendar `YYYY-MM-DD` date,
+the form the repository's fixtures state and the only form the read model
+orders correctly. Any other stated value leaves
+`as_of` empty on that row's balances and records one `row_unreadable` issue
+of severity `error` and impact `membership` at
+`<row>.businessDate`, so the container is partial; its message names the
+locator only, never the value, which stays in `extra.row`. A row that states
+no `businessDate` at all is read as in 0.2.1. The replay diagnostics
+(`services/processor/scripts/parser-rejection.ts`) name the new issue by its
+field, `businessDate`. Every valid date reads exactly as in 0.2.1, and no
+other parser's digest changed.
+
+| Parser                    | Previous | Release |
+| ------------------------- | -------- | ------- |
+| sbi-foreign-cash-balances | 0.2.1    | 0.2.2   |
+
+**Deploying rewrites nothing**: stored 0.2.1 runs stay as they are; the
+processor registers 0.2.2 itself and the repair lane re-parses stored
+captures under it. No migration: the dataset's snapshot policy row
+(`legacy-warning-compat-v1`) pins no parser version, and the new issue's
+warning text is not one of the two that policy treats as harmless, so a
+capture with an unreadable date is not a complete snapshot under either
+policy. Limits: production was not read for this release, so whether any
+stored capture states another form is not established. Tests:
+`packages/parsers/test/sbi-refusals.test.ts`,
+`services/processor/test/parser-rejection.test.ts`.
+
 ## Vpass credit snapshots keep the card name (credit-snapshot 1.1.0)
 
 2026-11-20. Owner approval of the readable-label proposal, 2026-11-19 03:29
@@ -2956,8 +2992,9 @@ dataset, the `data` object of `GetForeignCashBalance`. It walks accounts
 provider metric per row — `buy_possible_amount`, `keep_cash`,
 `transfer_possible_amount`, `remaining_buy_possible_amount`,
 `amount_pay_value` — with `instrument` from `currencyCode`, `as_of` from
-`businessDate`, and the three-part `{ account, currencyEntry, row }`
-context in `extra`. It does not decide which of the five is "the" balance.
+`businessDate` when it is a calendar `YYYY-MM-DD` date (any other stated
+value is a membership issue and no `as_of`, 0.2.2), and the three-part
+`{ account, currencyEntry, row }` context in `extra`. It does not decide which of the five is "the" balance.
 All five coexist, which is what `docs/design.md` means by balances being
 measurements rather than columns. It is also the parser whose container
 handling is described above: malformed containers are warned about and
