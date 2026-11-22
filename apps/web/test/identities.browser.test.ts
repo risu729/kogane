@@ -299,14 +299,14 @@ describe.if(runnable)("identity coverage page", () => {
     try {
       await tab.getByRole("button", { name: "口座一覧", exact: true }).click();
       const pager = tab.getByRole("group", { name: "一覧のページ", exact: true });
-      await tab.getByText("一覧のページ：1–1件", { exact: true }).waitFor();
+      await tab.getByText(`一覧のページ：1–${ACCOUNT_LIST.length}件`, { exact: true }).waitFor();
       await pager.getByRole("button", { name: "次の100件", exact: true }).click();
       await tab.getByText("一覧のページ：表示なし", { exact: true }).waitFor();
       await tab.getByText("このページに表示する項目はありません。", { exact: false }).waitFor();
       expect(await tab.locator("main").innerText()).not.toContain("整理済みの口座がありません。");
       // The pager stays, so the owner can step back to rows that exist.
       await pager.getByRole("button", { name: "前の100件", exact: true }).click();
-      await tab.getByText("一覧のページ：1–1件", { exact: true }).waitFor();
+      await tab.getByText(`一覧のページ：1–${ACCOUNT_LIST.length}件`, { exact: true }).waitFor();
     } finally {
       await tab.close();
     }
