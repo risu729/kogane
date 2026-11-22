@@ -1,10 +1,19 @@
 // Read-only, in-memory parser diagnostic. Never print raw bytes, identifiers,
 // financial values, provider keys or unfiltered exception messages.
+//
+// Without flags it replays the oldest failed job of each parser (any release).
+// `--remaining` replays the newest failed job, and `--remaining-all` every
+// failed job, of `sbi-yen-detail-history` and `global-pass-activity` at the
+// release the parser registry of this checkout declares
+// (`remainingJobsPredicate`); to look at another release, run the script from
+// a checkout of that release. `--newest-sbi` replays the newest SBI Securities
+// cash-position and yen-history artifacts.
 import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import { parse } from "parse5";
+import { remainingJobsPredicate } from "./diagnose-selection.ts";
 import { classifyParserRejection, topActivityShape } from "./parser-rejection.ts";
 
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({
@@ -29,7 +38,7 @@ try {
     coalesce((SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_end) AS window_end
     FROM observation_fetch_artifacts a JOIN raw_objects o ON o.sha256=a.sha256
     JOIN observation_fetch_runs r ON r.id=a.fetch_run_id
-    WHERE a.id IN (${remaining ? `SELECT ${remainingAll ? "fetch_artifact_id" : "MAX(fetch_artifact_id)"} FROM observation_parse_jobs WHERE last_error_code IS NOT NULL AND ((parser_name='sbi-yen-detail-history' AND parser_version='1.0.1') OR (parser_name='global-pass-activity' AND parser_version='1.0.0')) ${remainingAll ? "" : "GROUP BY parser_name"}` : newestSbi ? `SELECT id FROM (SELECT id,ROW_NUMBER() OVER(PARTITION BY dataset ORDER BY fetched_at DESC,id DESC) AS rank FROM observation_fetch_artifacts WHERE source_id='sbi-securities' AND dataset IN ('domestic-cash-positions','yen-detail-history')) WHERE rank=1` : `SELECT MIN(fetch_artifact_id) FROM observation_parse_jobs WHERE last_error_code IS NOT NULL GROUP BY parser_name`})
+    WHERE a.id IN (${remaining ? `SELECT ${remainingAll ? "fetch_artifact_id" : "MAX(fetch_artifact_id)"} FROM observation_parse_jobs WHERE last_error_code IS NOT NULL AND ${remainingJobsPredicate()} ${remainingAll ? "" : "GROUP BY parser_name"}` : newestSbi ? `SELECT id FROM (SELECT id,ROW_NUMBER() OVER(PARTITION BY dataset ORDER BY fetched_at DESC,id DESC) AS rank FROM observation_fetch_artifacts WHERE source_id='sbi-securities' AND dataset IN ('domestic-cash-positions','yen-detail-history')) WHERE rank=1` : `SELECT MIN(fetch_artifact_id) FROM observation_parse_jobs WHERE last_error_code IS NOT NULL GROUP BY parser_name`})
     ORDER BY a.id`).all<{
     id: number;
     source_id: string;
