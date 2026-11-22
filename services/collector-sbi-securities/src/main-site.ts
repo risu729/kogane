@@ -136,9 +136,12 @@ export async function collectMainSiteArtifacts(options: {
     });
     return collectMailbox({
       client: new MailboxHttp(
-        // Only SBI cookies go to the mailbox client, which refuses any other domain.
+        // Only SBI cookies with an absolute path go to the mailbox client,
+        // which refuses anything else.
         (classic?.cookies ?? auth.cookies).filter(
-          (cookie) => cookie.domain === "sbisec.co.jp" || cookie.domain.endsWith(".sbisec.co.jp"),
+          (cookie) =>
+            (cookie.domain === "sbisec.co.jp" || cookie.domain.endsWith(".sbisec.co.jp")) &&
+            cookie.path.startsWith("/"),
         ),
         fetch,
         options.mailboxDeadline ?? Date.now(),

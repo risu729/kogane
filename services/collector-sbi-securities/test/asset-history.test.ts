@@ -287,7 +287,7 @@ test("the deferred mailbox signs in to the classic site and opens the report lin
       return new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")]));
     if (url.origin === "https://main.invalid" && url.pathname === "/ETGate/") {
       etGateCalls += 1;
-      // The first sign-in is the assets session; the second is the classic one.
+      // The first sign-in is the assets session; later ones are classic sign-ins.
       return etGateCalls === 1
         ? new Response('<form action="/switch"><input name="synthetic" value="fixture"></form>')
         : new Response(null, {
@@ -299,7 +299,10 @@ test("the deferred mailbox signs in to the classic site and opens the report lin
       return new Response(null, { status: 302, headers: { location: "https://site.invalid/sso" } });
     if (url.href === "https://site.invalid/sso")
       return new Response(null, { status: 302, headers: { location: "/account/assets" } });
-    if (url.href === "https://site.invalid/account/assets") return new Response("<html></html>");
+    if (url.href === "https://site.invalid/account/assets")
+      return new Response("<html></html>", {
+        headers: { "set-cookie": "assets=synthetic-other; Path=/; Secure" },
+      });
     if (url.pathname === "/account/api/assets/valuations/current") return Response.json({});
     if (url.href === "https://site2.sbisec.co.jp/ETGate/")
       return new Response("<html></html>", {
