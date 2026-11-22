@@ -47,8 +47,8 @@ report it.
 
 ## Findings
 
-Checked on 2026-11-22 against `b1066a98e`. The command above is authoritative as
-the tree changes.
+Checked on 2026-11-22 against `b1066a98e` with the 2026-11-22 cleanup below
+applied. The command above is authoritative as the tree changes.
 
 No unresolved imports, undeclared dependencies or unused dependencies are
 reported. Knip reports two unused files, the `container/chrome-install.mjs`
