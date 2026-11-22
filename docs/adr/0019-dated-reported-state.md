@@ -264,7 +264,7 @@ page.
 
 ## Statements before the window amendment — 2026-11-18
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1404](https://github.com/risu729/kogane/pull/1404))
 - Date: 2026-11-18
 
 **Context.** Decision 2 lists as payables of D only the statements due on or
@@ -435,7 +435,7 @@ statements counts none and does not name the gap), all on synthetic data.
 
 ## Context amendment — 2026-11-19
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1445](https://github.com/risu729/kogane/pull/1445))
 - Date: 2026-11-19
 
 **Context.** Decision 3 made `contextId = canonicalDigest(manifest)` and the

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { displayLabel } from "../src/labels.ts";
+import { displayLabel, ownEntry } from "../src/labels.ts";
 import { StatusBadge, TransactionStatus } from "../src/ui.tsx";
 
 test("prototype-shaped source values render as their original text", () => {
@@ -39,4 +39,20 @@ test("transaction state separates unconfirmed, absent and provider unknown value
   for (const value of ["future_state", "__proto__", "constructor"])
     expect(render(value)).toContain(`>${value}</span>`);
   expect(render("<script>unsafe</script>")).not.toContain("<script>");
+});
+
+// Codes a server or a URL could send that name built-in object members.
+const PROTOTYPE_NAMES = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"];
+
+test("a table answers only its own keys: known codes keep their entry, prototype names and unknown codes have none", () => {
+  const labels: Readonly<Record<string, string>> = { known_code: "既知のコード" };
+  const tones: Readonly<Record<string, "ok" | "warn">> = { known_code: "ok" };
+  expect(ownEntry(labels, "known_code")).toBe("既知のコード");
+  expect(displayLabel(labels, "known_code")).toBe("既知のコード");
+  expect(ownEntry(tones, "known_code")).toBe("ok");
+  for (const code of [...PROTOTYPE_NAMES, "synthetic_unknown_code"]) {
+    expect(ownEntry(labels, code)).toBeUndefined();
+    expect(ownEntry(tones, code)).toBeUndefined();
+    expect(displayLabel(labels, code)).toBe(code);
+  }
 });

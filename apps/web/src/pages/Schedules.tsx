@@ -1,5 +1,6 @@
+import { displayLabel } from "../labels.ts";
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type {
   MaintenanceRule,
   SchedulePattern,
@@ -15,12 +16,14 @@ import type {
 } from "../../../../packages/collection/src/maintenance-survey-model";
 import { ApiError } from "../api";
 import {
+  acceptedCollectionMessage,
   collectionRequestKey,
   CollectionRequestError,
   postCollectionRequest,
 } from "../collection-request-api";
 import { operationRoute } from "../operations-api.ts";
 import { Link } from "../router";
+import { Notice, QueryBoundary } from "../ui.tsx";
 import "../styles/schedules.css";
 const PATH = "/api/ops/v1/schedules";
 const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -63,7 +66,7 @@ const fmt = (value: string | null) =>
         timeStyle: "short",
       }).format(new Date(value))
     : "未設定";
-const name = (id: string) => NAMES[id] ?? id;
+const name = (id: string) => displayLabel(NAMES, id);
 async function request<T>(suffix = "", body?: unknown): Promise<T> {
   const response = await fetch(`${PATH}${suffix}`, {
     credentials: "same-origin",
@@ -75,19 +78,28 @@ async function request<T>(suffix = "", body?: unknown): Promise<T> {
           body: JSON.stringify(body),
         }),
   });
-  if (!response.ok) throw new ApiError(response.status, "schedule_request_failed");
+  // A fixed message chosen from the status, never the server's text: the
+  // page's load error (QueryBoundary's ErrorState) shows it as it is.
+  if (!response.ok) throw new ApiError(response.status, statusMessage(response.status));
   return response.json() as Promise<T>;
 }
-function failure(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.status === 409)
-      return "他の変更が先に保存されました。表示を更新して再度変更してください。";
-    if (error.status === 401 || error.status === 403) return "管理者のログインが必要です。";
-    if (error.status === 400 || error.status === 415)
-      return "入力した時刻・出典・確認日時を確認してください。";
-  }
+function statusMessage(status: number): string {
+  if (status === 409) return "他の変更が先に保存されました。表示を更新して再度変更してください。";
+  if (status === 401 || status === 403) return "管理者のログインが必要です。";
+  if (status === 400 || status === 415) return "入力した時刻・出典・確認日時を確認してください。";
   return "設定を確認できません。表示を更新して保存状態を確認してください。";
 }
+function failure(error: unknown): string {
+  return statusMessage(error instanceof ApiError ? error.status : 0);
+}
+/**
+ * Whether the page shows an earlier answer: QueryBoundary keeps it, under its
+ * 前回読み込んだ warning, while a refresh fails or waits offline. The actions
+ * that decide from what the page shows, and that no server check ties to the
+ * answer shown, are held until a read succeeds (docs/schedules.md).
+ */
+const showsEarlier = (query: UseQueryResult<unknown>): boolean =>
+  query.data !== undefined && (query.isError || query.fetchStatus === "paused");
 function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
   return (
     <div className="schedule-receipt">
@@ -135,6 +147,18 @@ const DISPATCH_OFF = {
   connection_disabled:
     "この接続は依頼による収集がまだ有効ではありません。送った依頼は実行されず24時間後に期限切れになるため、送信できません。",
 };
+/**
+ * A refusal the server answers before it looks the key up (every 4xx but 408
+ * and 429: sign-in, grant, origin, schema and declared-source refusals): this
+ * send stored nothing, but it says nothing about an earlier send under the
+ * key. Any other failure may follow a stored request.
+ */
+const refusedBeforeStore = (error: unknown): boolean =>
+  error instanceof CollectionRequestError &&
+  error.status >= 400 &&
+  error.status < 500 &&
+  error.status !== 408 &&
+  error.status !== 429;
 function requestFailure(error: unknown): string {
   if (error instanceof CollectionRequestError) {
     if (error.status === 401 || error.status === 403) return "管理者のログインが必要です。";
@@ -160,11 +184,28 @@ interface RequestState {
    * `idempotency_conflict`.
    */
   pending: { key: string; at: Date | null } | null;
+  /**
+   * The key and window of a send whose answer did not say whether the request
+   * was stored. やめる keeps it: the request may already be stored, so the
+   * next confirmation re-sends it under the same key and window, and the
+   * server answers with the stored operation instead of storing a second
+   * one. Cleared once a send under it is accepted.
+   */
+  unresolved: { key: string; at: Date } | null;
   busy: boolean;
   message: string;
   operationId: string | null;
 }
-const IDLE: RequestState = { pending: null, busy: false, message: "", operationId: null };
+const IDLE: RequestState = {
+  pending: null,
+  unresolved: null,
+  busy: false,
+  message: "",
+  operationId: null,
+};
+/** What the section keeps saying after やめる while a send's outcome is unknown. */
+const UNRESOLVED_CANCEL =
+  "送信した依頼が保存されたかは確認できていません。保存されていれば、やめても取り消されず実行されます。このページを開いたまま、もう一度「収集を依頼」から送ると同じ依頼として扱われ、二重には保存されません。ページを離れるか再読み込みすると、次の依頼は新しい依頼になります。";
 /**
  * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
  * makes. The confirmation shows what the caller should read first — the last
@@ -177,6 +218,7 @@ function CollectionRequest({
   state,
   update,
   sending,
+  earlier,
 }: {
   value: ScheduleView;
   lease: ScheduleSnapshot["leases"][number] | undefined;
@@ -184,12 +226,17 @@ function CollectionRequest({
   update: (patch: Partial<RequestState>) => void;
   /** The page's synchronous guard against a second send for the same job. */
   sending: Set<string>;
+  /**
+   * The page shows an earlier answer: the facts this confirmation asks the
+   * operator to read first may be out of date, so nothing is sent.
+   */
+  earlier: boolean;
 }): ReactNode {
-  const { pending, busy, message, operationId } = state;
+  const { pending, unresolved, busy, message, operationId } = state;
   const target = value.collectionRequest;
   if (!target) return null;
   async function send() {
-    if (sending.has(value.id) || pending === null || !target) return;
+    if (earlier || sending.has(value.id) || pending === null || !target) return;
     sending.add(value.id);
     const at = pending.at ?? new Date();
     update({ pending: { key: pending.key, at }, busy: true, message: "" });
@@ -197,11 +244,16 @@ function CollectionRequest({
       const accepted = await postCollectionRequest(target.source, pending.key, at);
       update({
         pending: null,
+        unresolved: null,
         operationId: accepted.operationId,
-        message: `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。`,
+        message: acceptedCollectionMessage(accepted),
       });
     } catch (error) {
-      update({ message: requestFailure(error) });
+      update({
+        message: requestFailure(error),
+        // A refusal keeps what an earlier send under this key left unknown.
+        unresolved: refusedBeforeStore(error) ? unresolved : { key: pending.key, at },
+      });
     } finally {
       sending.delete(value.id);
       update({ busy: false });
@@ -220,7 +272,7 @@ function CollectionRequest({
             update({
               message: "",
               operationId: null,
-              pending: { key: collectionRequestKey(), at: null },
+              pending: unresolved ?? { key: collectionRequestKey(), at: null },
             })
           }
         >
@@ -232,6 +284,11 @@ function CollectionRequest({
             {name(value.id)}
             にログインし、毎日の収集と同じ範囲を取得します。期間は指定できません。収集が始まった依頼は取り消せません。送信する前に、次の状態を確認してください。
           </p>
+          {unresolved !== null && unresolved.key === pending.key ? (
+            <p>
+              前回の送信は保存されたか確認できていません。同じ依頼として送ります。保存済みなら、その依頼の状態を表示します。
+            </p>
+          ) : null}
           <dl>
             <dt>前回の実行</dt>
             <dd>
@@ -250,15 +307,22 @@ function CollectionRequest({
             <dt>メンテナンス時間</dt>
             <dd>{REF[value.maintenance.status]}。停止時間中は終了まで待機します。</dd>
           </dl>
+          {earlier ? (
+            <Notice tone="warn" inline>
+              前回読み込んだ状態です。更新できるまで依頼は送信できません。
+            </Notice>
+          ) : null}
           <div className="schedule-actions">
-            <button type="button" className="button" disabled={busy} onClick={send}>
+            <button type="button" className="button" disabled={busy || earlier} onClick={send}>
               {busy ? "送信中…" : "依頼を送信"}
             </button>
             <button
               type="button"
               className="button"
               disabled={busy}
-              onClick={() => update({ pending: null, message: "" })}
+              onClick={() =>
+                update({ pending: null, message: unresolved === null ? "" : UNRESOLVED_CANCEL })
+              }
             >
               やめる
             </button>
@@ -278,6 +342,113 @@ function CollectionRequest({
       ) : null}
     </div>
   );
+}
+/**
+ * Whether a settings write's answer leaves what is stored unknown: no answer
+ * (a network error), a 2xx whose body cannot be read, a 5xx, 408 or 429 (a
+ * lost relay is `503 scheduling_unavailable`, possibly after the Processor
+ * wrote). Every other 4xx is the server's refusal before it wrote anything.
+ */
+const outcomeUnknown = (error: unknown): boolean =>
+  !(error instanceof ApiError) ||
+  error.status >= 500 ||
+  error.status === 408 ||
+  error.status === 429;
+/**
+ * A `409` (the version check found another revision, or the proposal was
+ * decided): what is stored may be this very change, saved by an earlier
+ * attempt whose answer was lost.
+ */
+const conflict = (error: unknown): boolean => error instanceof ApiError && error.status === 409;
+/** JSON with object keys sorted, so two values compare by content, not key order. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+/**
+ * The page's snapshot read again after a write whose answer did not say what
+ * is stored, or null when that read fails too. The read starts after the
+ * answer, so it shows the write if the server stored it.
+ */
+async function readBack(
+  client: ReturnType<typeof useQueryClient>,
+): Promise<ScheduleSnapshot | null> {
+  try {
+    await client.invalidateQueries({ queryKey: ["schedules"] }, { throwOnError: true });
+  } catch {
+    return null;
+  }
+  return client.getQueryData<ScheduleSnapshot>(["schedules"]) ?? null;
+}
+const READ_BACK_FAILED = "保存されたか確認できません。表示を更新して保存状態を確認してください。";
+const NOT_STORED = "読み直した時点では保存されていません。もう一度保存できます。";
+/**
+ * What a save says once the stored revision is read back after an unknown
+ * answer or a `409`. Saved means the stored revision moved past the one the
+ * save was made from and holds exactly this change; a revision that did not
+ * move means nothing is stored yet, and the version check refuses a retry if
+ * an earlier attempt lands after all.
+ */
+function readBackText(
+  error: unknown,
+  from: number,
+  stored: { revision: number } | undefined,
+  same: boolean,
+): string {
+  if (!stored) return READ_BACK_FAILED;
+  if (stored.revision > from && same)
+    return conflict(error)
+      ? "この変更はすでに保存されています。読み直した設定はこの変更と同じです。"
+      : "応答を受け取れませんでしたが、読み直した設定はこの変更と同じで、保存されています。";
+  if (stored.revision > from)
+    return conflict(error)
+      ? "他の変更が先に保存されました。読み直した設定を表示しています。必要なら再度変更してください。"
+      : "この変更が保存されたかは分かりません。読み直した設定はこの変更と異なります。表示中の設定を確認し、必要なら再度変更してください。";
+  return conflict(error) ? failure(error) : NOT_STORED;
+}
+const RESERVATION_PENDING = "実行予約の反映を待っています。";
+/** A maintenance rule's stored fields, compared by content: what one save asks to store. */
+const ruleChange = (r: Omit<MaintenanceRule, "id" | "revision">): string =>
+  canonical({
+    source: r.source,
+    timezone: r.timezone,
+    pattern: r.pattern,
+    enabled: r.enabled,
+    scope: r.scope,
+    referenceUrl: r.referenceUrl,
+    verifiedAt: r.verifiedAt,
+  });
+/**
+ * A callback ref that focuses its element once, when it mounts: a module
+ * function keeps one identity, so React does not call it again on re-render.
+ */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+/**
+ * A proposal as the read back shows it: still `listed` (undecided), decided
+ * with the rule revision accepting it would write (`accepted`), or `decided`
+ * some other way; null when the read failed, or when the snapshot leaves out
+ * undecided proposals past the shown bound and does not list this one.
+ */
+function decidedAfterReadBack(
+  snapshot: ScheduleSnapshot | null,
+  proposal: MaintenanceSurveyProposalView,
+): "listed" | "accepted" | "decided" | null {
+  const survey = snapshot?.survey;
+  if (!snapshot || !survey) return null;
+  if (survey.proposals.some((p) => p.id === proposal.id)) return "listed";
+  if (survey.attention > survey.proposals.length) return null;
+  const accepted = ruleChange({ ...proposal, verifiedAt: proposal.fetchedAt });
+  // A `new` proposal's rule is created under `<source>-survey-<id>` (the
+  // Processor's `proposedRuleId`).
+  const ruleId = proposal.ruleId ?? `${proposal.source}-survey-${proposal.id}`;
+  return snapshot.maintenance.some(
+    (r) =>
+      r.id === ruleId && r.revision === proposal.baseRevision + 1 && ruleChange(r) === accepted,
+  )
+    ? "accepted"
+    : "decided";
 }
 function ScheduleCard({
   value,
@@ -299,10 +470,12 @@ function ScheduleCard({
     [timezone, setTimezone] = useState(value.timezone),
     [pattern, setPattern] = useState<SchedulePattern>(value.pattern);
   const [busy, setBusy] = useState(false);
+  const client = useQueryClient();
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setMessage({ from: value.revision, revision: value.revision, text: "" });
+    const intended = canonical({ enabled, timezone, pattern });
     try {
       const result = await request<{ reservation: string }>(`/${value.id}`, {
         revision: value.revision,
@@ -323,7 +496,26 @@ function ScheduleCard({
       });
       await refresh();
     } catch (error) {
-      setMessage({ from: value.revision, revision: value.revision, text: failure(error) });
+      if (!outcomeUnknown(error) && !conflict(error)) {
+        setMessage({ from: value.revision, revision: value.revision, text: failure(error) });
+        return;
+      }
+      // The answer does not say whether this change is stored: read the job
+      // back, so the card shows what the server holds and says how that
+      // compares with this change.
+      const stored = (await readBack(client))?.schedules.find((s) => s.id === value.id);
+      const same =
+        stored !== undefined &&
+        canonical({
+          enabled: stored.enabled,
+          timezone: stored.timezone,
+          pattern: stored.pattern,
+        }) === intended;
+      setMessage({
+        from: value.revision,
+        revision: stored?.revision ?? value.revision,
+        text: readBackText(error, value.revision, stored, same),
+      });
     } finally {
       setBusy(false);
     }
@@ -503,14 +695,22 @@ const REASON: Record<ProposalReason, string> = {
 };
 function SurveyProposal({
   value,
+  report,
   refresh,
+  earlier,
 }: {
   value: MaintenanceSurveyProposalView;
+  /** Where the decision's result is said: the section, which outlives a decided proposal. */
+  report: (text: string) => void;
   refresh: () => Promise<unknown>;
+  /** The page shows an earlier answer: the list of proposals may be out of date. */
+  earlier: boolean;
 }): ReactNode {
   const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    client = useQueryClient();
   async function decide(decision: "accept" | "reject") {
+    if (earlier) return;
     if (
       decision === "accept" &&
       !window.confirm(`${name(value.source)}のメンテナンス時間をこの提案のとおりに変更しますか？`)
@@ -518,11 +718,49 @@ function SurveyProposal({
       return;
     setBusy(true);
     setMessage("");
+    // A decided proposal leaves the list, and its result with it: the section
+    // says what was decided, prefixed with which proposal it was.
+    const said = (text: string) => report(`${name(value.source)}の${KIND[value.kind]}：${text}`);
     try {
-      await request(`/proposals/${value.id}`, { decision });
+      const answer = await request<{ decided: string; reservation?: string }>(
+        `/proposals/${value.id}`,
+        { decision },
+      );
+      said(
+        answer.decided === "accepted"
+          ? `採用し、メンテナンス時間に反映しました。${answer.reservation === "pending" ? RESERVATION_PENDING : ""}`
+          : "却下しました。メンテナンス時間は変わりません。",
+      );
       await refresh();
     } catch (error) {
-      setMessage(failure(error));
+      if (!outcomeUnknown(error) && !conflict(error)) {
+        setMessage(failure(error));
+        return;
+      }
+      // The answer does not say whether the decision is stored (a lost
+      // answer, or a 409 that an earlier attempt's own decision may explain):
+      // read the proposals and rules back.
+      const snapshot = await readBack(client);
+      const decided = decidedAfterReadBack(snapshot, value);
+      if (decided === null) {
+        const unknown = "決定されたか確認できません。表示を更新して確認してください。";
+        // A failed read keeps the list shown, this proposal in it; a read
+        // that does not list it (past the shown bound, or without the
+        // re-survey part) removes it, and a message of its own with it.
+        if (snapshot) said(unknown);
+        else setMessage(unknown);
+      } else if (decided === "listed")
+        setMessage(
+          conflict(error)
+            ? failure(error)
+            : "読み直した時点では決定されていません。もう一度選べます。",
+        );
+      else
+        said(
+          decided === "accepted"
+            ? "この提案は採用済みで、メンテナンス時間に反映されています。"
+            : "この提案は決定済みで、確認待ちの一覧から外れました。採用・却下のどちらになったかは、メンテナンス時間の一覧で確認してください。",
+        );
     } finally {
       setBusy(false);
     }
@@ -547,12 +785,12 @@ function SurveyProposal({
       <div className="schedule-actions">
         <button
           className="button"
-          disabled={busy || !value.current}
+          disabled={busy || earlier || !value.current}
           onClick={() => void decide("accept")}
         >
           採用
         </button>
-        <button className="button" disabled={busy} onClick={() => void decide("reject")}>
+        <button className="button" disabled={busy || earlier} onClick={() => void decide("reject")}>
           却下
         </button>
       </div>
@@ -562,16 +800,27 @@ function SurveyProposal({
 function SurveySection({
   survey,
   refresh,
+  earlier,
 }: {
   survey: MaintenanceSurveyView | undefined;
   refresh: () => Promise<unknown>;
+  earlier: boolean;
 }): ReactNode {
+  // A decision's result takes focus, since the decided proposal's buttons
+  // are gone: each result is a new paragraph (its own key), so a repeated
+  // text takes focus again.
+  const [report, setReport] = useState<{ key: number; text: string } | null>(null);
   return (
     <section className="schedule-section" aria-labelledby="maintenance-survey">
       <h2 id="maintenance-survey">公式サイトの再調査</h2>
       <p>
         確認済みの公式ページだけを定期的に取得し、停止時間が変わっていれば提案します。採用するまでメンテナンス時間は変わりません。取得の失敗や空のページは「停止時間なし」とはみなしません。
       </p>
+      {report ? (
+        <p role="status" tabIndex={-1} key={report.key} ref={focusOnMount}>
+          {report.text}
+        </p>
+      ) : null}
       {!survey ? (
         <p className="muted">再調査の状態を読み込めません。</p>
       ) : (
@@ -601,9 +850,20 @@ function SurveySection({
           {survey.proposals.length > 0 ? (
             <>
               <h3>確認待ちの提案</h3>
+              {earlier ? (
+                <Notice tone="warn" inline>
+                  前回読み込んだ提案です。更新できるまで採用・却下はできません。
+                </Notice>
+              ) : null}
               <ul className="maintenance-list">
                 {survey.proposals.map((p) => (
-                  <SurveyProposal key={p.id} value={p} refresh={refresh} />
+                  <SurveyProposal
+                    key={p.id}
+                    value={p}
+                    refresh={refresh}
+                    earlier={earlier}
+                    report={(text) => setReport((last) => ({ key: (last?.key ?? 0) + 1, text }))}
+                  />
                 ))}
               </ul>
             </>
@@ -655,11 +915,17 @@ function MaintenanceEditor({
   const [url, setUrl] = useState(rule?.referenceUrl ?? ""),
     [verified, setVerified] = useState(local(rule?.verifiedAt ?? new Date().toISOString())),
     [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    // A stored save's result: the editor then shows only it, since the form
+    // still carries the revision the save was made from.
+    [saved, setSaved] = useState("");
+  const client = useQueryClient();
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMessage("");
+    // Set once the request is about to be sent: a failure before it stored nothing.
+    let intended: string | null = null;
     try {
       const pattern =
         kind === "once"
@@ -671,7 +937,7 @@ function MaintenanceEditor({
           : kind === "weekly"
             ? { kind, weekdays, start, end }
             : { kind, weekday, nth, offsetDays, start, end };
-      await request("/maintenance", {
+      const body = {
         id,
         revision: rule?.revision ?? 0,
         source,
@@ -681,15 +947,52 @@ function MaintenanceEditor({
         pattern,
         referenceUrl: url,
         verifiedAt: new Date(`${verified}:00+09:00`).toISOString(),
-      });
+      };
+      intended = ruleChange(body);
+      const answer = await request<{ reservation?: string }>("/maintenance", body);
+      setSaved(
+        `停止時間を保存しました。${answer.reservation === "pending" ? RESERVATION_PENDING : ""}`,
+      );
       await refresh();
-      close();
     } catch (error) {
-      setMessage(failure(error));
+      if (intended === null || (!outcomeUnknown(error) && !conflict(error))) {
+        setMessage(failure(error));
+        return;
+      }
+      // The answer does not say whether this revision is stored: read the
+      // rules back. A rule the read does not list has no stored revision.
+      const from = rule?.revision ?? 0;
+      const snapshot = await readBack(client);
+      const stored = snapshot
+        ? (snapshot.maintenance.find((r) => r.id === id) ?? { revision: 0 })
+        : undefined;
+      const same = stored !== undefined && "source" in stored && ruleChange(stored) === intended;
+      const text = readBackText(error, from, stored, same);
+      if (stored && stored.revision > from && same) setSaved(text);
+      else
+        setMessage(
+          stored && stored.revision > from
+            ? `${text}一覧の「変更」から開き直すと、保存済みの設定から変更できます。`
+            : text,
+        );
     } finally {
       setBusy(false);
     }
   }
+  if (saved)
+    return (
+      <div className="maintenance-editor">
+        <h3>{rule ? "停止時間を変更" : "停止時間を追加"}</h3>
+        <p role="status" tabIndex={-1} ref={focusOnMount}>
+          {saved}
+        </p>
+        <div className="schedule-actions">
+          <button className="button" type="button" onClick={close}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    );
   return (
     <form onSubmit={save} className="maintenance-editor">
       <h3>{rule ? "停止時間を変更" : "停止時間を追加"}</h3>
@@ -880,6 +1183,13 @@ export function SchedulesPage(): ReactNode {
   const leaseRequests = useRef(new Set<string>());
   const collectionSends = useRef(new Set<string>());
   const refresh = () => client.invalidateQueries({ queryKey: ["schedules"] });
+  // Held while the answer shown is an earlier one: sending a collection
+  // request and deciding a survey proposal. A schedule or maintenance save is
+  // checked against the revision it was made from, and a lease release against
+  // the exact lease reference shown, so the server refuses those (409) when
+  // what they were based on changed; they stay available, and a release keeps
+  // its documented retry after a failed read back.
+  const earlier = showsEarlier(query);
   async function releaseLease(lease: ScheduleSnapshot["leases"][number]) {
     // The ref closes the gap before React disables the button, including
     // another activation while the confirmation dialog is being opened.
@@ -930,145 +1240,144 @@ export function SchedulesPage(): ReactNode {
       <p className="query-notice">
         メンテナンスに重なった収集は、終了後に1回実行します。時刻の変更は次回から反映されます。
       </p>
-      {query.data?.survey && query.data.survey.attention > 0 ? (
-        <p className="query-notice" role="status">
-          公式サイトの案内に変更の可能性があります。{query.data.survey.attention}
-          件の提案を確認してください。
-        </p>
-      ) : null}
-      {query.isPending ? (
-        <p role="status">設定を読み込んでいます…</p>
-      ) : query.isError ? (
-        <p role="alert">{failure(query.error)}</p>
-      ) : null}
-      {query.data ? (
-        <>
-          <div className="schedule-grid">
-            {query.data.schedules.map((s) => (
-              <ScheduleCard
-                key={`${s.id}:${s.revision}`}
-                value={s}
-                lease={query.data.leases.find((lease) => lease.source === s.source)}
-                collection={{
-                  state: requestStates[s.id] ?? IDLE,
-                  update: (patch) =>
-                    setRequestStates((states) => ({
-                      ...states,
-                      [s.id]: { ...(states[s.id] ?? IDLE), ...patch },
-                    })),
-                  sending: collectionSends.current,
-                }}
-                refresh={refresh}
-                message={cardMessages[s.id]}
-                setMessage={(message) =>
-                  setCardMessages((messages) => ({ ...messages, [s.id]: message }))
-                }
-              />
-            ))}
-          </div>
-          <section className="schedule-section">
-            <header>
-              <h2>メンテナンス時間</h2>
-              <button className="button" onClick={() => setEditor(null)}>
-                停止時間を追加
-              </button>
-            </header>
-            <p>
-              公式サイトの再調査は提案だけを行い、ここに表示される設定を自動では変更しません。新しい案内を確認したら、出典・確認日時と合わせて変更してください。
-            </p>
-            {/* Keyed by revision: reopening a rule that changed since the form
+      {/* An earlier answer stays visible after a failed refresh only under
+          QueryBoundary's 前回読み込んだ warning, the count below included
+          (INV05); a 401/403 hides it. */}
+      <QueryBoundary query={query} label="収集スケジュール">
+        {(data) => (
+          <>
+            {data.survey && data.survey.attention > 0 ? (
+              <p className="query-notice" role="status">
+                公式サイトの案内に変更の可能性があります。{data.survey.attention}
+                件の提案を確認してください。
+              </p>
+            ) : null}
+            <div className="schedule-grid">
+              {data.schedules.map((s) => (
+                <ScheduleCard
+                  key={`${s.id}:${s.revision}`}
+                  value={s}
+                  lease={data.leases.find((lease) => lease.source === s.source)}
+                  collection={{
+                    state: requestStates[s.id] ?? IDLE,
+                    update: (patch) =>
+                      setRequestStates((states) => ({
+                        ...states,
+                        [s.id]: { ...(states[s.id] ?? IDLE), ...patch },
+                      })),
+                    sending: collectionSends.current,
+                    earlier,
+                  }}
+                  refresh={refresh}
+                  message={cardMessages[s.id]}
+                  setMessage={(message) =>
+                    setCardMessages((messages) => ({ ...messages, [s.id]: message }))
+                  }
+                />
+              ))}
+            </div>
+            <section className="schedule-section">
+              <header>
+                <h2>メンテナンス時間</h2>
+                <button className="button" onClick={() => setEditor(null)}>
+                  停止時間を追加
+                </button>
+              </header>
+              <p>
+                公式サイトの再調査は提案だけを行い、ここに表示される設定を自動では変更しません。新しい案内を確認したら、出典・確認日時と合わせて変更してください。
+              </p>
+              {/* Keyed by revision: reopening a rule that changed since the form
                 opened starts from what is stored, so the form never sends an
                 earlier revision's fields under the newer revision number. */}
-            {editor !== undefined ? (
-              <MaintenanceEditor
-                key={editor === null ? "new" : `${editor.id}:${String(editor.revision)}`}
-                rule={editor}
-                sources={query.data.schedules
-                  .flatMap((s) => (s.source ? [s.source] : []))
-                  .filter((s, i, a) => a.indexOf(s) === i)}
-                refresh={refresh}
-                close={() => setEditor(undefined)}
-              />
-            ) : null}
-            <ul className="maintenance-list">
-              {query.data.maintenance.map((r) => (
-                <li key={r.id}>
-                  <div>
-                    <strong>{name(r.source)}</strong> · {description(r)}
-                    <br />
-                    <small>
-                      {r.enabled
-                        ? r.scope === "feature-only"
-                          ? "一部機能のみ：収集は延期しません"
-                          : "収集を延期"
-                        : "無効"}{" "}
-                      · 確認 {fmt(r.verifiedAt)} ·{" "}
-                      <a href={r.referenceUrl} target="_blank" rel="noreferrer">
-                        公式案内
-                      </a>
-                      {r.pattern.kind === "once" && Date.parse(r.pattern.to) < Date.now()
-                        ? " · 終了済み"
-                        : ""}
-                    </small>
-                  </div>
-                  <button className="button" onClick={() => setEditor(r)}>
-                    変更
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <SurveySection survey={query.data.survey} refresh={refresh} />
-          <section className="schedule-section">
-            <h2>実行結果</h2>
-            <label>
-              表示する実行
-              <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-                <option value="collection">収集</option>
-                <option value="all">すべて（保存処理・セッション維持を含む）</option>
-              </select>
-            </label>
-            <p>直近の記録です。各取得元の最新結果は上のカードにも表示します。</p>
-            {query.data.occurrences
-              .filter(
-                (o) =>
-                  filter === "all" ||
-                  query.data.schedules.find((s) => s.id === o.scheduleId)?.kind === "collection",
-              )
-              .map((o) => (
-                <article className="schedule-history" key={o.id}>
-                  <strong>{name(o.scheduleId)}</strong>
-                  <Occurrence value={o} />
-                </article>
-              ))}
-          </section>
-          {"leases" in query.data &&
-          Array.isArray(query.data.leases) &&
-          query.data.leases.length > 0 ? (
-            <section className="schedule-section">
-              <h2>実行中の取得元</h2>
-              <p>
-                前の実行が終了したことを確認できるまで、新しい実行を開始しません。処理が停止した場合のみ、取得履歴と実行状態を確認して解除してください。
-              </p>
-              {(query.data.leases as { source: string; leaseRef: string; startedAt: string }[]).map(
-                (lease) => (
-                  <div className="schedule-history" key={lease.source}>
-                    <strong>{name(lease.source)}</strong> · 開始 {fmt(lease.startedAt)}
-                    <button
-                      className="button"
-                      disabled={releasingSources.includes(lease.source)}
-                      onClick={() => releaseLease(lease)}
-                    >
-                      {releasingSources.includes(lease.source) ? "解除中…" : "停止した実行を解除"}
+              {editor !== undefined ? (
+                <MaintenanceEditor
+                  key={editor === null ? "new" : `${editor.id}:${String(editor.revision)}`}
+                  rule={editor}
+                  sources={data.schedules
+                    .flatMap((s) => (s.source ? [s.source] : []))
+                    .filter((s, i, a) => a.indexOf(s) === i)}
+                  refresh={refresh}
+                  close={() => setEditor(undefined)}
+                />
+              ) : null}
+              <ul className="maintenance-list">
+                {data.maintenance.map((r) => (
+                  <li key={r.id}>
+                    <div>
+                      <strong>{name(r.source)}</strong> · {description(r)}
+                      <br />
+                      <small>
+                        {r.enabled
+                          ? r.scope === "feature-only"
+                            ? "一部機能のみ：収集は延期しません"
+                            : "収集を延期"
+                          : "無効"}{" "}
+                        · 確認 {fmt(r.verifiedAt)} ·{" "}
+                        <a href={r.referenceUrl} target="_blank" rel="noreferrer">
+                          公式案内
+                        </a>
+                        {r.pattern.kind === "once" && Date.parse(r.pattern.to) < Date.now()
+                          ? " · 終了済み"
+                          : ""}
+                      </small>
+                    </div>
+                    <button className="button" onClick={() => setEditor(r)}>
+                      変更
                     </button>
-                  </div>
-                ),
-              )}
+                  </li>
+                ))}
+              </ul>
             </section>
-          ) : null}
-          {leaseMessage ? <p role="status">{leaseMessage}</p> : null}
-        </>
-      ) : null}
+            <SurveySection survey={data.survey} refresh={refresh} earlier={earlier} />
+            <section className="schedule-section">
+              <h2>実行結果</h2>
+              <label>
+                表示する実行
+                <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+                  <option value="collection">収集</option>
+                  <option value="all">すべて（保存処理・セッション維持を含む）</option>
+                </select>
+              </label>
+              <p>直近の記録です。各取得元の最新結果は上のカードにも表示します。</p>
+              {data.occurrences
+                .filter(
+                  (o) =>
+                    filter === "all" ||
+                    data.schedules.find((s) => s.id === o.scheduleId)?.kind === "collection",
+                )
+                .map((o) => (
+                  <article className="schedule-history" key={o.id}>
+                    <strong>{name(o.scheduleId)}</strong>
+                    <Occurrence value={o} />
+                  </article>
+                ))}
+            </section>
+            {"leases" in data && Array.isArray(data.leases) && data.leases.length > 0 ? (
+              <section className="schedule-section">
+                <h2>実行中の取得元</h2>
+                <p>
+                  前の実行が終了したことを確認できるまで、新しい実行を開始しません。処理が停止した場合のみ、取得履歴と実行状態を確認して解除してください。
+                </p>
+                {(data.leases as { source: string; leaseRef: string; startedAt: string }[]).map(
+                  (lease) => (
+                    <div className="schedule-history" key={lease.source}>
+                      <strong>{name(lease.source)}</strong> · 開始 {fmt(lease.startedAt)}
+                      <button
+                        className="button"
+                        disabled={releasingSources.includes(lease.source)}
+                        onClick={() => releaseLease(lease)}
+                      >
+                        {releasingSources.includes(lease.source) ? "解除中…" : "停止した実行を解除"}
+                      </button>
+                    </div>
+                  ),
+                )}
+              </section>
+            ) : null}
+            {leaseMessage ? <p role="status">{leaseMessage}</p> : null}
+          </>
+        )}
+      </QueryBoundary>
     </section>
   );
 }

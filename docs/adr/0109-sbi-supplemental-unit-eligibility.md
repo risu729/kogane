@@ -88,6 +88,8 @@ exact scope, idempotence and preservation of every nondefault policy field.
 
 ## Amendment 2026-11-19: SBI Shinsei's importer partition joins the native one
 
+Status: accepted (merged 2026-11-20 in [#1435](https://github.com/risu729/kogane/pull/1435)).
+
 **Context.** SBI Shinsei's three container-snapshot datasets
 (`top-accounts-balance-and-activity`, `yen-deposit-account`, `exchange-rate`)
 were captured under the unit `primary` by the retired R2 importer until fetch

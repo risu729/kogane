@@ -40,6 +40,29 @@ describe("V Point safe diagnostics", () => {
     expect(JSON.stringify(safeFailure(error))).not.toContain(PRIVATE);
   });
 
+  test("a history walk past its stated total is logged with its closed reason", async () => {
+    try {
+      await collectVPoint({
+        sessionCookie: "session=value",
+        fetcher: async (input) =>
+          Response.json({
+            status: { code: "0000" },
+            results:
+              new URL(String(input)).pathname === "/api/tpoint_history"
+                ? { total: 0, history: [{ point: 1 }], graph: {} }
+                : {},
+          }),
+      });
+      throw new Error("expected failure");
+    } catch (error) {
+      expect(safeFailure(error)).toEqual({
+        errorType: "VPointProtocolError",
+        failureCode: "provider_protocol_failed",
+        reasonCode: "rows-exceed-total",
+      });
+    }
+  });
+
   test("provider HTTP failure retains status and active read stage without response body", async () => {
     const stages: string[] = [];
     try {
@@ -115,6 +138,87 @@ describe("V Point safe diagnostics", () => {
       expect(logs.join()).not.toContain(PRIVATE);
     });
   }
+
+  // INV05: a run that did not finish both history walks never learned their
+  // totals or page counts, so its outcome and its persisted line leave them
+  // out instead of reporting 0. A run that finished reports what it read.
+  // The provider is a mocked `fetch`; nothing leaves the test.
+  const COUNT_FIELDS = [
+    "historyTotal",
+    "historyPageCount",
+    "vMoneyHistoryTotal",
+    "vMoneyHistoryPageCount",
+  ] as const;
+  for (const failingPath of [
+    null,
+    "/api/balance_info",
+    "/api/tpoint_history",
+    "/api/tmoney_history",
+  ]) {
+    test(`counts are reported only when read; failing read=${failingPath ?? "none"}`, async () => {
+      const logs = captureLogs();
+      spyOn(globalThis, "fetch").mockImplementation((async (input: string | URL | Request) => {
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path === failingPath) return new Response(PRIVATE, { status: 503 });
+        if (path === "/api/tpoint_history")
+          return Response.json({
+            status: { code: "0000" },
+            results: { total: 1, history: [{ point: 1 }], graph: {} },
+          });
+        if (path === "/api/tmoney_history")
+          return Response.json({ status: { code: "0000" }, results: { total: 0, history: [] } });
+        return Response.json({ status: { code: "0000" }, results: {} });
+      }) as typeof fetch);
+      const env = fixture({ getSession: async () => "session=synthetic" }, new FakeR2Bucket());
+      const outcome = await runCollection(env);
+      const persisted = logs
+        .map((line) => JSON.parse(line))
+        .filter((line) => line.event === "vpoint-collection-persisted");
+      expect(persisted).toHaveLength(1);
+      if (failingPath === null) {
+        expect(outcome.manifest.status).toBe("success");
+        const counts = {
+          historyTotal: 1,
+          historyPageCount: 1,
+          vMoneyHistoryTotal: 0,
+          vMoneyHistoryPageCount: 1,
+        };
+        expect(outcome.manifest).toMatchObject(counts);
+        expect(persisted[0]).toMatchObject(counts);
+      } else {
+        expect(outcome.manifest.status).toBe("failed");
+        expect(persisted[0].status).toBe("failed");
+        expect(persisted[0].failureCount).toBe(1);
+        for (const field of COUNT_FIELDS) {
+          expect(Object.hasOwn(outcome.manifest, field)).toBe(false);
+          expect(Object.hasOwn(persisted[0], field)).toBe(false);
+        }
+      }
+      expect(logs.join()).not.toContain(PRIVATE);
+    });
+  }
+
+  test("counts are absent when there is no session and reauthentication is pending", async () => {
+    const logs = captureLogs();
+    const fetch = spyOn(globalThis, "fetch").mockImplementation((async () => {
+      throw new Error("unexpected fetch");
+    }) as unknown as typeof globalThis.fetch);
+    const env = fixture(
+      { getSession: async () => null, ensureEmailChallenge: async () => ({ status: "pending" }) },
+      new FakeR2Bucket(),
+    );
+    const outcome = await runCollection(env);
+    const persisted = logs
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.event === "vpoint-collection-persisted");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(outcome.manifest.status).toBe("failed");
+    expect(persisted).toHaveLength(1);
+    for (const field of COUNT_FIELDS) {
+      expect(Object.hasOwn(outcome.manifest, field)).toBe(false);
+      expect(Object.hasOwn(persisted[0], field)).toBe(false);
+    }
+  });
 
   test("forwarding failure is logged once with safe message and no email address or body", async () => {
     const logs = captureLogs();

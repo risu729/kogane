@@ -2,6 +2,9 @@
 // API, the same application service `kogane.ops.collection.request` calls.
 // 202 means the request is stored, never that a provider was contacted.
 
+import { displayLabel } from "./labels.ts";
+import { OPERATION_STATUS_LABELS } from "./operations-api.ts";
+
 export const COLLECTIONS_PATH = "/api/ops/v1/collections";
 
 export interface AcceptedCollection {
@@ -19,6 +22,18 @@ export class CollectionRequestError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * What the page says about a 202. A first request is always stored as
+ * `accepted`; a re-send under a key the server already holds answers with
+ * that operation's current status, which may be running or finished, so only
+ * `accepted` promises a start.
+ */
+export function acceptedCollectionMessage(accepted: AcceptedCollection): string {
+  return accepted.status === "accepted"
+    ? `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。`
+    : `この依頼は保存済みで、状態は「${displayLabel(OPERATION_STATUS_LABELS, accepted.status)}」です（依頼ID ${accepted.operationId}）。新しい収集は始めません。`;
 }
 
 /** Today in Japan, as the date-only bound the request carries. */

@@ -12,6 +12,7 @@ import type { FinancialErrorCode, QuerySpec } from "../../../domain/src/result.t
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { validLocalDateText, type TemporalValue } from "../../../domain/src/time.ts";
 import { MEASURE_VIEWS } from "../../../../packages/observation-shared/src/api-schema.ts";
+import { refPrefix, unknownKeyRefs } from "../errors.ts";
 import { DEFAULT_QUERY_LIMIT, GRANT_LIMITS } from "../grants.ts";
 
 /**
@@ -89,11 +90,11 @@ export function parseQueryRequest(value: unknown): SpecOutcome<QueryRequest> {
   const unknown = Object.keys(value).filter(
     (key) => !(REQUEST_KEYS as readonly string[]).includes(key),
   );
-  if (unknown.length > 0) return reject("unsupported_semantics", unknown.slice(0, 10));
+  if (unknown.length > 0) return reject("unsupported_semantics", unknownKeyRefs(unknown));
   const intent = value.intent;
   if (typeof intent !== "string") return reject("invalid_query", ["intent"]);
   if (!(SUPPORTED_QUERY_INTENTS as readonly string[]).includes(intent))
-    return reject("unsupported_semantics", [`intent:${intent.slice(0, 64)}`]);
+    return reject("unsupported_semantics", [`intent:${refPrefix(intent)}`]);
   const supported = intent as SupportedQueryIntent;
   const rawFilters: unknown = value.filters ?? {};
   if (!isRecord(rawFilters)) return reject("invalid_query", ["filters"]);
@@ -104,7 +105,7 @@ export function parseQueryRequest(value: unknown): SpecOutcome<QueryRequest> {
   if (unknownFilters.length > 0)
     return reject(
       "unsupported_semantics",
-      unknownFilters.slice(0, 10).map((key) => `filter:${key.slice(0, 64)}`),
+      unknownKeyRefs(unknownFilters).map((key) => `filter:${key}`),
     );
   const filters: Partial<Record<QueryFilterKey, string>> = {};
   for (const key of allowed) {

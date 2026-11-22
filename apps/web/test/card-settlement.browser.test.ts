@@ -342,7 +342,22 @@ describe.if(runnable)("card settlement review", () => {
   let advertised = true;
   let detailRevision = 0;
   let planRevision = 0;
+  /** Holds the plan's answer until it resolves, when a test sets it. */
+  let planGate: Promise<void> | null = null;
   let action = "accept";
+  /**
+   * Set once a commit is answered: as the server does, the candidate then
+   * reads accepted at the next revision, and a simulate of the plan is
+   * refused (`stale_context`: the candidate is no longer proposed).
+   */
+  let committed = false;
+  /** The receipt status the commit answers with. */
+  let receiptStatus: "accepted" | "failed" = "accepted";
+  /**
+   * When set, the next commit writes its decision and its answer is lost (a
+   * gateway fault); a resend of the same operation id answers with the receipt.
+   */
+  let commitLost = false;
   let older: ReturnType<typeof settlementReview>[] = [];
   let leadSearch = "not_searched";
   /** A second statement's candidates, newest first; empty serves one statement. */
@@ -365,7 +380,11 @@ describe.if(runnable)("card settlement review", () => {
     advertised = true;
     detailRevision = 0;
     planRevision = 0;
+    planGate = null;
     action = "accept";
+    committed = false;
+    receiptStatus = "accepted";
+    commitLost = false;
     older = [];
     leadSearch = "not_searched";
     second = [];
@@ -465,10 +484,12 @@ describe.if(runnable)("card settlement review", () => {
         if (url.pathname === "/api/v2/reconciliation/card-settlements")
           return Response.json({
             items: [
-              {
-                ...review,
-                revision: url.searchParams.has("proposalId") ? detailRevision : review.revision,
-              },
+              committed
+                ? { ...review, revision: planRevision + 1, status: "accepted" }
+                : {
+                    ...review,
+                    revision: url.searchParams.has("proposalId") ? detailRevision : review.revision,
+                  },
             ],
             nextOffset: null,
             nextPage: "none",
@@ -528,7 +549,10 @@ describe.if(runnable)("card settlement review", () => {
             expiresAt: "2099-01-01",
             status: "planned",
           };
+          if (operation === "plan" && planGate) await planGate;
           if (operation === "plan") return Response.json({ plan });
+          if (operation === "simulate" && committed)
+            return Response.json({ error: "stale_context" }, { status: 409 });
           if (operation === "simulate")
             return Response.json({
               report: {
@@ -549,12 +573,17 @@ describe.if(runnable)("card settlement review", () => {
                 usesRemaining: 1,
               },
             });
+          committed = true;
+          if (commitLost) {
+            commitLost = false;
+            return Response.json({ error: "bad_gateway" }, { status: 502 });
+          }
           return Response.json({
             receipt: {
               operationId: "op-synthetic",
               operationKind: simulation.kind,
               planId: PLAN,
-              status: "accepted",
+              status: receiptStatus,
               acceptedAt: "2026-09-11T00:00:00Z",
               publishedAt: null,
               decisionRevisionId: "decision-synthetic",
@@ -594,6 +623,17 @@ describe.if(runnable)("card settlement review", () => {
     return page;
   }
 
+  test("a candidate's statement with no period recorded says so, never a bare 不明 (INV05)", async () => {
+    const base = settlementReview();
+    review = {
+      ...base,
+      facts: { ...base.facts, statement: { ...base.facts.statement, period: null } },
+    };
+    const page = await open();
+    expect(await page.locator("main").innerText()).toMatch(/請求対象期間\s+未記録/u);
+    await page.close();
+  });
+
   test("unknown ownership blocks adoption, preserves evidence access and allows explicit rejection planning", async () => {
     review = settlementReview(true);
     const page = await open();
@@ -606,7 +646,10 @@ describe.if(runnable)("card settlement review", () => {
     expect(
       await page.getByRole("link", { name: "銀行明細と原本", exact: true }).getAttribute("href"),
     ).toBe("/observations/transaction/12");
-    expect(await page.locator("main").innerText()).toContain("純資産への影響");
+    const details = await page.locator("main").innerText();
+    expect(details).toContain("純資産への影響");
+    // An unknown fee breakdown says why, never a bare 不明 (INV05).
+    expect(details).toMatch(/手数料の内訳\s+不明（請求総額だけでは元本と手数料を分けられません）/u);
     await page.getByRole("button", { name: "却下内容を確認" }).click();
     await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
     expect(posted.filter((row) => row.operation === "plan")[0]?.body).toMatchObject({
@@ -658,7 +701,7 @@ describe.if(runnable)("card settlement review", () => {
     const text = await section.innerText();
     expect(text).toContain("2098-03-20 以降に引き落とされるカードの請求です。");
     expect(text).toContain("架空カード（card-001）");
-    expect(text).toContain("30000 JPY");
+    expect(text).toContain("30,000 JPY");
     // Not exact: its reason, never a zero (INV05).
     expect(text).toContain("不明（stored:unparsed） · JPY");
     expect(text).toContain("架空銀行 普通");
@@ -672,6 +715,9 @@ describe.if(runnable)("card settlement review", () => {
     expect(unknown).toContain("請求額が確定していない請求があります。");
     expect(text).toContain("ほかの引落や入金は含みません");
     expect(text).toContain("カード会社が引落日を示していません");
+    // A missing date or account carries the server's reason (INV05).
+    expect(text).toContain("引落日 不明（payment_date_not_published）");
+    expect(text).toContain("引落口座は不明 引落口座を示す記録がありません。");
     // A refund statement is listed apart, never netted against a bill.
     expect(text).toContain("最新の請求総額が0円以下（返金など）のため");
     expect(await section.getByRole("button").count()).toBe(0);
@@ -778,6 +824,45 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("a due or debit date the server sends as null shows its reason, and a null without one is refused (INV05)", async () => {
+    const [stated, settled] = debitAccounts.items;
+    const match = settled!.settled[0]!;
+    const undated = (
+      paymentDateReason: string | undefined,
+      debitDateReason: string | undefined,
+    ) => ({
+      ...debitAccounts,
+      items: [
+        {
+          ...stated!,
+          latestStatement: { ...stated!.latestStatement!, paymentDate: null, paymentDateReason },
+        },
+        {
+          ...settled!,
+          settled: [{ ...match, latest: { ...match.latest, debitDate: null, debitDateReason } }],
+          answer: { ...settled!.answer, debitDate: null, debitDateReason },
+        },
+      ],
+    });
+    debitAccountsPage = undated("payment_date_absent", "debit_date_invalid");
+    let page = await open();
+    let section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("myjcb:synthetic:root").waitFor();
+    const text = await section.innerText();
+    expect(text).toContain("引落予定日 不明（payment_date_absent）");
+    expect(text).toContain("引落日 不明（debit_date_invalid） · 照合を見る");
+    expect(text).toContain("最新の引落日 不明（debit_date_invalid）");
+    expect(text).not.toContain("年月日として読める記録なし");
+    await page.close();
+    // A null that came without its reason is refused before anything renders.
+    debitAccountsPage = undated(undefined, undefined);
+    page = await open();
+    section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("myjcb:synthetic:root");
+    await page.close();
+  });
+
   test("statements without a candidate show their reason and the planner's answer, with no action", async () => {
     const page = await open();
     const section = page.getByRole("region", { name: "照合候補のない請求" });
@@ -785,8 +870,8 @@ describe.if(runnable)("card settlement review", () => {
     const text = await section.innerText();
     expect(text).toContain("請求総額と同じ金額の出金はありません");
     expect(text).toContain("複数の出金の合計が一致");
-    expect(text).toContain("三井住友銀行 · synthetic-bank · 1000 JPY");
-    expect(text).toContain("三井住友銀行 · synthetic-bank · 2000 JPY");
+    expect(text).toContain("三井住友銀行 · synthetic-bank · 1,000 JPY");
+    expect(text).toContain("三井住友銀行 · synthetic-bank · 2,000 JPY");
     expect(text).toContain("返金の割り当ては未対応");
     expect(text).toContain("まだ採用できません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
@@ -816,6 +901,28 @@ describe.if(runnable)("card settlement review", () => {
     await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
     expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
     await page.close();
+    // A due date the server sends as null shows the reason it carries.
+    unmatchedPage = {
+      ...unmatched,
+      items: [
+        {
+          ...first!,
+          statement: {
+            ...first!.statement,
+            paymentDate: null,
+            paymentDateReason: "payment_date_invalid",
+          },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          planner: null,
+        },
+      ],
+    };
+    page = await open();
+    section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
+    expect(await section.innerText()).toContain("引落予定日 不明（payment_date_invalid）");
+    await page.close();
     unmatchedPage = withTotal(null);
     page = await open();
     section = page.getByRole("region", { name: "照合候補のない請求" });
@@ -831,7 +938,7 @@ describe.if(runnable)("card settlement review", () => {
     const note = section.getByRole("note");
     await note.waitFor();
     expect(await note.innerText()).toContain(
-      "一致する組み合わせ 4,960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
+      "一致する組み合わせ 4960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
     );
     expect(await section.locator(".unmatched-allocation").count()).toBe(50);
     expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
@@ -1024,7 +1131,7 @@ describe.if(runnable)("card settlement review", () => {
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
     const page = await open();
     const text = await page.locator("main").innerText();
-    expect(text).toContain("3000 JPY");
+    expect(text).toContain("3,000 JPY");
     expect(text).toContain("追加する現金移動");
     expect(text).toContain("0 JPY");
     expect(text).toContain("候補・未適用");
@@ -1042,6 +1149,67 @@ describe.if(runnable)("card settlement review", () => {
       .filter({ hasText: "読み取りモデルへの反映はまだ完了" })
       .waitFor();
     expect(posted.map((row) => row.operation)).toContain("commit");
+    // The candidate is read again after the commit and shows the decision;
+    // the revision the commit itself wrote is not reported as a change made
+    // since planning, and the plan, not simulated again (the server would
+    // refuse it), reads as committed.
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    const after = await page.locator("main").innerText();
+    expect(after).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(after).not.toContain("この候補では計画した操作を実行できません");
+    expect(after).not.toContain("古い承認は適用されません");
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
+    await page.close();
+  });
+
+  test("a commit whose answer is lost stays resendable when the candidate, read again, shows the decision it may have written", async () => {
+    commitLost = true;
+    const page = await open(`/confirm/${PLAN}`);
+    await page.getByRole("button", { name: "承認する", exact: true }).click();
+    await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
+    await page.getByRole("button", { name: "確定する", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "時間をおいて再試行" }).waitFor();
+    // A refocused window reads the candidate again; the commit landed, so it
+    // reads accepted at a revision newer than the plan pinned.
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    const lost = await page.locator("main").innerText();
+    expect(lost).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(lost).not.toContain("この候補では計画した操作を実行できません");
+    // The warnings are silent, so the screen says the outcome is unknown and
+    // that the resend is the same operation.
+    expect(lost).toContain("判断が保存されたかどうか分かりません");
+    expect(lost).toContain("同じ操作IDで送るため二重には保存されず");
+    const resend = page.getByRole("button", { name: "確定する", exact: true });
+    expect(await resend.isDisabled()).toBe(false);
+    await resend.click();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    const commits = posted.filter((row) => row.operation === "commit");
+    expect(commits).toHaveLength(2);
+    expect(commits[1]!.body.operationId).toBe(commits[0]!.body.operationId);
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
+    await page.close();
+  });
+
+  test("a failed receipt says the decision was saved and does not report its own revision as a change since planning", async () => {
+    receiptStatus = "failed";
+    const page = await open(`/confirm/${PLAN}`);
+    await page.getByRole("button", { name: "承認する", exact: true }).click();
+    await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
+    await page.getByRole("button", { name: "確定する", exact: true }).click();
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    await page.getByText("操作の記録を確認してください", { exact: true }).waitFor();
+    const after = await page.locator("main").innerText();
+    expect(after).toContain("この計画の判断は保存されましたが、操作は失敗として記録されています");
+    expect(after).not.toContain("確定済み");
+    expect(after).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(after).not.toContain("この候補では計画した操作を実行できません");
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
     await page.close();
   });
 
@@ -1091,6 +1259,36 @@ describe.if(runnable)("card settlement review", () => {
     expect(posted.find((row) => row.operation === "plan")?.body.kind).toBe(
       "card-settlement.withdraw",
     );
+    await page.close();
+  });
+
+  test("a plan in flight holds the buttons without taking focus, and its refusal leaves focus on the pressed button", async () => {
+    // The plan pins a newer revision than the one on screen: refused here.
+    planRevision = 1;
+    let release!: () => void;
+    planGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const page = await open();
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const button = page.getByRole("button", { name: "却下内容を確認", exact: true });
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("button")].some(
+        (element) =>
+          element.textContent === "却下内容を確認" &&
+          element.getAttribute("aria-disabled") === "true",
+      ),
+    );
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    // Another press while the plan is in flight sends nothing.
+    await page.keyboard.press("Enter");
+    release();
+    await page.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    expect(await button.getAttribute("aria-disabled")).toBeNull();
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(posted.filter((row) => row.operation === "plan")).toHaveLength(1);
     await page.close();
   });
 

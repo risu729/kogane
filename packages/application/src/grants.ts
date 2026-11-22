@@ -18,6 +18,8 @@
 // A grant is not an authentication decision: the transport authenticates the
 // principal (Cloudflare Access) before any grant exists.
 import { hasExactKeys, isOneOf, isRecord, isSafeInt, isText } from "../../domain/src/guards.ts";
+import type { FinancialError } from "../../domain/src/result.ts";
+import { financialError } from "./errors.ts";
 
 export const AGENT_CAPABILITIES = [
   /** Aggregates, quality and freshness inside the granted scope. */
@@ -87,6 +89,36 @@ export const DEFAULT_QUERY_LIMIT = 100;
 
 export function grantAllows(grant: Grant, capability: AgentCapability): boolean {
   return grant.capabilities.includes(capability);
+}
+
+/**
+ * `scope:source` and then `scope:account`, for each store axis the grant
+ * narrows; empty when it covers the whole store. The schedule axis is not a
+ * store axis and is not named.
+ */
+export function narrowedScopeRefs(grant: Grant): string[] {
+  return [
+    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
+    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+  ];
+}
+
+/**
+ * The refusal of a grant that may not make a whole-store read under
+ * `capability`, or null when it may: `unauthorized` with
+ * `capability:<capability>` when it lacks the capability, else
+ * `evidence_restricted` naming each narrowed axis (`narrowedScopeRefs`).
+ * Decided from the grant alone, so a read checks it before anything else.
+ */
+export function wholeStoreReadRefusal(
+  grant: Grant,
+  capability: AgentCapability,
+  requestId: string,
+): FinancialError | null {
+  if (!grantAllows(grant, capability))
+    return financialError("unauthorized", requestId, [`capability:${capability}`]);
+  const narrowed = narrowedScopeRefs(grant);
+  return narrowed.length > 0 ? financialError("evidence_restricted", requestId, narrowed) : null;
 }
 
 function scopeHas(scope: ScopeSet, value: string): boolean {

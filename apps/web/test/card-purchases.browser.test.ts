@@ -154,15 +154,17 @@ describe.if(runnable)("card purchase explanation", () => {
     const figures = page.getByRole("list", { name: "状態ごとの利用額" });
     const tiles = await figures.getByRole("listitem").allInnerTexts();
     expect(tiles.map((text) => text.replace(/\s+/gu, " ").trim())).toEqual([
-      "1234 JPY 確定",
-      "1200 JPY 未確定",
+      "1,234 JPY 確定",
+      "1,200 JPY 未確定",
       "300 JPY 返金（対応不明）",
       "0 JPY 未確定の返金（対応不明）",
       "1件 取得元に表示されなくなった利用",
     ]);
     const main = await page.locator("main").innerText();
-    // No figure adds captured and authorized, or subtracts a refund.
-    for (const combined of ["2434", "2734", "934", "2134"]) expect(main).not.toContain(combined);
+    // No figure adds captured and authorized, or subtracts a refund, grouped
+    // as the shared formatter writes it or not.
+    for (const combined of ["2434", "2734", "934", "2134", "2,434", "2,734", "2,134"])
+      expect(main).not.toContain(combined);
     expect(main).toContain("引落は購入費用に加算しません");
     // The unrecognised count is across every statement month, and says so.
     expect(main).toContain("3 件は、カード利用として認識されていないため、どの請求月の一覧にも");
@@ -173,9 +175,14 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(main).not.toContain("理由は一部の明細についてだけ数えています");
     // The statement total is reference only, behind its own disclosure.
     await page.getByText("カード会社の請求総額（参考）", { exact: true }).click();
-    expect(await page.locator("main").innerText()).toContain("1734 JPY");
+    expect(await page.locator("main").innerText()).toContain("1,734 JPY");
     const rows = page.getByRole("region", { name: "カード利用の一覧" }).locator("tbody tr");
     expect(await rows.count()).toBe(4);
+    // A purchase not yet on a statement has no debit to follow, and says so
+    // in words beside the statement reason, never a dash (INV05).
+    const unbilled = rows.filter({ hasText: "架空の喫茶店" });
+    expect(await unbilled.locator("td").nth(4).innerText()).toBe("未請求");
+    expect(await unbilled.locator("td").nth(5).innerText()).toBe("引落をたどれません");
     expect(await rows.nth(3).innerText()).toContain("取得元に表示されなくなった");
     expect(await rows.nth(3).innerText()).toContain("合計に含めていません");
     expect(requests[0]?.searchParams.get("offset")).toBe("0");
@@ -208,7 +215,7 @@ describe.if(runnable)("card purchase explanation", () => {
       "請求",
       "引落",
       "2026-09 請求分",
-      "1734 JPY",
+      "1,734 JPY",
       "採用済み",
       "三井住友銀行",
     ])
