@@ -806,7 +806,9 @@ card settlement answer offers a page its grant is refused
 (`maxRows` 1000) the last page offered starts at offset 950. Each item has the statement's ref, source, source account,
 resolved account, total (always a quantity: one that is not exact carries
 its status and reason, `stored:<status>` or `decimal_not_projected`, never
-null), due date (null when absent),
+null), due date (null when absent or not a civil date, and then with
+`paymentDateReason` `payment_date_absent` or `payment_date_invalid`,
+[ADR 0114, 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)),
 period, `code`, `debitsInWindow`, `planner` (null unless asked) and
 `acceptable: false`. A planner answer lists at most the first 50 allocations
 (`manifest.planner.bounds.allocations`), with `allocationCount` (all of them)
@@ -839,7 +841,8 @@ any other key or value is `400 invalid_request`. Output without a view:
 account), its `latestStatement` (ref, period, due date, total; null when the
 card has no current statement; a total that is not exact is a quantity with
 its status and reason, `stored:<status>` or `decimal_not_projected`, never
-null), `stated` (status `named`, `conflicting`,
+null; a null due date has `paymentDateReason`, `payment_date_absent` or
+`payment_date_invalid`), `stated` (status `named`, `conflicting`,
 `not_named` or `absent` with its reason, the newest reading and the newest
 one naming exactly one account), `settled` and `proposed` (per bank account:
 distinct statements and the candidate with the latest debit date), and the
@@ -852,6 +855,11 @@ confirmed, and the page shows it as a warning, so an agent reads the same
 `codes` the page does: with `newer_reading_unresolved` it is the last account
 the provider was seen to state, which a newer reading does not confirm, so the
 account may have changed. Undecided candidates are listed, never used as the answer (INV07).
+A debit date that is null, in `settled`, `proposed` or an
+`accepted-settlement` answer, has `debitDateReason` `debit_date_invalid`: the
+candidate's stored bank debit date is not a civil local date, which the only
+candidate writer never stores ([ADR 0114, 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)). Each reason
+is a key only beside a null date.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `maxRows` of at least 100, else

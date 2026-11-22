@@ -220,6 +220,142 @@ the page renders the total through `SettlementQuantity` only.
 - `apps/web/test/card-settlement.browser.test.ts`: the section shows
   `不明（stored:unparsed） · JPY` and refuses a `null` total before it renders.
 
+## Amendment 2026-11-21: a null due or debit date carries its reason
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. The published answers of
+  `kogane.card-settlements.debit-accounts` and
+  `kogane.card-settlements.unmatched` gain a field, and both tool
+  descriptions change; a change to a published tool's answer is the owner's
+  to approve ([ADR 0081](0081-ui-parity-through-mcp.md)'s `nextPage`
+  amendment). The unmatched list is
+  [ADR 0074](0074-card-statement-allocation-planner.md)'s view; it is
+  recorded here because both reads take the due date from the same stored
+  field through one domain function.
+
+### Context
+
+Three dates on these answers were null with no reason (INV05):
+`latestStatement.paymentDate` on each card, `statement.paymentDate` on a
+statement without a candidate, and the debit date of a settlement candidate
+(`settled[].latest.debitDate`, `proposed[].latest.debitDate` and an
+`accepted-settlement` answer's `debitDate`). The page could only say what was
+missing (年月日として読める記録なし), and an agent got a bare `null`.
+
+What the stored data can say:
+
+- The due date is `card_statement_facts.payment_date`, the stored
+  `_kogane.paymentDate`. It is null when nothing is recorded there (no key,
+  or JSON null), or it is a value that is not a civil `YYYY-MM-DD` date. The
+  store records no reason for either; the two parsers the view reads
+  (`vpass-statement-page`, `myjcb-credit-statement-total`) always write a
+  civil date or refuse the page.
+- The debit date is the candidate's stored `bankDebit.occurred`. The only
+  candidate writer (`cardSettlementCandidate`, through the settlement sweep)
+  makes a candidate only when both dates are civil local dates, so no stored
+  candidate has an `unknown` time or a `reasonCode` to carry. The candidates
+  read takes the date only from a `local-date` (`CARD_DEBIT_ACCOUNT_CANDIDATES_SQL`),
+  so a row the writer did not make reads null whatever it holds.
+
+### Options considered
+
+1. **Keep `null`; the page names what is missing.** An agent still gets no
+   reason, and the page cannot tell absent from unreadable. Rejected.
+2. **Pass the stored `reasonCode` through.** No stored value has one: the
+   writer never stores an `unknown` time. Reading one would change the
+   candidates SQL, which needs the query-rewrite proof (frozen legacy SQL,
+   differential tests, plan checks), for a value nothing writes. Rejected.
+3. **Replace `null` with an `unknown` time** (`{kind: "unknown",
+   reasonCode}`, the shape the card purchase read gives a statement link's
+   `paymentDate`). It changes an existing field: a client that tests
+   `paymentDate === null` would read an unknown time as present, and the
+   debit dates are plain text with no unknown shape, so the two would differ.
+   Rejected for this change.
+4. **Fail the read on a debit date that is not civil,** as on other
+   malformed rows. One such row would hide every card's answer, though the
+   rest of that row (its card, bank account and candidate) is still readable;
+   and a null due date already answers its statement, never fails the read.
+   Rejected.
+5. **An optional reason beside each nullable date (chosen),** from closed
+   lists in the domain, present exactly when the date is null, so every
+   dated answer is unchanged byte for byte.
+
+### Decision
+
+`packages/domain/src/card-settlement.ts` holds the closed lists and the one
+reading of each date:
+
+- `STATEMENT_DUE_DATE_REASONS`, from `statementDueDate`:
+  `payment_date_absent` when nothing is recorded (the code the card purchase
+  read already gives the same field), `payment_date_invalid` when a value
+  that is not a civil date is;
+- `SETTLEMENT_DEBIT_DATE_REASONS`, from `settlementDebitDate`:
+  `debit_date_invalid` when the stored debit is not a civil local date (the
+  code the unmatched planner input already gives such a debit).
+
+`reviewCardDebitAccounts` answers `latestStatement.paymentDateReason` and
+`latest.debitDateReason` (in `settled` and `proposed`), and an
+`accepted-settlement` answer carries its settlement's `debitDateReason`
+(`answerCardDebitAccount`). `reviewUnmatchedCardStatements` answers
+`statement.paymentDateReason`. Each reason is a key only beside a null date.
+The wire contracts (`validCardDebitAccountsReview`,
+`validUnmatchedCardStatementsReview`) require the reason exactly when the
+date is null, from its closed list, and require an answer's reason to equal
+its settlement's. The page shows a null date as `不明（<code>）` through
+`NullableDate`. Both tool descriptions name the field and its codes. No SQL
+changes; `schemaVersion` stays `kogane-card-debit-accounts-v1` and
+`kogane-card-statements-unmatched-v1`.
+
+The reason says only what is stored: neither code says why the provider page
+or the parser left the date so (ADR 0004).
+
+### Consequences
+
+- The route bodies and both tool results gain `paymentDateReason` and
+  `debitDateReason` beside a null date; every answer whose dates are present
+  is unchanged. The tools' names and input schemas are unchanged, and the
+  catalogue is not touched. Client and Worker deploy together, so the
+  browser never meets a null date without its reason from an older Worker.
+- The `upcoming` view keeps its own `payment_date_not_published` for a card
+  whose due date is null, whichever of the two reasons it has, and the card
+  purchase read keeps `payment_date_absent` for a stored due date that is not
+  a civil date. Both are left as they are.
+- The 基準日の保有状況 payable list, a separate read, shows a payable with no
+  due date recorded as 引落予定日未記録 instead of a bare 不明; its answer
+  is unchanged (a value that is not a civil date is shown as stored, with
+  the status `payment_date_unknown`).
+
+### Verification
+
+- `packages/domain/test/card-settlement.test.ts`: each stored shape gives
+  its date or its reason; the writer refuses a debit that is not a local
+  date. `packages/domain/test/card-debit-account-answer.test.ts`: an
+  accepted-settlement answer carries its settlement's reason, and a dated
+  one has no reason key.
+- `packages/application/test/card-debit-accounts-contract.test.ts`: the
+  random stores now include absent and non-text due dates, and every reason
+  is reached and passes the contract; a candidate row whose read gave no
+  date answers `debit_date_invalid` in `settled` and in the answer.
+  `packages/application/test/card-statements-unmatched-total.test.ts`: a null
+  due date gives its reason and stays `statement_not_comparable`.
+- `packages/observation-shared/test/card-debit-accounts-contract.test.ts`
+  and `card-statements-unmatched-contract.test.ts`: the contracts refuse a
+  bare null, a reason outside the list, a reason beside a date, and an
+  answer that drops its settlement's reason.
+- `services/app/test/card-debit-accounts-api.test.ts` and
+  `card-statements-unmatched-api.test.ts`: on the real migrations, a
+  statement with no `_kogane.paymentDate` and one with `2099-02-30` give
+  `payment_date_absent` and `payment_date_invalid`, alike on the route and
+  through the tool; `ui-mcp-parity.test.ts` and the unmatched test check the
+  descriptions name the fields and codes, and `mcp-client.test.ts` that every
+  description stays within 2,048 characters.
+- `apps/web/test/card-settlement.browser.test.ts`: the sections show
+  `不明（payment_date_absent）`, `不明（debit_date_invalid）` and
+  `不明（payment_date_invalid）`, and refuse a null date without its reason
+  before rendering. `apps/web/test/reported-state.browser.test.ts`: a payable
+  with no due date reads 引落予定日未記録.
+
 ## Amendment 2026-11-19: the `upcoming` view answers each card's next bill and whether its account covers it
 
 - Status: proposed. It changes the published input schema and answers of

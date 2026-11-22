@@ -130,7 +130,7 @@ function UnmatchedRow({ item }: { item: UnmatchedCardStatement }): ReactNode {
         <strong>{statement.sourceId === "vpass" ? "Vpass" : "MyJCB"}</strong> · 対象月{" "}
         <Nullable value={statement.period} /> · 請求総額{" "}
         <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
-        <NullableDate value={statement.paymentDate} />
+        <NullableDate value={statement.paymentDate} reason={statement.paymentDateReason} />
       </p>
       <p>{label(CODES, item.code)}</p>
       {item.planner === null ? null : <PlannerAnswer answer={item.planner} />}

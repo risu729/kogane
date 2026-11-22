@@ -156,6 +156,9 @@ describe.if(runnable)("reported state on a date", () => {
     expect(text).toContain("基準日より後に引落予定");
     expect(text).toContain("引落予定日を過ぎ、引落は未確認");
     expect(text).toContain("引落予定日が不明");
+    // A statement with no due date recorded says so in words, never a bare 不明 (INV05).
+    expect(text).toContain("引落予定日未記録");
+    expect(text).not.toMatch(/(^|[\t\n])不明($|[\t\n])/u);
     expect(text).toContain("採用済み");
     await choose(page, "2026-09-26");
     expect(await payables.innerText()).toContain("基準日までに引落を確認");

@@ -93,8 +93,12 @@ function Answer({ item }: { item: CardDebitAccountCard }): ReactNode {
         ) : (
           <span className="dim">
             {" "}
-            · 引落日 <NullableDate value={answer.debitDate} /> ·{" "}
-            <Link to={`/reconciliation/${answer.proposalId}`}>照合を見る</Link>
+            · 引落日{" "}
+            <NullableDate
+              value={answer.debitDate}
+              reason={answer.debitDate === null ? answer.debitDateReason : undefined}
+            />{" "}
+            · <Link to={`/reconciliation/${answer.proposalId}`}>照合を見る</Link>
           </span>
         )}
       </p>
@@ -146,8 +150,11 @@ function Matched({ entries, empty }: { entries: MatchedDebitAccount[]; empty: st
       {entries.map((entry) => (
         <li key={entry.bankSourceId + "\n" + entry.bankSourceAccount}>
           <Account account={entry} /> · 請求 {entry.statements}件 · 最新の引落日{" "}
-          <NullableDate value={entry.latest.debitDate} /> ·{" "}
-          <Link to={`/reconciliation/${entry.latest.proposalId}`}>照合候補</Link>
+          <NullableDate
+            value={entry.latest.debitDate}
+            reason={entry.latest.debitDate === null ? entry.latest.debitDateReason : undefined}
+          />{" "}
+          · <Link to={`/reconciliation/${entry.latest.proposalId}`}>照合候補</Link>
         </li>
       ))}
     </ul>
@@ -168,7 +175,7 @@ function CardRow({ item }: { item: CardDebitAccountCard }): ReactNode {
             {" "}
             · 最新の請求 <Nullable value={statement.period} /> · 請求総額{" "}
             <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
-            <NullableDate value={statement.paymentDate} />
+            <NullableDate value={statement.paymentDate} reason={statement.paymentDateReason} />
           </span>
         )}
       </p>

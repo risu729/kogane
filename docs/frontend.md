@@ -156,9 +156,12 @@ An unknown value says why (INV05). When the answer carries a closed reason
 for it, the page shows that reason: `不明（<code>）` (`SettlementQuantity`,
 `DateValue`, the 次回の引落 amounts and a not-listed card's due date), or the
 reason in words beside a badge (引落口座は不明). When the answer sends a bare
-null, `Nullable` names what is missing rather than a bare 不明: a due or debit
-date the card reconciliation reads send as null (absent, or not a civil date)
-is `NullableDate`, 年月日として読める記録なし. An identifier is printed
+null, `Nullable` names what is missing rather than a bare 不明 (a payable
+with no due date recorded on 基準日の保有状況 is 引落予定日未記録). A due or
+debit date the card reconciliation reads send as null carries its closed
+reason (`paymentDateReason`, `debitDateReason`), and `NullableDate` shows it
+as `不明（<code>）`; a null without one, which their wire contracts refuse,
+would read 年月日として読める記録なし. An identifier is printed
 `namespace / scope / value`; an empty scope is part of the key and stays
 empty, never a dash.
 

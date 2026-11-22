@@ -140,12 +140,26 @@ export function DateValue({ value }: { value: TemporalValue }): ReactNode {
 }
 
 /**
- * A due or debit date the server sends as a civil date or as null with no
- * reason (absent, or not a `YYYY-MM-DD` date). Null names what is missing in
- * words and claims no reason the answer does not carry (INV05).
+ * A due or debit date the server sends as a civil date, or as null with the
+ * closed reason beside it (`paymentDateReason`, `debitDateReason`): null shows
+ * 不明（reason）, as `DateValue` shows an unknown time. A null that came with
+ * no reason names what is missing in words and claims no reason the answer
+ * does not carry (INV05).
  */
-export function NullableDate({ value }: { value: TemporalValue | string | null }): ReactNode {
-  if (value === null) return <Nullable value={null} placeholder="年月日として読める記録なし" />;
+export function NullableDate({
+  value,
+  reason,
+}: {
+  value: TemporalValue | string | null;
+  reason?: string | undefined;
+}): ReactNode {
+  if (value === null)
+    return (
+      <Nullable
+        value={null}
+        placeholder={reason === undefined ? "年月日として読める記録なし" : `不明（${reason}）`}
+      />
+    );
   return typeof value === "string" ? <>{value}</> : <DateValue value={value} />;
 }
 

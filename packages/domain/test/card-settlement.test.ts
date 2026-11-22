@@ -3,6 +3,8 @@ import {
   cardSettlementCandidate,
   cardSettlementEligible,
   cardSettlementImpact,
+  settlementDebitDate,
+  statementDueDate,
   validCardSettlementFacts,
   type CardStatementFact,
   type CardBankDebitFact,
@@ -125,4 +127,33 @@ test("stored facts fail closed on any field outside the candidate's own shape", 
     { ...facts, bankDebit: { ...bank, amount: exactQuantity("JPY", integerDecimal(2999)) } },
   ];
   for (const value of malformed) expect(validCardSettlementFacts(value)).toBe(false);
+});
+
+test("a due date that is not answered names why: nothing recorded, or not a civil date (INV05)", () => {
+  expect(statementDueDate("2098-01-10")).toEqual({ paymentDate: "2098-01-10" });
+  for (const absent of [null, undefined])
+    expect(statementDueDate(absent)).toEqual({
+      paymentDate: null,
+      paymentDateReason: "payment_date_absent",
+    });
+  // Recorded, but not a `YYYY-MM-DD` calendar date: as json_extract returns
+  // a number, an object's text, an empty string or a day that does not exist.
+  for (const invalid of ["2098-02-30", "", "2098/01/10", "2098-01-10T00:00:00Z", 20980110, "{}"])
+    expect(statementDueDate(invalid)).toEqual({
+      paymentDate: null,
+      paymentDateReason: "payment_date_invalid",
+    });
+});
+
+test("a candidate's debit date that is not a civil local date is debit_date_invalid, never a bare null", () => {
+  expect(settlementDebitDate("2098-01-10")).toEqual({ debitDate: "2098-01-10" });
+  for (const invalid of [null, undefined, "", "2098-02-30", "2098-01"])
+    expect(settlementDebitDate(invalid)).toEqual({
+      debitDate: null,
+      debitDateReason: "debit_date_invalid",
+    });
+  // The only writer stores a candidate only when both dates are civil local dates.
+  expect(
+    cardSettlementCandidate(statement, { ...bank, occurred: { kind: "unknown", reasonCode: "x" } }),
+  ).toBeNull();
 });
