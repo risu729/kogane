@@ -2081,20 +2081,44 @@ and the tool alike. Its context is always opened under the latest identity
 (`contextInputs`, `services/app/src/agent-service.ts`), so its `contextId`
 pins the identity release (`identity:latest:current-mappings-v1`) and the
 evaluation clock, which the Worker cuts to whole seconds
-(`services/app/src/agent-api.ts`), and no mapping revision: a mapping
-corrected between two calls in the same second leaves the `contextId` as it
-was. A graph's `account_mapping:<referenceId>@<revision>` and
-`instrument_mapping:<referenceId>@<revision>` refs (and the
-`identity-decision:` ref under the account one) are written from the
-organization on the observation detail the reader returned, so they name the
-revision that was read, which the `contextId` does not pin.
+(`services/app/src/agent-api.ts`), and no mapping revision.
 
-Limit: the reader the Worker passes is the evidence reader, whose
-`getObservation` returns no organization
-(`packages/read-model/src/observation-reader.ts`). A graph served today
-therefore holds no `adopted-claim` or `identity-decision` node and reads no
-mapping; those levels are exercised only with a test reader
-(`packages/application/test/explain-propose.test.ts`).
+For an observation ref, the graph's organization levels come from the
+organization the observation detail route shows: `organizedExplainReader`
+reads it with `observationOrganizations`
+(`packages/application/src/query/observation-organization.ts`), the function
+`GET /api/observations/<kind>/<id>` calls, under the context's identity mode,
+and only after the grant has allowed the row. A mapped observation's graph
+then holds, below the result row:
+
+| Depth | Node                                                                            | Kind                |
+| ----- | ------------------------------------------------------------------------------- | ------------------- |
+| 2     | `account_mapping:<referenceId>@<revision>`                                      | `adopted-claim`     |
+| 2     | `instrument_mapping:<referenceId>@<revision>`                                   | `adopted-claim`     |
+| 3     | `identity-decision:<method>:<referenceId>@<revision>` (under the account claim) | `identity-decision` |
+
+`referenceId` is the source account or instrument identifier id the mapping is
+keyed by, `method` is `rule` or `manual`, and `revision` is the revision that
+was read. An observation no sealed identity run organizes has none of these
+nodes. The levels are shown under `summary.read`, like the parse run beside
+them; only the raw locators need `evidence.read`.
+
+Under `latest` a mapping corrected between two calls in the same second
+leaves the `contextId` as it was and changes the graph's refs to the new
+revision. That is how the shared context treats `latest`, which `explain`
+opens with the inputs `kogane.context.open` and `kogane.query` use: it pins
+the identity mode and release, not revisions, and the `identity` quality
+dimension of a `latest` query says `mappings_may_change_under_latest`
+([result contract](#result-contract)); balance pages likewise re-read the
+organization overlay. Not every `latest` answer works this way: a dated
+reported-state `contextId` pins each listed row's account and instrument, so
+a mapping revision that changes what a row shows moves it
+([reported state](reported-state.md#the-answer)). A graph is self-describing
+instead: each mapping ref
+names the revision it was built from, so two graphs that differ under one
+`contextId` say how. `explain` issues no cursor and no `resultRef`, so nothing
+resumes or hands off on a revision it did not read
+([ADR 0081 amendment 2026-11-21](adr/0081-ui-parity-through-mcp.md#amendment-explain-reads-the-detail-routes-organization-2026-11-21)).
 
 ## Result contract
 
@@ -2214,11 +2238,13 @@ Converting them to JSON does not make them instructions.
   `kogane.command.plan` `baseContextId` (256) and `kogane.command.approve`
   `scope` items (512). The keys of both open maps, and the values of
   `kogane.audit.search` `filters`, have no length bound in the schema.
-- `explain` returns identifiers only — `account_mapping:` (where its reader
-  supplies an organization, which the served one does not:
-  [explain and the identity read](#explain-and-the-identity-read)),
-  `parse_run:`, `fetch_artifact:`, `raw:<sha256>`. The provider URL an
-  artifact was fetched from is never in a graph, at any capability.
+- `explain` returns identifiers only — `account_mapping:`,
+  `instrument_mapping:`, `identity-decision:`, `parse_run:`,
+  `fetch_artifact:`, `raw:<sha256>`. The provider URL an artifact was fetched
+  from is never in a graph, at any capability, and neither is a mapping's
+  label or reason, the account entity or instrument it maps to, or an
+  identifier's namespace, scope or value
+  ([explain and the identity read](#explain-and-the-identity-read)).
 - Errors carry a code, a fixed remedy sentence and safe refs. No provider
   content, token, SQL text or raw exception string reaches a caller.
 - Bank credentials, sessions and keys are never in a response, and no Access

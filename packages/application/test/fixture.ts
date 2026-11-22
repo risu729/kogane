@@ -261,6 +261,20 @@ export function observationDetail(source: string, account: string): ObservationD
   };
 }
 
-export function explainReader(detail: ObservationDetail | undefined): ExplainReader {
-  return { getObservation: async () => detail };
+/**
+ * A stub reader whose organization is the detail's own `organization`; the
+ * identity modes it was asked for are recorded in `organizationReads`.
+ */
+export function explainReader(
+  detail: ObservationDetail | undefined,
+): ExplainReader & { organizationReads: string[] } {
+  const organizationReads: string[] = [];
+  return {
+    organizationReads,
+    getObservation: async () => detail,
+    getOrganization: async (ref, mode) => {
+      organizationReads.push(`${ref.kind}:${String(ref.id)}@${mode}`);
+      return detail?.organization;
+    },
+  };
 }

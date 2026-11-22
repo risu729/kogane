@@ -28,6 +28,7 @@ import {
   type Grant,
   grantAllowsSource,
   openContext,
+  organizedExplainReader,
   parseExplainRequest,
   parseProposalRequest,
   parsePurchasesExplainRequest,
@@ -263,10 +264,13 @@ async function agentRead(
       if (!parsed.ok) return failure(parsed.code, "explain", parsed.refs);
       const overview = await context.reader.overview();
       const opened = await openContext(context.grant, await contextInputs(context, overview));
+      // The organization is the observation detail route's read, under the
+      // context's identity mode (always `latest` here), so a served graph has
+      // the adopted-claim and identity-decision levels.
       const outcome = await explain({
         grant: context.grant,
         opened,
-        reader: context.reader,
+        reader: organizedExplainReader(context.reader, d1Executor(context.db)),
         request: parsed.value,
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
