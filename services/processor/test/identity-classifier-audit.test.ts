@@ -3,14 +3,17 @@
 // module selects, with the trusted Vpass binding, so its counts equal what
 // `identifyParse` stores. Before, it resolved every row under the newest rules
 // and without the binding, and reported every bound Vpass card row as an
-// unresolved card ordinal.
+// unresolved card ordinal. The test also pins the version and binding each
+// row was resolved with, and a manual decision on a run-scoped Vpass
+// reference being kept.
 //
 // Everything is synthetic: the card, token, rows and amounts are placeholders
 // in the observed shapes, on the real CORE schema in Miniflare.
 import { afterEach, expect, test } from "bun:test";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
+import type { IdentityInput } from "../../../packages/identity/src/types.ts";
 import { auditIdentityClassification } from "../src/identity-classifier-audit.ts";
-import { identifyParse } from "../src/identity-store.ts";
+import { identifyParse, identityKey } from "../src/identity-store.ts";
 import { disposeWorlds, PRODUCER, TOKEN_A, world, type World } from "./card-purchase-world.ts";
 import { publishParse, seedArtifact } from "./harness.ts";
 
@@ -113,7 +116,18 @@ test("the audit resolves each parse under its own policy and binding, as the pro
   });
 
   const progress: string[] = [];
-  const audit = await auditIdentityClassification(w.db, (kind) => progress.push(kind));
+  // The version and binding each row was resolved with. No observed shape of a
+  // base-policy parse plans differently under the newest rules, so the counts
+  // alone would not show a dropped version; the inputs do.
+  const inputs: IdentityInput[] = [];
+  const audit = await auditIdentityClassification(
+    w.db,
+    (kind) => progress.push(kind),
+    (input) => {
+      inputs.push(input);
+      return resolveIdentity(input);
+    },
+  );
   expect(progress).toEqual(["transaction", "balance", "position", "valuation"]);
   expect(audit.policy).toBe("per-parse-required");
   const source = (id: string) => audit.sources.find((summary) => summary.source === id)!;
@@ -151,6 +165,20 @@ test("the audit resolves each parse under its own policy and binding, as the pro
   expect(sony.policyFallbacks).toEqual({});
   expect(sony.accountStatus).toEqual({ "provider-local": 1 });
 
+  // Each row was resolved at the version its parse's run stored, and a row
+  // carries the trusted binding exactly when that run pinned one.
+  const runs = await w.all<{ parse_run_id: number; policy_version: number; pinned: number }>(
+    `SELECT r.parse_run_id,r.policy_version,EXISTS(SELECT 1 FROM identity_vpass_bindings b WHERE b.identity_run_id=r.id) pinned
+     FROM identity_runs r`,
+  );
+  expect(inputs).toHaveLength(audit.sources.reduce((n, summary) => n + summary.observations, 0));
+  for (const input of inputs) {
+    const run = runs.find((candidate) => candidate.parse_run_id === input.parseRunId)!;
+    expect(input.policyVersion).toBe(run.policy_version);
+    expect(input.trustedVpassBinding !== undefined).toBe(run.pinned === 1);
+  }
+  expect(new Set(inputs.map((input) => input.policyVersion))).toEqual(new Set([1, 2]));
+
   // Parity with the projection, source by source.
   const projection = await stored(w);
   for (const summary of audit.sources) {
@@ -163,4 +191,37 @@ test("the audit resolves each parse under its own policy and binding, as the pro
   const text = JSON.stringify(audit);
   for (const secret of [TOKEN_A.slice(-64), "vpass-card-v", "card-00", "架空", "sony-bank:deposit"])
     expect(text).not.toContain(secret);
+
+  // A still-effective manual decision on the bound card's run-scoped reference
+  // (an operator mapped the ordinal before the binding was trusted) is kept,
+  // as the projection keeps it: the audit plans the run-scoped key with the
+  // closed issue code instead of the token mapping.
+  const boundInput = inputs.find((input) => input.trustedVpassBinding)!;
+  const runScoped = [boundInput.sourceAccount, "fetch-run", String(boundInput.fetchRunId)];
+  const ref = await identityKey("sa", [boundInput.sourceId, boundInput.producerId, runScoped]);
+  await w.db.batch([
+    w.db
+      .prepare("INSERT INTO source_accounts VALUES(?,?,?,?)")
+      .bind(ref, boundInput.sourceId, boundInput.producerId, JSON.stringify(runScoped)),
+    w.db
+      .prepare(
+        "INSERT INTO accounts VALUES('synthetic-manual-account','synthetic','card','identified')",
+      )
+      .bind(),
+    w.db
+      .prepare(
+        "INSERT INTO account_mappings VALUES('synthetic-manual-mapping',?,1,'synthetic-manual-account','manual','synthetic',1,'2026-09-01','synthetic','identified')",
+      )
+      .bind(ref),
+  ]);
+  const again = await auditIdentityClassification(w.db);
+  const kept = again.sources.find((summary) => summary.source === "vpass")!;
+  expect(kept.issues).toEqual({
+    "card-ordinal-needs-durable-provider-binding": unbound.observations.length,
+    "manual-run-scoped-account-mapping-preserved": bound.observations.length,
+  });
+  expect(kept.accountStatus).toEqual(vpass.accountStatus);
+  // The run-scoped keys of the two runs differ, so the key count is unchanged.
+  expect(kept.canonicalKeys).toBe(2);
+  expect(JSON.stringify(again)).not.toContain("fetch-run");
 }, 90_000);

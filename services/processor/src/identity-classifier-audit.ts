@@ -12,6 +12,7 @@ import {
   identityObservationInput,
   type IdentityObservationKind,
   type IdentityObservationRow,
+  type IdentityResolver,
   parseIdentityPolicy,
   type ParseIdentityPolicy,
   planObservationIdentity,
@@ -43,7 +44,11 @@ interface IdentityClassifierSourceSummary {
   source: string;
   observations: number;
   forms: Counts;
-  /** Parses by the policy release they were resolved under (`<family>-v<version>`). */
+  /**
+   * Parses with at least one published observation, by the policy release
+   * they were resolved under (`<family>-v<version>`). Empty parses are in
+   * `inventory` only.
+   */
   policyReleases: Counts;
   /** Parses whose source family did not apply, by `<family>:<reason>`. */
   policyFallbacks: Counts;
@@ -112,10 +117,13 @@ function working(source: string): Working {
 /**
  * Classifies every published observation and returns per-source aggregates.
  * `onProgress` is called after each form with the running observation count.
+ * `resolver` is the projection's (`resolveIdentity`); tests pass a recording
+ * wrapper to see the input each row was resolved with.
  */
 export async function auditIdentityClassification(
   db: D1Like,
   onProgress: (kind: IdentityObservationKind, observations: number) => void = () => {},
+  resolver: IdentityResolver = resolveIdentity,
 ): Promise<IdentityClassifierAudit> {
   const maxParse =
     (await db.prepare("SELECT coalesce(max(id),0) n FROM parse_runs").first<{ n: number }>())?.n ??
@@ -176,7 +184,7 @@ export async function auditIdentityClassification(
         let resolved: IdentityPlan;
         try {
           input = identityObservationInput(parse, policy, kind, row);
-          resolved = resolveIdentity(input);
+          resolved = resolver(input);
         } catch {
           summary.resolverErrors++;
           continue;
