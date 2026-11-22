@@ -18,6 +18,7 @@ import type {
 } from "../../../packages/domain/src/card-upcoming-bills.ts";
 import { CARD_DEBIT_ACCOUNTS_PATH } from "../../../packages/observation-shared/src/card-debit-accounts-contract.ts";
 import { bankSourceLabel } from "./reconciliation-display.tsx";
+import { formatDecimalText } from "./money.ts";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
 export function useUpcomingCardBills() {
@@ -66,7 +67,7 @@ const label = (labels: Record<string, string>, code: string): string =>
 function Amount({ value }: { value: CompactQuantity }): ReactNode {
   return value.status === "exact" ? (
     <span>
-      {value.value} {value.unit}
+      {formatDecimalText(value.value)} {value.unit}
     </span>
   ) : (
     <Nullable value={null} placeholder={`不明（${value.reason}） · ${value.unit}`} />
