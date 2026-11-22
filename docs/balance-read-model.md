@@ -411,9 +411,14 @@ invocation, committing each chunk with its checkpoint in one batch; after the
 last row the written rows are verified against the build, and the snapshot is
 sealed and published in one further batch, so a reader that selects
 `status='complete'` never observes a partial build. Two complete snapshots are
-retained so a reader with an open cursor survives one rebuild; older builds are
-retired first and only then lose their rows, and the published one is never
-retired.
+retained so a reader with an open cursor survives one rebuild. An older build
+is retired and loses its rows in one batch (`retireOldSnapshots`,
+`abandonSnapshot` in `packages/storage-d1/src/read/writer.ts`): a failed batch
+leaves it as it was (`complete` or `building`) with its rows for the next pass,
+never retired with rows no pass selects again. The published one is never
+retired: the retirement restates that in its own statement, so a build the
+pointer is switched to after the selection read it stays complete, and
+abandoning a build another writer has sealed leaves it as it is.
 
 Rebuild is currently whole-context, not per scope: the snapshot id changes on
 any published parse, and the build recomputes every candidate. That is bounded
