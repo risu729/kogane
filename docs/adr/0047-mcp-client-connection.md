@@ -496,7 +496,7 @@ about 16:40 UTC.
 
 ## Amendment: reconcile the App domain in normal delivery
 
-- Status: accepted by the owner, implementation pending merge
+- Status: accepted by the owner; merged with its implementation 2026-11-12 in [#1305](https://github.com/risu729/kogane/pull/1305)
 - Date: 2026-11-11 13:40 UTC
 
 The owner selected normal `deploy-triggers: true` delivery for all four maintained

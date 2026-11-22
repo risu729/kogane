@@ -455,7 +455,7 @@ only.
 
 ## Amendment 2026-11-21: a null due date carries its reason
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1534](https://github.com/risu729/kogane/pull/1534))
 - Date: 2026-11-21
 - Owner approval: required before merge, with the change it belongs to.
 
