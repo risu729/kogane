@@ -300,6 +300,27 @@ inside it ([ADR 0047](adr/0047-mcp-client-connection.md)).
 `test/coverage-scope.test.ts` pins this on the HTTP agent route and `/mcp`:
 520 runs of a source outside the scope leave the whole answer byte-identical.
 
+#### Rows a date window cannot place
+
+An `activity` window places a row by the calendar date its `as_of` starts
+with, so a row whose `as_of` is null, a year-month, an impossible day or other
+text is left out of every windowed page: whether it lies in the window is not
+known. When a request has `from` or `to`, `executeQuery` counts those rows in
+each scope pair, inside the `source`, `account` and `q` filters and the grant
+(`undatedTransactions`,
+[read model](read-model.md#rows-a-date-window-cannot-place)), and names each
+source that has one as the gap `undated_rows_excluded` (`scopeRef`
+`source:<id>`), on every page
+([ADR 0091, amendment of 2026-11-21](adr/0091-query-cursor-paging-basis.md#amendment-2026-11-21-rows-a-date-window-cannot-place-are-a-gap),
+proposed). The answer is then `partial`, and the `freshness` dimension is
+`partial` with the reason `undated_rows_excluded`. Such a source is not also
+named `no_rows_in_scope`. Without `from` and `to` nothing is left out: an
+undated row is returned, and the page's freshness says `as_of_missing` as
+before. `every_row_carries_an_as_of` is the freshness reason only when every
+returned row carries an `as_of` and no row in scope was left out unplaced.
+`packages/application/test/activity-undated.test.ts` pins this over the real
+transactions read.
+
 `holdings` reads A07's adopted balance projection and nothing else. While READ
 is unbound or no snapshot is sealed it answers
 `completeness: "unavailable"` with the gap reason `projection_not_built` and a
@@ -1209,6 +1230,14 @@ the reader is the route's status with `{ error, refs? }`, as the Worker
 answers it, without the request id. A store read that fails is
 `503 catalogue_read_failed`, as on the route.
 
+Limit: `kogane.observations.list` with `kind: "transactions"` and `from` or
+`to`, like `GET /api/transactions`, leaves out every transaction whose
+`as_of` starts with no calendar date (null, a year-month, an impossible
+day), and its answer has no field that says so. Only `kogane.financial.query`
+`activity` names those rows, as `undated_rows_excluded`
+([rows a date window cannot place](#rows-a-date-window-cannot-place)); the
+same list without `from` and `to` returns them.
+
 Five reads answer one short line per row by default
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
 the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
@@ -2076,13 +2105,13 @@ typed error.
 How the quality dimensions are filled today, from what the shared read model
 actually knows:
 
-| Dimension        | Filled from                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `identity`       | The read mode: `as-recorded` is `verified`; `latest` is `partial` (`mappings_may_change_under_latest`) |
-| `freshness`      | Whether every in-scope source has collected evidence, and every row an `as_of`                         |
-| `numeric`        | The decimal state: exact minor units, or `amount_text_only`                                            |
-| `reconciliation` | `not-applicable` — no reconciliation engine exists yet, and it says so                                 |
-| `valuation`      | `not-applicable` — no valuation policy is adopted                                                      |
+| Dimension        | Filled from                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`       | The read mode: `as-recorded` is `verified`; `latest` is `partial` (`mappings_may_change_under_latest`)                                                   |
+| `freshness`      | Whether every in-scope source has collected evidence, every returned row an `as_of`, and (for an `activity` window) no row in scope was left out undated |
+| `numeric`        | The decimal state: exact minor units, or `amount_text_only`                                                                                              |
+| `reconciliation` | `not-applicable` — no reconciliation engine exists yet, and it says so                                                                                   |
+| `valuation`      | `not-applicable` — no valuation policy is adopted                                                                                                        |
 
 ## Proposals are not adoptions
 

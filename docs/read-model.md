@@ -76,6 +76,7 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 | `parsingHealth`         | `observation_parse_jobs`, `parse_runs`; probes `observation_fetch_artifacts`        | job repaired by a newer published parse                                       | none                                                                                                                                                                                           | —                                                   | —                                   |
 | `globalPassEmptyMonths` | the GLOBAL PASS snapshot CTEs, probing `transaction_observations` by run and month  | the month's current snapshot is empty and an older eligible snapshot had rows | none; a notice, not a visibility rule                                                                                                                                                          | source, month desc                                  | 100 months, plus one for truncation |
 | `listTransactions`      | `transaction_observations` via `activeStateProjection`                              | published + successful run + per-source current page/container                | **Group first, then filter.** Duplicates within (source, account, parser family, external id) are ranked over the whole active set and rank 1 kept; the filter applies to that derived result. | `COALESCE(as_of,'') DESC, id DESC`                  | 501                                 |
+| `undatedTransactions`   | the same derived set as `listTransactions`                                          | as `listTransactions`                                                         | **Group first, then filter**, as `listTransactions`, with `source`, `account` and `q` only, then the rows whose `as_of` starts with no calendar date, counted per source account.              | `source_id, source_account`                         | 5,000 bound                         |
 | `listLatestBalances`    | `balance_observations` via `activeStateProjection` + `completeSnapshotCandidates`   | as above, plus current complete snapshot, MyJCB and V Point windows           | **Group first, then filter.** Latest witness per (source, parser family, unit, account, metric, instrument) is ranked over the whole active set; the filter applies after.                     | `source_id, source_account, metric, instrument, id` | 501, or 5001 for the candidate set  |
 | `listBalanceHistory`    | `balance_observations` via `visibleEvidence.parseRuns`                              | recorded: failed, superseded and partial-run rows included, marked            | No grouping; filter, order, page.                                                                                                                                                              | `COALESCE(as_of, observed_at,'') DESC, id DESC`     | 501                                 |
 | `listPositions`         | `position_observations` via `activeStateProjection` + snapshot membership           | published + successful run + current complete snapshot                        | No grouping; filter, order, page, then valuations are matched for the first 500 positions of the page.                                                                                         | `source_id, source_account, security_code, id`      | 501 positions; pairs bounded        |
@@ -233,6 +234,44 @@ the code accepts and nobody has observed:
 Where a parser leaves `as_of` empty, `observed_at` (when the source displayed
 a value) stands in for `as_of` (the time the value describes), and the two
 are ranked as one kind of time.
+
+### Rows a date window cannot place
+
+The `from` and `to` filters keep a transaction only when its `as_of` starts
+with a real calendar date (`CALENDAR_DATED_AS_OF` in `src/scope.ts`), and
+then compare that date. A row whose `as_of` is null, a year-month
+(`2026-03`), an impossible day (`2026-02-30`) or any other text is in no
+window: a windowed `listTransactions` leaves it out, neither inside nor
+outside the range. An instant, with or without a zone, starts with a date
+and is placed by it.
+
+`undatedTransactions` counts those rows. It reads the same derived set as
+`listTransactions` (`undatedTransactionsSql` wraps `TRANSACTIONS_SQL`),
+applies the same `source`, `account` and `q` predicates, and keeps the rows
+for which `(CALENDAR_DATED_AS_OF) IS NOT 1`, the exact complement of the
+window's date check, grouped per source account. The windowed SQL is the
+shipped text (the predicate moved into the constant unchanged; a test pins
+the frozen text). `test/undated-transactions.test.ts` checks that the
+count's derived set is `TRANSACTIONS_SQL`'s text byte for byte for every
+scope, and, on five seeded random stores (about a quarter of their parses
+never published) and eleven scopes each, that the unwindowed rows of a scope
+are the rows the widest window places plus the counted ones, and that the
+count per source account equals an independent calendar oracle over the
+published rows. Its plan, on every CORE migration with no table statistics,
+makes exactly the scans and searches of the windowed `listTransactions`
+plan, as many times: only the final temporary B-tree differs (`GROUP BY` in
+place of `ORDER BY`).
+
+The `activity` intent of `kogane.financial.query` calls it once per scope
+pair when a request has `from` or `to`, and names each source with such a
+row as the gap `undated_rows_excluded`
+([agent API](agent-api.md#rows-a-date-window-cannot-place)). Its cost is a
+second evaluation of the derived transaction set per scope pair, the same
+work as one `listTransactions` page, and only on windowed requests. The v1
+`/api/transactions` route and `kogane.observations.list` read the same
+windowed SQL and have no field to carry a reason, so they still leave these
+rows out without saying so: a limit, not a guarantee that the window is
+everything in scope.
 
 ### Raw download
 

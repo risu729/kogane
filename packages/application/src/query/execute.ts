@@ -48,7 +48,7 @@ import { INTENT_CAPABILITY, type QueryRequest, querySpecDigest, requestedLimit }
 /** The reader methods a query may use. Listing them keeps the surface auditable. */
 export type QueryReader = Pick<
   ObservationReader,
-  "overview" | "fetchRunCounts" | "listLatestBalances" | "listTransactions"
+  "overview" | "fetchRunCounts" | "listLatestBalances" | "listTransactions" | "undatedTransactions"
 >;
 
 export interface CoverageScope {
@@ -644,6 +644,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
       data: { intent: "reported-state", rows },
       exact: rows.every((row) => row.amountMinor !== null),
       dated: rows.every((row) => row.asOf !== null),
+      undated: new Set(),
       more: sorted.length > offset + limit,
       digest,
       offset,
@@ -669,6 +670,26 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     )
     .sort(compareActivity);
   if (collected.scanBound) return fail("budget_exceeded", ["budget:scan"]);
+  // A `from`/`to` window places a row by the calendar date its `as_of` starts
+  // with, so a row whose `as_of` starts with none is neither inside nor
+  // outside it. Its source is named, never silently left out (INV05).
+  const undated = new Set<string>();
+  if (request.filters.from !== undefined || request.filters.to !== undefined) {
+    for (const pair of pairs) {
+      const counts = await reader.undatedTransactions({
+        ...(pair.source === undefined ? {} : { source: pair.source }),
+        ...(pair.account === undefined ? {} : { account: pair.account }),
+        ...(request.filters.q === undefined ? {} : { q: request.filters.q }),
+      });
+      for (const count of counts)
+        if (
+          count.row_count > 0 &&
+          grantAllowsSource(grant, count.source_id) &&
+          grantAllowsAccount(grant, count.source_account)
+        )
+          undated.add(count.source_id);
+    }
+  }
   const page = sorted.slice(offset, offset + limit);
   const rows: ActivityRow[] = page.map((row) => ({
     observationRef: `observation:transaction:${String(row.id)}`,
@@ -696,6 +717,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     data: { intent: "activity", rows },
     exact: rows.every((row) => row.amountMinor !== null),
     dated: rows.every((row) => row.asOf !== null),
+    undated,
     more: sorted.length > offset + limit,
     digest,
     offset,
@@ -715,7 +737,10 @@ function rowResult(input: {
   readToEnd(source: string): boolean;
   data: QueryData;
   exact: boolean;
+  /** Every returned row carries an `as_of`. */
   dated: boolean;
+  /** Sources with rows in scope that the date window left out unplaced. */
+  undated: ReadonlySet<string>;
   more: boolean;
   digest: string;
   offset: number;
@@ -723,10 +748,24 @@ function rowResult(input: {
   refs: string[];
 }): QueryOutcome {
   // A source is named as having no rows only when the read reached the end of
-  // every pair that could hold one; past the rows read, nothing is known.
-  const gaps = input.sources
-    .filter((source) => !input.present.has(source) && input.readToEnd(source))
-    .map((source) => ({ reasonCode: "no_rows_in_scope", scopeRef: `source:${source}` }));
+  // every pair that could hold one; past the rows read, nothing is known. A
+  // source with rows the date window could not place is named for those
+  // instead: whether any of them lies in the window is not known.
+  const gaps = [
+    ...input.sources
+      .filter(
+        (source) =>
+          !input.present.has(source) && !input.undated.has(source) && input.readToEnd(source),
+      )
+      .map((source) => ({ reasonCode: "no_rows_in_scope", scopeRef: `source:${source}` })),
+    ...[...input.undated]
+      .sort()
+      .map((source) => ({ reasonCode: "undated_rows_excluded", scopeRef: `source:${source}` })),
+  ];
+  const freshnessReasons = [
+    ...(input.dated ? [] : ["as_of_missing"]),
+    ...(input.undated.size === 0 ? [] : ["undated_rows_excluded"]),
+  ];
   const nextCursor = input.more
     ? encodeCursor({
         basisRef: input.opened.pagingBasisRef,
@@ -748,8 +787,8 @@ function rowResult(input: {
       quality: {
         identity: input.identity,
         freshness: dimension(
-          input.dated ? "verified" : "partial",
-          input.dated ? ["every_row_carries_an_as_of"] : ["as_of_missing"],
+          freshnessReasons.length === 0 ? "verified" : "partial",
+          freshnessReasons.length === 0 ? ["every_row_carries_an_as_of"] : freshnessReasons,
           [input.opened.context.publicationRef],
         ),
         numeric: dimension(

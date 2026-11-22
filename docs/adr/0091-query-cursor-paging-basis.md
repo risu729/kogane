@@ -183,3 +183,86 @@ without a filter, also over an empty store, are `partial` with the gap; a
 points-only account, a held `source` filter and an empty store under the
 whole-store grant stay `complete`. Seven of these fail against the previous
 `execute.ts`.
+
+## Amendment 2026-11-21: rows a date window cannot place are a gap
+
+- Status: proposed
+- Date: 2026-11-21
+- Carried by: `packages/application/src/query/execute.ts` (`executeQuery`,
+  `rowResult`), `packages/read-model/src/sql.ts` (`undatedTransactionsSql`),
+  `packages/read-model/src/scope.ts` (`CALENDAR_DATED_AS_OF`),
+  `packages/read-model/src/observation-reader.ts`
+  (`undatedTransactions`)
+
+**Context.** The Consequences above decide when `executeQuery` may name a
+gap. An `activity` request with `from` or `to` reads `listTransactions`
+through a window that keeps a row only when its `as_of` starts with a real
+calendar date. A row whose `as_of` is null, a year-month or an impossible day
+was left out of every page, and nothing said so: on origin/main (63d2e4fe) a
+synthetic store with one dated and one null-`as_of` transaction answered
+`from`/`to` with the dated row, `completeness: "complete"`, no gap and the
+freshness reason `every_row_carries_an_as_of`; a source whose rows were all
+undated was named `no_rows_in_scope` (INV05).
+
+**Options considered.**
+
+1. Return undated rows inside every window. Rejected: it changes the
+   windowed SQL that `/api/transactions` and `kogane.observations.list`
+   share (and so the proof rule's full burden), and a row that is not known
+   to lie in the window would be presented as lying in it.
+2. Refuse a windowed request when undated rows exist. Rejected: the dated
+   rows are a correct answer as far as they go; a refusal hides them too.
+3. Keep the row set and name what the window left out. A count read over the
+   same derived set, with the exact complement of the window's date check,
+   finds the sources that have such a row; each is a gap.
+
+**Decision.** Option 3. When a request has `from` or `to`, `executeQuery`
+calls `undatedTransactions` once per scope pair, with the pair's source
+and account and the request's `q`, and keeps the counts the grant allows.
+Each source with a counted row is the gap `undated_rows_excluded` (scopeRef
+`source:<id>`, after the `no_rows_in_scope` gaps, by source id), so the
+answer is `partial`; such a source is not also named `no_rows_in_scope`,
+since whether its rows lie in the window is not known. The `freshness`
+dimension is `partial` with `undated_rows_excluded` (and `as_of_missing` when
+a returned row has no `as_of`, as before); `every_row_carries_an_as_of`
+remains its reason only when every returned row carries one and no row was
+left out unplaced. Without `from` and `to` nothing changes. The windowed SQL
+is unchanged: the date check moved into `CALENDAR_DATED_AS_OF` with the same
+text.
+
+**Consequences.**
+
+- A windowed `activity` page costs one more evaluation of the derived
+  transaction set per scope pair, the same work as one `listTransactions`
+  page. Unwindowed requests read as before.
+- The gap names a source, not a count or an account: `coverage.gaps` has no
+  count field, and the reader's per-account count is not returned.
+- The gap is the same on every page of a cursor, since it does not depend on
+  the offset; the cursor and the query digest are unchanged.
+- Limit: `GET /api/transactions` and `kogane.observations.list` (`kind:
+  "transactions"`) read the same window and still leave these rows out
+  without a reason; neither answer has a field for one
+  ([read model](../read-model.md#rows-a-date-window-cannot-place)).
+
+**Verification.**
+
+- `packages/application/test/activity-undated.test.ts`, over the real
+  transactions read on a synthetic CORE store: a null `as_of`, a year-month
+  and an impossible day make a windowed answer `partial` with
+  `undated_rows_excluded` for their sources, a zone-less date-time and
+  instants are placed, an all-undated source is not `no_rows_in_scope`, the
+  `account` and `q` filters and the grant bound what is counted, an
+  all-dated window stays `complete` with `every_row_carries_an_as_of`, and an
+  unwindowed answer returns the undated row with `as_of_missing`. Four of
+  these fail on origin/main. A grant narrowed by account counts no row of an
+  account outside it (the answer equals one from a store without that
+  account's rows), and across a cursor every page names the same gap while
+  its rows and `nextCursor` equal those of a store without the undated rows.
+- `packages/read-model/test/undated-transactions.test.ts`: the windowed
+  predicates equal the frozen shipped text; the count's derived set is
+  `TRANSACTIONS_SQL`'s text byte for byte; without table statistics its plan
+  makes exactly the windowed list's scans and searches; on five seeded random
+  stores (about a quarter of their parses never published) and eleven scopes
+  each, the unwindowed rows equal the rows the widest window places plus the
+  counted ones, and the count per source account equals an independent
+  calendar oracle over the published rows.

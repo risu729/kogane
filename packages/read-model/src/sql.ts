@@ -25,6 +25,7 @@ import {
   visibleEvidence,
 } from "./concepts";
 import {
+  CALENDAR_DATED_AS_OF,
   type CollectionScope,
   GLOBAL_PASS_NOTICE_LIMIT,
   type MeasureView,
@@ -34,6 +35,7 @@ import {
   type PageSql,
   pagedCollection,
   periodMeasureSql,
+  scopePredicates,
 } from "./scope";
 import {
   ELIGIBLE_VPOINT_RUNS,
@@ -539,6 +541,28 @@ export function transactionsSql(scope: CollectionScope, offset: number): PageSql
     PAGE_LIMIT,
     offset,
   );
+}
+
+/**
+ * The current transactions in `scope` (source, account, `q`) whose `as_of`
+ * does not start with a calendar date, counted per source account: the rows a
+ * `from`/`to` window leaves out because it cannot place them, not because
+ * they lie outside it. The row set is `TRANSACTIONS_SQL`'s and the predicate
+ * is the exact complement of the window's own date check, so
+ * `transactionsSql` without a window equals the rows any window can place
+ * plus these.
+ */
+export function undatedTransactionsSql(
+  scope: Pick<CollectionScope, "source" | "account" | "q">,
+): PageSql {
+  const { where, args } = scopePredicates(scope, ["source", "account", "q"]);
+  return {
+    sql: `SELECT source_id, source_account, COUNT(*) AS row_count FROM (${TRANSACTIONS_SQL})
+      WHERE ${where} AND (${CALENDAR_DATED_AS_OF}) IS NOT 1
+      GROUP BY source_id, source_account
+      ORDER BY source_id, source_account`,
+    args,
+  };
 }
 
 /**
