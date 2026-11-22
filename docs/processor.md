@@ -730,9 +730,19 @@ an `error_code` and `counts_json`:
 - `skipped-by-flag` — the lane's flag is off, so the stage was not called
   (or, for the always-wired `operation_dispatch`, it reported
   `enabled: false`); the log still gets no line, and `counts_json` is `{}`.
-- `failed` — the stage threw; `error_code` is the same safe code the
-  `<lane>_failed` log line carries (a pipeline code or the error's constructor
-  name, `unknown` for anything that is not a code) and `counts_json` is `{}`.
+- `failed` — the stage threw; `error_code` is the same closed code the
+  `<lane>_failed` log line carries, and `counts_json` is `{}`. The code is one
+  of the pipeline's own codes (`raw_object_missing`, `parse_contract_invalid`,
+  …), one of the two Processor lane errors whose class is their documented
+  code (`RewardClaimWriteRefused`, [rewards.md](rewards.md#7-promotion-job);
+  `IdentityObservationBoundExceeded`,
+  [ADR 0055](adr/0055-instrument-candidates.md)), matched by identity rather
+  than by name, or else the error's built-in class as `safeFailureCode`
+  classifies it (§7: `TypeError`, `RangeError`, …, `Error` for any other
+  Error, a custom class included) and `unknown` for a throw that is not an
+  Error or cannot be inspected. A class name or message the thrower chose is
+  never copied. The `collection_notification_failed` line of the queue
+  consumer carries a code from the same set.
 
 A lane whose stage is not wired at all records nothing. Only counts, flags and
 the closed code maps above (`purchase_recognition`'s exclusion codes,
@@ -747,8 +757,9 @@ The table is bounded: each insert deletes that lane's rows beyond the latest
 updated. It is `operational-mutable` in the CORE ledger and outside the
 source-revision ledger, so recording a tick never makes a projection stale. A
 row that cannot be written is logged as
-`{"event":"lane_tick_record_failed","lane":…,"code":…}` and changes nothing
-the lane did. `GET /status` (`mise run //services/processor:ops status`) and
+`{"event":"lane_tick_record_failed","lane":…,"code":…}`, the code being the
+error's built-in class or `unknown` (`safeFailureCode`, §7), and changes
+nothing the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 `GET /internal/health` (§13) report the latest tick of each lane as
 `laneTicks`; reading them is in [operations.md](operations.md#lane-tick-records).
 
@@ -773,7 +784,9 @@ counts. An idle tick, a lane whose flag is off and every other lane write no
 record. The mark and the record are read and written outside the lane's
 metered scope, and a failure to read or write them is logged as
 `{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
-the lane did.
+the lane did. The code is the audit builder's own `audit_record_invalid` or
+`audit_diff_invalid`, else the error's built-in class or `unknown`
+(`safeFailureCode`, §7); any other `code` an error carries is not copied.
 
 ## 7. Operations dispatch
 

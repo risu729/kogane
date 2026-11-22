@@ -127,12 +127,6 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "matched against exact runtime phrases; only the mapped closed reason is kept",
   },
-  "services/collector-sbi-shinsei/src/local/cli.ts": {
-    count: 1,
-    reason:
-      "local operator CLI on the operator's own terminal: the collector's own literal messages, " +
-      "credential-shaped values redacted and bounded; nothing from the provider is thrown with text",
-  },
   "services/collector-sbi-vc-trade/src/documents.ts": {
     count: 1,
     reason:
@@ -143,9 +137,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     reason:
       "safeError reads once under catch and retains only exact closed codes or a bounded HTTP status code; raw exception text is never serialized",
   },
-  "services/collector-sbi-vc-trade/src/worker.ts": {
-    count: 2,
-    reason: "classifyError keeps a message only when it is already a code-shaped token",
+  "services/collector-sbi-vc-trade/src/error-code.ts": {
+    count: 1,
+    reason:
+      "classifyError reads once under catch and keeps a message only when it is one of the " +
+      "collector's own closed codes or a bounded HTTP status code; anything else is a class code",
   },
   "services/collector-smbc-direct/src/session.ts": {
     count: 2,
@@ -179,12 +175,6 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "compared with the lease refusal code only; the message is never logged or returned",
   },
-  "services/collector-vpoint-pay/src/state.ts": {
-    count: 1,
-    reason:
-      "the redacted failure message of a run the disabled app path can no longer start; " +
-      "the terminal and the log line carry closed codes only",
-  },
   "services/processor/src/schedule-alarm.ts": {
     count: 1,
     reason:
@@ -202,7 +192,7 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
       "records the RewardClaimWriteRefused class as its code and the text is dropped",
   },
   "services/processor/src/worker.ts": {
-    count: 8,
+    count: 6,
     reason:
       "PipelineError, MetadataError and ReleaseCommandError messages are closed codes; the " +
       "publication repair keeps only publication_* codes; parse_issues.message is a SQL path",
