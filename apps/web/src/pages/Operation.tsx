@@ -7,7 +7,7 @@
 // time. The page sends no request of its own and re-reads only when asked.
 import type { ReactNode } from "react";
 import { ApiError } from "../api.ts";
-import { displayLabel } from "../labels.ts";
+import { displayLabel, ownEntry } from "../labels.ts";
 import {
   EVIDENCE_RUN_ID,
   EXECUTION_REASON_LABELS,
@@ -114,7 +114,7 @@ function Summary({ record }: { record: OperationRecordWire }): ReactNode {
             <Coded
               labels={OPERATION_STATUS_LABELS}
               value={record.status}
-              tone={STATUS_TONES[record.status]}
+              tone={ownEntry(STATUS_TONES, record.status)}
             />
           </KvRow>
           <KvRow label="待機・停止の理由">
@@ -190,7 +190,7 @@ function Stages({ record }: { record: OperationRecordWire }): ReactNode {
                     {displayLabel(OPERATION_STAGE_LABELS, stage.stage)} <Code value={stage.stage} />
                   </th>
                   <td>
-                    <Badge tone={STAGE_TONES[stage.state] ?? "neutral"}>
+                    <Badge tone={ownEntry(STAGE_TONES, stage.state) ?? "neutral"}>
                       {displayLabel(OPERATION_STAGE_STATE_LABELS, stage.state)}
                     </Badge>
                   </td>
@@ -222,7 +222,7 @@ function Run({ run }: { run: OperationRecordRunWire }): ReactNode {
         <Code value={run.runId} />
       </th>
       <td>
-        <Badge tone={RUN_TONES[run.state] ?? "neutral"}>
+        <Badge tone={ownEntry(RUN_TONES, run.state) ?? "neutral"}>
           {displayLabel(RUN_STATE_LABELS, run.state)}
         </Badge>
         {run.reasonCode === null ? null : (
@@ -307,7 +307,7 @@ function Execution({ execution }: { execution: OperationRecordExecutionWire }): 
             <Coded
               labels={EXECUTION_STATE_LABELS}
               value={execution.state}
-              tone={EXECUTION_TONES[execution.state]}
+              tone={ownEntry(EXECUTION_TONES, execution.state)}
             />
           </KvRow>
           <KvRow label="理由">

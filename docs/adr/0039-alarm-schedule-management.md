@@ -239,3 +239,63 @@ completion is lost, an exhausted retry, a delayed original racing a retry and
 the next alarm through the real lease, old-build claims, and an upgrade of an
 existing started receipt. Shared-contract tests verify the distinct closed
 reason with no fabricated terminal or provider payload.
+
+## Amendment: a maintenance window is never dropped at a clock change (2026-11-22)
+
+Status: proposed
+Date: 2026-11-22
+
+### Context
+
+Schedule and maintenance times are wall times in a configured zone; Sydney
+moves its clocks forward from 02:00 to 03:00 on the first Sunday of October.
+The model placed every wall time with one helper that answers nothing for a
+time the zone skips. For a daily run that skips that day's run (the model
+test "nonexistent Sydney wall time skips one day" pins it). For a weekly or
+monthly maintenance window it
+dropped the whole window that day whenever its start or end fell in the
+skipped hour: a window stated as 02:30–04:00 did not defer collection at 03:30
+summer time, the alarm and the operations dispatch ran inside it, and the
+joined-deferral bound did not see it.
+
+### Options considered
+
+- Keep dropping the window: collection runs during announced maintenance once
+  a year for any Sydney-zone rule with an endpoint in 02:00–02:59.
+- Read a skipped time on the clock after the change (+11:00, so 02:30 is the
+  instant 01:30 standard time): shortens a skipped end below what the stated
+  wall time can mean.
+- Read a skipped start as the first minute whose wall time reaches it, and a
+  skipped end on the clock before the change (02:30 is 03:30 summer time).
+
+### Decision
+
+The third option, for maintenance windows only (`windowAt` in
+`packages/collection/src/schedule-model.ts`, used by `afterMaintenance` and the
+joined-deferral measure). On that day a window covers every minute whose
+wall time lies within it, and from a start that exists it keeps its stated
+length (01:00–02:30 is ninety minutes). A window wholly inside the skipped hour
+defers from the change (02:15–02:45 is 03:00–03:45 summer time), unless its end
+exists (02:30–03:00 is empty). A daily run's nominal time keeps the existing
+rule and has no run that day, and the re-survey keeps refusing a dated time the
+zone skips. Times that exist are placed exactly as before, so no Japan-time or
+UTC rule changes, and on the day clocks move back a repeated wall time is still
+read at its first occurrence: a window ending in the repeated hour ends at its
+first pass, and collection may run in the second.
+
+### Consequences and verification
+
+A Sydney-zone rule with a start or end in the skipped hour now defers
+collection on that day, and its deferral counts toward a delegated revision's
+bound. No stored rule, schedule or occurrence changes; the next reservation
+repair or the alarm's own re-check when it fires applies it. Model tests cover
+a skipped start, a skipped end, a window from the skipped hour to just after
+it, one wholly inside it, one from the night before, the week after, the
+joined deferral measure, the repeated hour's first occurrence, and that a
+dated survey time and a daily run in the skipped hour stay unplaced.
+`packages/collection/test/schedule-dst-oracle.test.ts` compares
+`afterMaintenance` and the joined deferrals with a minute-by-minute oracle that
+takes Sydney's offsets from the written rules (checked against the runtime's
+zone data) and places windows by scanning minutes, over random Sydney, Japan
+and UTC rule sets around both changes of 2026 and 2027; it fails on the code
+before this amendment.

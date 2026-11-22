@@ -530,7 +530,7 @@ records production evidence and the unproven scheduled-success acceptance.
 
 ## Amendment 2026-11-19: a status view, one line per configured job
 
-- Status: proposed (until this amendment's PR merges)
+- Status: accepted (merged 2026-11-20 in [#1451](https://github.com/risu729/kogane/pull/1451))
 - Date: 2026-11-19
 - Issue: [#1414](https://github.com/risu729/kogane/issues/1414) ("which sources
   are failing, and is anything stuck?" in one or two calls, each under 8 KB),

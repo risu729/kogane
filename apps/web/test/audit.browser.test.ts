@@ -35,12 +35,15 @@ describe.if(runnable)("the operator's audit log page", () => {
   let origin: string;
   let fixture: AuditFixture;
   let operator = true;
+  /** The caller Access did not verify: the App answers 401 before any route. */
+  let unverified = false;
   let malformed = false;
   let staleCursor = false;
   const reads: URLSearchParams[] = [];
 
   beforeEach(() => {
     operator = true;
+    unverified = false;
     malformed = false;
     staleCursor = false;
     reads.length = 0;
@@ -62,6 +65,8 @@ describe.if(runnable)("the operator's audit log page", () => {
           reads.push(url.searchParams);
           if (request.method !== "GET")
             return Response.json({ error: "method_not_allowed" }, { status: 405 });
+          if (unverified)
+            return Response.json({ error: "authentication_required" }, { status: 401 });
           if (!operator) return Response.json({ error: "operator_required" }, { status: 403 });
           if (staleCursor && url.searchParams.has("cursor"))
             return Response.json(
@@ -286,19 +291,24 @@ describe.if(runnable)("the operator's audit log page", () => {
     }
   }, 60_000);
 
-  test("a non-operator is told the log is the operator's, and sees no record", async () => {
-    operator = false;
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    try {
-      await page.goto(`${origin}/audit`);
-      await page.getByText("監査ログは管理者だけが表示できます", { exact: true }).waitFor();
-      expect(await rows(page).count()).toBe(0);
-      expect(await page.locator("h1").innerText()).toBe("監査ログ");
-      expect(await noPageOverflow(page)).toBe(true);
-    } finally {
-      await page.close();
-    }
-  }, 60_000);
+  // The same two answers the 依頼の一覧 and 依頼の経過 pages explain this way.
+  for (const status of [403, 401] as const)
+    test(`a ${String(status)} caller is told the log is the operator's, and sees no record`, async () => {
+      if (status === 401) unverified = true;
+      else operator = false;
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      try {
+        await page.goto(`${origin}/audit`);
+        await page.getByText("監査ログは管理者だけが表示できます", { exact: true }).waitFor();
+        expect(await rows(page).count()).toBe(0);
+        expect(await page.locator("h1").innerText()).toBe("監査ログ");
+        // The page's own refusal, not the shared error state with its retry.
+        expect(await page.getByRole("button", { name: "監査ログを再試行" }).count()).toBe(0);
+        expect(await noPageOverflow(page)).toBe(true);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 
   test("a malformed page is an error, never a partial table", async () => {
     malformed = true;
@@ -321,7 +331,7 @@ describe.if(runnable)("the operator's audit log page", () => {
       await rows(page).first().waitFor();
       staleCursor = true;
       await page.getByRole("button", { name: "次のページ", exact: true }).click();
-      await page.getByText("続きのページを読めません", { exact: true }).waitFor();
+      await page.getByText("このページの続きを読み込めません", { exact: true }).waitFor();
       expect(await rows(page).count()).toBe(0);
       await page.getByRole("button", { name: "最新の記録から読み直す" }).click();
       await page.getByText("1ページ目 · このページ50件", { exact: true }).waitFor();

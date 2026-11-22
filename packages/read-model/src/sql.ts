@@ -25,14 +25,17 @@ import {
   visibleEvidence,
 } from "./concepts";
 import {
+  CALENDAR_DATED_AS_OF,
   type CollectionScope,
   GLOBAL_PASS_NOTICE_LIMIT,
   type MeasureView,
+  ORDER_KEYS,
   PAGE_LIMIT,
   type PageLimit,
   type PageSql,
   pagedCollection,
   periodMeasureSql,
+  scopePredicates,
 } from "./scope";
 import {
   ELIGIBLE_VPOINT_RUNS,
@@ -541,6 +544,28 @@ export function transactionsSql(scope: CollectionScope, offset: number): PageSql
 }
 
 /**
+ * The current transactions in `scope` (source, account, `q`) whose `as_of`
+ * does not start with a calendar date, counted per source account: the rows a
+ * `from`/`to` window leaves out because it cannot place them, not because
+ * they lie outside it. The row set is `TRANSACTIONS_SQL`'s and the predicate
+ * is the exact complement of the window's own date check, so
+ * `transactionsSql` without a window equals the rows any window can place
+ * plus these.
+ */
+export function undatedTransactionsSql(
+  scope: Pick<CollectionScope, "source" | "account" | "q">,
+): PageSql {
+  const { where, args } = scopePredicates(scope, ["source", "account", "q"]);
+  return {
+    sql: `SELECT source_id, source_account, COUNT(*) AS row_count FROM (${TRANSACTIONS_SQL})
+      WHERE ${where} AND (${CALENDAR_DATED_AS_OF}) IS NOT 1
+      GROUP BY source_id, source_account
+      ORDER BY source_id, source_account`,
+    args,
+  };
+}
+
+/**
  * Latest balance per (source, parser family, fetch unit, account, metric,
  * instrument). The source is part of the key because `source_account` is only
  * the provider's own label. Computed on request and stored nowhere.
@@ -657,6 +682,35 @@ export function positionsSql(scope: CollectionScope, offset: number): PageSql {
     offset,
   );
 }
+
+/**
+ * Whether the positions a caller read page by page from `positionsSql`
+ * (unscoped) are one cut of the current positions. `?1` is the JSON array of
+ * every position id the pages returned. Over the current positions, the same
+ * text `positionsSql` pages, it counts all rows (`current_rows`), the read ids
+ * among them (`read_current`), and the rows that sort at or before the
+ * greatest read row in the page order (`prefix_rows`). The bound row is looked
+ * up by id through its visible artifact, not through the current predicate: a
+ * read row that stopped being current still bounds the prefix (and fails
+ * `read_current` on its own).
+ *
+ * `read_current` equal to the number read says no row a page returned has
+ * left the current set since; `prefix_rows` equal to it as well says the read
+ * rows are exactly the current rows up to the last one, so none was skipped
+ * and none is a second copy of a holding; `current_rows` equal to it says no
+ * row follows. A snapshot republished between two page reads replaces rows an
+ * earlier page returned, so the check fails (INV06).
+ */
+export const POSITION_CUT_SQL = `SELECT count(*) AS current_rows,
+       coalesce(sum(id IN (SELECT value FROM json_each(?1))), 0) AS read_current,
+       coalesce(sum((${ORDER_KEYS.positionsByScope}) <= (
+         SELECT bound_fa.source_id, bound.source_account, bound.security_code, bound.id
+         FROM position_observations bound
+         JOIN parse_runs bound_p ON bound_p.id = bound.parse_run_id
+         JOIN ${visibleEvidence.fetchArtifacts} bound_fa ON bound_fa.id = bound_p.fetch_artifact_id
+         WHERE bound.id IN (SELECT value FROM json_each(?1))
+         ORDER BY 1 DESC, 2 DESC, 3 DESC, 4 DESC LIMIT 1)), 0) AS prefix_rows
+  FROM (${POSITIONS_SQL})`;
 
 /**
  * The provider row a valuation `v` belongs to, beside position `po` of parse

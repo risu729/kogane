@@ -18,10 +18,10 @@ import type {
   CardSettlementReviewPage,
   CardSettlementStatementPage,
 } from "../../../domain/src/card-settlement-review.ts";
-import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
+import type { FinancialError } from "../../../domain/src/result.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { grantAllows, type Grant } from "../grants.ts";
+import { wholeStoreReadRefusal, type Grant } from "../grants.ts";
 import { queryCardOwnership } from "./card-ownership.ts";
 import {
   CARD_SETTLEMENT_PAGE_SIZE,
@@ -52,16 +52,8 @@ function refusal(
   grant: Grant,
   operation: CardSettlementsReadOperation,
 ): { status: "refused"; error: FinancialError } | null {
-  const fail = (code: FinancialErrorCode, refs: string[]) => ({
-    status: "refused" as const,
-    error: financialError(code, operation, refs),
-  });
-  if (!grantAllows(grant, "records.read")) return fail("unauthorized", ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  return narrowed.length ? fail("evidence_restricted", narrowed) : null;
+  const refused = wholeStoreReadRefusal(grant, "records.read", operation);
+  return refused ? { status: "refused", error: refused } : null;
 }
 
 /**

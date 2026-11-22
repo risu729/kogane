@@ -151,6 +151,71 @@ WHERE ${LIVE_EVENT} AND EXISTS(SELECT 1 FROM economic_legs l
 ORDER BY e.event_id,e.revision
 LIMIT ?2 OFFSET ?3`;
 
+/**
+ * The most live revisions one filtered page walks (ADR 0081, amendment of
+ * 2026-11-20). A page lists what the walk found and continues after the last
+ * revision it walked, so a call reads a fixed number of rows whatever the
+ * store holds, and a sparse filter answers a short or empty page that still
+ * carries a cursor.
+ */
+export const ACTIVITY_FILTER_WALK = 5_000;
+
+/** The ISO form both recording-time bounds and `created_at` are compared in. */
+const ISO_TIME = `'%Y-%m-%dT%H:%M:%fZ'`;
+
+/**
+ * The activity list of `activityEventsSql` narrowed by optional filters, in
+ * the same order, paged by key instead of offset. It walks at most `?4` live
+ * revisions after the key (`?2` event id, `?3` revision; `''` and 0 for the
+ * first page) through `economic_event_revisions_current`, and lists the
+ * first `?5` of them that have a leg on basis `?1` and pass every filter
+ * given (a NULL filter passes all):
+ *
+ * - `?6`, `?7`: the revision was recorded (`created_at`) at or after `?6`
+ *   and before `?7`, both ISO instants compared in `ISO_TIME` form, as the
+ *   changes digest compares them (ADR 0127);
+ * - `?8`: a leg of the revision names the account `?8`, as `account:<id>`
+ *   or as the bare id (the 0044 tolerance; the knowledge selector reads
+ *   both forms the same way);
+ * - `?9`: an evidence reference of the revision was read in a parse run
+ *   (`parse_run:<id>`) of a capture of source `?9`, by key: each reference,
+ *   then its parse run, then its capture. A reference that is not an object
+ *   with that revision text names no source.
+ *
+ * The recording window is tested first, on the row the walk already holds,
+ * so a revision outside it reads no leg.
+ *
+ * Rows: the listed revisions with the shipped columns and `walked` NULL, in
+ * key order, then one row (none when nothing was walked) with the last key
+ * walked and `walked`, the number of revisions walked.
+ */
+export const filteredActivityEventsSql = `WITH walked AS MATERIALIZED (
+ SELECT e.event_id,e.revision,
+  ((?6 IS NULL OR strftime(${ISO_TIME},e.created_at)>=?6)
+   AND (?7 IS NULL OR strftime(${ISO_TIME},e.created_at)<?7)
+   AND EXISTS(SELECT 1 FROM economic_legs l
+    WHERE l.event_id=e.event_id AND l.revision=e.revision AND l.basis=?1)
+   AND (?8 IS NULL OR EXISTS(SELECT 1 FROM economic_legs a
+    WHERE a.event_id=e.event_id AND a.revision=e.revision AND a.subject_ref IN (?8,'account:'||?8)))
+   AND (?9 IS NULL OR EXISTS(SELECT 1 FROM json_each(e.evidence_support_json) j
+    CROSS JOIN parse_runs p ON p.id=CAST(substr(json_extract(e.evidence_support_json,j.fullkey||'.revision'),11) AS INTEGER)
+     AND 'parse_run:'||p.id=json_extract(e.evidence_support_json,j.fullkey||'.revision')
+    CROSS JOIN fetch_artifacts f ON f.id=p.fetch_artifact_id
+    WHERE f.source_id=?9))) AS hit
+ FROM economic_event_revisions e
+ WHERE ${LIVE_EVENT} AND (e.event_id,e.revision)>(?2,?3)
+ ORDER BY e.event_id,e.revision LIMIT ?4
+), listed AS (
+ SELECT w.event_id,w.revision FROM walked w WHERE w.hit ORDER BY w.event_id,w.revision LIMIT ?5
+)
+SELECT e.event_id,e.revision,e.kind,e.state,e.unknown_reason,
+ e.effective_time_json,e.basis,e.evidence_support_json,e.decision_revision_id,NULL AS walked
+FROM listed x JOIN economic_event_revisions e ON e.event_id=x.event_id AND e.revision=x.revision
+UNION ALL
+SELECT t.event_id,t.revision,NULL,NULL,NULL,NULL,NULL,NULL,NULL,(SELECT count(*) FROM walked)
+FROM (SELECT w.event_id,w.revision FROM walked w ORDER BY w.event_id DESC,w.revision DESC LIMIT 1) t
+ORDER BY 10,1,2`;
+
 /** Every leg of a bounded set of live event revisions (`?1` is a JSON array of event ids). */
 export const eventLegsSql = `SELECT l.event_id,l.revision,l.leg_index,l.subject_ref,l.unit_ref,
  l.value_status,l.coefficient,l.scale,l.value_reason_code,l.role,l.basis
@@ -242,6 +307,10 @@ interface EventRow {
   basis: string;
   evidence_support_json: string;
   decision_revision_id: string;
+}
+/** A row of `filteredActivityEventsSql`: a listed revision (`walked` null) or the walk's last key. */
+interface FilteredEventRow extends EventRow {
+  walked: number | null;
 }
 interface LegRow {
   event_id: string;
@@ -414,10 +483,51 @@ const coverage = (scopeRef: string, truncated: boolean): DataCoverage => ({
 export interface EventsReaderOptions {
   /** Rows per page; one more is fetched to decide whether a next page exists. */
   pageSize?: number;
+  /** Live revisions one filtered page walks; `ACTIVITY_FILTER_WALK` unless a test sets it. */
+  filterWalk?: number;
+}
+
+/**
+ * The filters of a filtered activity read, each already checked and in its
+ * compared form; null passes every revision. `since` and `before` are ISO
+ * instants (`toISOString`), `account` an account id without its `account:`
+ * prefix, `source` a source id.
+ */
+export interface ActivityFilters {
+  since: string | null;
+  before: string | null;
+  account: string | null;
+  source: string | null;
+}
+
+/** A live revision's place in the activity order. */
+export interface ActivityKey {
+  eventId: string;
+  revision: number;
+}
+
+/**
+ * One filtered page: the revisions listed, in the activity order, and the
+ * key to continue after (null when the walk reached the end of the live
+ * revisions with every match listed). `walked` counts the live revisions this
+ * page read; it reaches `walk` when the walk stopped at its bound.
+ */
+export interface FilteredActivityPage {
+  items: EventView[];
+  next: ActivityKey | null;
+  walked: number;
+  walk: number;
+  dataCoverage: DataCoverage;
 }
 
 export interface EventsReader {
   activity(query: { basis: ActivityBasis; offset: number }): Promise<Page<EventView>>;
+  /** The activity list narrowed by `filters`, walked by key after `after` (null: from the start). */
+  filteredActivity(query: {
+    basis: ActivityBasis;
+    filters: ActivityFilters;
+    after: ActivityKey | null;
+  }): Promise<FilteredActivityPage>;
   obligations(query: { offset: number }): Promise<Page<ObligationView>>;
   /** Provider-reported against event-derived, per subject and unit. */
   reconciliationSignals(query: { subjectRefs: readonly string[] }): Promise<ReconciliationSignal[]>;
@@ -431,6 +541,7 @@ export function createEventsReader(
   options: EventsReaderOptions = {},
 ): EventsReader {
   const pageSize = options.pageSize ?? DEFAULT_PAGE;
+  const filterWalk = options.filterWalk ?? ACTIVITY_FILTER_WALK;
 
   const legRowToView = (row: LegRow): LegView => ({
     legIndex: row.leg_index,
@@ -462,6 +573,82 @@ export function createEventsReader(
     return out;
   }
 
+  /** The page's revisions with their legs, allocations, evidence and explanation refs. */
+  async function views(page: readonly EventRow[]): Promise<EventView[]> {
+    const eventIds = page.map((row) => row.event_id);
+    const legs = await grouped<LegRow, LegView>(
+      eventLegsSql,
+      eventIds,
+      (row) => row.event_id,
+      legRowToView,
+    );
+    const allocations = await grouped<AllocationRow, AllocationView>(
+      eventAllocationsSql,
+      eventIds.map((id) => `event:${id}`),
+      (row) => row.target_effect_ref,
+      (row) => ({
+        allocationId: row.id,
+        sourceComponentRef: row.source_component_ref,
+        targetEffectRef: row.target_effect_ref,
+        role: row.role as AllocationRole,
+        quantity: storedQuantity(row.unit_ref, "exact", row.coefficient, row.scale, null),
+      }),
+    );
+    const evidenceByEvent = new Map<string, SourceFactRef[]>(
+      page.map((row) => [row.event_id, parseJson<SourceFactRef[]>(row.evidence_support_json, [])]),
+    );
+    const observationIds = [
+      ...new Set(
+        [...evidenceByEvent.values()]
+          .flat()
+          .map((ref) => TRANSACTION_REF.exec(ref.id)?.[1])
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
+    const locators = new Map<string, string[]>();
+    if (observationIds.length > 0) {
+      const rawRows = await sql.all<{ id: number; raw_locator: string; sha256: string }>(
+        evidenceLocatorsSql,
+        [JSON.stringify(observationIds.map(Number))],
+      );
+      for (const row of rawRows)
+        locators.set(String(row.id), [
+          `raw_locator:${row.raw_locator}`,
+          `raw_object:${row.sha256}`,
+        ]);
+    }
+    const items = page.map((row): EventView => {
+      const eventLegs = legs.get(row.event_id) ?? [];
+      const eventAllocations = allocations.get(`event:${row.event_id}`) ?? [];
+      const evidence = evidenceByEvent.get(row.event_id) ?? [];
+      return {
+        eventId: row.event_id,
+        revision: row.revision,
+        kind: row.kind as EconomicEventKind,
+        state: row.state as EventState,
+        unknownReason: row.unknown_reason as UnknownStateReason | null,
+        basis: row.basis as RecognitionBasis,
+        effectiveTime: temporal(row.effective_time_json),
+        legs: eventLegs,
+        allocations: eventAllocations,
+        totals: basisTotals(eventLegs),
+        evidence,
+        decisionRevisionRef: row.decision_revision_id,
+        explanationRefs: [
+          `event:${row.event_id}@${row.revision}`,
+          ...eventLegs.map((leg) => `leg:${row.event_id}@${row.revision}#${leg.legIndex}`),
+          ...eventAllocations.map((allocation) => `allocation:${allocation.allocationId}`),
+          ...evidence.flatMap((ref) => [
+            `${ref.kind}:${ref.id}@${ref.revision}`,
+            ...(locators.get(TRANSACTION_REF.exec(ref.id)?.[1] ?? "") ?? []),
+          ]),
+          `decision_revision:${row.decision_revision_id}`,
+        ],
+      };
+    });
+    return items;
+  }
+
   return {
     async activity(query) {
       const rows = await sql.all<EventRow>(activityEventsSql, [
@@ -469,85 +656,48 @@ export function createEventsReader(
         pageSize + 1,
         query.offset,
       ]);
-      const page = rows.slice(0, pageSize);
-      const eventIds = page.map((row) => row.event_id);
-      const legs = await grouped<LegRow, LegView>(
-        eventLegsSql,
-        eventIds,
-        (row) => row.event_id,
-        legRowToView,
-      );
-      const allocations = await grouped<AllocationRow, AllocationView>(
-        eventAllocationsSql,
-        eventIds.map((id) => `event:${id}`),
-        (row) => row.target_effect_ref,
-        (row) => ({
-          allocationId: row.id,
-          sourceComponentRef: row.source_component_ref,
-          targetEffectRef: row.target_effect_ref,
-          role: row.role as AllocationRole,
-          quantity: storedQuantity(row.unit_ref, "exact", row.coefficient, row.scale, null),
-        }),
-      );
-      const evidenceByEvent = new Map<string, SourceFactRef[]>(
-        page.map((row) => [
-          row.event_id,
-          parseJson<SourceFactRef[]>(row.evidence_support_json, []),
-        ]),
-      );
-      const observationIds = [
-        ...new Set(
-          [...evidenceByEvent.values()]
-            .flat()
-            .map((ref) => TRANSACTION_REF.exec(ref.id)?.[1])
-            .filter((id): id is string => id !== undefined),
-        ),
-      ];
-      const locators = new Map<string, string[]>();
-      if (observationIds.length > 0) {
-        const rawRows = await sql.all<{ id: number; raw_locator: string; sha256: string }>(
-          evidenceLocatorsSql,
-          [JSON.stringify(observationIds.map(Number))],
-        );
-        for (const row of rawRows)
-          locators.set(String(row.id), [
-            `raw_locator:${row.raw_locator}`,
-            `raw_object:${row.sha256}`,
-          ]);
-      }
-      const items = page.map((row): EventView => {
-        const eventLegs = legs.get(row.event_id) ?? [];
-        const eventAllocations = allocations.get(`event:${row.event_id}`) ?? [];
-        const evidence = evidenceByEvent.get(row.event_id) ?? [];
-        return {
-          eventId: row.event_id,
-          revision: row.revision,
-          kind: row.kind as EconomicEventKind,
-          state: row.state as EventState,
-          unknownReason: row.unknown_reason as UnknownStateReason | null,
-          basis: row.basis as RecognitionBasis,
-          effectiveTime: temporal(row.effective_time_json),
-          legs: eventLegs,
-          allocations: eventAllocations,
-          totals: basisTotals(eventLegs),
-          evidence,
-          decisionRevisionRef: row.decision_revision_id,
-          explanationRefs: [
-            `event:${row.event_id}@${row.revision}`,
-            ...eventLegs.map((leg) => `leg:${row.event_id}@${row.revision}#${leg.legIndex}`),
-            ...eventAllocations.map((allocation) => `allocation:${allocation.allocationId}`),
-            ...evidence.flatMap((ref) => [
-              `${ref.kind}:${ref.id}@${ref.revision}`,
-              ...(locators.get(TRANSACTION_REF.exec(ref.id)?.[1] ?? "") ?? []),
-            ]),
-            `decision_revision:${row.decision_revision_id}`,
-          ],
-        };
-      });
+      const items = await views(rows.slice(0, pageSize));
       return {
         items,
         nextCursor: rows.length > pageSize ? String(query.offset + pageSize) : null,
         dataCoverage: coverage(`activity:${query.basis}`, rows.length > pageSize),
+      };
+    },
+
+    async filteredActivity(query) {
+      const { filters, after } = query;
+      const rows = await sql.all<FilteredEventRow>(filteredActivityEventsSql, [
+        query.basis,
+        after?.eventId ?? "",
+        after?.revision ?? 0,
+        filterWalk,
+        pageSize + 1,
+        filters.since,
+        filters.before,
+        filters.account,
+        filters.source,
+      ]);
+      const listed = rows.filter((row) => row.walked === null);
+      const tail = rows.find((row) => row.walked !== null);
+      const walked = tail?.walked ?? 0;
+      const page = listed.slice(0, pageSize);
+      // More matches than the page holds: continue after the last one listed.
+      // Else, a walk that stopped at its bound continues after the last
+      // revision it walked, even past a short or empty page; one that ended
+      // before its bound read every live revision after the key.
+      const last = page.at(-1);
+      const next: ActivityKey | null =
+        listed.length > pageSize && last !== undefined
+          ? { eventId: last.event_id, revision: last.revision }
+          : walked >= filterWalk && tail !== undefined
+            ? { eventId: tail.event_id, revision: tail.revision }
+            : null;
+      return {
+        items: await views(page),
+        next,
+        walked,
+        walk: filterWalk,
+        dataCoverage: coverage(`activity:${query.basis}`, next !== null),
       };
     },
 

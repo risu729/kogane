@@ -10,6 +10,7 @@ import {
   ownershipDeclarationRef,
 } from "../../../../packages/domain/src/ownership-declaration.ts";
 import { useCardOwnership } from "../card-ownership-api.ts";
+import { BusyButton } from "../busy-button.tsx";
 import {
   CardOwnershipDetails,
   OWNERSHIP_ROLES,
@@ -18,7 +19,13 @@ import {
 } from "../card-ownership-display.tsx";
 import { useFeatures } from "../api.ts";
 import { tokyoToday } from "../reported-state-api.ts";
-import { postCommand, type ChangePlanView } from "../command-api.ts";
+import { postCommand, StalePlanError, type ChangePlanView } from "../command-api.ts";
+import {
+  PlanRefreshNotice,
+  PlanRefreshScope,
+  PlanRefusal,
+  usePlanRefresh,
+} from "../plan-refresh.tsx";
 import { Link, navigate } from "../router.tsx";
 import { EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
 
@@ -51,7 +58,9 @@ function OwnershipForm({
   const ownerDefault = basis === "owner-default";
   const partyRef = ownerDefault ? OWNER_DEFAULT_PARTY : "party:" + label.trim();
   const existing = side.claims.some((c) => c.partyRef === partyRef && c.status === "accepted");
+  const refresh = usePlanRefresh();
   const plan = useMutation({
+    ...refresh,
     mutationFn: async (action: "accept" | "reject") => {
       // The owner default is dated on the day it is applied (ADR 0082), on
       // the owner's calendar, taken when the plan is made.
@@ -86,13 +95,15 @@ function OwnershipForm({
         expected[`account_mapping:${side.sourceAccountId}`] !== side.mappingRevision ||
         expected[`ownership:${side.role}|${side.accountId}`] !== side.ownershipRevision
       )
-        throw new Error(
-          "口座または保有者の記録が更新されています。表示を更新して確認し直してください。",
+        throw new StalePlanError(
+          "口座または保有者の記録が更新されています。表示を読み直すので、確認し直してください。",
         );
       return value.plan;
     },
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
   const enabled =
     features.known &&
     features.commands &&
@@ -103,8 +114,7 @@ function OwnershipForm({
     reason.trim().length > 0 &&
     ownershipReviewPartyRef(partyRef) &&
     (!selfDeclared || (declarationRef !== null && side.selfDeclarationBlockers.length === 0)) &&
-    (!ownerDefault || side.ownerDefaultBlockers.length === 0) &&
-    !plan.isPending;
+    (!ownerDefault || side.ownerDefaultBlockers.length === 0);
   const suggestions = [
     ...new Set(
       review.sides.flatMap((s) => s.claims.map((c) => c.partyRef)).filter(ownershipReviewPartyRef),
@@ -249,28 +259,18 @@ function OwnershipForm({
         />
       </div>
       <div className="button-row">
-        <button
-          type="button"
-          className="button"
-          disabled={!enabled}
-          onClick={() => plan.mutate("accept")}
-        >
+        <BusyButton busy={plan.isPending} disabled={!enabled} onClick={() => plan.mutate("accept")}>
           この保有者の関係を確認
-        </button>
-        <button
-          type="button"
-          className="button"
+        </BusyButton>
+        <BusyButton
+          busy={plan.isPending}
           disabled={!enabled || !existing || selfDeclared || ownerDefault}
           onClick={() => plan.mutate("reject")}
         >
           この保有者の関係を却下する内容を確認
-        </button>
+        </BusyButton>
       </div>
-      {plan.isError ? (
-        <Notice tone="bad" inline role="alert">
-          {plan.error.message}
-        </Notice>
-      ) : null}
+      <PlanRefusal error={plan.error} />
       <p className="footnote">
         ここでは期間を限定しない関係を記録します。名義変更や期間の指定が必要な場合は、この画面では確定しないでください。次の画面で承認・確定するまで判断は保存されません。
       </p>
@@ -282,7 +282,7 @@ export function CardOwnershipPage({ proposalId }: { proposalId: string }): React
   const query = useCardOwnership(proposalId);
   if (!features.known) return <Loading label="保有者の確認" />;
   return (
-    <>
+    <PlanRefreshScope queryKeys={[["card-ownership", proposalId]]}>
       <div className="page-head">
         <div className="breadcrumb">
           <Link to={`/reconciliation/${proposalId}`}>照合候補に戻る</Link>
@@ -295,6 +295,7 @@ export function CardOwnershipPage({ proposalId }: { proposalId: string }): React
           この判断だけではカード決済を採用しません。関係が反映された後、新しく作成された照合候補で請求と引落を再確認してください。
         </p>
       </div>
+      <PlanRefreshNotice />
       {!features.cardOwnershipReview ? (
         <EmptyState>この接続先は保有者の確認を提供していません。</EmptyState>
       ) : (
@@ -319,6 +320,6 @@ export function CardOwnershipPage({ proposalId }: { proposalId: string }): React
           }
         </QueryBoundary>
       )}
-    </>
+    </PlanRefreshScope>
   );
 }

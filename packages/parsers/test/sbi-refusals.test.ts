@@ -112,6 +112,24 @@ describe("sbi-domestic-trade-records keeps evidence but never guesses an amount"
     expect(transaction(parse([{ amount: "1" }]).observations[0]).description).toBe("");
   });
 
+  test("a trade date that is not a calendar YYYY-MM-DD date is no as_of and is warned", () => {
+    // The collector writes `20YY-MM-DD` from the page's `YY/MM/DD` cell
+    // without a calendar check; as_of orders transactions by text (0.2.2).
+    for (const tradeDate of ["2026-02-30", "2026-13-01", "", "26/08/12", "2026/08/12", null, 7]) {
+      const result = parse([{ ...record("1"), tradeDate }]);
+      const observation = transaction(result.observations[0]);
+      expect(observation.asOf).toBeUndefined();
+      expect(observation).toMatchObject({ amountMinor: 1, externalId: "synthetic:1" });
+      expect(observation.extra["tradeDate"]).toEqual(tradeDate);
+      expect(result.warnings).toEqual([
+        "records[0]: tradeDate is not a calendar YYYY-MM-DD date; recorded without as_of",
+      ]);
+    }
+    const valid = parse([{ ...record("1"), tradeDate: "2024-02-29" }]);
+    expect(transaction(valid.observations[0]).asOf).toBe("2024-02-29");
+    expect(valid.warnings).toEqual([]);
+  });
+
   test("a truncated window is flagged and a wrong body is refused", () => {
     expect(parse([], true).warnings).toEqual([
       "hasMore=true: the source truncated this window; artifact covers a partial page",
@@ -180,6 +198,56 @@ describe("sbi-foreign-cash-balances demotes membership instead of skipping silen
       failureCause: "row_unreadable",
       absenceMeaning: "not-applicable",
     });
+  });
+
+  test("a business date that is not a calendar YYYY-MM-DD date is no as_of and breaks membership", () => {
+    // The fixtures' schedule rows state `YYYY-MM-DD`; as_of ranks the latest
+    // balance by text, so any other value must never become one (0.2.2).
+    for (const businessDate of [
+      "2026-02-30",
+      "2026-13-01",
+      "",
+      "20260820",
+      "2026/08/20",
+      null,
+      7,
+    ]) {
+      const result = parse(usd([{ businessDate, daysLater: 0, keepCash: "10.00" }]));
+      const balance = result.observations[0];
+      if (balance?.kind !== "balance") throw new Error("expected balance");
+      expect(balance.asOf).toBeUndefined();
+      expect(balance).toMatchObject({ metric: "keep_cash", amountMinor: 1000 });
+      expect((balance.extra["row"] as Record<string, unknown>)["businessDate"]).toEqual(
+        businessDate,
+      );
+      expect(result.issues).toEqual([
+        {
+          code: "row_unreadable",
+          locator:
+            "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].businessDate",
+          severity: "error",
+          impact: "membership",
+          message:
+            "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].businessDate: not a calendar YYYY-MM-DD date; the row's balances carry no as_of",
+        },
+      ]);
+      expect(result.warnings).toEqual([result.issues![0]!.message]);
+      expect(result.coverage![0]).toMatchObject({
+        completeness: "partial",
+        membershipComplete: false,
+        failureCause: "row_unreadable",
+      });
+    }
+    const valid = parse(usd([{ businessDate: "2026-02-28", daysLater: 0, keepCash: "10.00" }]));
+    expect(valid.observations[0]?.asOf).toBe("2026-02-28");
+    expect(valid.issues).toEqual([]);
+    expect(valid.coverage![0]).toMatchObject({ completeness: "complete" });
+    // A row that states no `businessDate` at all is read as in 0.2.1: no
+    // as_of and no issue (the documented limit of this release).
+    const unstated = parse(usd([{ daysLater: 0, keepCash: "10.00" }]));
+    expect(unstated.observations[0]?.asOf).toBeUndefined();
+    expect(unstated.issues).toEqual([]);
+    expect(unstated.coverage![0]).toMatchObject({ completeness: "complete" });
   });
 
   test("precision beyond the currency scale is kept as text, never rounded", () => {

@@ -12,7 +12,7 @@
 import { useState, type ReactNode } from "react";
 import { ApiError, useFeatures } from "../api.ts";
 import { validLocalDateText } from "../../../../packages/domain/src/time.ts";
-import { displayLabel } from "../labels.ts";
+import { displayLabel, ownEntry } from "../labels.ts";
 import { accountsOf, formProblem } from "../reconstruction-form.ts";
 import { SettlementQuantity } from "../reconciliation-display.tsx";
 import {
@@ -188,7 +188,7 @@ function Reported({ value }: { value: ReconstructionStart | null }): ReactNode {
 
 function Difference({ cell }: { cell: ReconstructedCell }): ReactNode {
   const { explanation } = cell;
-  const status = EXPLANATION[explanation.status] ?? {
+  const status = ownEntry(EXPLANATION, explanation.status) ?? {
     label: explanation.status,
     tone: "warn" as Tone,
   };
@@ -374,7 +374,7 @@ function DispositionTable({
               </td>
               <td>
                 {row.gap === null ? (
-                  <Nullable value={null} placeholder="—" />
+                  <Nullable value={null} placeholder="なし" />
                 ) : (
                   <>
                     {reason(row.gap)} <code className="dim">{row.gap}</code>

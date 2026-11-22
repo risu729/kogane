@@ -30,7 +30,7 @@
 //   say when more exist (`complete: false`). At most
 //   `PENDING_DECISIONS_IDS_SHOWN` ids and `PENDING_DECISIONS_ID_BYTES` bytes
 //   of ids per line, so the answer stays under `PENDING_DECISIONS_MAX_BYTES`.
-import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
+import type { FinancialError } from "../../../domain/src/result.ts";
 import {
   PENDING_DECISION_HANDLERS,
   PENDING_DECISIONS_COUNT_BOUND,
@@ -45,8 +45,7 @@ import {
 } from "../../../domain/src/pending-decisions.ts";
 import { AccountCandidateLimitError } from "../../../domain/src/account-candidates.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
-import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, grantAllows, wholeStoreReadRefusal } from "../grants.ts";
 import { accountCandidateView, queryAccountCandidates } from "./account-candidates.ts";
 import {
   boundedInstrumentResolution,
@@ -348,16 +347,8 @@ export async function readPendingDecisions(input: {
   now: string;
 }): Promise<PendingDecisionsOutcome> {
   const { grant, sql, served, now } = input;
-  const fail = (code: FinancialErrorCode, refs: string[]): PendingDecisionsOutcome => ({
-    ok: false,
-    error: financialError(code, REQUEST_ID, refs),
-  });
-  if (!grantAllows(grant, "records.read")) return fail("unauthorized", ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   const instant = Date.parse(now);
   if (!Number.isFinite(instant)) throw new RangeError("now is not an instant");
   const shown = PENDING_DECISIONS_IDS_SHOWN;

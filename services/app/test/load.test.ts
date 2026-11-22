@@ -211,9 +211,9 @@ describe("D1 load budgets", () => {
         samples.push({
           observations: seeded,
           screens: {
-            list: await screen("/api/balances?source=other-test", 5),
-            latest: await screen("/api/balances?source=other-test&view=summaries", 5),
-            history: await screen("/api/balances?source=other-test&offset=0", 5),
+            list: await screen("/api/balances?source=other-test&detail=full", 5),
+            latest: await screen("/api/balances?source=other-test&view=summaries&detail=full", 5),
+            history: await screen("/api/balances?source=other-test&offset=0&detail=full", 5),
           },
         });
       }

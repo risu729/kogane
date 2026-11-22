@@ -24,7 +24,14 @@ and its JavaScript regex engine. Tokens become escaped React text with fixed CSS
 classes; the content security policy does not need inline styles, script execution,
 or WebAssembly permissions. No additional component, state, or chart library is required.
 Navigation keeps the existing small History API router. Monetary values stay
-as decimal strings and use the shared exact formatter; provider text remains
+as decimal strings and use the shared exact formatters in `apps/web/src/money.ts`:
+`formatAmount` for integer minor units, and `formatDecimal` (or
+`formatDecimalText` for a compact wire quantity) for an exact decimal such as
+a settlement, reward, report or subtotal quantity. Both group integer digits
+in threes and keep the sign and every fraction digit, never through floating point;
+`test/money.test.ts` holds them to the same text for each known currency.
+Counts are printed as plain digits, without separators, and nothing in the
+client calls `toLocaleString` or `Intl.NumberFormat`. Provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
 Transaction filters, search, sort, and page selection, balance source/account,
@@ -50,7 +57,15 @@ observation preview; the deployed evidence mode still shows raw records only.
 Authentication failures (401/403) clear the rejected response from the in-memory
 query cache and hide its records. A failed retry cannot restore them; a successful
 response is required. Connection metadata gates observation pages as well. Other
-refresh failures retain previously authorized records with an explicit warning.
+refresh failures retain previously authorized records with an explicit warning:
+`QueryBoundary` shows them under `更新できませんでした。前回読み込んだ{label}を表示しています。`
+("could not refresh; showing the {label} loaded earlier") with a retry, or under its
+offline 前回読み込んだ notice while a read is paused. `収集スケジュール`
+("collection schedules") renders through it, and so do the two correction
+histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
+on an account candidate), which are read again when reopened. While the schedules page shows an earlier
+answer it also holds 依頼を送信 and the re-survey 採用/却下, which decide from what
+it shows ([schedules](schedules.md#schedule-administration)).
 
 ## Design tokens and stylesheet layout
 
@@ -97,20 +112,36 @@ Pages compose these instead of writing their own markup or rules:
 | Page header                   | `.page-head` with the `<h1>` and a `.lede`; `.footnote` for caveats                                                                   |
 | Grouped content               | `Panel` (`.panel` with `.panel-head`, `.panel-note`, `.panel-body`); content inside a panel always sits in `.panel-body`              |
 | Key/value facts               | `Kv` / `KvRow`                                                                                                                        |
-| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, never blank                                                    |
+| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, in words naming what is absent, never blank                    |
 | Loading, error, empty, stale  | `QueryBoundary` (with `isEmpty`/`empty`), `ErrorState`, `EmptyState`                                                                  |
 | Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
 | Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
-| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
+| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`; a button that sends a request is `BusyButton` (held, still focused)       |
 | Paging                        | `Pagination` (offset or cursor) rendering `.pagination`, a named group whose status speaks its label; one label per pager on a page   |
 | Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
 | Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+| Codes as words                | `displayLabel` or `ownEntry` (`labels.ts`) for a code a table may lack: only own keys answer, so `constructor` is unknown             |
 | Evidence chains               | `ChainStep` in an `<ol className="chain">`: record → parse → original; usage → statement → debit; a candidate's pending → posted row  |
 | Review candidates             | A `.panel` with a `.settlement-head`, then a `.settlement-disclosure` open while a decision is due (see below)                        |
 | Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |
+
+A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
+`Pagination`): its buttons say 前のページ and 次のページ, its status says
+続きがあります or 最後のページです unless the page passes its own, and its
+buttons, its read-again action included, wait while a read of the list is in
+flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`,
+so a button the owner pressed, or sits on during a background read, keeps the
+focus; a button with nowhere to go (no earlier page, no more rows) is
+`disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
+use it.
+
+The 口座・銘柄 lists the server pages by offset name the rows a page shows
+(1–2件); these reads count no total. A page with no rows says 表示なし, and only
+an empty first page says the list is empty: a later page that comes back empty,
+because the list shrank, says that this page lists nothing and keeps its pager.
 
 A review candidate (a card settlement on `カード照合` ("card reconciliation"), a pending-to-posted link on
 `カード利用` ("card usage")) is one panel. Its `.settlement-head` holds the title, a status
@@ -121,8 +152,61 @@ decision is a `.settlement-decision`: a required `.settlement-reason`, a button
 per action the candidate allows, and a footnote that planning decides nothing.
 The pending-to-posted review also states each action's effect in words.
 
+An unknown value says why (INV05). When the answer carries a closed reason
+for it, the page shows that reason: `不明（<code>）` (`SettlementQuantity`,
+`DateValue`, the 次回の引落 amounts and a not-listed card's due date), or the
+reason in words beside a badge (引落口座は不明). When the answer sends a bare
+null, `Nullable` names what is missing rather than a bare 不明 (a payable
+with no due date recorded on 基準日の保有状況 is 引落予定日未記録). A due or
+debit date the card reconciliation reads send as null carries its closed
+reason (`paymentDateReason`, `debitDateReason`), and `NullableDate` shows it
+as `不明（<code>）`; a null without one, which their wire contracts refuse,
+would read 年月日として読める記録なし. An identifier is printed
+`namespace / scope / value`; an empty scope is part of the key and stays
+empty, never a dash.
+
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.
+
+### Plan refusals
+
+A review page plans a decision with `postCommand("plan")` and shows a
+refusal in the item that asked for it (`PlanRefusal`). A refusal that says the
+item changed since the page read it (`planRefusedAsStale` in
+`command-api.ts`) makes the page read that item again: the server's
+`stale_context` (409: the candidate is no longer in the state the plan needs,
+a pinned revision moved, or another holder claimed the debit) and
+`target_missing` (400: the candidate is gone), the two codes the plan route
+answers about its target, and the page's own `StalePlanError` (the candidate
+read again before planning differs from the one shown, or the plan pinned
+another revision than the one shown). The page's `PlanRefreshScope`
+invalidates exactly the reads that show the reviewed items, so the ones on
+screen are fetched again:
+
+| Page                                                    | Reads again                                                                                                                                                       |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `カード照合` and one candidate (`/reconciliation/<id>`) | `card-settlements` statements, one statement's candidates, one candidate, its competitors; not the debit accounts, the upcoming bills or the unmatched statements |
+| `口座の保有者を確認`                                    | that candidate's `card-ownership` read                                                                                                                            |
+| `カード利用の説明`                                      | every `card-purchases` read: a pending-to-posted candidate shows on both its purchases and on the list                                                            |
+| `口座の対応候補`, `銘柄の同一性の候補`                  | every view and page of that candidate list                                                                                                                        |
+
+Every other refusal (a missing grant, an invalid payload, evidence or scope
+that is not ready, unsupported semantics, a budget) reads nothing again: it
+says nothing about whether the page is current. `plan_not_open` and the other
+lifecycle codes are answers to simulate, approve and commit on the
+confirmation screen, not to plan. A read again that fails keeps the earlier
+answer under `QueryBoundary`'s warning, as any read does.
+
+The refusal stays visible. While the item read again still shows it, it
+stays in the item. When the item no longer does (it left the list or view,
+its form started over for a new revision, it offers no decision any more, or
+it sits in a disclosure that closed when its status changed), the page shows
+the refusal once below its head (`PlanRefreshNotice`) until the next plan is
+sent. Focus stays where it is, on the pressed button while that button is
+still there; only when the page read again removed or hid the focused
+element does focus move, to wherever the refusal is shown. The review pages'
+browser tests check each page's reads, the refusals that read nothing, and
+where the refusal and focus end up.
 
 ## API metadata and capabilities
 

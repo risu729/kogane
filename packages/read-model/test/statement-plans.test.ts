@@ -22,6 +22,7 @@ import {
   activityEventsSql,
   eventAllocationsSql,
   eventLegsSql,
+  filteredActivityEventsSql,
   evidenceLocatorsSql,
   obligationSettlementsSql,
   obligationsSql,
@@ -111,6 +112,25 @@ const cases: Case[] = [
     // LIMIT stops the walk, so a page never reads the whole history.
     bounded: ["e"],
     noSort: true,
+  },
+  {
+    // ADR 0081, amendment of 2026-11-20. The walk is one range of the
+    // partial index from the cursor's key, stopped by its LIMIT; each walked
+    // revision's filters read its legs by key and its evidence's parse run
+    // and capture by primary key, never a source's captures or a table whole.
+    name: "the filtered activity walks live event revisions by key from the cursor",
+    sql: filteredActivityEventsSql,
+    keyed: [
+      "SEARCH e USING INDEX economic_event_revisions_current ((event_id,revision)>(?,?))",
+      "SEARCH l USING INDEX sqlite_autoindex_economic_legs_1 (event_id=? AND revision=?)",
+      "SEARCH a USING INDEX sqlite_autoindex_economic_legs_1 (event_id=? AND revision=?)",
+      "SEARCH p USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH f USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH e USING INDEX sqlite_autoindex_economic_event_revisions_1 (event_id=? AND revision=?)",
+    ],
+    // `w`, `walked`, `x` and `t` are the walk's own rows (at most its LIMIT)
+    // and the page and last key drawn from them.
+    bounded: ["w", "walked", "x", "t"],
   },
   {
     name: "activity reads the legs of the page's events",

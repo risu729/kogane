@@ -508,6 +508,12 @@ describe("exclusions", () => {
     expect(reason(vpassRow({ providerStatus: "canceled" }))).toBe("status_unsupported");
     expect(reason(vpassRow({ providerStatus: "confirmed" }))).toBe("status_unsupported");
     expect(reason(vpassRow({ sourceId: "smbc-bank" }))).toBe("status_unsupported");
+    // A status that names a property every object inherits is still not one
+    // of the source's statuses: the lookup reads own keys only (ADR 0004).
+    for (const providerStatus of ["constructor", "toString", "valueOf", "__proto__"]) {
+      expect(reason(vpassRow({ providerStatus }))).toBe("status_unsupported");
+      expect(reason(myjcbRow({ providerStatus }))).toBe("status_unsupported");
+    }
     expect(reason(vpassRow({ newestRepresentation: false }))).toBe("superseded_representation");
     // Every reason used above is in the closed set.
     expect(CARD_USAGE_EXCLUSIONS).toContain("amount_not_exact");

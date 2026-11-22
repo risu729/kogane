@@ -3,6 +3,8 @@
 //
 //  * a plan the server refuses to simulate is named by the refusal's own
 //    fixed message, not a generic "is the API up" text,
+//  * a refusal code that names a built-in object member (`constructor`)
+//    reads as an unknown refusal, never as the member,
 //  * a refused receipt re-check says what the server refused,
 //  * one receipt re-check runs at a time, so an older answer can never
 //    replace a newer one on screen.
@@ -23,6 +25,8 @@ if (!runnable) {
 
 const PLAN_ID = "a".repeat(64);
 const MISSING_PLAN_ID = "e".repeat(64);
+/** A plan whose simulation the server refuses with a code naming a built-in object member. */
+const PROTOTYPE_CODE_PLAN_ID = "f".repeat(64);
 const SUBJECT = "account_mapping:synthetic-reference";
 const simulation = {
   kind: "identity.assign",
@@ -91,6 +95,8 @@ describe.if(runnable)("change confirmation refusals", () => {
         if (url.pathname.startsWith("/api/command/v1/")) {
           const command = url.pathname.slice("/api/command/v1/".length);
           const body = (await request.json()) as { planId?: string };
+          if (command === "simulate" && body.planId === PROTOTYPE_CODE_PLAN_ID)
+            return Response.json({ error: "constructor" }, { status: 400 });
           if (command === "simulate")
             return body.planId === PLAN_ID
               ? Response.json({
@@ -168,6 +174,21 @@ describe.if(runnable)("change confirmation refusals", () => {
       expect(await alert.getByRole("button", { name: "再試行" }).count()).toBe(0);
       // Nothing can be approved for a plan the server could not show.
       expect(await page.getByRole("button", { name: "承認する" }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a refusal code that names a built-in object member reads as an unknown refusal", async () => {
+    const page = await open(PROTOTYPE_CODE_PLAN_ID);
+    try {
+      const alert = page.getByRole("alert").filter({ hasText: "確認内容を読み込めませんでした" });
+      await alert.waitFor();
+      const text = await alert.innerText();
+      expect(text).toContain("操作を受け付けられませんでした。再試行しても結果は変わりません。");
+      expect(text).toContain("HTTP 400");
+      expect(text).not.toContain("native code");
+      expect(text).not.toContain("function");
     } finally {
       await page.close();
     }
