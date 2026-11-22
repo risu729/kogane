@@ -378,7 +378,7 @@ describe.if(runnable)("operator schedule administration", () => {
     stoppedLease();
     leaseResponse = async () => {
       snapshot.leases = [];
-      // As the App answers a release whose Processor answer was lost or malformed.
+      // As the App answers a release whose Processor answer was lost.
       return Response.json({ error: "scheduling_unavailable" }, { status: 503 });
     };
     const page = await browser.newPage();

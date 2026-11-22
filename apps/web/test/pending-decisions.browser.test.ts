@@ -151,7 +151,7 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
             : unavailable
-              ? Response.json({ error: "unavailable" }, { status: 503 })
+              ? Response.json({ error: "catalogue_read_failed" }, { status: 503 })
               : Response.json(current);
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });

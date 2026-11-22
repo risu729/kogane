@@ -94,9 +94,12 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
             );
           // The route answers a refusal as the service's `financial-error-v1`.
           if (mode === "refused")
-            return Response.json(financialError("unauthorized", "economic-readiness.read"), {
-              status: ERROR_STATUS.unauthorized,
-            });
+            return Response.json(
+              financialError("unauthorized", "economic-readiness.read", [
+                "capability:records.read",
+              ]),
+              { status: ERROR_STATUS.unauthorized },
+            );
           if (mode === "malformed")
             return Response.json({ status: "ok", providerText: "private response" });
           const body = economicReadinessFixture(mode === "mismatch" ? id + 1 : id);

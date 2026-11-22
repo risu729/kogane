@@ -5,6 +5,7 @@
 // page never builds one of its own and never approves.
 import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { ERROR_STATUS } from "../../../packages/application/src/errors.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -51,7 +52,7 @@ describe.if(runnable)("instrument candidate review", () => {
   let store: World;
   let commands = true;
   let stale = false;
-  /** The history route answers 503 while set, as an unavailable read would. */
+  /** The history route answers 503 `catalogue_read_failed` while set, as a failed store read would. */
   let historyDown = false;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
@@ -119,8 +120,10 @@ describe.if(runnable)("instrument candidate review", () => {
         }
         if (url.pathname === "/api/identity/instrument-history") {
           read.push(url);
-          // As the App answers a read that failed after its checks.
-          if (historyDown) return Response.json({ error: "internal_error" }, { status: 500 });
+          // As the App answers a read whose store failed (the route runs in
+          // `catalogue`).
+          if (historyDown)
+            return Response.json({ error: "catalogue_read_failed" }, { status: 503 });
           const outcome = await readInstrumentHistoryForGrant({
             grant: GRANT,
             sql: store.sql,
@@ -128,7 +131,7 @@ describe.if(runnable)("instrument candidate review", () => {
           });
           return outcome.ok
             ? Response.json(outcome.history)
-            : Response.json(outcome.error, { status: 403 });
+            : Response.json(outcome.error, { status: ERROR_STATUS[outcome.error.code] });
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
