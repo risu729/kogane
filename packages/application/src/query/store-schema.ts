@@ -32,9 +32,12 @@ export const STORE_FEATURES = {
     ],
     views: [],
   },
-  /** `queryDatedState`: snapshot policies, statements and settlement reviews (CORE 0044). */
+  /**
+   * `queryDatedState`: snapshot policies, statements and settlement reviews
+   * (CORE 0044), and the scheduled payments (CORE 0061).
+   */
   datedState: {
-    tables: ["dataset_snapshot_policies"],
+    tables: ["dataset_snapshot_policies", "scheduled_payment_observations"],
     views: ["card_statement_facts", "card_settlement_reviews"],
   },
 } as const satisfies Record<string, { tables: readonly string[]; views: readonly string[] }>;
