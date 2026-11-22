@@ -88,7 +88,7 @@ separate retirement migration; it is not an ordinary old-commit rollback.
 
 ## Amendment: repeated stopped-execution release
 
-Status: accepted (merged 2026-10-08 in #566)
+Status: accepted (merged 2026-10-09 in #566)
 Date: 2026-10-09
 
 A confirmed stopped-execution release can be resent after a lost response or a

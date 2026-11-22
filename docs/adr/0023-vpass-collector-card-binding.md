@@ -1,6 +1,6 @@
 # ADR 0023: Do not trust a card binding for collector-vpass runs until the collector writes one
 
-- Status: accepted (merged 2026-09-26 in #260); amended to implement option 3
+- Status: accepted (merged 2026-09-27 in #260); amended to implement option 3
   (see [Amendment](#amendment-option-3-implemented)), merged 2026-09-27 in #273;
   amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the token is derived without a key; see
@@ -485,7 +485,7 @@ above is left as it was decided.
 
 ## Note (2026-09-27): both stated-total fields are on the live site
 
-- Status: accepted (merged 2026-09-27 in #320)
+- Status: accepted (merged 2026-09-28 in #320)
 - Date: 2026-09-27
 - Carried by: `services/collector-vpass/src/provider-count.ts`,
   `services/collector-vpass/src/statement-walk.ts`,

@@ -1472,7 +1472,7 @@ and settlement do not read them.
 
 ## Amendment 2026-10-08: GLOBAL PASS replay compares records with detail tables
 
-- Status: accepted (merged 2026-10-08 in #574)
+- Status: accepted (merged 2026-10-09 in #574)
 - Date: 2026-10-08
 - Carried by: `services/processor/scripts/parser-rejection.ts`
   (`globalPassActivityShape`: `detailTables`, `detailContainer`,

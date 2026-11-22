@@ -1,6 +1,6 @@
 # ADR 0021: Collectors state the registration contract; the Processor's refusals stay
 
-- Status: accepted (merged 2026-09-26 in #265)
+- Status: accepted (merged 2026-09-27 in #265)
 - Date: 2026-09-26
 - Carried by:
   [collection: the registration contract](../collection.md#shared-data-bucket-per-source-u09),
