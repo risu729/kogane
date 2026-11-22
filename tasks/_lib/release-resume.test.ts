@@ -40,6 +40,18 @@ import {
 import { workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
 
+// About 45 cases below run the release helpers in a real Node process, and
+// each of those processes used to compile the same helper modules from
+// scratch: that compilation was about a third of the file's run time, and the
+// part that grows first when the machine is loaded. Node's on-disk compile
+// cache (keyed by each module's source) lets the processes share it; it
+// changes how fast a module loads, not what it does.
+const nodeCompileCache = mkdtempSync(resolve(tmpdir(), "kogane-resume-node-cache-"));
+afterAll(() => {
+  rmSync(nodeCompileCache, { recursive: true, force: true });
+});
+const nodeEnv = { ...process.env, NODE_COMPILE_CACHE: nodeCompileCache };
+
 const sha = "a".repeat(40),
   trustedSha = "b".repeat(40);
 const context = { runId: "123", sha, trustedSha, attempt: 2 };
@@ -591,7 +603,7 @@ for (const native of [false, true])
       );
       chmodSync(resolve(tools, "docker"), 0o755);
       packedEnv = {
-        ...process.env,
+        ...nodeEnv,
         PATH: `${tools}:${process.env.PATH}`,
         GITHUB_TOKEN: "synthetic-token",
         GITHUB_REPOSITORY: "synthetic/repository",
@@ -857,7 +869,10 @@ test("native Node refuses oversized incoming chunks without touching or material
       catch(error){if(error.message!=='release_resume_artifact_chunk')throw error;}
       if(readdirSync(directory).length || process.resourceUsage().maxRSS>256*1024)throw Error('resource boundary');
     } finally {rmSync(directory,{recursive:true,force:true});}`;
-  const result = spawnSync("node", ["--input-type=module", "-e", code], { encoding: "utf8" });
+  const result = spawnSync("node", ["--input-type=module", "-e", code], {
+    encoding: "utf8",
+    env: nodeEnv,
+  });
   expect(result.stderr).toBe("");
   expect(result.status).toBe(0);
 });
@@ -1080,7 +1095,7 @@ for (const phase of [
       };`,
         );
         const env = {
-          ...process.env,
+          ...nodeEnv,
           RUNNER_TEMP: temp,
           GITHUB_RUN_ID: "123",
           GITHUB_RUN_ATTEMPT: "1",
@@ -1343,7 +1358,7 @@ for (const phase of [
             {
               cwd: REPO_ROOT,
               env: {
-                ...process.env,
+                ...nodeEnv,
                 RUNNER_TEMP: temp,
                 MOCK_MODE: mode,
                 CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
