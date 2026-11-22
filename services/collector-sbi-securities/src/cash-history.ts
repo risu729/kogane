@@ -12,9 +12,9 @@ import {
 } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
 import type { Artifact } from "./types";
 
-export const cashDataset = (kind: CashHistoryKind) =>
+const cashDataset = (kind: CashHistoryKind) =>
   kind === "yen" ? "yen-detail-history" : "foreign-cash-history";
-export const cashSourceKey = (kind: CashHistoryKind, pageNumber: number) =>
+const cashSourceKey = (kind: CashHistoryKind, pageNumber: number) =>
   `${cashDataset(kind)}-page-${String(pageNumber).padStart(4, "0")}-source.json`;
 
 /** Ten-row response pages are bounded before buffering their original bytes. */
