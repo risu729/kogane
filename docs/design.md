@@ -87,11 +87,11 @@ Layer transitions have different rules:
 
 ### Mutation Policy
 
-| Class                  | Examples                                                                       | Policy                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Immutable              | raw objects, fetch history, source observations, historical price observations | Append-only. Never updated or deleted, with one declared exception (below). |
-| Versioned / corrigible | identity mappings, observation links, event interpretation, classification     | May be corrected; corrections are tracked.                                  |
-| Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.                                   |
+| Class                  | Examples                                                                       | Policy                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| Immutable              | raw objects, fetch history, source observations, historical price observations | Append-only. Never updated or deleted, except by the two migrations below. |
+| Versioned / corrigible | identity mappings, observation links, event interpretation, classification     | May be corrected; corrections are tracked.                                 |
+| Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.                                  |
 
 What a collector may write in the first place is narrower than what it
 reads: credentials and full payment-instrument numbers are removed before an
@@ -100,7 +100,24 @@ written while names were replaced carry the marker `[redacted:name]` and are
 not rewritten
 ([ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
 
-The one declared exception to the immutable class is migration 0063
+Two migrations have dropped append-only guards to change rows of the
+immutable class.
+
+Migration 0043 ([#207](https://github.com/risu729/kogane/pull/207)) deleted
+synthetic bootstrap metadata. It selected the fetch runs of the dedicated
+`kogane-synthetic` source and the runs of `synthetic` acquisition sessions
+annotated `legacy-synthetic-bootstrap`, dropped the `*_no_delete` guards of
+nine tables (`ingestion_attempts`, `fetch_run_seals`, `run_inventory_items`,
+`run_inventories`, `fetch_artifacts`, `fetch_run_reports`,
+`fetch_run_annotations`, `fetch_runs`, `acquisition_sessions`), deleted
+those runs' rows and each acquisition session left with no fetch or
+collection run, and recreated the nine guards with their original text
+(0001, 0003). It also deleted the `kogane-synthetic` source and its registry
+rows, which have no delete guard. It deleted no raw object, and parsed
+observations of those runs would have made it fail through the restrictive
+foreign keys rather than be removed. No ADR records this decision.
+
+The one exception declared in an ADR is migration 0063
 ([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)):
 once, it replaces each staged importer-era identity value (a digest the
 platform derived, not a provider claim) by the collector's value in five
