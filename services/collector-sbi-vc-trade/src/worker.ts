@@ -15,6 +15,7 @@ import { collectSbiVcTrade, isLocalSbiVcCashflowFailure } from "./collector";
 import { collectSbiVcDocuments, isLocalSbiVcReportFailure } from "./documents";
 import { collectSbiVcLeverageExecutions } from "./leverage-executions";
 import { decryptSession, encryptSession } from "./crypto";
+import { classifyCryptoError, classifyError } from "./error-code";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
 import {
@@ -686,30 +687,6 @@ async function ensureHealthySession(
     health = reauthenticated;
   }
   return health;
-}
-function classifyError(error: unknown): string {
-  if (error instanceof Error && /^[a-z0-9_-]+$/u.test(error.message)) {
-    return error.message.replaceAll("-", "_");
-  }
-  if (error instanceof SyntaxError) return "json_parse_failed";
-  if (error instanceof DOMException) return classifyCryptoError(error);
-  if (error instanceof TypeError) return "type_error";
-  return "unexpected_error";
-}
-function classifyCryptoError(error: unknown): string {
-  if (!(error instanceof DOMException)) return "session_encrypt_failed";
-  switch (error.name) {
-    case "DataError":
-      return "crypto_data_error";
-    case "InvalidAccessError":
-      return "crypto_invalid_access";
-    case "NotSupportedError":
-      return "crypto_not_supported";
-    case "OperationError":
-      return "crypto_operation_error";
-    default:
-      return "crypto_error";
-  }
 }
 async function readBoundedText(response: Response, limit: number): Promise<string> {
   if (!response.body) throw new Error("missing_response_body");

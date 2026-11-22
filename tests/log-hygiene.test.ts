@@ -143,9 +143,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     reason:
       "safeError reads once under catch and retains only exact closed codes or a bounded HTTP status code; raw exception text is never serialized",
   },
-  "services/collector-sbi-vc-trade/src/worker.ts": {
-    count: 2,
-    reason: "classifyError keeps a message only when it is already a code-shaped token",
+  "services/collector-sbi-vc-trade/src/error-code.ts": {
+    count: 1,
+    reason:
+      "classifyError reads once under catch and keeps a message only when it is one of the " +
+      "collector's own closed codes or a bounded HTTP status code; anything else is a class code",
   },
   "services/collector-smbc-direct/src/session.ts": {
     count: 2,

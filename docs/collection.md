@@ -1625,6 +1625,20 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   still excludes that whole account unit. Neither another run's successful
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
+- Failure codes: a thrown error becomes a code through `classifyError`
+  (`src/error-code.ts`), for the manifest's failures and units (so the
+  terminal's `safeErrorCode`), the session health record's `lastErrorCode`
+  (prefixed with the keepalive stage) and `lastReauthErrorCode`, and the
+  `sbi_vc_keepalive` and `sbi_vc_reauth` log lines. It keeps a message only
+  when it is one of the collector's own codes (`SBI_VC_ERROR_CODES`, hyphens
+  folded to underscores) or `collector_http_<status>` /
+  `passkey_http_<status>` with a three-digit status from 100 to 599; any
+  other message, however code-shaped, gives `json_parse_failed`, a `crypto_*`
+  code, `type_error` or `unexpected_error` by the error's class.
+  `test/error-code.test.ts` checks that every literal message the
+  collector's sources throw is in the set and that every message template
+  is one it covers. Until 2026-11-22 any lowercase code-shaped
+  message was kept as it was; records written before then are not rewritten.
 - `transformations`: one `redacted` step per JSON dataset
   (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
   is not retained. Each PDF/ZIP document states an `extracted` step instead.
