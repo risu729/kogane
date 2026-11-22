@@ -2783,11 +2783,14 @@ In CORE, each of the five observation tables, `observation_decimal_values`,
 `DELETE` by trigger. Since migration 0105 each also refuses an insert that
 collides with a stored key (`*_no_replace`), because SQLite's
 `INSERT OR REPLACE` deletes the colliding row without firing `DELETE`
-triggers while `recursive_triggers` is off, which rewrote a stored observation
-and its amount past both guards. Acquisition history, identity and the
-decision log already had the same guard. No writer depends on a collision:
-the Processor inserts observations, issues and coverage claims without an id,
-and prices behind `WHERE NOT EXISTS`
+triggers while `recursive_triggers` is off (as Miniflare's D1 reports it),
+which rewrote a stored observation and its amount past both guards. The keys
+checked are the primary key, each unique key and, for `observation_decimal_values`,
+`price_observations` and `price_observation_claims`, whose primary key is not
+an integer, the hidden `rowid`. Acquisition history, identity and the decision
+log already had the same guard on their declared keys. No writer depends on a
+collision: the Processor inserts observations, issues and coverage claims
+without an id, and prices behind `WHERE NOT EXISTS`
 (`packages/storage-d1/test/observation-no-replace-migration.test.ts`).
 
 The `source_account` comment is reproduced from `schema.sql` as it stands

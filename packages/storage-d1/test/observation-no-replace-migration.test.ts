@@ -303,3 +303,53 @@ describe("after 0105", () => {
     db.close();
   });
 });
+
+/**
+ * The three tables whose key is not an INTEGER PRIMARY KEY keep a hidden
+ * rowid, and a REPLACE naming a stored row's rowid deletes that row whatever
+ * key it states.
+ */
+const ROWID_CASES = [
+  {
+    table: "observation_decimal_values",
+    stored: "kind='balance' AND observation_id=1",
+    replace: (rowid: number) =>
+      `INSERT OR REPLACE INTO observation_decimal_values(rowid,kind,observation_id,parse_run_id,policy_version,status,coefficient,scale,basis)
+        VALUES(${rowid},'valuation',777,1,'decimal-v1','exact','999',0,'decimal_text')`,
+  },
+  {
+    table: "price_observations",
+    stored: "id='synthetic-price-2'",
+    replace: (rowid: number) =>
+      `INSERT OR REPLACE INTO price_observations(rowid,id,base_instrument_ref,base_quantity_coefficient,base_quantity_scale,quote_unit_ref,quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,source_claim_ref,recorded_at)
+        VALUES(${rowid},'synthetic-price-3','synthetic-instrument','1',0,'JPY','999',0,'reference',${PRICE_TIME},'synthetic-claim-3','2026-01-07T00:00:00Z')`,
+  },
+  {
+    table: "price_observation_claims",
+    stored: "price_id='synthetic-price'",
+    replace: (rowid: number) =>
+      `INSERT OR REPLACE INTO price_observation_claims(rowid,price_id,rule_id,claim_kind,observation_id,parse_run_id,json_path,created_at)
+        VALUES(${rowid},'synthetic-price-2','synthetic-rule','valuation',14,1,'$.other','2026-01-07T00:00:00Z')`,
+  },
+] as const;
+
+describe("a replacing insert by rowid", () => {
+  test.each(ROWID_CASES.map((c) => [c.table, c] as const))(
+    "%s: removed the stored row before 0105 and is refused after it",
+    (table, c) => {
+      const read = `SELECT rowid AS rowid FROM ${table} WHERE ${c.stored}`;
+      const before = seeded(beforeImage);
+      const { rowid } = before.query(read).get() as { rowid: number };
+      before.run(c.replace(rowid));
+      expect(before.query(read).get()).toBeNull();
+      before.close();
+
+      const after = seeded(afterImage);
+      const rows = contents(after);
+      expect((after.query(read).get() as { rowid: number }).rowid).toBe(rowid);
+      expect(() => after.run(c.replace(rowid))).toThrow(/replacement is forbidden/u);
+      expect(contents(after)).toEqual(rows);
+      after.close();
+    },
+  );
+});

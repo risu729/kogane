@@ -10,7 +10,7 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `3bd6de9b829acc1faa82b4d0a7bb443e748c6cf35b7442ed30cb777b4f786ca0`
+Schema digest: `28706e40ed863c826e77f7209b60f4a35d5d8b475f49b84c4672c1e1faf12e4c`
 
 ## Summary
 

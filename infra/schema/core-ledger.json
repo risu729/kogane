@@ -1377,7 +1377,7 @@
       "file": "0105_observation_no_replace.sql",
       "statementCount": 11,
       "insertStatements": [],
-      "sha256": "7d9993ae077a7e3dfbc5a2881e4cbe223eda5f4889cb0acd2108f02294d43ed4"
+      "sha256": "0370a056b7a8ecf1d2d90e36e82eb777a83456e1b7493ffbea11960969c2e70d"
     }
   ],
   "tables": [
@@ -20126,7 +20126,7 @@
       "table": "observation_decimal_values",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "2981cb4a94e3a856"
+      "sqlSha256": "18a70ad9b3ba5c48"
     },
     {
       "name": "observation_decimals_no_update",
@@ -20462,7 +20462,7 @@
       "table": "price_observation_claims",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "5ce54d8649f9347b"
+      "sqlSha256": "d3cc51831017579d"
     },
     {
       "name": "price_observation_claims_no_update",
@@ -20490,7 +20490,7 @@
       "table": "price_observations",
       "timing": "BEFORE",
       "event": "INSERT",
-      "sqlSha256": "3260351d4f0ae795"
+      "sqlSha256": "a84392502cc96093"
     },
     {
       "name": "price_observations_no_update",
@@ -22425,6 +22425,6 @@
       "0100_sbi_supplemental_unit_eligibility.sql",
       "0101_myjcb_document_unit_eligibility.sql"
     ],
-    "schemaSha256": "3bd6de9b829acc1faa82b4d0a7bb443e748c6cf35b7442ed30cb777b4f786ca0"
+    "schemaSha256": "28706e40ed863c826e77f7209b60f4a35d5d8b475f49b84c4672c1e1faf12e4c"
   }
 }

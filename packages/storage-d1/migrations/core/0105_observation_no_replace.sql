@@ -7,7 +7,11 @@
 -- (0018) and the decision log (0029) already refuse that; these tables did not.
 --
 -- Each trigger refuses an insert that would collide on any uniqueness path of
--- its table. No writer relies on a collision: the Processor inserts
+-- its table. The three tables whose primary key is not an INTEGER PRIMARY KEY
+-- keep a hidden rowid, which a REPLACE naming an explicit rowid also collides
+-- on, so their triggers check `rowid` too. NEW.rowid is -1 in a BEFORE INSERT
+-- trigger when the insert names no rowid, and no stored row has rowid -1. No
+-- writer relies on a collision: the Processor inserts
 -- observations, issues and coverage claims without an id, a parse input
 -- reference once per new parse run, and prices and price claims behind
 -- `WHERE NOT EXISTS` on their key. Nothing writes these tables with
@@ -36,7 +40,8 @@ BEGIN SELECT RAISE(ABORT,'scheduled_payment_observations replacement is forbidde
 
 CREATE TRIGGER observation_decimals_no_replace BEFORE INSERT ON observation_decimal_values
 WHEN EXISTS(SELECT 1 FROM observation_decimal_values
-  WHERE kind=NEW.kind AND observation_id=NEW.observation_id AND policy_version=NEW.policy_version)
+  WHERE rowid=NEW.rowid
+    OR (kind=NEW.kind AND observation_id=NEW.observation_id AND policy_version=NEW.policy_version))
 BEGIN SELECT RAISE(ABORT,'versioned decimal value replacement is forbidden'); END;
 
 CREATE TRIGGER parse_issues_no_replace BEFORE INSERT ON parse_issues
@@ -53,11 +58,11 @@ WHEN EXISTS(SELECT 1 FROM parse_input_references WHERE parse_run_id=NEW.parse_ru
 BEGIN SELECT RAISE(ABORT,'parse_input_references replacement is forbidden'); END;
 
 CREATE TRIGGER price_observations_no_replace BEFORE INSERT ON price_observations
-WHEN EXISTS(SELECT 1 FROM price_observations WHERE id=NEW.id)
+WHEN EXISTS(SELECT 1 FROM price_observations WHERE rowid=NEW.rowid OR id=NEW.id)
 BEGIN SELECT RAISE(ABORT,'price_observations replacement is forbidden'); END;
 
 CREATE TRIGGER price_observation_claims_no_replace BEFORE INSERT ON price_observation_claims
 WHEN EXISTS(SELECT 1 FROM price_observation_claims
-  WHERE price_id=NEW.price_id OR (rule_id=NEW.rule_id AND claim_kind=NEW.claim_kind
+  WHERE rowid=NEW.rowid OR price_id=NEW.price_id OR (rule_id=NEW.rule_id AND claim_kind=NEW.claim_kind
     AND observation_id=NEW.observation_id AND json_path=NEW.json_path))
 BEGIN SELECT RAISE(ABORT,'price_observation_claims replacement is forbidden'); END;
