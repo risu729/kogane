@@ -27,7 +27,7 @@ import type {
 } from "../../../packages/application/src/index";
 import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
-import { assertOwnOrigin, boundedText, HttpError, json } from "./http";
+import { assertMethod, assertOwnOrigin, boundedText, HttpError, json, WRITE_METHODS } from "./http";
 
 const PREFIX = "/api/command/v1/";
 export const COMMAND_OPERATIONS = ["plan", "simulate", "approve", "commit", "operation"] as const;
@@ -120,7 +120,7 @@ async function commandRoute(
   operation: CommandOperation,
   call: OperationCall,
 ): Promise<Answer> {
-  if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, WRITE_METHODS);
   if (url.search) throw new HttpError(400, "invalid_query");
   // A page on another site never reaches the flag, the grant or the body
   // (ADR 0078): the operator's browser session is not the operator's intent.

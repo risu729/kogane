@@ -64,6 +64,42 @@ client uses are served by Access itself
 ([ADR 0047](adr/0047-mcp-client-connection.md)), not by this Worker, so
 these headers are not on them.
 
+### Methods
+
+Every route serves either reads or writes, never both
+([ADR 0130](adr/0130-http-method-contract.md)):
+
+- A read serves `GET` and `HEAD`. `HEAD` runs the same route as the `GET`,
+  behind the same Access and grant checks, and answers its status and headers
+  without the body (`secureResponse` cancels it unread). That holds for every read
+  route, the release postcheck's `GET /api/ops/v1/health`, the operations
+  reads `GET /api/ops/v1/operations[/:id]` and the schedules page
+  `GET /api/ops/v1/schedules` included, and for the app shell and its assets.
+- A write serves `POST` only: the change lifecycle (`/api/command/v1/*`), the
+  agent routes (`/api/agent/v1/*`), `/mcp`, the operations requests and the
+  schedules settings writes, and the schedule bootstrap.
+- Any other method is `405 method_not_allowed` with an `Allow` header naming
+  what the route serves (RFC 9110 §15.5.6): `Allow: GET, HEAD` on a read and
+  on every path the Worker's GET-only boundary refuses, unrouted ones
+  included; `Allow: POST` on a write. One error type (`MethodNotAllowed` in
+  `src/http.ts`) carries the list and the Worker's one error formatter
+  (`errorResponse`) writes the header, so no route sets it itself. Under
+  `/api/ops/v1` with the operations API on, a path that is neither an
+  acceptance route nor a read names all three verbs, each of which answers
+  it `404`. The check comes after the caller is proved, as before: an
+  unproved caller is `401` whatever the method. The one exception is the
+  schedule bootstrap, which checks the flag, the method, the query and the
+  body before the deployment service token, as it did before ADR 0130.
+- A verb the operations API routes (`GET`, `HEAD`, `POST`) on an operations
+  path that does not take it is `404 not_found`, and `POST` to the schedules
+  page itself is `404`; neither carries `Allow`. (`HEAD` on an operations
+  acceptance route, such as `HEAD /api/ops/v1/collections`, is that `404`
+  too; before ADR 0130 it was `405`.)
+
+`test/method-contract.test.ts` checks the `405` and its `Allow` on every
+route family, that the security headers stay on it, and that `HEAD` answers
+what `GET` answers, status and headers, with no body.
+
 ## Authentication and operation
 
 Cloudflare Access protects every route of this Worker through its Worker-scoped

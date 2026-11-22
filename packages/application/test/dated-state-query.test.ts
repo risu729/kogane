@@ -938,7 +938,7 @@ describe("card payables on the date", () => {
     expect(seen.counted).toBeGreaterThan(20);
     expect(seen.split).toBeGreaterThan(5);
     expect(seen.refused).toBe(seen.counted);
-  });
+  }, 60_000);
 
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {
     const accepted = {

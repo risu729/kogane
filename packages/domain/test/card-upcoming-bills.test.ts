@@ -346,6 +346,34 @@ describe("covers", () => {
     expect(run("2098-03-10T15:30:00.000Z")).toMatchObject({ covers: "yes", reasons: [] });
   });
 
+  test("a balance captured on a counted bill's own due date may already show it (INV06)", () => {
+    // Asked on the bill's due date: a capture that day may come after the
+    // bank took the 100, so comparing 50 with the 100 would count it twice.
+    const run = (capturedAt: string) =>
+      upcomingCardBills({
+        date: DATE,
+        cards: [
+          card("today", bill(DATE, yen(100)), "a"),
+          card("later", bill("2098-03-26", yen(100)), "a"),
+        ],
+        accounts: new Map([["entity:a", balance(yen(50), capturedAt, null)]]),
+      }).byDebitAccount.map((line) => [line.debitDate, line.covers, line.reasons]);
+    // 08:00 on 3/20 in Tokyo: the bill's own day, on both of the account's lines.
+    expect(run("2098-03-19T23:00:00.000Z")).toEqual([
+      [DATE, "unknown", ["balance_before_previous_debit"]],
+      ["2098-03-26", "unknown", ["balance_before_previous_debit"]],
+    ]);
+    // 23:00 on 3/19 in Tokyo: before the bill's day, so it is compared.
+    expect(run("2098-03-19T14:00:00.000Z")).toEqual([
+      [DATE, "no", []],
+      ["2098-03-26", "no", []],
+    ]);
+    // The Tokyo day starts at 15:00 UTC: 00:30 on 3/20 is the bill's day,
+    // the last instant of 3/19 is not.
+    expect(run("2098-03-19T15:30:00.000Z")).toEqual(run("2098-03-19T23:00:00.000Z"));
+    expect(run("2098-03-19T14:59:59.999Z")).toEqual(run("2098-03-19T14:00:00.000Z"));
+  });
+
   test("bills with no known debit account have their own line and make earlier-or-equal lines unknown", () => {
     const answer = upcomingCardBills({
       date: DATE,

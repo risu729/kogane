@@ -21,7 +21,7 @@ import {
 } from "../../../packages/application/src/index";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { reportedStateAvailable } from "./reported-state-api";
 
 export const RECONSTRUCTED_STATE_PATH = "/api/v2/reconstructed-state";
@@ -42,8 +42,7 @@ export async function reconstructedStateApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== RECONSTRUCTED_STATE_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (!(await reconstructedStateAvailable(env))) throw new HttpError(404, "not_found");
   const query = reconstructedStateBodyFromQuery(url.searchParams);
   const outcome = query.ok

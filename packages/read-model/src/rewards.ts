@@ -401,11 +401,14 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
     applicability,
     // The policy body is resolved from the registry above. An unresolved
     // reference leaves it null, and `estimateExpiry` then reports
-    // needs-rule-verification instead of computing anything.
+    // needs-rule-verification instead of computing anything. Only the
+    // registry's own keys resolve: a reference such as `constructor` names an
+    // inherited property, not a policy.
     qualifyingActivity:
-      row.qualifying_activity_policy_ref === null
-        ? null
-        : (QUALIFYING_ACTIVITY_POLICIES[row.qualifying_activity_policy_ref] ?? null),
+      row.qualifying_activity_policy_ref !== null &&
+      Object.hasOwn(QUALIFYING_ACTIVITY_POLICIES, row.qualifying_activity_policy_ref)
+        ? QUALIFYING_ACTIVITY_POLICIES[row.qualifying_activity_policy_ref]!
+        : null,
     deadlineCalendar: {
       zone: zone && zone.length > 0 ? zone : "UTC",
       dayBoundary: dayBoundary === "start-of-day" ? "start-of-day" : "end-of-day",

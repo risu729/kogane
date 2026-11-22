@@ -91,8 +91,12 @@ export function PendingDecisionsPanel(): ReactNode {
   if (!features.pendingDecisions) return null;
   if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
     return null;
+  // A read that failed after an earlier answer keeps that answer in the
+  // query, but the body then says the count could not be read: the heading
+  // shows no total, rather than the earlier one as if it were current (INV05).
+  const shown = query.error ? undefined : query.data;
   const waiting =
-    query.data?.kinds.reduce(
+    shown?.kinds.reduce(
       (sum, line) => sum + (line.state === "counted" ? (line.count ?? 0) : 0),
       0,
     ) ?? null;
@@ -100,7 +104,7 @@ export function PendingDecisionsPanel(): ReactNode {
   // kind this deployment does not serve), leaves the total a lower bound, so
   // it says so rather than reading as complete (INV05).
   const atLeast =
-    query.data?.kinds.some((line) =>
+    shown?.kinds.some((line) =>
       line.state === "counted" ? !line.complete : line.reason !== "not_served",
     ) ?? false;
   return (

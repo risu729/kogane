@@ -4,7 +4,7 @@ import {
   isCurrentFinancialProductClaim,
   type FinancialProductClaim,
 } from "../../../packages/observation-shared/src/financial-products.ts";
-import { ArtifactLink, Badge, Kv, KvRow, ObservationLink, type Tone } from "./ui.tsx";
+import { ArtifactLink, Badge, Kv, KvRow, Nullable, ObservationLink, type Tone } from "./ui.tsx";
 
 const STATUS = { identified: "商品を特定", unresolved: "商品未特定", conflict: "商品の根拠が競合" };
 const TONE: Record<keyof typeof STATUS, Tone> = {
@@ -63,11 +63,15 @@ export function FinancialProductDetails({ claim }: { claim: FinancialProductClai
       <details className="detail-disclosure">
         <summary>商品の判定根拠</summary>
         <Kv>
-          <KvRow label="商品 ID">{claim.productId ?? "未特定"}</KvRow>
+          <KvRow label="商品 ID">
+            <Nullable value={claim.productId} placeholder="未特定" />
+          </KvRow>
           {claim.family ? (
             <KvRow label="商品体系">{claim.family.name}（個別商品とは別）</KvRow>
           ) : null}
-          <KvRow label="元の商品コード">{claim.code ?? "記録なし"}</KvRow>
+          <KvRow label="元の商品コード">
+            <Nullable value={claim.code} />
+          </KvRow>
           <KvRow label="根拠の記録">
             <ObservationLink kind={claim.origin.kind} id={claim.origin.id}>
               判定に使った記録
@@ -75,8 +79,12 @@ export function FinancialProductDetails({ claim }: { claim: FinancialProductClai
             · <ArtifactLink id={claim.origin.artifactId} />
           </KvRow>
           <KvRow label="原本内の位置">{claim.origin.rawLocator}</KvRow>
-          <KvRow label="記録の基準日">{claim.origin.asOf ?? "記録なし"}</KvRow>
-          <KvRow label="取得元の観測日時">{claim.origin.observedAt ?? "記録なし"}</KvRow>
+          <KvRow label="記録の基準日">
+            <Nullable value={claim.origin.asOf} />
+          </KvRow>
+          <KvRow label="取得元の観測日時">
+            <Nullable value={claim.origin.observedAt} />
+          </KvRow>
           <KvRow label="解析">
             #{claim.origin.parseRunId}
             {claim.origin.parserName ? ` · ${claim.origin.parserName}` : null}
