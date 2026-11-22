@@ -189,12 +189,17 @@ the wire contract refuses one.
 
 The `/state` page asks only for a date. It shows each account as a card with
 the captures its rows came from, and lists every chosen capture no account
-came from (complete and empty, or holding only rows counted in
-`excludedRows`) under 表示する記載のない取得結果, with its source, capture time
-and freshness. A capture that listed nothing is therefore never shown as no
-capture: a container without one is named in the coverage notes instead, and
-only when the date has no account and no such capture does the page say that
-this does not mean nothing is held.
+came from under 表示する記載のない取得結果, with its source, capture time and
+freshness. Such a capture is complete and holds no position or balance the
+answer lists: it is empty, holds only rows counted in `excludedRows`, or
+holds only valuations the answer never lists per account (the perimeter's
+`sbi-shinsei-exchange-rate`, `sbi-income-payments`, `sbi-realised-gains` and
+`sony-bank-realised-gains` containers). The answer does not say which, so the
+page names all three and never says the provider listed nothing. A complete
+capture is therefore never shown as no capture: a container without one is
+named in the coverage notes instead, and only when the date has no account
+and no such capture does the page say that this does not mean nothing is
+held.
 
 ## HTTP
 

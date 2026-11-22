@@ -35,6 +35,8 @@ describe.if(runnable)("reported state on a date", () => {
   const world = reportedStateWorld();
   // A world whose first capture is complete and lists nothing: the provider
   // reported no holding on 2026-09-08, then a bank capture lists a balance.
+  // Beside it, a complete income capture holds only a valuation, which the
+  // answer never lists per account: it is named too, never read as empty.
   const emptyWorld = new DatedStore();
   emptyWorld.capture({
     source: "sbi-securities",
@@ -42,6 +44,19 @@ describe.if(runnable)("reported state on a date", () => {
     parser: "sbi-domestic-cash-positions",
     fetchedAt: "2026-09-08T01:00:00Z",
   });
+  const income = emptyWorld.capture({
+    source: "sbi-securities",
+    dataset: "income-payments",
+    parser: "sbi-income-payments",
+    version: "0.1.3",
+    fetchedAt: "2026-09-08T03:00:00Z",
+    claim: "complete",
+  });
+  emptyWorld.db.run(
+    `INSERT INTO valuation_observations(parse_run_id,source_account,subject,metric,amount_minor,amount_text,amount_scale,currency,as_of,observed_at,raw_locator,extra_json)
+     VALUES(?,'sbi-a','1001','income_amount',100,'100',0,'JPY',NULL,NULL,'$.payments[0]','{}')`,
+    [income.parse],
+  );
   emptyWorld.capture({
     source: "smbc-bank",
     dataset: "balance-normalized",
@@ -207,7 +222,11 @@ describe.if(runnable)("reported state on a date", () => {
     expect(listed).toContain("sbi-domestic-cash-positions");
     expect(listed).toContain("取得日時 2026-09-08T01:00:00.000Z");
     expect(listed).toContain("当日取得");
+    // The income capture holds a valuation, so the page never says it listed nothing.
+    expect(listed).toContain("sbi-income-payments");
     const main = await page.locator("main").innerText();
+    expect(main).toContain("取得元が何も記載していないか、記載がこの一覧に載せないものだけです");
+    expect(main).toContain("為替レート・受取額・実現損益");
     expect(main).not.toContain("保有がないという意味ではありません。");
     expect(main).not.toContain("0 JPY");
     // With a bank capture beside it, the empty one is still named apart.
