@@ -38,8 +38,12 @@ interface IncrementalSha256 {
 }
 
 function incrementalSha256(): IncrementalSha256 {
-  const digestStream = (globalThis.crypto as unknown as { DigestStream?: DigestStreamConstructor })
-    .DigestStream;
+  // Read through a cast of `globalThis` itself: under the Workers types
+  // `crypto` is a global binding, not a declared property of `globalThis`, and
+  // every collector typechecks this module through the reader.
+  const digestStream = (
+    globalThis as unknown as { crypto?: { DigestStream?: DigestStreamConstructor } }
+  ).crypto?.DigestStream;
   if (digestStream !== undefined) {
     const sink = new digestStream("SHA-256");
     const writer = sink.getWriter();
