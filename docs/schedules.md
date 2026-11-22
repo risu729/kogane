@@ -367,15 +367,27 @@ page and one from an MCP client are the same kind of stored operation.
   request then waits), the next scheduled run and the maintenance status, and
   says that the collector runs its daily scope and that a started collection
   cannot be taken back. **依頼を送信** sends the request; **やめる** sends
-  nothing.
+  nothing. After a send whose answer did not say whether the request was
+  stored, **やめる** keeps that key and window: the section says the request
+  may already be stored and is not withdrawn by backing out, and the next
+  **収集を依頼** opens a confirmation that says it re-sends that request.
 - **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
   the window is the date in Japan of the confirmation's first send (stored,
   not applied: the collector runs its daily scope), and the key is
-  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
-  lost answer reuses the key and the window, so it is the same payload and the
-  same operation even after midnight; a new confirmation is a new request. A
+  `ui-collect-<uuid>`, new for each confirmation except as below. A retry
+  after a failed or lost answer reuses the key and the window, so it is the
+  same payload and the same operation even after midnight. A new
+  confirmation is a new request once a send under the key was answered with
+  202, or when every send under it was refused; while one send's outcome is
+  unknown, a new confirmation re-sends it under the same key and window. A
   4xx answer other than 408 or 429 is shown as refused and not stored, with
-  its code. The answer shows the operation id.
+  its code; it stored nothing itself, but it is answered before the server
+  looks the key up, so it does not settle an earlier unknown send. The
+  answer shows the operation id. A
+  202 with status `accepted` says the collection starts at the next
+  processing run; any other status is the stored operation's current one,
+  answered to a re-send (running or finished), and the page names it and says
+  no new collection starts.
 - **Following it.** An accepted request links to **依頼の経過** ("request trail")
   at `/operations/{id}`. That read-only page follows the request through
   `GET /api/ops/v1/operations/{id}`. The link survives schedule-card refreshes;

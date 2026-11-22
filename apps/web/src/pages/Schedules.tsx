@@ -15,6 +15,7 @@ import type {
 } from "../../../../packages/collection/src/maintenance-survey-model";
 import { ApiError } from "../api";
 import {
+  acceptedCollectionMessage,
   collectionRequestKey,
   CollectionRequestError,
   postCollectionRequest,
@@ -135,6 +136,18 @@ const DISPATCH_OFF = {
   connection_disabled:
     "この接続は依頼による収集がまだ有効ではありません。送った依頼は実行されず24時間後に期限切れになるため、送信できません。",
 };
+/**
+ * A refusal the server answers before it looks anything up or stores
+ * anything (every 4xx but 408 and 429, sign-in refusals included): this send
+ * stored nothing, but it says nothing about an earlier send under the key.
+ * Any other failure may follow a stored request.
+ */
+const refusedBeforeStore = (error: unknown): boolean =>
+  error instanceof CollectionRequestError &&
+  error.status >= 400 &&
+  error.status < 500 &&
+  error.status !== 408 &&
+  error.status !== 429;
 function requestFailure(error: unknown): string {
   if (error instanceof CollectionRequestError) {
     if (error.status === 401 || error.status === 403) return "管理者のログインが必要です。";
@@ -160,11 +173,28 @@ interface RequestState {
    * `idempotency_conflict`.
    */
   pending: { key: string; at: Date | null } | null;
+  /**
+   * The key and window of a send whose answer did not say whether the request
+   * was stored. やめる keeps it: the request may already be stored, so the
+   * next confirmation re-sends it under the same key and window, and the
+   * server answers with the stored operation instead of storing a second
+   * one. Cleared once a send under it is accepted.
+   */
+  unresolved: { key: string; at: Date } | null;
   busy: boolean;
   message: string;
   operationId: string | null;
 }
-const IDLE: RequestState = { pending: null, busy: false, message: "", operationId: null };
+const IDLE: RequestState = {
+  pending: null,
+  unresolved: null,
+  busy: false,
+  message: "",
+  operationId: null,
+};
+/** What the section keeps saying after やめる while a send's outcome is unknown. */
+const UNRESOLVED_CANCEL =
+  "送信した依頼が保存されたかは確認できていません。保存されていれば、やめても取り消されず実行されます。もう一度「収集を依頼」から送ると同じ依頼として扱われ、二重には保存されません。";
 /**
  * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
  * makes. The confirmation shows what the caller should read first — the last
@@ -185,7 +215,7 @@ function CollectionRequest({
   /** The page's synchronous guard against a second send for the same job. */
   sending: Set<string>;
 }): ReactNode {
-  const { pending, busy, message, operationId } = state;
+  const { pending, unresolved, busy, message, operationId } = state;
   const target = value.collectionRequest;
   if (!target) return null;
   async function send() {
@@ -197,11 +227,16 @@ function CollectionRequest({
       const accepted = await postCollectionRequest(target.source, pending.key, at);
       update({
         pending: null,
+        unresolved: null,
         operationId: accepted.operationId,
-        message: `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。`,
+        message: acceptedCollectionMessage(accepted),
       });
     } catch (error) {
-      update({ message: requestFailure(error) });
+      update({
+        message: requestFailure(error),
+        // A refusal keeps what an earlier send under this key left unknown.
+        unresolved: refusedBeforeStore(error) ? unresolved : { key: pending.key, at },
+      });
     } finally {
       sending.delete(value.id);
       update({ busy: false });
@@ -220,7 +255,7 @@ function CollectionRequest({
             update({
               message: "",
               operationId: null,
-              pending: { key: collectionRequestKey(), at: null },
+              pending: unresolved ?? { key: collectionRequestKey(), at: null },
             })
           }
         >
@@ -250,6 +285,11 @@ function CollectionRequest({
             <dt>メンテナンス時間</dt>
             <dd>{REF[value.maintenance.status]}。停止時間中は終了まで待機します。</dd>
           </dl>
+          {unresolved !== null && unresolved.key === pending.key ? (
+            <p>
+              前回の送信は保存されたか確認できていません。同じ依頼として送ります。保存済みなら、その依頼の状態を表示します。
+            </p>
+          ) : null}
           <div className="schedule-actions">
             <button type="button" className="button" disabled={busy} onClick={send}>
               {busy ? "送信中…" : "依頼を送信"}
@@ -258,7 +298,9 @@ function CollectionRequest({
               type="button"
               className="button"
               disabled={busy}
-              onClick={() => update({ pending: null, message: "" })}
+              onClick={() =>
+                update({ pending: null, message: unresolved === null ? "" : UNRESOLVED_CANCEL })
+              }
             >
               やめる
             </button>
