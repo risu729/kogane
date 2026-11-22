@@ -187,7 +187,9 @@ Worker used the same pattern in production.
 - `readTerminal(bucket, source, runId)` / `readTerminalAt(bucket, key)` return
   `found`, `missing`, or `blocked` with a reason code. A terminal whose bytes
   are not the canonical encoding of its own manifest, or whose identity does
-  not match its key, is `blocked` rather than trusted.
+  not match its key, is `blocked` rather than trusted. A terminal over 8 MiB
+  is `blocked` `terminal_too_large` without being read: the reader cancels its
+  body.
 - `verifyReferencedObjects(bucket, manifest)` re-checks existence, size and
   digest for every artifact and reports each problem
   (`object_missing`, `object_size_mismatch`, `object_hash_mismatch`,

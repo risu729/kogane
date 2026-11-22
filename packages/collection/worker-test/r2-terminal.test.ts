@@ -13,6 +13,7 @@ import { hexToBytes, nativeSha256Hex } from "../src/bucket";
 import { sha256Hex } from "../src/digest";
 import { objectKey, terminalKey } from "../src/keys";
 import { listTerminals, readTerminal, verifyReferencedObjects } from "../src/reader";
+import { sha256HexOfStream } from "../src/stream-digest";
 import { persistRun } from "../src/writer";
 import type { PersistArtifact, PersistRunPlan } from "../src/writer";
 import type { TerminalRunFields } from "../src/manifest";
@@ -148,5 +149,28 @@ describe("R2 create-only writes in the Workers runtime", () => {
     }
     expect(cursor).toBeNull();
     for (const runId of ["scan-a", "scan-b", "scan-c"]) expect(seen).toContain(runId);
+  });
+});
+
+describe("streamed digest of a refused terminal in the Workers runtime", () => {
+  it("hashes the R2 body with crypto.DigestStream to the digest of the buffered bytes", async () => {
+    // The Workers path, not Bun's: the runtime's Web Crypto extension.
+    expect(typeof (crypto as unknown as { DigestStream?: unknown }).DigestStream).toBe("function");
+    // Over the reader's 8 MiB cap, so the reader refuses it unread.
+    const size = 8 * 1024 * 1024 + 5;
+    const bytes = Uint8Array.from({ length: size }, (_, at) => (at * 13 + 7) & 0xff);
+    const key = terminalKey(SOURCE, "oversized-terminal");
+    expect(await env.DATA.put(key, bytes)).not.toBeNull();
+    expect(await readTerminal(env.DATA, SOURCE, "oversized-terminal")).toEqual({
+      outcome: "blocked",
+      key,
+      reasonCode: "terminal_too_large",
+    });
+
+    const streamed = await env.DATA.get(key);
+    const buffered = await env.DATA.get(key);
+    const digest = await sha256HexOfStream(streamed!.body);
+    expect(digest).toBe(await sha256Hex(new Uint8Array(await buffered!.arrayBuffer())));
+    expect(digest).toBe(await sha256Hex(bytes));
   });
 });
