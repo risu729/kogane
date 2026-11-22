@@ -425,7 +425,8 @@ occurrence of that job.
   notification) —
   including a JSON-RPC error `/mcp` answers inside a `200` (an unknown method,
   `-32601`), and the same `-32601` the 2026-07-28 revision answers under
-  `404` for a method it does not have (`ping` is not one of its methods).
+  `404` for a method the server does not serve (`ping` among them: that
+  revision has no `ping`); no other `/mcp` answer is a `404`.
   Everything `/mcp` refuses with an HTTP status before a message
   reaches a tool is recorded once as `mcp.request`: the App's own refusals (a
   method other than POST, a query string, a cross-origin request, no grant)

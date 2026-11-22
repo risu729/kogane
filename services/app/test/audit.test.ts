@@ -823,10 +823,10 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
   });
 
   it("records nothing for the protocol's own answers in the 2026-07-28 revision either", async () => {
-    // The 2026-07-28 revision answers a method it does not have (`ping` is
-    // not one of its methods) with -32601 under HTTP 404, where the
-    // initialize-based revisions answer it inside a 200. It is the same
-    // JSON-RPC answer, so it is recorded as there: not at all.
+    // The 2026-07-28 revision answers a method the server does not serve
+    // (`ping` among them: that revision has no `ping`) with -32601 under
+    // HTTP 404, where the initialize-based revisions answer it inside a 200.
+    // It is the same JSON-RPC answer, so it is recorded as there: not at all.
     let id = 0;
     const modern = (method: string, params: Record<string, unknown> = {}) =>
       call("/mcp", {
