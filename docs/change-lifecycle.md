@@ -758,8 +758,37 @@ advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
 (addendum 11 §5); one re-check runs at a time, so an earlier answer never
-replaces a later one. A refusal from any step (simulate, approve, commit or the
-re-check) is shown by a fixed message for its closed code, and every code in
+replaces a later one. A committed plan is not simulated again: its own commit
+moves the revisions it pinned, so the server would answer it `stale` with
+another re-simulated plan id, or refuse it (`stale_context`: a card
+settlement no longer proposed, a pending-to-posted review already decided;
+`target_missing`: an identity protection already released). The re-read
+stops when the commit is sent, and one already in flight is cancelled. A
+commit the server refuses (a client error other than a timeout, or
+`commit_failed`) wrote nothing, and the plan is read again, so a stale plan
+shows its re-simulated plan id. A commit without such an answer (no response,
+a timeout, a server fault) may have landed: the plan stays as read, and the
+same confirmation sent again, with the same operation id, answers with its
+receipt. Until the server refuses it the reviewed item's checks neither warn
+nor block that resend: the item, read again (a refocused window, a
+reconnect), may show the decision the commit wrote, and a resend that did not
+land is checked against every pinned revision by the server again. In their
+place the commit's alert says that no answer came back, so whether the
+decision was saved is unknown, and that 確定する sends the same operation id,
+which never saves twice and shows the receipt if it was saved. Once a receipt is on screen the screen says that the plan it shows
+was read before the commit, and drops the warnings that guard approval and
+commit: the stale plan, the re-simulated plan id, and a pin that moved or an
+action no longer offered. Every receipt is written in the batch that writes
+its decision, so this holds for any status; an `accepted` or `published`
+receipt reads as committed (`確定済み`), and any other (`failed`) says the
+decision was saved but the operation is recorded as failed, and points to the
+receipt. No writer sets `failed` today: the outbox dispatcher moves a receipt
+only to `published`, so the screen's `failed` wording has not been seen on a
+real receipt. The commit reads the reviewed item (the settlement candidate, the
+ownership review, the purchases) again, so its panel shows it after the
+decision, at a revision newer than the plan pinned and without a warning. A refusal from any step (simulate,
+approve, commit or the re-check) is shown by a fixed message for its closed
+code, and every code in
 `COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the
 server's text is never shown. Of the codes outside that list only the App's
 `command_executor_unavailable` has its own message; any other (such as the
