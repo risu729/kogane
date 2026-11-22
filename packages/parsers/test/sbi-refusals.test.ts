@@ -224,6 +224,12 @@ describe("sbi-foreign-cash-balances demotes membership instead of skipping silen
     expect(valid.observations[0]?.asOf).toBe("2026-02-28");
     expect(valid.issues).toEqual([]);
     expect(valid.coverage![0]).toMatchObject({ completeness: "complete" });
+    // A row that states no `businessDate` at all is read as in 0.2.1: no
+    // as_of and no issue (the documented limit of this release).
+    const unstated = parse(usd([{ daysLater: 0, keepCash: "10.00" }]));
+    expect(unstated.observations[0]?.asOf).toBeUndefined();
+    expect(unstated.issues).toEqual([]);
+    expect(unstated.coverage![0]).toMatchObject({ completeness: "complete" });
   });
 
   test("precision beyond the currency scale is kept as text, never rounded", () => {
