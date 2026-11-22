@@ -42,8 +42,11 @@ change itself), and a skipped end is read on the clock before the change, so
 `02:30` ends the window at 03:30 summer time. Before 2026-11-22 such a window
 was dropped for that day, and collection could run inside it
 ([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-maintenance-window-is-never-dropped-at-a-clock-change-2026-11-22)).
-On the day clocks move back, a repeated wall time is read at its first
-occurrence.
+A window wholly inside the skipped hour defers from the change only if its
+end is skipped too (`02:15`–`02:45` defers 03:00–03:45; `02:30`–`03:00` is
+empty). On the day clocks move back, a repeated wall time is read at its first
+occurrence, so a window ending in the repeated hour ends at its first pass and
+collection may run in the second.
 
 **When a refresh fails.** The page reads its snapshot through the shared
 `QueryBoundary` ([frontend](frontend.md#shared-primitives)). The first read

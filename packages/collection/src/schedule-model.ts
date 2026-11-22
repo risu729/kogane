@@ -511,8 +511,10 @@ function wallClock(ms: number, timezone: string): number {
  * skipped start opens the window at the first minute whose wall time reaches
  * it, the clock change itself for a whole-hour change; a skipped end is read
  * on the clock before the change (02:30 in a skipped 02:00–03:00 is 03:30
- * summer time). Both read the window no shorter than its wall times say. A
- * scheduled run's nominal time keeps `at`, which skips such a day.
+ * summer time). Either way the window covers every minute whose wall time
+ * lies within it, and from a start that exists it keeps its stated length. A
+ * repeated wall time keeps `at`'s first occurrence. A scheduled run's nominal
+ * time keeps `at`, which skips such a day.
  */
 function windowAt(
   date: number,

@@ -5,6 +5,7 @@ import {
   longestDeferral,
   nextNominal,
   validMaintenance,
+  wallTimeInstant,
   type MaintenanceRule,
 } from "../src/schedule-model";
 import {
@@ -125,6 +126,56 @@ test("joined deferrals count a window whose start or end is in the skipped hour"
   ]);
   expect(longestDeferral(rules, ms("2026-10-03T00:00:00.000Z"), 86_400_000, 86_400_000)).toBe(
     120 * 60_000,
+  );
+});
+test("a window wholly inside the skipped hour defers only from the clock change", () => {
+  // 02:15–02:45: the start opens at the change and the end is read on the
+  // clock before it (03:45 summer time).
+  const inside = [sydney({ kind: "weekly", weekdays: [0], start: "02:15", end: "02:45" })];
+  expect(afterMaintenance(ms("2026-10-03T15:59:00.000Z"), inside)).toBe(
+    ms("2026-10-03T15:59:00.000Z"),
+  );
+  expect(afterMaintenance(ms("2026-10-03T16:00:00.000Z"), inside)).toBe(
+    ms("2026-10-03T16:45:00.000Z"),
+  );
+  // 02:30–03:00: no minute of it is shown, and 03:00 exists, so it is empty.
+  const empty = [sydney({ kind: "weekly", weekdays: [0], start: "02:30", end: "03:00" })];
+  expect(afterMaintenance(ms("2026-10-03T16:00:00.000Z"), empty)).toBe(
+    ms("2026-10-03T16:00:00.000Z"),
+  );
+});
+test("a window from Saturday night to a skipped Sunday end defers past the change", () => {
+  const rules = [sydney({ kind: "weekly", weekdays: [6], start: "23:00", end: "02:30" })];
+  // Saturday 23:00 standard time to 02:30 read as +10:00, 03:30 summer time.
+  expect(afterMaintenance(ms("2026-10-03T13:00:00.000Z"), rules)).toBe(
+    ms("2026-10-03T16:30:00.000Z"),
+  );
+});
+// Sydney moves its clocks back from 03:00 summer time to 02:00 standard time on
+// Sunday 2026-04-05 (2026-04-04T16:00:00Z); 02:00–02:59 is shown twice.
+test("a repeated wall time places a window edge at its first occurrence, as before", () => {
+  const ending = [sydney({ kind: "weekly", weekdays: [0], start: "01:00", end: "02:30" })];
+  // 01:00 to the first 02:30 (summer time); the second pass is not deferred.
+  expect(afterMaintenance(ms("2026-04-04T14:00:00.000Z"), ending)).toBe(
+    ms("2026-04-04T15:30:00.000Z"),
+  );
+  expect(afterMaintenance(ms("2026-04-04T16:15:00.000Z"), ending)).toBe(
+    ms("2026-04-04T16:15:00.000Z"),
+  );
+  const starting = [sydney({ kind: "weekly", weekdays: [0], start: "02:30", end: "04:00" })];
+  // From the first 02:30 to 04:00 standard time, two and a half hours.
+  expect(afterMaintenance(ms("2026-04-04T15:30:00.000Z"), starting)).toBe(
+    ms("2026-04-04T18:00:00.000Z"),
+  );
+});
+test("a dated survey time and a daily run in the skipped hour stay unplaced", () => {
+  expect(wallTimeInstant(Date.UTC(2026, 9, 4), "02:30", "Australia/Sydney")).toBeNull();
+  expect(wallTimeInstant(Date.UTC(2026, 9, 4), "03:00", "Australia/Sydney")).toBe(
+    ms("2026-10-03T16:00:00.000Z"),
+  );
+  const daily = { kind: "daily" as const, time: "02:00", weekdays: [0] };
+  expect(nextNominal(daily, "Australia/Sydney", ms("2026-10-03T00:00:00.000Z"))).toBe(
+    ms("2026-10-10T15:00:00.000Z"),
   );
 });
 test("nested VPoint manifests retain failed status and exact safe run reference", () => {
