@@ -70,7 +70,7 @@ export interface ForeignOrdinaryProgress {
   history?: ForeignOrdinaryUnitProgress;
 }
 
-export interface ForeignOrdinaryUnitProgress {
+interface ForeignOrdinaryUnitProgress {
   status: "success" | "partial";
   failureCode?: string;
 }
