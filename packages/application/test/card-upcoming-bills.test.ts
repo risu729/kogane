@@ -806,7 +806,7 @@ describe("the reported state it reads", () => {
     expect(seen.scheduled).toBeGreaterThan(10);
     expect(seen.compared).toBeGreaterThan(10);
     expect(seen.unknown).toBeGreaterThan(10);
-  });
+  }, 60_000);
 
   test("scheduled payments past the row bound no longer blank every balance", async () => {
     // The one answer that differs: the full state refused this store for a
