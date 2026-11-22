@@ -62,11 +62,11 @@ import {
   validLocalDateText,
   validTemporalValue,
   validZone,
-  validZoneOffsetInstantText,
   type CivilDate,
   type TemporalBasis,
   type TemporalValue,
 } from "./time.ts";
+import { validZoneOffsetInstantText } from "./zone-offset.ts";
 import {
   compareDecimals,
   decimalEquals,

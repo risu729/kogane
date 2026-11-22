@@ -20,9 +20,9 @@ import {
   validLocalDateText,
   validTemporalReference,
   validTemporalValue,
-  validZoneOffsetInstantText,
   type TemporalValue,
 } from "../src/time.ts";
+import { validZoneOffsetInstantText } from "../src/zone-offset.ts";
 
 const date = (value: string, zone: string | null = "Asia/Tokyo"): TemporalValue => ({
   kind: "local-date",

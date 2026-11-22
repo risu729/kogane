@@ -564,7 +564,8 @@ western Pacific zones until 1844 (-13:08:04 to -15:56:08). `Etc/GMT+12` and
 ### Decision
 
 A known-at K must also carry an offset a time zone uses, from -12:00 to
-+14:00 (`validZoneOffsetInstantText`, the span of the IANA fixed-offset zones
++14:00 (`validZoneOffsetInstantText` in `packages/domain/src/zone-offset.ts`, kept
+out of `time.ts` so no parser's code digest moves; the span of the IANA fixed-offset zones
 `Etc/GMT+12` to `Etc/GMT-14`, inside what SQLite reads), and must not be after
 9999-12-31T23:59:59.999Z in UTC. `validKnownAtInstant` refuses any other K,
 so `validSelectionBound` refuses the bound,

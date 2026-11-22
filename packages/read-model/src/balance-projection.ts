@@ -29,10 +29,10 @@ import {
 import {
   validInstantText,
   validLocalDateText,
-  validZoneOffsetInstantText,
   type TemporalReference,
   type TemporalValue,
 } from "../../domain/src/time.ts";
+import { validZoneOffsetInstantText } from "../../domain/src/zone-offset.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { AUTHORITY_POLICY_RELEASE, AUTHORITY_RANKS } from "./authority";
