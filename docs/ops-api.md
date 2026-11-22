@@ -59,8 +59,21 @@ in protected GitHub workflows (02 §6).
 
 All seven are authenticated, and all seven are refused unless `OPS_API_ENABLED`
 is `"true"`. The route set is closed: any other path under `/api/ops/v1` is
-`404 not_found`, and any verb other than `POST` (accept) and `GET` (read) is
-`405 method_not_allowed`, exactly as everywhere else on this Worker.
+`404 not_found`. The verbs are `POST` (accept), `GET` (read) and `HEAD` (the
+read's answer without its body, recorded as that read); one of them on a path
+that does not take it is `404 not_found`, and any other verb is
+`405 method_not_allowed` with an `Allow` header naming what the path serves —
+`POST` on an acceptance route, `GET, HEAD` on a read, all three on a path that
+is neither — as everywhere else on this Worker
+([methods](production-evidence-browser.md#methods)). A route's fixed segments
+are matched as they were sent: a percent-encoded spelling of one
+(`/api/ops/v1/coll%65ctions`) is another path and `404 not_found`, because the
+function that names a request's audit operation (`opsOperation`) is the route
+table, and a path it does not name never reaches a handler, so the router's own
+percent-decoding cannot accept a request no audit record names (ADR 0064). The
+one variable segment, `{source}` or `{id}`, may be percent-encoded: it is
+decoded before its schema checks it, and the request is named and recorded
+like any other.
 
 | Route                                        | Body                                                       | Answers                     | What "done" means                                                          |
 | -------------------------------------------- | ---------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------- |
@@ -112,7 +125,11 @@ a postcheck that only works once an unrelated flag is on is not a postcheck
 It is read-only: one `SELECT 1` per database, one migration list, one bucket
 `head`, one capability snapshot, one service-binding read. No write, no
 provider request, no bank access, no collection and no backfill — and no value
-of any kind in the answer.
+of any kind in the answer. It takes no query string (`400 invalid_query`).
+`HEAD` is the same read, answering its status and headers without the body;
+any other method is `405 method_not_allowed` with `Allow: GET, HEAD`, decided
+after the caller, so a caller that may not read the route learns nothing of
+its shape from the method.
 
 Who may read it (`services/app/src/health.ts`):
 
@@ -316,7 +333,8 @@ already does. Between them, on a `POST`, sits the own-origin rule: an
 `Origin` that is present and not the Worker's own is
 `403 origin_not_allowed` before a grant, a schema or the store is touched
 ([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). With the flag
-off the route answers as it did before (a `POST` is `405`), whatever its
+off the route answers as it did before (a `POST` is `405`, with
+`Allow: GET, HEAD`), whatever its
 `Origin`. An operator's `curl` sends no `Origin` and is unaffected.
 
 1. the deployment flag `OPS_API_ENABLED`;

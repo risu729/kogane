@@ -568,7 +568,7 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "設定を保存", exact: true }).click();
       await page
         .getByRole("alert")
-        .getByText("設定を確認できません。表示を更新して保存状態を確認してください。", {
+        .getByText("更新できませんでした。前回読み込んだ収集スケジュールを表示しています。", {
           exact: true,
         })
         .waitFor();
@@ -984,6 +984,129 @@ describe.if(runnable)("operator schedule administration", () => {
         .waitFor();
       expect(writes).toEqual([]);
       expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a failed refresh labels the earlier answer, holds the decisions read from it, and clears on recovery", async () => {
+    // Synthetic: an invented page, proposal and lease; no provider page is read.
+    stoppedLease();
+    snapshot.survey = {
+      enabled: true,
+      attention: 1,
+      targets: [],
+      proposals: [
+        {
+          id: 7,
+          targetId: "sony-bank",
+          source: "sony-bank",
+          kind: "new",
+          ruleId: null,
+          baseRevision: 0,
+          current: true,
+          timezone: "Asia/Tokyo",
+          pattern: { kind: "weekly", weekdays: [0], start: "01:00", end: "04:00" },
+          enabled: true,
+          scope: "collection",
+          status: "proposed",
+          reasons: [],
+          referenceUrl: "https://example.test/sony-maintenance",
+          fetchedAt: "2026-10-05T00:00:00.000Z",
+          sha256: "c".repeat(64),
+          createdAt: "2026-10-05T00:00:00.000Z",
+        },
+      ],
+    };
+    const warning = "更新できませんでした。前回読み込んだ収集スケジュールを表示しています。";
+    const requestHeld = "前回読み込んだ状態です。更新できるまで依頼は送信できません。";
+    const decisionHeld = "前回読み込んだ提案です。更新できるまで採用・却下はできません。";
+    const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+    try {
+      await page.goto(`${origin}/schedules`);
+      await page.getByText("1件の提案を確認してください。", { exact: false }).waitFor();
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      const send = card.getByRole("button", { name: "依頼を送信", exact: true });
+      const section = page.locator('section[aria-labelledby="maintenance-survey"]');
+      const accept = section.getByRole("button", { name: "採用", exact: true });
+      const reject = section.getByRole("button", { name: "却下", exact: true });
+      const release = page.getByRole("button", { name: "停止した実行を解除", exact: true });
+      const save = card.getByRole("button", { name: "設定を保存", exact: true });
+      expect(await send.isEnabled()).toBe(true);
+      expect(await accept.isEnabled()).toBe(true);
+      expect(await page.getByText(warning, { exact: true }).count()).toBe(0);
+
+      // Every read now fails; a refocus refetches, and the earlier answer stays.
+      snapshotStatus = 503;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await page.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+      // The earlier answer, its proposal count included, is shown only under the warning.
+      expect(
+        await page.evaluate(
+          ([text, count]) => {
+            const nodes = [...document.querySelectorAll("main *")];
+            const label = nodes.find((node) => node.textContent === text);
+            const shown = nodes.find(
+              (node) => node.children.length === 0 && node.textContent?.includes(count!),
+            );
+            return (
+              label !== undefined &&
+              shown !== undefined &&
+              (label.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+            );
+          },
+          [warning, "件の提案を確認してください。"],
+        ),
+      ).toBe(true);
+      expect(await page.getByText("1件の提案を確認してください。", { exact: false }).count()).toBe(
+        1,
+      );
+      // Decisions read from the earlier answer are held, each saying why.
+      expect(await send.isDisabled()).toBe(true);
+      expect(await card.getByText(requestHeld, { exact: true }).count()).toBe(1);
+      expect(await accept.isDisabled()).toBe(true);
+      expect(await reject.isDisabled()).toBe(true);
+      expect(await section.getByText(decisionHeld, { exact: true }).count()).toBe(1);
+      // Writes the server checks against the revision or lease shown stay available.
+      expect(await save.isEnabled()).toBe(true);
+      expect(await release.isEnabled()).toBe(true);
+      expect(await auditView(page)).toEqual([]);
+      expect(writes).toEqual([]);
+      expect(collections).toEqual([]);
+
+      // Reads recover: the warning and the holds go, and the actions return.
+      snapshotStatus = 200;
+      const reads = snapshotReads;
+      await page.getByRole("button", { name: "収集スケジュールを再試行", exact: true }).click();
+      await page.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+      expect(snapshotReads).toBeGreaterThan(reads);
+      expect(await send.isEnabled()).toBe(true);
+      expect(await accept.isEnabled()).toBe(true);
+      expect(await reject.isEnabled()).toBe(true);
+      expect(await page.getByText(requestHeld, { exact: true }).count()).toBe(0);
+      expect(await page.getByText(decisionHeld, { exact: true }).count()).toBe(0);
+      expect(writes).toEqual([]);
+      expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test("a first read that fails shows a fixed load error and no schedules", async () => {
+    snapshotStatus = 503;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const alert = page
+        .getByRole("alert")
+        .filter({ hasText: "収集スケジュールを読み込めませんでした" });
+      await alert.waitFor();
+      expect(await alert.innerText()).toContain(
+        "設定を確認できません。表示を更新して保存状態を確認してください。",
+      );
+      expect(await page.locator(".schedule-card").count()).toBe(0);
+      expect(await page.getByText("schedule_request_failed").count()).toBe(0);
     } finally {
       await page.close();
     }

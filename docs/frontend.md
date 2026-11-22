@@ -24,7 +24,14 @@ and its JavaScript regex engine. Tokens become escaped React text with fixed CSS
 classes; the content security policy does not need inline styles, script execution,
 or WebAssembly permissions. No additional component, state, or chart library is required.
 Navigation keeps the existing small History API router. Monetary values stay
-as decimal strings and use the shared exact formatter; provider text remains
+as decimal strings and use the shared exact formatters in `apps/web/src/money.ts`:
+`formatAmount` for integer minor units, and `formatDecimal` (or
+`formatDecimalText` for a compact wire quantity) for an exact decimal such as
+a settlement, reward, report or subtotal quantity. Both group integer digits
+in threes and keep the sign and every fraction digit, never through floating point;
+`test/money.test.ts` holds them to the same text for each known currency.
+Counts are printed as plain digits, without separators, and nothing in the
+client calls `toLocaleString` or `Intl.NumberFormat`. Provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
 Transaction filters, search, sort, and page selection, balance source/account,
@@ -50,7 +57,15 @@ observation preview; the deployed evidence mode still shows raw records only.
 Authentication failures (401/403) clear the rejected response from the in-memory
 query cache and hide its records. A failed retry cannot restore them; a successful
 response is required. Connection metadata gates observation pages as well. Other
-refresh failures retain previously authorized records with an explicit warning.
+refresh failures retain previously authorized records with an explicit warning:
+`QueryBoundary` shows them under `更新できませんでした。前回読み込んだ{label}を表示しています。`
+("could not refresh; showing the {label} loaded earlier") with a retry, or under its
+offline 前回読み込んだ notice while a read is paused. `収集スケジュール`
+("collection schedules") renders through it, and so do the two correction
+histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
+on an account candidate), which are read again when reopened. While the schedules page shows an earlier
+answer it also holds 依頼を送信 and the re-survey 採用/却下, which decide from what
+it shows ([schedules](schedules.md#schedule-administration)).
 
 ## Design tokens and stylesheet layout
 
@@ -97,7 +112,7 @@ Pages compose these instead of writing their own markup or rules:
 | Page header                   | `.page-head` with the `<h1>` and a `.lede`; `.footnote` for caveats                                                                   |
 | Grouped content               | `Panel` (`.panel` with `.panel-head`, `.panel-note`, `.panel-body`); content inside a panel always sits in `.panel-body`              |
 | Key/value facts               | `Kv` / `KvRow`                                                                                                                        |
-| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, never blank                                                    |
+| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, in words naming what is absent, never blank                    |
 | Loading, error, empty, stale  | `QueryBoundary` (with `isEmpty`/`empty`), `ErrorState`, `EmptyState`                                                                  |
 | Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
@@ -108,9 +123,25 @@ Pages compose these instead of writing their own markup or rules:
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
 | Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+| Codes as words                | `displayLabel` or `ownEntry` (`labels.ts`) for a code a table may lack: only own keys answer, so `constructor` is unknown             |
 | Evidence chains               | `ChainStep` in an `<ol className="chain">`: record → parse → original; usage → statement → debit; a candidate's pending → posted row  |
 | Review candidates             | A `.panel` with a `.settlement-head`, then a `.settlement-disclosure` open while a decision is due (see below)                        |
 | Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |
+
+A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
+`Pagination`): its buttons say 前のページ and 次のページ, its status says
+続きがあります or 最後のページです unless the page passes its own, and its
+buttons, its read-again action included, wait while a read of the list is in
+flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`,
+so a button the owner pressed, or sits on during a background read, keeps the
+focus; a button with nowhere to go (no earlier page, no more rows) is
+`disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
+use it.
+
+The 口座・銘柄 lists the server pages by offset name the rows a page shows
+(1–2件); these reads count no total. A page with no rows says 表示なし, and only
+an empty first page says the list is empty: a later page that comes back empty,
+because the list shrank, says that this page lists nothing and keeps its pager.
 
 A review candidate (a card settlement on `カード照合` ("card reconciliation"), a pending-to-posted link on
 `カード利用` ("card usage")) is one panel. Its `.settlement-head` holds the title, a status
@@ -120,6 +151,19 @@ always on a card settlement's own page (`/reconciliation/<proposalId>`). The
 decision is a `.settlement-decision`: a required `.settlement-reason`, a button
 per action the candidate allows, and a footnote that planning decides nothing.
 The pending-to-posted review also states each action's effect in words.
+
+An unknown value says why (INV05). When the answer carries a closed reason
+for it, the page shows that reason: `不明（<code>）` (`SettlementQuantity`,
+`DateValue`, the 次回の引落 amounts and a not-listed card's due date), or the
+reason in words beside a badge (引落口座は不明). When the answer sends a bare
+null, `Nullable` names what is missing rather than a bare 不明 (a payable
+with no due date recorded on 基準日の保有状況 is 引落予定日未記録). A due or
+debit date the card reconciliation reads send as null carries its closed
+reason (`paymentDateReason`, `debitDateReason`), and `NullableDate` shows it
+as `不明（<code>）`; a null without one, which their wire contracts refuse,
+would read 年月日として読める記録なし. An identifier is printed
+`namespace / scope / value`; an empty scope is part of the key and stays
+empty, never a dash.
 
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.

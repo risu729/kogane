@@ -97,6 +97,71 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
   `413 result_limit_exceeded`. A result is never silently cut to look complete.
 - `/api/artifacts` walks an immutable descending id cursor; derived lists use
   deterministic total orderings (each ends in `id`) with an offset.
+- Each offset page is its own read of what is current then, so pages read
+  while a parse is published can repeat or skip a row, and a republished
+  snapshot brings its holdings back under new ids, so one holding can appear
+  on two pages under two ids. `POSITION_CUT_SQL` lets a caller that reads the
+  unscoped positions page by page check afterwards that the ids it read are
+  one cut: over the same text `positionsSql` pages, it counts the current
+  rows, the read ids still current, and the current rows that sort at or
+  before the greatest row read. The report job uses it and reads again or
+  refuses
+  ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21));
+  the evidence browser's pages do not. `test/position-cut.test.ts` checks it
+  against an oracle on seeded random stores and checks its plan without
+  table statistics: the same whole-store snapshot passes as one page, the
+  bound row searched by key, the id lists read once.
+
+### Order of `as_of` across shapes
+
+`listTransactions` orders by the text of `as_of` (`COALESCE(as_of, '') DESC,
+id DESC`), and `listBalanceHistory` by the text of `as_of` or `observed_at`.
+The text is not one shape. Transaction parsers write a calendar date
+(`2026-03-04`: MyJCB, Sony Bank, SBI Securities and most others), an instant
+with the `+09:00` offset (PayPay CSV; Mizuho ordinary history at
+`T00:00:00+09:00`; SBI VC Trade's slash-form timestamps), an instant in UTC
+with milliseconds (`2026-03-03T23:00:00.000Z`: V Point Pay notification
+events), or SBI VC Trade's ISO timestamps verbatim with the offset the
+provider wrote. So the order is newest text first, not newest time first:
+
+- Two instants written in different offsets order by their text, not by
+  absolute time: an instant at 05:00 `+09:00` lists above one at 10:00
+  `+09:00` written as `01:00:00.000Z`. Between the `Z` and `+09:00` shapes
+  the error is at most nine hours.
+- A date lists below every instant whose text starts with that date and
+  above every instant whose text starts with an earlier one; an instant in
+  UTC starts with its UTC date. A missing `as_of` lists last.
+- The `from` and `to` filters read the date an `as_of` starts with, so an
+  instant in UTC falls on its UTC date: a V Point Pay event at 08:00
+  `+09:00` on 2026-03-04 is in `to=2026-03-03`. The Transactions page's
+  column sort and date filter in the browser read the same text the same
+  way.
+
+Balance history mixes more shapes than these: a year-month (`2026-03`:
+MyJCB statement payment amounts), which lists below every date and instant
+of its month; a local date-time with no zone (Sony Bank gross balance); an
+instant in UTC with milliseconds (Vpass credit availability); and a row
+without `as_of` sorts by its `observed_at`. It takes no `from` or `to`.
+
+None of this skips or repeats a row: the order is total and ends in `id`,
+so offset pages over a fixed store return every row once. No read picks a
+"latest" transaction from this order. The `activity` intent of
+`kogane.financial.query` merges its per-scope reads with a comparator of
+the same text and id (`compareActivity` in
+`packages/application/src/query/execute.ts`), so its merge takes exactly the
+rows each scope's read put first. `test/transaction-order.test.ts` pins the
+three points above and the paging over mixed shapes.
+
+Ordering by absolute time is an owner decision, not made: instants alone
+could be ordered by their UTC instant, but every total order must also
+place a date among instants, and the domain leaves that open.
+`compareTemporal` (`packages/domain/src/time.ts`) orders an instant against
+a date only when the instant's own calendar date lies wholly outside the
+date (`within_day` otherwise), and `temporalOrderingKey`, the domain's total
+key for paging, sorts every instant before every date rather than among
+them ([domain contracts](domain-contracts.md#timets--role-typed-time)).
+Normalizing the instants alone would also move each date against the
+`+09:00` instants of its own day, which is the same undecided question.
 
 ### Coverage run counts
 
@@ -118,6 +183,56 @@ which `overview`'s own `COUNT(*)` of `fetch_runs` already does on each call.
 The same file is the differential: on 8 random stores inside the window it
 returns the window's count for every scope, and on 8 random stores and a
 fixed one past it the exact count, unmoved by an unlisted source's runs.
+
+### Latest witness ranking
+
+`listLatestBalances` ranks the witnesses of one group (source, parser family,
+unit, account, metric, instrument) by the text of
+`COALESCE(as_of, observed_at, '')`, greatest first, then by `id`. Two
+families rank differently in `src/sql.ts`: MyJCB past-month balances by
+`detailMonth`, and Sony Bank history by capture and then the CSV, after the
+text. Text order is time order only while every key of a group has one
+shape. Which shapes reach one group, from every parser that writes
+`balance_observations` (read from the parsers on 2026-11-21; production was
+not read):
+
+- A parser with a snapshot policy (`SNAPSHOT_DATASETS` and
+  `ARTIFACT_SNAPSHOT_CONTAINERS` in `packages/parsers/src/snapshot-query.ts`)
+  contributes only its current complete capture: `CURRENT_SNAPSHOT` admits
+  one fetch run per source, parser, dataset and unit, each such parser has
+  one dataset, and a group's key holds the parser and the unit, so every key
+  of a group comes from one capture. The keys are the fetch instant, which the
+  `observation_fetch_artifacts` view always writes in UTC with milliseconds
+  (Mizuho, Prestia, SBI Shinsei, Money Forward, MyJCB J-POINT history); one
+  provider time for the whole response (SBI VC Trade `statusDate`, else
+  `meta.timestamp`; Sony Bank `updateDttm`; the SMBC and St.George recorded
+  instant; Vpass `shokaiDate`, while the Vpass revolving rows carry neither
+  `as_of` nor `observed_at`); or SBI foreign cash balances' per-row
+  `businessDate`.
+- Every other group spans captures, and its parser writes one shape: a
+  calendar date (Mobile Suica, the MyJCB statement total, Vpass statement
+  months as `YYYY-MM-01`, Sony Bank history in JSON and CSV), the fetch
+  instant as `observed_at` (MyJCB J-POINT balance; V Point, read from its
+  newest complete run only), a canonical UTC instant (V Point Pay events), or
+  SBI VC Trade's `eventDatetime` (cashflow balances), which the audited
+  captures carry only in the slash form, read as `+09:00`.
+
+So no group of today's parsers mixes a calendar date with an instant, or two
+offsets, and the ranking picks the greatest key in time. Limits, in shapes
+the code accepts and nobody has observed:
+
+- SBI VC Trade's `providerTimestamp` keeps an ISO date-time verbatim with the
+  offset the provider wrote. Cashflow balances span captures, so an
+  `eventDatetime` sent in UTC would put `Z` and `+09:00` text in one group,
+  and the ranking could then be up to nine hours wrong.
+- SBI foreign cash balances keep `businessDate` verbatim as any string; the
+  fixtures, which mirror the captured shape, carry only `YYYY-MM-DD`. Rows of
+  one capture with differently shaped dates would rank by their text, and a
+  row whose `businessDate` is not a string has an empty key and ranks last.
+
+Where a parser leaves `as_of` empty, `observed_at` (when the source displayed
+a value) stands in for `as_of` (the time the value describes), and the two
+are ranked as one kind of time.
 
 ### Raw download
 
@@ -285,10 +400,17 @@ stale-key read probed each live revision's keys once per current key (quadratic
 in the live and current sets); it now names the revisions holding a current key
 once, through `card_purchase_recognition_keys_key`. No index was added: a
 partial index on the two card datasets saved about 10 ms. What still grows with
-history is the snapshot step shared with the Transactions page, which reads
-every artifact once per call (about 50 ms here, nearly all of it the 4,869 Vpass
-statement pages; 40,000 unrelated artifacts added 4 ms); the rest grows with the
-current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
+history is the snapshot step shared with the Transactions page (about 50 ms
+here, nearly all of it the 4,869 Vpass statement pages; 40,000 unrelated
+artifacts added 4 ms). It does not read each artifact once: without statistics
+the current card usage page scans every artifact twice, for the Vpass statement
+snapshots (through `sqlite_autoindex_fetch_artifacts_1`) and for the MyJCB
+ledger ranking (through `idx_fetch_artifacts_source_dataset_time`), probing each
+scanned artifact's run, unit reports and parse; the stale-key read reaches the
+same artifacts by walking every terminal run report twice through an automatic
+index on `report_kind`. Its rows read therefore grow linearly with the history
+([rows read by the latest-state reads](#rows-read-by-the-latest-state-reads)).
+The rest grows with the current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
 compares every read with the shipped text (`card-usage-legacy-sql.ts`) on a
 smaller store and fails on a plan that scans observations, parses, runs, reports
 or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
@@ -305,6 +427,87 @@ confirmed captures at positions 0 and 1 so that the substituted rules decide
 rows; the plan checks run the unmodified shipped text. This proves the plan
 rewrite and the rule change separately: the rewrite returns what the shipped
 plan returns under the intended rules, not the shipped rows byte for byte.
+
+### Rows read by the latest-state reads
+
+The reads the Processor tick makes of the current state read rows in
+proportion to the whole history on every call, not to what they return or to
+what changed (issue [#1491](https://github.com/risu729/kogane/issues/1491)).
+Their plans without table statistics, as D1 plans them (`EXPLAIN QUERY PLAN`
+on every CORE migration):
+
+- `listLatestBalances` (the balance projection's capture reads it three times,
+  `services/processor/src/balance-projection-job.ts`) scans `fetch_artifacts`
+  three times through `idx_fetch_artifacts_source_dataset_time`: its own
+  active chain, `eligible_snapshots` and `eligible_artifact_containers`. It
+  walks every terminal fetch-run report twice more, through an automatic index
+  on `report_kind`, for the MyJCB past months and the V Point runs, and reaches
+  every artifact of each run by `fetch_run_id`. Each scanned artifact runs
+  correlated probes: the visible-run checks (annotation, seal, terminal
+  report), its unit reports, the expected-artifact count, the unit policy and
+  unit success, its parse, publication and coverage claim, and `json_each` over
+  the parse's warnings. The window functions then rank the whole set.
+- `listPositions` (the report job reads it on every tick,
+  `services/processor/src/report-job.ts`) walks every terminal report for its
+  active chain and makes the two snapshot scans; its valuation pairs
+  (`POSITION_VALUATIONS_SQL`) reach the positions by id and make the two
+  snapshot scans again.
+- `CURRENT_REWARD_BUCKETS_SQL` evaluates `ELIGIBLE_VPOINT_RUNS`, the same walk
+  of every terminal report, whenever a current claim is a V Point one, and
+  scans every reward bucket claim (`SCAN c USING INDEX
+  reward_bucket_claims_v2_holding`).
+- The card usage page and the stale-key read make the passes in
+  [Cost](#cost) above.
+- The Vpass binding insert of `identitySweep`'s empty-parse batch
+  (`packages/storage-d1/src/core/identity-store.ts`) joins
+  `trusted_vpass_card_bindings` (migration 0057) by artifact, but its plan
+  starts from every binding artifact (`SEARCH ba USING INDEX
+  idx_fetch_artifacts_source_dataset_time (source_id=? AND artifact_role=? AND
+  dataset=?)`) and, for each, searches every Vpass artifact (`SEARCH fa ...
+  (source_id=?)`); the batch's candidates are the innermost loop. It reads
+  binding artifacts times Vpass artifacts whatever the batch holds, and it runs
+  whenever the batch holds an empty parse of any source. The keyed lookup
+  `SELECT ... FROM trusted_vpass_card_bindings WHERE financial_artifact_id=?`
+  is keyed (`services/processor/test/binding-query-plan.test.ts`); the insert's
+  join is not.
+
+`services/processor/test/tick-rows-read.test.ts` measures workerd's own
+`meta.rows_read` per call through each statement's real caller, on two
+synthetic stores with the same current balances, positions, reward buckets and
+stale keys over 30 and 60 capture days
+(972 and 1,942 artifacts: the card store of `card-usage-scale-fixture.ts` at
+`STATEMENT_CI_SCALE`, plus a V Point run, an SBI Securities positions run and
+their reward claims per day), copied into Miniflare D1:
+
+| Statement                      | Caller               | 30 days | 60 days | Growth | Rows returned |
+| ------------------------------ | -------------------- | ------: | ------: | -----: | ------------- |
+| `listLatestBalances`           | `captureFixedInput`  |  37,693 |  74,943 |   1.99 | 10 / 10       |
+| `listPositions`                | `runReportJob`       |  20,041 |  39,791 |   1.99 | 3 / 3         |
+| `POSITION_VALUATIONS_SQL`      | `runReportJob`       |  12,371 |  24,401 |   1.97 | 3 / 3         |
+| `CURRENT_REWARD_BUCKETS_SQL`   | `captureRewardInput` |   8,571 |  17,101 |   2.00 | 2 / 2         |
+| `STALE_CARD_PURCHASE_KEYS_SQL` | `cardPurchaseSweep`  |  17,755 |  32,588 |   1.84 | 5 / 5         |
+| `currentCardUsageSql` page     | `cardPurchaseSweep`  |  15,010 |  27,702 |   1.85 | 68 / 85       |
+| Vpass binding insert           | `identitySweep`      |  75,890 | 283,740 |   3.74 | (insert)      |
+
+Rows read are per call. Doubling the history about doubles every read (1.84
+to 2.00) and nearly quadruples the Vpass binding insert (3.74), while what they
+return stays the same (the card usage page returns the older statement months
+the longer history still holds as current). The report job's second run over
+unchanged inputs reads as much as its first (32,451 rows at 30 days, 64,231 at
+60; the first run reads 32,466 and 64,246) only to find the report it stored:
+it reads every position, valuation, decimal and price before it compares the
+manifest digest. The current-snapshot selections alone (container snapshots,
+MyJCB past months, V Point runs) are 45,503 of the 74,943 rows of one
+latest-balances read at 60 days; the rest is its active chain over every
+artifact. The test fails when a statement's growth exceeds a ceiling (2.4 for
+the linear reads, 4.8 for the Vpass binding insert), so a read that starts to
+grow faster with history fails it; a read made cheaper passes, and its PR
+restates the numbers above and lowers the ceiling. That these reads do not
+grow with history, issue #1491's acceptance, is a `test.todo` per statement:
+it does not hold today. `tick-query-plan.test.ts` accepts the scans among these
+steps by name and checks `SCAN` steps only, so the nested search of the Vpass
+insert, the automatic indexes and the per-row probes pass it; its one-capture
+store does not reach the Vpass binding insert at all.
 
 ## Parity proof
 

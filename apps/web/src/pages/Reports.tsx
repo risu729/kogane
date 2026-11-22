@@ -3,6 +3,7 @@
 // exactly as it was fixed: the page never recomputes a value, never adds the
 // rows itself, and offers no recompute or share button, because those are
 // commands no route serves.
+import { displayLabel } from "../labels.ts";
 import type { ReactNode } from "react";
 import type { ResultPartition } from "../../../../packages/domain/src/calculation.ts";
 import { ApiError, useFeatures } from "../api.ts";
@@ -320,7 +321,7 @@ function ReportFacts({
         ) : (
           <>
             <code className="wrap-any">{run.runId}</code> ·{" "}
-            {RUN_STATUS_LABELS[run.status] ?? run.status} · 開始 {run.startedAt}
+            {displayLabel(RUN_STATUS_LABELS, run.status)} · 開始 {run.startedAt}
             {run.completedAt === null ? null : <> · 完了 {run.completedAt}</>}
           </>
         )}

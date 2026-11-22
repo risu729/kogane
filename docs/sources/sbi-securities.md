@@ -476,6 +476,15 @@ is one of the flow's hosts and its route by name (`main-link`, `handoff`,
 else `other`. It never logs provider text: no path, query, cookie, form field
 or body.
 
+The next run (2026-11-21 21:00 UTC) logged the refusal at step `landing`, hop
+0, with no HTTP status: the first request never left. The client called the
+runtime's `fetch` as a method of itself, which the Workers runtime refuses
+with "Illegal invocation" before sending anything; local tests pass any
+function and could not see it. Every mailbox attempt since the archive shipped
+probably ended there, so the hand-off above was never reached in production.
+The client now calls the fetcher unbound, as the Sony Bank client already
+does, and a test fetcher that refuses a receiver pins it.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

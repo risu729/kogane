@@ -69,7 +69,9 @@ function store(seed: number) {
         value_status: valueStatus,
         coefficient: valueStatus === "exact" ? String(int(5) * 1000) : null,
         scale: valueStatus === "exact" ? 0 : null,
-        payment_date: pick(DEBIT_DATES.slice(0, 3)),
+        // As json_extract returns `_kogane.paymentDate`: a date, a day that
+        // does not exist, nothing, or a value that is not text.
+        payment_date: pick([...DEBIT_DATES.slice(0, 3), null, 20980110]),
         as_of: null,
         period: pick(["2098-01", "2098-02", null]),
         account_id: chance(0.5) ? `acct-${n}` : null,
@@ -144,6 +146,11 @@ test("every answer the service makes from random evidence passes the wire contra
       throw new Error(`seed ${seed}: the contract refuses the service's answer`);
     for (const item of outcome.review.items) {
       const { answer, stated } = item;
+      const statement = item.latestStatement;
+      if (statement !== null)
+        seen.add(`due:${statement.paymentDateReason ?? statement.paymentDate?.kind}`);
+      for (const { latest } of [...item.settled, ...item.proposed])
+        seen.add(`debit:${latest.debitDate === null ? latest.debitDateReason : "dated"}`);
       seen.add(
         `${stated.status}/${answer.basis}/${"reason" in answer ? answer.reason : answer.codes.join("+")}`,
       );
@@ -161,6 +168,12 @@ test("every answer the service makes from random evidence passes the wire contra
     "unknown/stated_reading_conflicting",
     "unknown/only_unreviewed_candidates",
     "unknown/no_debit_account_evidence",
+    // Every null date carries its reason (INV05).
+    "due:local-date",
+    "due:payment_date_absent",
+    "due:payment_date_invalid",
+    "debit:dated",
+    "debit:debit_date_invalid",
   ])
     expect(all).toContain(fragment);
 });
@@ -237,4 +250,76 @@ test("an exact total without its decimal-v1 columns, or an unknown status, fails
     statementRow({ value_status: "estimated", coefficient: null, scale: null }),
   ])
     await expect(totalOf(row)).rejects.toThrow("card_debit_accounts_row_invalid");
+});
+
+test("a null due date says whether nothing is recorded or the value is not a civil date (INV05)", async () => {
+  const cases: [unknown, Record<string, unknown>][] = [
+    [
+      "2098-01-10",
+      {
+        paymentDate: {
+          kind: "local-date",
+          value: "2098-01-10",
+          zone: "Asia/Tokyo",
+          basis: "provider",
+        },
+      },
+    ],
+    [null, { paymentDate: null, paymentDateReason: "payment_date_absent" }],
+    ["2098-02-30", { paymentDate: null, paymentDateReason: "payment_date_invalid" }],
+    [20980110, { paymentDate: null, paymentDateReason: "payment_date_invalid" }],
+  ];
+  for (const [stored, expected] of cases) {
+    const outcome = await totalOf(statementRow({ payment_date: stored }));
+    if (!outcome.ok) throw new Error(outcome.error.code);
+    const statement = outcome.review.items[0]!.latestStatement!;
+    const { paymentDate, paymentDateReason } = statement;
+    expect(
+      paymentDateReason === undefined ? { paymentDate } : { paymentDate, paymentDateReason },
+    ).toEqual(expected as never);
+    // The reason is a key only beside a null date.
+    expect(Object.hasOwn(statement, "paymentDateReason")).toBe(paymentDate === null);
+    const wire: unknown = JSON.parse(JSON.stringify(outcome.review));
+    expect(validApiResponse(CARD_DEBIT_ACCOUNTS_PATH, wire)).toBe(true);
+  }
+});
+
+test("a settlement without a civil debit date answers with debit_date_invalid, in its list and in the answer", async () => {
+  const outcome = await reviewCardDebitAccounts({
+    grant: WHOLE,
+    sql: {
+      all: async <T>(sql: string) =>
+        (sql === CARD_DEBIT_ACCOUNT_CANDIDATES_SQL
+          ? [
+              {
+                status: "accepted",
+                card_source_id: "vpass",
+                card_source_account: "vpass:card-001",
+                bank_source_id: "smbc-bank",
+                bank_source_account: "smbc-bank:synthetic-a",
+                statements: 1,
+                // The read's `debit_date` is null when `bankDebit.occurred` is not a local date.
+                latest_key: "\ncs_synthetic-1",
+                latest_period: "2098-01",
+              },
+            ]
+          : []) as unknown as T[],
+      first: () => Promise.reject(new Error("unexpected read")),
+    },
+  });
+  if (!outcome.ok) throw new Error(outcome.error.code);
+  const item = outcome.review.items[0]!;
+  expect(item.settled[0]!.latest).toEqual({
+    proposalId: "cs_synthetic-1",
+    debitDate: null,
+    debitDateReason: "debit_date_invalid",
+    period: "2098-01",
+  });
+  expect(item.answer).toMatchObject({
+    basis: "accepted-settlement",
+    debitDate: null,
+    debitDateReason: "debit_date_invalid",
+  });
+  const wire: unknown = JSON.parse(JSON.stringify(outcome.review));
+  expect(validApiResponse(CARD_DEBIT_ACCOUNTS_PATH, wire)).toBe(true);
 });

@@ -51,7 +51,12 @@ function page(planner: unknown) {
           sourceAccount: "synthetic-card",
           accountId: null,
           amount: yen("3000"),
-          paymentDate: null,
+          paymentDate: {
+            kind: "local-date",
+            value: "2098-01-10",
+            zone: "Asia/Tokyo",
+            basis: "provider",
+          },
           period: "2098-01",
         },
         code: "no_equal_amount_debit",
@@ -215,4 +220,33 @@ test("a statement total that is not exact carries its status and reason; a bare 
     expect(validUnmatchedCardStatementsReview(withTotal(amount))).toBe(false);
     expect(validApiResponse(CARD_STATEMENTS_UNMATCHED_PATH, withTotal(amount))).toBe(false);
   }
+});
+
+test("a null due date carries its closed reason, and a due date never has one (INV05)", () => {
+  const withStatement = (changes: Record<string, unknown>) => {
+    const base = page(null);
+    const item = base.items[0]!;
+    return {
+      ...base,
+      items: [
+        {
+          ...item,
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          statement: { ...item.statement, ...changes },
+        },
+      ],
+    };
+  };
+  for (const paymentDateReason of ["payment_date_absent", "payment_date_invalid"])
+    expect(
+      validUnmatchedCardStatementsReview(withStatement({ paymentDate: null, paymentDateReason })),
+    ).toBe(true);
+  for (const changes of [
+    { paymentDate: null },
+    { paymentDate: null, paymentDateReason: "guessed" },
+    { paymentDate: null, paymentDateReason: "debit_date_invalid" },
+    { paymentDateReason: "payment_date_absent" },
+  ])
+    expect(validUnmatchedCardStatementsReview(withStatement(changes))).toBe(false);
 });

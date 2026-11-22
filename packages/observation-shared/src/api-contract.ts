@@ -1,5 +1,6 @@
 // Browser-safe HTTP contracts. No database, runtime, or UI imports.
 // Amount strings retain exact minor units; formatting never changes these values.
+import { READ_DETAILS } from "../../domain/src/read-detail.ts";
 import type { ObservationOrganization } from "./organization-contract.ts";
 import type { ApiCapabilities } from "./api-schema.ts";
 export type { ApiCapabilities } from "./api-schema.ts";
@@ -466,7 +467,7 @@ export interface BalanceHistoryPage {
  * `full`, the row with its whole provenance. The rows, their order, the page,
  * its cursor, the coverage and the subtotals are the same under both.
  */
-export const BALANCE_READ_DETAILS = ["summary", "full"] as const;
+export const BALANCE_READ_DETAILS = READ_DETAILS;
 export type BalanceReadDetail = (typeof BALANCE_READ_DETAILS)[number];
 
 /**

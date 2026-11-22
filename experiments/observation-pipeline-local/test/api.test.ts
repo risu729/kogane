@@ -266,6 +266,7 @@ describe("read-only enforcement", () => {
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
       const response = await app.fetch(new Request("http://api.test/api/overview", { method }));
       expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("GET, HEAD");
     }
   });
 

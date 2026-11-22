@@ -312,6 +312,7 @@ describe("named concepts in the final SQL", () => {
     latestSummaries: sql.latestBalancesSql({ measureView: "summaries" }, 0, PAGE_LIMIT).sql,
     balanceHistory: sql.balanceHistorySql({}, 0).sql,
     positions: sql.positionsSql({}, 0).sql,
+    positionCut: sql.POSITION_CUT_SQL,
     positionValuations: sql.POSITION_VALUATIONS_SQL,
     artifacts: sql.ARTIFACTS_SQL,
     artifactDetail: sql.ARTIFACT_DETAIL_SQL,
