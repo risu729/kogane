@@ -29,6 +29,17 @@ const DATED_STATE_EXCLUDED_PARSERS = [
 ] as const;
 
 /**
+ * Sources a reported state does not list at all: MoneyForward is an
+ * aggregator that restates accounts the direct sources list (ADR 0019,
+ * decision 2, `source:moneyforward-me` in `REPORTED_STATE_EXCLUSIONS`). Its
+ * detail container has a selecting policy row (migration 0091), so the
+ * perimeter leaves the source out here rather than trusting the policy table
+ * to name no container of it. The ids here are the `source:` scopes of
+ * `REPORTED_STATE_EXCLUSIONS`; dated-state-query.test.ts holds the two equal.
+ */
+export const DATED_STATE_EXCLUDED_SOURCES = ["moneyforward-me"] as const;
+
+/**
  * The container parsers in the perimeter whose snapshots hold positions. A
  * valuation on the date reads a container of these without a snapshot as
  * holdings it cannot include. dated-state.test.ts fails when a parser that
@@ -44,6 +55,7 @@ export const DATED_POSITION_CONTAINER_PARSERS = [
 export const DATED_STATE_ROW_BOUND = 5000;
 
 const EXCLUDED = DATED_STATE_EXCLUDED_PARSERS.map((name) => `'${name}'`).join(",");
+const EXCLUDED_SOURCES = DATED_STATE_EXCLUDED_SOURCES.map((name) => `'${name}'`).join(",");
 
 /**
  * The run and parse condition `current_identity_observations` puts on a
@@ -71,7 +83,7 @@ const DATED_SNAPSHOT_CTES = `${snapshotCtes(SNAPSHOT_RELATIONS, { prefix: "dated
  CROSS JOIN observation_fetch_runs f ON f.id=fa.fetch_run_id
  CROSS JOIN published_parse_runs pub ON pub.fetch_artifact_id=fa.id AND pub.parser_name=s.parser_name
  CROSS JOIN parse_runs p ON p.id=pub.parse_run_id
- WHERE s.parser_name NOT IN (${EXCLUDED})
+ WHERE s.parser_name NOT IN (${EXCLUDED}) AND s.source_id NOT IN (${EXCLUDED_SOURCES})
   AND (s.required_version IS NULL OR p.parser_version=s.required_version)
   AND ${unitParseable.policyPredicate("f", "fa")}
  UNION ALL
@@ -86,7 +98,7 @@ const DATED_SNAPSHOT_CTES = `${snapshotCtes(SNAPSHOT_RELATIONS, { prefix: "dated
  CROSS JOIN observation_fetch_runs f ON f.id=fa.fetch_run_id
  CROSS JOIN published_parse_runs pub ON pub.fetch_artifact_id=fa.id AND pub.parser_name=c.parser_name
  CROSS JOIN parse_runs p ON p.id=pub.parse_run_id
- WHERE ${unitParseable.policyPredicate("f", "fa")}
+ WHERE c.source_id NOT IN (${EXCLUDED_SOURCES}) AND ${unitParseable.policyPredicate("f", "fa")}
 )`;
 
 /**
@@ -214,7 +226,7 @@ LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
 
 /**
  * The container datasets a reported state expects a snapshot of (every
- * selecting policy row outside the excluded aggregates, and the artifact
+ * selecting policy row outside the excluded aggregates and sources, and the artifact
  * containers), each with the snapshots chosen for it at the cutoff: one row
  * per chosen snapshot, or one row with no snapshot. A complete-empty snapshot
  * is chosen and holds nothing, so it is listed here although no position or
@@ -225,6 +237,7 @@ LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
 export const DATED_SNAPSHOTS_SQL = `WITH ${DATED_SNAPSHOT_CTES}, dated_perimeter(source_id,parser_name,dataset) AS (
  SELECT source_id,parser_name,dataset FROM dataset_snapshot_policies
  WHERE snapshot_selection=1 AND parser_name NOT IN (${EXCLUDED})
+  AND source_id NOT IN (${EXCLUDED_SOURCES})
  UNION
  SELECT column1,column2,column3 FROM (VALUES ${ARTIFACT_SNAPSHOT_CONTAINERS.map(
    (container) => `('${container.sourceId}','${container.parserName}','${container.dataset}')`,

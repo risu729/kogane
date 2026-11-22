@@ -223,7 +223,22 @@ a subject that appears twice in the same unit makes the subtotal unavailable
 several units (an exchange account's cash per asset, a broker's foreign cash
 per currency) counts once in each unit's figure: the subtotal is per unit, so
 that is not a second count of anything. Above 5,000 adopted rows the subtotal
-is `null` with `scope_exceeds_subtotal_bound`.
+is `null` with `scope_exceeds_subtotal_bound`. The subject is the provider
+reference: an account entity reached through two references of one source
+that the within-source policy lists apart is added once per reference here
+(an open limit; the cash read below counts neither).
+
+`GET /api/v2/balances/cash` (`kogane.balances.read` `collection: cash`)
+answers the same snapshot's cash per account: one line per account entity
+with its references and amounts, exact subtotals per unit and per source, and
+every other latest measurement counted under a closed reason. Its counted
+amounts are the known-assets subtotal's, except that two adopted amounts of
+one unit on one account entity are both left uncounted with
+`cash:account_reported_twice`. Its lines page under the cursor below, whole
+lines up to `limit` measurements and 8 KB a page; its page and the rules of what is cash are
+in [agent API: UI read pages](agent-api.md#ui-read-pages) and
+[ADR 0123](adr/0123-summary-detail-for-large-reads.md) (amendment of
+2026-11-20).
 
 ### Cursor contract
 
@@ -260,7 +275,12 @@ page is not bound to its cursor either: a page read as `summary` continues as
 `full` and the reverse.
 
 The reader is never moved silently to a newer list. "Read the newest
-snapshot" is an explicit action: drop the cursor.
+snapshot" is an explicit action: drop the cursor. Under `identityRead: latest`
+the organization overlay (labels, mapping revision) is re-read on each page,
+while membership and order stay pinned: the rows come from the cursor's
+snapshot (for history, the record up to its high-water parse run), and only
+their organization is read again per page (`organizeRows` in
+`services/app/src/balances-v2.ts`).
 
 Order is the recorded effective time descending, then the scope key
 ascending, made dense as `row_seq`. A row with no recorded time sorts last and
@@ -283,7 +303,10 @@ is present and answer `503 read_model_unavailable` until that snapshot is
 published. With no READ binding those paths answer 404. The v1 routes keep
 `paginationVersion: "offset-v1"`.
 
-`/api/balances` is unchanged. When READ is bound and a snapshot is published
+`/api/balances` keeps its rows. Its default answer on the central store is a
+summary of the rows ([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
+amendment of 2026-11-20), and `detail=full` gives the list unchanged. When
+READ is bound and a snapshot is published
 it is served through a compat adapter over the same projection — identical
 rows, order, offset window and `interpretation` record, proved by a parity
 test on one synthetic fixture. The adapter declines when the snapshot is

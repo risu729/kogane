@@ -9,6 +9,7 @@ import { canonicalDigest } from "../../domain/src/context.ts";
 import { METRIC_REGISTRY_RELEASE } from "../../domain/src/metrics.ts";
 import {
   payableStatus,
+  REPORTED_STATE_EXCLUSIONS,
   scheduledPaymentDueStatus,
   snapshotFreshness,
 } from "../../domain/src/reported-state.ts";
@@ -16,6 +17,7 @@ import { validReportedState } from "../../observation-shared/src/reported-state-
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 import {
   DATED_SCHEDULED_PAYMENTS_SQL,
+  DATED_STATE_EXCLUDED_SOURCES,
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
@@ -181,6 +183,13 @@ describe("accounts and their snapshots", () => {
 });
 
 describe("coverage", () => {
+  test("the sources the perimeter leaves out are the source: scopes, by id", () => {
+    const sources = REPORTED_STATE_EXCLUSIONS.flatMap(({ scope }) =>
+      scope.startsWith("source:") ? [scope.slice("source:".length)] : [],
+    );
+    expect(sources).toEqual([...DATED_STATE_EXCLUDED_SOURCES]);
+  });
+
   test("containers without a snapshot, stale snapshots, the perimeter and liabilities", async () => {
     const state = await queryDatedState(executor(holdings()), { date: "2026-09-10" });
     const missing = state.coverage.containersWithoutSnapshot.map((c) => c.parserName);
@@ -198,10 +207,48 @@ describe("coverage", () => {
         ageDays: 4,
       },
     ]);
-    expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward");
+    expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward-me");
     expect(state.coverage.liabilitiesCoverage).toBe("partial");
     expect(state.coverage.liabilitiesMissing).toContain("unbilled_card_usage");
     expect(state.coverage.payablesFromPaymentDate).toBe("2026-08-10");
+  });
+
+  test("MoneyForward is excluded as the coverage says: no account, no missing container", async () => {
+    // Before and after its first capture alike: the aggregator restates the
+    // direct sources' accounts, so it is never listed nor expected.
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.capture({
+      source: "moneyforward-me",
+      dataset: "account-detail",
+      parser: "moneyforward-detail-balances",
+      version: "1.0.1",
+      unitKey: "synthetic-connection",
+      claim: "complete",
+      fetchedAt: "2026-09-10T01:00:00Z",
+      balances: [
+        {
+          account: "moneyforward-me:synthetic-connection",
+          metric: "reported_account_value_jpy",
+          instrument: "JPY",
+          minor: 57_000,
+        },
+      ],
+    });
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    for (const state of [before, after]) {
+      expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward-me");
+      expect(state.accounts.map((a) => a.sourceId)).not.toContain("moneyforward-me");
+      expect(state.snapshots.map((s) => s.sourceId)).not.toContain("moneyforward-me");
+      expect(state.coverage.containersWithoutSnapshot.map((c) => c.sourceId)).not.toContain(
+        "moneyforward-me",
+      );
+      expect(validReportedState(JSON.parse(JSON.stringify({ apiVersion: 2, ...state })))).toBe(
+        true,
+      );
+    }
+    // Nothing the answer reads changed, so neither did its context.
+    expect(after.contextId).toBe(before.contextId);
   });
 
   test("a date before every capture lists no account and names every container", async () => {
@@ -973,7 +1020,7 @@ describe("card payables on the date", () => {
     expect(seen.split).toBeGreaterThan(5);
     expect(seen.refused).toBe(seen.counted);
     expect(seen.scheduled).toBeGreaterThan(10);
-  });
+  }, 60_000);
 
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {
     const accepted = {

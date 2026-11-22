@@ -63,8 +63,8 @@ an older capture said.
 
 Listed (`dated-state-perimeter-v1`): every container in the snapshot policy
 table with `snapshot_selection = 1` and the artifact containers
-(`ARTIFACT_SNAPSHOT_CONTAINERS`), except the two aggregates below. Not listed,
-and named in `coverage.excluded`:
+(`ARTIFACT_SNAPSHOT_CONTAINERS`), except the two aggregates and the MoneyForward
+source below. Not listed, and named in `coverage.excluded`:
 
 | Scope                                    | Why                                                              |
 | ---------------------------------------- | ---------------------------------------------------------------- |
@@ -73,6 +73,18 @@ and named in `coverage.excluded`:
 | `sony-bank-gross-balance`                | A provider total (assets and loans) over the Sony accounts       |
 | Balances restated after each transaction | Registry `timeBasis: event-reported`; counted in `excludedRows`  |
 | Reward units                             | Registry `unitDimension: reward`; counted in `excludedRows`      |
+
+MoneyForward is left out by source (`moneyforward-me`,
+`DATED_STATE_EXCLUDED_SOURCES`), not by the policy table: migration 0091 gave
+its detail container (`moneyforward-detail-balances`) a selecting policy row.
+Until the source exclusion, every answer on a store with that row listed the
+connection's provider totals beside the direct accounts, or named the
+container in `containersWithoutSnapshot`. The scope in `coverage.excluded`
+is `source:moneyforward-me`, the source id itself (it read
+`source:moneyforward`, an id no source has, until 2026-11-22). On such a store the
+context id changes once, as the snapshots, rows and containers it pins do; the
+answer's keys and `reported-state-v3` are unchanged, and nothing stores a
+reported context id.
 
 A perimeter container with no snapshot before the cutoff is listed in
 `coverage.containersWithoutSnapshot` with `no_complete_snapshot_before_cutoff`.
@@ -241,6 +253,20 @@ an `account` filter the read is skipped, nothing is listed and
 after the card statements; `kogane.reported-state.read` answers the same
 body.
 
+The `/state` page asks only for a date. It shows each account as a card with
+the captures its rows came from, and lists every chosen capture no account
+came from under 表示する記載のない取得結果, with its source, capture time and
+freshness. Such a capture is complete and holds no position or balance the
+answer lists: it is empty, holds only rows counted in `excludedRows`, or
+holds only valuations the answer never lists per account (the perimeter's
+`sbi-shinsei-exchange-rate`, `sbi-income-payments`, `sbi-realised-gains` and
+`sony-bank-realised-gains` containers). The answer does not say which, so the
+page names all three and never says the provider listed nothing. A complete
+capture is therefore never shown as no capture: a container without one is
+named in the coverage notes instead, and only when the date has no account
+and no such capture does the page say that this does not mean nothing is
+held.
+
 ## HTTP
 
 `GET /api/v2/reported-state?date=YYYY-MM-DD[&source=…][&account=…]`, GET and
@@ -325,8 +351,8 @@ is after today in Tokyo, `404 unknown_source` and `404 unknown_account`, and
 `dated_state_limit_exceeded`) rather than a cut answer. With `detail=full` the
 body is `{ apiVersion: 2, …HoldingsChange }`, unpaged.
 
-Without `detail`, or with `detail=summary` (ADR 0075, amendment 2026-11-19;
-proposed), the body is one page of `summarizeHoldingsChange` in
+Without `detail`, or with `detail=summary` (ADR 0075, amendment 2026-11-19),
+the body is one page of `summarizeHoldingsChange` in
 `packages/domain/src/holdings-change-summary.ts`
 (`reported-holdings-change-summary-v1`) over the same comparison: the
 holdings whose change is not an exact zero, in status order (`compared`,
@@ -417,7 +443,8 @@ processes):
 The five reads are issued concurrently through the executor, one statement
 each, plus the settlement read. What grows with history: the snapshot CTEs
 read every artifact once per read (through
-`idx_fetch_artifacts_source_dataset_time`), as the current-state reads do, and
+`idx_fetch_artifacts_source_dataset_time`; the current-state reads scan them
+two or three times, [read model: rows read by the latest-state reads](read-model.md#rows-read-by-the-latest-state-reads)), and
 the statement read and the count of the statements before the window each
 rank every captured statement total before the cutoff, as
 `card_statement_facts` does. Everything else is reached by key: parses through
@@ -429,6 +456,12 @@ no migration. `packages/application/test/dated-state-scale.test.ts` builds the
 smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
+`packages/read-model/test/dated-state-differential.test.ts` holds the
+positions, balances and snapshots reads to their text before the MoneyForward
+source exclusion (`dated-state-legacy-sql.ts`): on random synthetic stores
+only the `moneyforward-me` rows differ, and without table statistics the
+shipped plans scan no table the frozen ones do not. The scale test compares
+the rows of both texts on `STATEMENT_CI_SCALE` too.
 
 Since `reported-state-v4` a sixth read, `DATED_SCHEDULED_PAYMENTS_SQL`, is
 issued with the five. It walks the publication pointers

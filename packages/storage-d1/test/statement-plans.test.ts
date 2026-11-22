@@ -72,6 +72,8 @@ import {
 import { ingestRouteActive, sourceDeclared } from "../src/core/ingest-registry.ts";
 import * as readSql from "../src/read/sql.ts";
 import * as rewardSql from "../src/read/rewards.ts";
+import { projectionMeasureSql } from "../../read-model/src/balance-projection-sql.ts";
+import type { CollectionScope } from "../../read-model/src/scope.ts";
 
 beforeAll(() => {
   fullCoreDatabase().close();
@@ -177,6 +179,36 @@ describe("every exported READ statement, without table statistics", () => {
     test(`${name} reaches its rows by key`, () => {
       const { sqlite } = createSqliteReadDatabase();
       expect(wholeTableReads(sqlite, sql, READ_SINGLETONS)).toEqual([]);
+      sqlite.close();
+    });
+});
+
+// The cash read's projection scan (`measureRows`, ADR 0123 amendment of
+// 2026-11-20): one fixed snapshot's latest rows, under every filter the route
+// takes, reached through an index that leads with the snapshot. No plan reads
+// the projection rows of every snapshot.
+describe("the projection measure read, without table statistics", () => {
+  const scopes: [string, CollectionScope][] = [
+    ["no filter", {}],
+    ["a source", { source: "s" }],
+    ["an account", { account: "a" }],
+    ["a unit", { instrument: "i" }],
+    ["a source, an account and a unit", { source: "s", account: "a", instrument: "i" }],
+  ];
+  for (const [name, scope] of scopes)
+    test(`${name}: searches one snapshot by key`, () => {
+      const { sqlite } = createSqliteReadDatabase();
+      const query = projectionMeasureSql("snapshot", scope);
+      const plan = planOf(sqlite, query.sql, query.args);
+      expect(wholeTableReads(sqlite, query.sql, READ_SINGLETONS)).toEqual([]);
+      expect(
+        plan.some(
+          (step) =>
+            step.startsWith("SEARCH current_balance_projection USING ") &&
+            step.includes("snapshot_id=?"),
+        ),
+        plan.join("\n"),
+      ).toBe(true);
       sqlite.close();
     });
 });

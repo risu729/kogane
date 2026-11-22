@@ -1,4 +1,4 @@
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { identityReadMode } from "./identity-read";
 import {
   IDENTITY_COLLECTIONS,
@@ -11,8 +11,7 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 /** Call only after the existing Access authentication gate. No mutations. */
 export async function identityApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   if (!url.pathname.startsWith("/api/identity/")) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   const collection = url.pathname.slice("/api/identity/".length);
   if (!(IDENTITY_COLLECTIONS as readonly string[]).includes(collection))
     throw new HttpError(404, "not_found");

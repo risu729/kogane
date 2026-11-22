@@ -15,6 +15,7 @@
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 import {
   moneyForwardAccountIdentities,
+  type MoneyForwardAccountIdentities,
   type MoneyForwardIdentityUnavailable,
 } from "./account-identity";
 import {
@@ -45,8 +46,12 @@ export interface SharedRunInput {
   readonly startedAt: string;
   readonly completedAt: string;
   readonly status: CollectionManifest["status"];
-  readonly accountDetailCount: number;
-  readonly monthlyFragmentCount: number;
+  /**
+   * Set only from a finished collection; absent, never 0, for a run that
+   * stopped before it learned them (INV05).
+   */
+  readonly accountDetailCount?: number;
+  readonly monthlyFragmentCount?: number;
   readonly artifacts: readonly RawArtifact[];
   readonly failures: readonly CollectionFailure[];
   /**
@@ -157,8 +162,13 @@ function manifestBytes(input: SharedRunInput, stored: readonly StoredArtifact[])
     startedAt: input.startedAt,
     completedAt: input.completedAt,
     status: input.status,
-    accountDetailCount: input.accountDetailCount,
-    monthlyFragmentCount: input.monthlyFragmentCount,
+    // An unknown count is left out, never written as 0 (INV05).
+    ...(input.accountDetailCount === undefined
+      ? {}
+      : { accountDetailCount: input.accountDetailCount }),
+    ...(input.monthlyFragmentCount === undefined
+      ? {}
+      : { monthlyFragmentCount: input.monthlyFragmentCount }),
     artifacts: [...stored],
     failures: input.failures.map((failure) => ({
       ...failure,
@@ -196,11 +206,16 @@ async function moneyForwardRunPlanWithIdentity(
     const positional = artifactUnitKey(artifact.filename);
     if (positional !== null) positionalUnits.add(positional.slice("account-".length));
   }
-  const identities = await moneyForwardAccountIdentities(
-    sources,
-    positionalUnits,
-    input.status === "success" ? input.accountDetailCount : undefined,
-  );
+  // A successful run's identities must number its accounts. A success that
+  // does not carry the count cannot be checked, so its units stay positional.
+  const identities: MoneyForwardAccountIdentities =
+    input.status === "success" && input.accountDetailCount === undefined
+      ? { status: "unavailable", code: "identity_incomplete" }
+      : await moneyForwardAccountIdentities(
+          sources,
+          positionalUnits,
+          input.status === "success" ? input.accountDetailCount : undefined,
+        );
   const identity: MoneyForwardIdentityState =
     identities.status === "derived" ? "derived" : identities.code;
   // The unit of a page: its account's identity when the run has one for every

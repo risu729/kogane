@@ -736,14 +736,44 @@ test("decision log rows reject UPDATE, DELETE and REPLACE; superseded_by is set 
       "INSERT INTO entity_relations VALUES('rel-append','supports','evidence:a','evidence:b',NULL,NULL,'proposed','dr-relation-append','[]','2099')",
     ),
   ]);
-  for (const table of ["decision_operations", "decision_revisions", "entity_relations"]) {
+  // Each statement is refused by the table's own append-only or replacement
+  // guard, named by its message: a row another insert guard refuses (a
+  // superseded decision, or a mapping decision that no longer matches its
+  // mapping row, fails decision_subject_invalid first) would pass with the
+  // replacement guard gone.
+  for (const [table, column, row, appendOnly, replacement] of [
+    [
+      "decision_operations",
+      "operation_id",
+      "1=1",
+      "decision operations are append-only",
+      "decision operation replacement is forbidden",
+    ],
+    [
+      "decision_revisions",
+      "id",
+      "id='dr-relation-append'",
+      "decision revisions are append-only",
+      "decision revision replacement is forbidden",
+    ],
+    [
+      "entity_relations",
+      "id",
+      "id='rel-append'",
+      "entity relations are append-only",
+      "entity relation replacement is forbidden",
+    ],
+  ] as const) {
     expect(await count(table)).toBeGreaterThan(0);
-    const column = table === "decision_operations" ? "operation_id" : "id";
-    await expect(db.prepare(`UPDATE ${table} SET ${column}=${column}`).run()).rejects.toThrow();
-    await expect(db.prepare(`DELETE FROM ${table}`).run()).rejects.toThrow();
+    await expect(db.prepare(`UPDATE ${table} SET ${column}=${column}`).run()).rejects.toThrow(
+      appendOnly,
+    );
+    await expect(db.prepare(`DELETE FROM ${table}`).run()).rejects.toThrow(appendOnly);
     await expect(
-      db.prepare(`INSERT OR REPLACE INTO ${table} SELECT * FROM ${table} LIMIT 1`).run(),
-    ).rejects.toThrow();
+      db
+        .prepare(`INSERT OR REPLACE INTO ${table} SELECT * FROM ${table} WHERE ${row} LIMIT 1`)
+        .run(),
+    ).rejects.toThrow(replacement);
   }
   const [a, b] = (
     await db

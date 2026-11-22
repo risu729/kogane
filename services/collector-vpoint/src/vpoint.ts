@@ -228,7 +228,12 @@ class VPointClient {
       }
       pages.push(response);
       observedRows += rows;
-      if (observedRows >= declaredTotal) {
+      // A page that carries the walk past the stated total disagrees with it:
+      // the rows kept would not be the history the total describes.
+      if (observedRows > declaredTotal) {
+        throw new VPointProtocolError("rows-exceed-total");
+      }
+      if (observedRows === declaredTotal) {
         return { pages, total: declaredTotal };
       }
       // Short of the total, an empty or short page is an unobserved end of
@@ -258,8 +263,20 @@ export class VPointSessionExpiredError extends Error {
   }
 }
 
+/**
+ * A total the page states as a count: a non-negative safe integer number, or a
+ * string of ASCII digits only whose value is one. Anything else (`null`, an
+ * empty or blank string, a boolean, an array, an exponent or a hex string) is
+ * `invalid-total`, a reason and never a zero (INV05): `Number()` would read
+ * most of them as 0 and end the walk after one page as a whole history.
+ */
 function countValue(value: unknown): number {
-  const count = typeof value === "number" ? value : Number(value);
+  const count =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^[0-9]{1,16}$/u.test(value)
+        ? Number(value)
+        : Number.NaN;
   if (!Number.isSafeInteger(count) || count < 0) {
     throw new VPointProtocolError("invalid-total");
   }
