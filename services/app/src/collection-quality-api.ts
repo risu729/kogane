@@ -39,7 +39,7 @@ import {
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import { readerGrant } from "./agent-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
 const OFFSET = /^(?:0|[1-9][0-9]{0,6})$/u;
@@ -60,8 +60,7 @@ export async function collectionQualityApi(
   const path = url.pathname;
   if (path !== COLLECTION_QUALITY_PATH && !path.startsWith(`${COLLECTION_QUALITY_PATH}/`))
     return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   // Resolve authority before schema/source enumeration. This aggregation
   // cannot safely answer an account-filtered grant, even for a known source.
   const grant = readerGrant(subject);
