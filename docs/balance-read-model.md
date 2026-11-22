@@ -300,6 +300,22 @@ read. Its `dataCoverage.completeness` is always `unknown`: a history window is
 not a membership claim. It is not bounded by the 5,000 candidate limit, so it
 routinely holds more rows than the latest list.
 
+The pin is a parse run id, not a moment: `balanceHistoryKeysetSql` keeps the
+rows of the parse runs visible now (`recordedParses`) whose id is at most the
+high-water mark, and visibility is read again on every page. A parse run with
+an id at most the mark that becomes visible after the snapshot was built can
+therefore still add rows between two pages (a snapshot that is behind stays
+pageable): a release activation publishes its candidate runs, a rollback
+publishes the run the activation replaced, and a run still `pending` when the
+snapshot was built that is later marked `error` (an interrupted parse) is
+visible with the observations it had already written. A row that sorts after
+the cursor then appears on a later page, and one that sorts before it is not
+shown on that walk. The run an activation or a rollback moves the pointer
+away from is no longer published, and neither path sets its
+`superseded_by_parse_run_id`, so unless it was already marked superseded it
+stops being visible and its rows drop out of the later pages. That is an open
+limit; dropping the cursor reads the history again from the first page.
+
 ## Capabilities and the v1 route
 
 `/api/meta` advertises `balancesV2` and `balancesV2Pagination` only when a
