@@ -432,14 +432,17 @@ export function trackedGeneratedFiles(
 /** Bun's default test file names, and the Node test runner files tasks name. */
 const TEST_FILE =
   /(?:[._](?:test|spec)\.(?:js|jsx|ts|tsx|mjs|cjs|mts|cts)|\.node(?:-test)?\.mjs)$/u;
-/** `bun test` flags whose value is the next argument rather than a path. */
+/**
+ * `bun test` flags whose value is the next argument rather than a path.
+ * `--bail` and `--parallel` take a value only after `=`: a separate next
+ * argument stays a path or filter.
+ */
 const VALUE_FLAGS = new Set([
   "--timeout",
   "--shard",
   "--seed",
   "--rerun-each",
   "--retry",
-  "--bail",
   "--max-concurrency",
   "--coverage-dir",
   "--coverage-reporter",
@@ -448,8 +451,10 @@ const VALUE_FLAGS = new Set([
   "--test-name-pattern",
   "-t",
   "--path-ignore-patterns",
-  "--parallel",
+  "--parallel-delay",
   "--timings",
+  "--preload",
+  "-r",
 ]);
 
 /** The path arguments of a `bun test` or `node --test` command, or undefined for any other. */
@@ -478,8 +483,10 @@ export function testCommandArguments(command: string): string[] | undefined {
  * to them is never run and nothing fails. Every test file under the directory
  * such a list or glob names must be run by some command of the graph: the same
  * list, a glob, a directory argument, a plain `bun test` of the workspace or a
- * Bun path filter. A Vitest `include` is not read; the Vitest suites live in
- * their own `worker-test/` directories, which no list or glob names.
+ * Bun path filter. A Vitest `include` is not read: a file only Vitest runs
+ * counts as unrun when a list or glob names its directory. Today no list or
+ * glob names a directory a Vitest suite reads (`worker-test/`, and the
+ * default include of `services/app`).
  */
 export function unselectedTestFiles(
   tasks: readonly TaskRecord[],

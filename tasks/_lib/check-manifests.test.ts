@@ -422,6 +422,12 @@ describe("test files a listing command leaves out", () => {
     expect(
       testCommandArguments("node ../../tasks/_lib/coverage-run.mjs bun test --shard=1/2"),
     ).toEqual([]);
+    // Bun reads a value for --bail and --parallel only after `=`.
+    expect(testCommandArguments("bun test --bail test/a.test.ts")).toEqual(["test/a.test.ts"]);
+    expect(testCommandArguments("bun test --parallel test/a.test.ts")).toEqual(["test/a.test.ts"]);
+    expect(testCommandArguments("bun test --preload ./setup.ts test/a.test.ts")).toEqual([
+      "test/a.test.ts",
+    ]);
     expect(testCommandArguments("node --test a.node-test.mjs")).toEqual(["a.node-test.mjs"]);
     expect(
       testCommandArguments("node ../../tasks/_lib/coverage-run.mjs vitest run"),
