@@ -12,6 +12,7 @@
 import type { RewardProviderExpirySection } from "../../../../packages/domain/src/reward-expiry-observations.ts";
 import { type ReactNode } from "react";
 import { useFeatures } from "../api.ts";
+import { formatDecimal } from "../money.ts";
 import { Badge, EmptyState, Kv, KvRow, Loading, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
   useRewardExpiry,
@@ -133,13 +134,9 @@ function Quantity({ quantity }: { quantity: RewardQuantity }): ReactNode {
         <span className="reward-unit">{reasonText(quantity.value.reasonCode)}</span>
       </span>
     );
-  const { coefficient, scale } = quantity.value.value;
-  const negative = coefficient.startsWith("-");
-  const digits = (negative ? coefficient.slice(1) : coefficient).padStart(scale + 1, "0");
-  const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
   return (
     <span className="amount">
-      {`${negative ? "-" : ""}${text}`} <span className="reward-unit">{quantity.unitRef}</span>
+      {formatDecimal(quantity.value.value)} <span className="reward-unit">{quantity.unitRef}</span>
     </span>
   );
 }

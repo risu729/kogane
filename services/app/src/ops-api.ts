@@ -60,7 +60,15 @@ import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys
 import { d1Executor, type SqlExecutor } from "../../../packages/read-model/src/index";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
-import { assertOwnOrigin, boundedText, HttpError, json } from "./http";
+import {
+  assertOwnOrigin,
+  boundedText,
+  HttpError,
+  json,
+  MethodNotAllowed,
+  READ_METHODS,
+  WRITE_METHODS,
+} from "./http";
 
 export const OPS_PREFIX = "/api/ops/v1";
 /** Largest request body any operations route reads, in bytes. */
@@ -489,9 +497,28 @@ export function opsOperation(method: string, path: string): OperationName | null
     if (rest === "/projections") return "ops.projection.request";
     if (/^\/sessions\/[^/]+\/refresh$/u.test(rest)) return "ops.session.refresh";
   }
-  if (method === "GET" && /^\/operations\/[^/]+$/u.test(rest)) return "ops.operation.get";
-  if (method === "GET" && rest === "/operations") return "ops.operation.list";
+  // HEAD is the read without its body (Hono answers it with the GET route),
+  // and is recorded as that read.
+  const read = method === "GET" || method === "HEAD";
+  if (read && /^\/operations\/[^/]+$/u.test(rest)) return "ops.operation.get";
+  if (read && rest === "/operations") return "ops.operation.list";
   return null;
+}
+
+/** Every verb this API routes; on a path that does not take it, it is `404 not_found`. */
+const OPS_METHODS = [...READ_METHODS, ...WRITE_METHODS] as const;
+
+/**
+ * The methods an operations path serves, for the `Allow` of its 405: the
+ * acceptance routes take POST, the two reads GET and HEAD. A path that is
+ * none of them names every verb this API routes, each of which answers it
+ * `404 not_found`.
+ */
+export function opsAllow(path: string): readonly string[] {
+  const post = opsOperation("POST", path) !== null;
+  const get = opsOperation("GET", path) !== null;
+  if (post === get) return OPS_METHODS;
+  return post ? WRITE_METHODS : READ_METHODS;
 }
 
 /**
@@ -509,11 +536,13 @@ export async function opsApi(
 ): Promise<Response | null> {
   if (!isOpsPath(url.pathname)) return null;
   if (!opsApiEnabled(env)) return null;
-  // Two verbs exist here: POST to accept, GET to read. Anything else is the
-  // same 405 the Worker gives every other non-GET request, not a 404 that
-  // would suggest a different path might take it.
-  if (request.method !== "POST" && request.method !== "GET")
-    throw new HttpError(405, "method_not_allowed");
+  // Two verbs exist here: POST to accept, GET to read, and HEAD as the GET
+  // without its body; a verb a path does not take is that path's 404. Any
+  // other verb is the same 405 the Worker gives every other request it does
+  // not serve, not a 404 that would suggest a different path might take it,
+  // and it names what the path does serve.
+  if (!(OPS_METHODS as readonly string[]).includes(request.method))
+    throw new MethodNotAllowed(opsAllow(url.pathname));
   const operation = opsOperation(request.method, url.pathname);
   if (operation === null) {
     if (url.search) throw new HttpError(400, "invalid_query");

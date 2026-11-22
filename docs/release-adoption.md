@@ -123,11 +123,17 @@ only an input's key `(projection_id, input_artifact_id, role)`
 (`ON CONFLICT … DO NOTHING`). A projection or an input the schema refuses (a
 CHECK or NOT NULL failure, such as an input without its raw digest) raises:
 the parse attempt fails as `metadata_or_raw_read_failed`, and
-`/metadata/reextract` fails without an answer for the rest of its page. Limit:
-the inputs are one batch written after the projection's own statement, so a
-refused input leaves the projection row without its inputs; every later
-attempt that reaches it raises again at the inputs, so no parse records it as
-its input, but `/metadata/differences` can list it.
+`/metadata/reextract` fails without an answer for the rest of its page. The
+projection and its inputs are one D1 batch, each input finding its projection
+by that unique key inside the batch, so a refused input rolls back a new
+projection with it: no projection is written without its inputs, and neither
+a parse nor `/metadata/differences` can read one. A projection an earlier call
+wrote is the key the batch skips, so a refused input adds nothing to it. Limit:
+a projection the earlier writer (before the two were one batch) left without
+its inputs is not repaired, since projections are append-only. Every later
+attempt that reaches it with the same refused input raises again, so no parse
+records it as its input, but `/metadata/differences` can list it; a later call
+whose inputs the schema accepts adds them to it.
 
 `input_digest` and `output_digest` are the literal string `unknown` for the
 rows migration 0027 backfills: the inputs and code digest of the historical
