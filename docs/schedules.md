@@ -16,8 +16,10 @@ failures since the newest success, and treats a failed receipt that a
 successful collection (fetch run) of the same source followed before the next
 receipt as recovered ([collection](collection.md#is-anything-stuck-the-collection-status-view)).
 
-Save a daily time/weekdays or an interval and enable/disable the job. A version
-conflict requires refreshing before another edit. A successful database save with
+Save a daily time/weekdays or an interval and enable/disable the job. A save
+whose answer does not say what is stored, or a version conflict, reads the job
+back and says how the stored settings compare with the change
+([below](#after-an-answer-that-does-not-say-what-is-stored)). A successful database save with
 pending reservation is not an armed alarm. The five-minute processor job repairs
 pending reservations; deployment bootstrap can also reconcile them.
 
@@ -31,6 +33,44 @@ that is not a claim that maintenance never happens. A rule changes only through
 an operator's edit or an operator's or delegated acceptance of a re-survey proposal
 ([below](#official-site-re-survey)). The page flags provenance older than
 thirty days.
+
+Times are wall times in the job's or rule's zone. On the day a zone moves its
+clocks forward (Sydney, the first Sunday of October), a daily job time in the
+skipped hour has no run that day. A weekly or monthly maintenance window whose
+start or end falls in that hour still defers collection
+(`packages/collection/src/schedule-model.ts`, `windowAt`): a skipped start
+opens the window at the first minute whose wall time reaches it (the clock
+change itself), and a skipped end is read on the clock before the change, so
+`02:30` ends the window at 03:30 summer time. Before 2026-11-22 such a window
+was dropped for that day, and collection could run inside it
+([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-maintenance-window-is-never-dropped-at-a-clock-change-2026-11-22)).
+A window wholly inside the skipped hour defers from the change only if its
+end is skipped too (`02:15`–`02:45` defers 03:00–03:45; `02:30`–`03:00` is
+empty). On the day clocks move back, a repeated wall time is read at its first
+occurrence, so a window ending in the repeated hour ends at its first pass and
+collection may run in the second.
+
+**When a refresh fails.** The page reads its snapshot through the shared
+`QueryBoundary` ([frontend](frontend.md#shared-primitives)). The first read
+failing shows `収集スケジュールを読み込めませんでした` ("the collection schedules
+could not be loaded") with the status and a fixed message, and no schedule. A
+later read that fails (a refocus, a retry, the read back after a save)
+keeps the earlier answer only under `更新できませんでした。前回読み込んだ収集スケジュールを表示しています。`
+("could not refresh; showing the collection schedules loaded earlier") with a
+retry, and so does a read paused offline under its own 前回読み込んだ warning.
+Everything below the warning, the `{n}件の提案を確認してください` ("review {n}
+proposals") count included, is that earlier answer. A 401 or 403 hides it. While
+the earlier answer is shown, the two actions that decide from what the page
+shows are held, each with a note saying so: **依頼を送信** (its confirmation
+lists the last run, a held lease, the next run and the maintenance status as
+what to read first, the request carries none of them for the server to
+check, and a started collection cannot be taken back) and **採用**/**却下** of a re-survey proposal (the list of
+undecided proposals may be out of date). The other writes stay available,
+because the server checks each against exactly what the page showed and
+refuses it with 409 when that changed: **設定を保存** and **停止時間を保存** carry
+the revision they were made from, and **停止した実行を解除** carries the exact
+lease reference, so repeating it after a failed read back is safe (below). A
+successful read lifts the warning and the holds.
 
 The initial public snapshot is in `config/maintenance-research.json` (2026-10-04).
 It includes Mizuho Saturday night, Sony login/debit windows, the GLOBAL PASS debit
@@ -256,7 +296,9 @@ before calling the cutover complete.
 
 Scheduling/storage failures reserve a one-minute bookkeeping wakeup rather than
 exhausting only native alarm retries. Receipts still in `started` after one hour
-are reported as uncertain; this neither expires leases nor repeats collection.
+are closed as `uncertain`, or as `not_dispatched` when a new-protocol claim never
+marked its dispatch; the scan frees no lease, and only a collection job's
+`not_dispatched` occurrence is tried again, once (above).
 
 Claiming an occurrence of a `collection`-kind job also appends one `alarm`
 audit record (`alarm.occurrence.claim`, principal `alarm:<job id>`) as the
@@ -296,8 +338,14 @@ and counts only:
   schedule revision its UPDATE was fenced on, written only when that UPDATE
   claimed the row; no audit record), or `claim_conflict` (with
   `scheduleRevision`, the revision the claim's INSERT required; it inserted
-  no occurrence row; a `started` row already there for that occurrence is
-  marked `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
+  no occurrence row and nothing is dispatched. A row already there for that
+  occurrence belongs to another attempt and is left as it is: a `started` one
+  is closed by that attempt's own receipt update or, after an hour still
+  `started`, by the abandonment scan as `uncertain` or `not_dispatched`
+  ([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-durable-pre-rpc-dispatch-marker-2026-11-08)).
+  Until 2026-11-09 the conflict marked such a row `uncertain` at once. The
+  same outcome, with no row there, follows a claim whose schedule changed
+  revision, enabled flag or next nominal after the alarm read it).
 - `schedule_dispatch_start`, written just before the collector call, with the
   target workspace.
 - `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
@@ -309,7 +357,7 @@ and counts only:
   `occurrenceId` once claimed, the `phase` that threw (`load`, `plan`,
   `claim`, `dispatch`, `record`), `errorName` and `errorKind`.
 
-So an occurrence that ends `uncertain` with no `finished_at` (the hourly
+So an occurrence that ends `uncertain` with no `finished_at` (the one-hour
 abandonment rule above) can be placed: a `claimed` line with no
 `schedule_dispatch_start` stopped between the claim and the call, a start
 with no result stopped while the call was open, and a result with no later
@@ -367,15 +415,31 @@ page and one from an MCP client are the same kind of stored operation.
   request then waits), the next scheduled run and the maintenance status, and
   says that the collector runs its daily scope and that a started collection
   cannot be taken back. **依頼を送信** sends the request; **やめる** sends
-  nothing.
+  nothing. After a send whose answer did not say whether the request was
+  stored, **やめる** keeps that key and window: the section says the request
+  may already be stored and is not withdrawn by backing out, and the next
+  **収集を依頼** opens a confirmation that says it re-sends that request.
+  The key is held in the page's state only: leaving the Schedules page or
+  reloading it forgets it, and the next confirmation is a new request (the
+  notice says so). This is an open limit.
 - **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
   the window is the date in Japan of the confirmation's first send (stored,
   not applied: the collector runs its daily scope), and the key is
-  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
-  lost answer reuses the key and the window, so it is the same payload and the
-  same operation even after midnight; a new confirmation is a new request. A
+  `ui-collect-<uuid>`, new for each confirmation except as below. A retry
+  after a failed or lost answer reuses the key and the window, so it is the
+  same payload and the same operation even after midnight. A new
+  confirmation is a new request once a send under the key was answered with
+  202, or when every send under it was refused; while one send's outcome is
+  unknown, a new confirmation re-sends it under the same key and window. A
   4xx answer other than 408 or 429 is shown as refused and not stored, with
-  its code. The answer shows the operation id.
+  its code; it stored nothing itself, but the server answers it (sign-in,
+  grant, origin, schema or declared-source refusal) before it looks the key
+  up, so it does not settle an earlier unknown send. The
+  answer shows the operation id. A
+  202 with status `accepted` says the collection starts at the next
+  processing run; any other status is the stored operation's current one,
+  answered to a re-send (`running`, `completed`, `failed` or `blocked`), and
+  the page names it and says no new collection starts.
 - **Following it.** An accepted request links to **依頼の経過** ("request trail")
   at `/operations/{id}`. That read-only page follows the request through
   `GET /api/ops/v1/operations/{id}`. The link survives schedule-card refreshes;
@@ -452,7 +516,10 @@ login or render with JavaScript cannot be read this way.
   with its closed states and newest receipt, each source's maintenance
   status and rule count, and the held leases
   ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
-  parameter is accepted.
+  parameter is accepted. `HEAD` is the same read, `detail` included, without
+  the body; another method is `405` with `Allow: GET, HEAD`, except `POST`,
+  which is `404` here. A method other than `POST` on any path below the page
+  is `405` with `Allow: POST`, as it is on `POST /api/ops/v1/schedules/bootstrap`.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
@@ -469,6 +536,19 @@ The job edit, the maintenance edit, the survey acceptance and the lease
 release are each one batch: a job's settings and its history row in
 `collection_schedule_revisions`, or an accepted proposal's revision and
 decision, exist together or not at all. The page's `GET` is not recorded.
+
+Where these routes answer with the Processor's answer — the snapshot under
+`detail=full`, a Processor refusal under either detail, every write's answer
+and a bootstrap refusal — the App relays its status and its body bytes as
+they are, under its own `Content-Type: application/json`. No header of the
+Processor's crosses back, its `Content-Type` included, so a relayed body never
+chooses how the App's origin serves it; the App's own response headers apply
+as on every answer ([production evidence browser](production-evidence-browser.md#response-headers)).
+A summary is the App's own JSON of the snapshot, and a bootstrap success is
+the App's own JSON of the answer it checked. `services/app/test/schedules-relay.test.ts`
+serves a Processor answer labelled `text/html` on each of these paths, and a
+body with a leading byte-order mark or invalid UTF-8, which crosses unchanged
+because a write's answer is read as bytes, not text.
 
 A write that loses its version check — another edit saved the job or the rule
 first, including one by the same operator in the same millisecond — writes
@@ -490,6 +570,58 @@ the code; the tests rebuild the table with one more CHECK to show it
 copied only when the job's `UPDATE`, the statement before it in the batch,
 changed a row (`changes()=1`); the same file runs the same-millisecond race and
 the refused history row on Miniflare D1 as well as on `bun:sqlite`.
+
+### After an answer that does not say what is stored
+
+No settings write carries an operation id or an idempotency key. The job edit
+and the maintenance edit carry the revision they were made from, and the
+Processor stores a revision only on top of that one; a survey decision is
+stored once per proposal. So a retry of one of these three writes that was
+stored is refused with `409` (`revision_conflict`, or
+`proposal_already_decided`), never stored twice, and a `409` alone does not
+say whether the stored change is someone else's or this very one, saved by an
+attempt whose answer was lost. The App answers a relay it lost, after or
+before the Processor wrote, `503 scheduling_unavailable`. (A lease release
+names the exact lease, a repeated one succeeds while the source is unlocked,
+and the page reads the leases back after any answer.)
+
+The page therefore treats an answer as leaving the outcome unknown when there
+is none (a network error), when a `2xx` body cannot be read, and on a `5xx`,
+`408` or `429`. After such an answer, and after a `409`, it reads the snapshot
+again (a read that starts after the answer) and compares what is stored with
+the change it sent. Every other `4xx` is a refusal before anything was
+written and is said as it was.
+
+- **Job edit.** The card shows the stored revision. A stored revision past the
+  one the save was made from that holds exactly this change is said to be
+  saved (`この変更はすでに保存されています` after a `409`); one that holds
+  something else is said to be another change (`他の変更が先に保存されました`
+  after a `409`; after an unknown answer, that it is not known whether this
+  change was stored). A revision that did not move is said not to be stored at
+  the time of the read, with the edit kept for another save, which the
+  version check refuses if the earlier attempt lands after all.
+- **Maintenance edit.** A stored save, or a read back showing exactly this
+  change at a later revision, replaces the form with its result (`停止時間を保存しました。`,
+  followed by `実行予約の反映を待っています。` when the answer's `reservation` is
+  `pending`) and a **閉じる** button, and moves focus to the result. Otherwise
+  the form stays open with the read-back result; a stored revision that holds
+  another change is edited by opening the rule again with **変更**.
+- **Survey decision.** A decided proposal leaves the list, so the section says
+  the result (rejected, accepted, or accepted with the reservation pending)
+  and moves focus to it. After an unknown answer or a `409`, a proposal the
+  read back still lists is undecided and can be decided again; one it no
+  longer lists is said to be accepted when the rule holds the proposal's
+  change at the revision after the proposal's base (a new rule under
+  `<source>-survey-<id>`), and decided otherwise.
+  When more proposals are undecided than the page shows, or the read back has
+  no re-survey part, an unlisted proposal is not taken as decided: the section
+  says that whether it was decided is not known, since the proposal's own row
+  is gone.
+- **A failed read back** says that whether the write was stored is not known.
+
+Limits: buttons are disabled while their write is in flight, so focus leaves
+them; and a job save that moves the card to a new revision redraws the card,
+so focus leaves its button too.
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation

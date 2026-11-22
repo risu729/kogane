@@ -97,7 +97,7 @@ requests are used.
 
 ## Amendment 2026-11-18: a refused window stops a partial core run
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1425](https://github.com/risu729/kogane/pull/1425))
 - Date: 2026-11-18
 - Decided in: [ADR 0099, amendment 2026-11-18](0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)
 - Amends: the decision's "A missing body or failed CSV request, invalid CSV

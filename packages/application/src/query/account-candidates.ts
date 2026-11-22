@@ -59,8 +59,8 @@ import {
   type PagedFields,
   type PagedWireFields,
 } from "../../../observation-shared/src/paging-contract.ts";
-import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { financialError, unknownKeyRefs } from "../errors.ts";
+import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 
 export type { AccountCandidate, AccountConnectionEntry, UnreviewedAggregatorAccount };
 export type AccountSourceFacts = AccountSourceFactsRow;
@@ -285,7 +285,7 @@ export function parseAccountCandidatesRequest(
     return {
       ok: false,
       code: "unsupported_semantics",
-      refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
+      refs: unknownKeyRefs(unknown),
     };
   const { view, offset, sourceAccountId } = value;
   if (view !== undefined) {
@@ -358,13 +358,8 @@ export async function reviewAccountCandidates(input: {
     ok: false,
     error: financialError(code, REQUEST_ID, refs),
   });
-  if (!grantAllows(grant, ACCOUNT_CANDIDATES_CAPABILITY))
-    return fail("unauthorized", [`capability:${ACCOUNT_CANDIDATES_CAPABILITY}`]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, ACCOUNT_CANDIDATES_CAPABILITY, REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (request.offset + ACCOUNT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows)
     return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 

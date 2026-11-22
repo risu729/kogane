@@ -15,7 +15,7 @@ import { cardPurchasesAvailable } from "./card-purchases-api";
 import { cardSettlementsAvailable } from "./card-settlements-api";
 import { commandsEnabled } from "./command-api";
 import { principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { schedulesServed } from "./schedule-tools";
 
 export { PENDING_DECISIONS_PATH };
@@ -54,8 +54,7 @@ export async function pendingDecisionsApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== PENDING_DECISIONS_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   const principal = principalFor(env, subject);
   if (principal.kind !== "human" || !principal.capabilities.includes("interpretation.accept"))
     throw new HttpError(403, "operator_required");

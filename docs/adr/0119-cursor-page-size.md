@@ -1,6 +1,6 @@
 # ADR 0119: A snapshot read's cursor continues at another offered page size
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1446](https://github.com/risu729/kogane/pull/1446))
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414) (point 2, "Paging is fragile")
 - Carried by: `packages/storage-d1/src/read/cursor.ts` (`checkReadCursor`,

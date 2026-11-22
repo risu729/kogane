@@ -108,7 +108,7 @@ when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`; `retu
   says nothing about whether the data behind it is complete (`packages/domain/src/paging.ts:1-6`).
   `paging` describes the page only; INV05 reasons stay where they are.
 - **Why `stoppedBy`.** It separates "the page is full" (`limit`), "the answer reached its byte bound"
-  (`bytes`, purchase lines, changes since) and "rows follow but this grant may not read them"
+  (`bytes`, `purchases.explain` `view: lines`) and "rows follow but this grant may not read them"
   (`budget`, today `nextPage: "budget_exceeded"`, and today silent on the candidate reads).
 - **A full page says `limit`** (`bytes` held to it on 2026-11-21, in review; it needs the owner's
   approval with the rest of this ADR). `bytes` means what `walk` means for a short page: the byte

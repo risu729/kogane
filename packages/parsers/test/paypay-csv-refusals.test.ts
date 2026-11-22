@@ -112,4 +112,93 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
     expect(short.warnings).toContain("header: no column found for transactionNumber");
     expect(short.warnings).toContain("header: no column found for incomingJpy");
   });
+
+  test("a reordered header reads each column by its expected label (0.2.4)", () => {
+    // The overseas amount (a foreign-currency figure) listed before the yen
+    // outflow. 0.2.3 matched 出金 in 海外出金金額 first: 12 USD became a yen
+    // outflow of 12, and the yen column was dropped as undocumented.
+    const reordered =
+      "取引日,海外出金金額,出金金額（円）,入金金額（円）,通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号";
+    const result = parse(
+      `${reordered}\n` +
+        "2026/08/01 00:00:00,12,1800,,USD,150,US,支払い,店,カード,一括払い,本人,t-1\n" +
+        "2026/08/02 00:00:00,,500,,,,,支払い,店,PayPay残高,一括払い,本人,t-2\n",
+    );
+    const [overseas, domestic] = result.observations;
+    if (overseas?.kind !== "transaction" || domestic?.kind !== "transaction")
+      throw new Error("expected two transactions");
+    expect(overseas.amountMinor).toBe(-1800);
+    expect(overseas.amountText).toBe("1800");
+    expect(overseas.extra["overseas"]).toEqual({
+      amount: "12",
+      currency: "USD",
+      conversionRateJpy: "150",
+      country: "US",
+    });
+    expect(domestic.amountMinor).toBe(-500);
+    expect(result.warnings).toEqual([
+      "header: outgoingJpy was found at column 3, not the documented column 2",
+      "header: incomingJpy was found at column 4, not the documented column 3",
+      "header: overseasAmount was found at column 2, not the documented column 4",
+    ]);
+    // With neither amount label as documented, the yen column still matches
+    // by 出金, never by the overseas label that also contains it.
+    const relabelled = reordered
+      .replace("海外出金金額", "海外出金額")
+      .replace("出金金額（円）", "出金金額(円)");
+    const variant = parse(
+      `${relabelled}\n2026/08/01 00:00:00,12,1800,,USD,150,US,支払い,店,カード,一括払い,本人,t-1\n`,
+    ).observations[0];
+    if (variant?.kind !== "transaction") throw new Error("expected a transaction");
+    expect(variant.amountMinor).toBe(-1800);
+    expect(variant.extra["overseas"]).toMatchObject({ amount: "12", currency: "USD" });
+    // The incoming yen field is held to the same rule: a relabelled overseas
+    // column naming 入金 is never read as a yen inflow.
+    const inflow = parse(
+      "取引日,出金金額(円),海外入金金額,入金金額(円),通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号\n" +
+        "2026/08/01 00:00:00,,12,1800,USD,150,US,受取,人,カード,一括払い,本人,t-1\n",
+    ).observations[0];
+    if (inflow?.kind !== "transaction") throw new Error("expected a transaction");
+    expect(inflow.amountMinor).toBe(1800);
+    expect(inflow.extra["overseas"]).toMatchObject({ amount: "12", currency: "USD" });
+  });
+
+  test("a missing column's documented position never takes a labelled column (0.2.4)", () => {
+    // Without 入金金額（円）, 0.2.3 gave incomingJpy the documented column 3
+    // before overseasAmount looked for its label, so the overseas amount read
+    // as a yen inflow.
+    const header = HEADER.replace(",入金金額（円）", "");
+    const result = parse(
+      `${header}\n2026/08/01 00:00:00,1800,12,USD,150,US,支払い,店,カード,一括払い,本人,t-1\n`,
+    );
+    const [observation] = result.observations;
+    if (observation?.kind !== "transaction") throw new Error("expected a transaction");
+    expect(observation.amountMinor).toBe(-1800);
+    expect(observation.extra["overseas"]).toEqual({
+      amount: "12",
+      currency: "USD",
+      conversionRateJpy: "150",
+      country: "US",
+    });
+    expect(observation.externalId).toBe("t-1");
+    expect(result.warnings).toContain("header: no column found for incomingJpy");
+  });
+
+  test("a row of separators only is skipped, not read as a transaction (0.2.4)", () => {
+    // A spreadsheet saving the export can leave trailing ",,,," lines; 0.2.3
+    // turned each into a transaction with no date, amount or id.
+    const blank = ",".repeat(12);
+    const result = parse(
+      `\uFEFF${HEADER}\r\n${row("2026/08/01 00:00:00", "100", "")}\r\n${blank}\r\n , ,\r\n`,
+    );
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0]).toMatchObject({ amountMinor: -100, rawLocator: "csv:row=2" });
+    expect(result.warnings).toEqual(["row 3: blank row skipped", "row 4: blank row skipped"]);
+    // A blank row between data rows keeps every later row's number.
+    const between = parse(
+      `${HEADER}\n${blank}\n${row("2026/08/02 00:00:00", "", "50")}\n`,
+    ).observations;
+    expect(between).toHaveLength(1);
+    expect(between[0]).toMatchObject({ amountMinor: 50, rawLocator: "csv:row=3" });
+  });
 });
