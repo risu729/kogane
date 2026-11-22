@@ -176,7 +176,7 @@ export const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "ema
  * nothing about whether collection was switched off: V Point Pay's app job is
  * unsupported while its e-mail path, which has no job, still delivers.
  */
-export function sourceWait(
+function sourceWait(
   jobs: readonly {
     kind: string;
     enabled: boolean;
