@@ -1378,6 +1378,12 @@
       "statementCount": 11,
       "insertStatements": [],
       "sha256": "312b5d16141073e2cb21bfd8d410ce75266bb5b324b8955f4524578e42a562ac"
+    },
+    {
+      "file": "0106_no_replace_rowid.sql",
+      "statementCount": 43,
+      "insertStatements": [],
+      "sha256": "b9a0d7a426a7d851b369a14d6f9ef8cc368fa843d376e04fbd3aa3a126446405"
     }
   ],
   "tables": [
@@ -1655,6 +1661,7 @@
         "account_mappings_bump_revision_update",
         "account_mappings_no_delete",
         "account_mappings_no_replace",
+        "account_mappings_no_replace_rowid",
         "account_mappings_no_update"
       ],
       "noUpdateTriggers": [
@@ -1713,6 +1720,7 @@
         "accounts_bump_revision_update",
         "accounts_no_delete",
         "accounts_no_replace",
+        "accounts_no_replace_rowid",
         "accounts_no_update"
       ],
       "noUpdateTriggers": [
@@ -2028,6 +2036,7 @@
       "triggers": [
         "allocations_no_delete",
         "allocations_no_replace",
+        "allocations_no_replace_rowid",
         "allocations_supersede_only"
       ],
       "noUpdateTriggers": [],
@@ -2132,6 +2141,7 @@
       "triggers": [
         "approvals_no_delete",
         "approvals_no_replace",
+        "approvals_no_replace_rowid",
         "approvals_uses_only"
       ],
       "noUpdateTriggers": [],
@@ -3276,6 +3286,7 @@
         "audit_records_closed_json",
         "audit_records_no_delete",
         "audit_records_no_replace",
+        "audit_records_no_replace_rowid",
         "audit_records_no_update"
       ],
       "noUpdateTriggers": [
@@ -3999,6 +4010,7 @@
         "card_purchase_recognition_keys_guard",
         "card_purchase_recognition_keys_no_delete",
         "card_purchase_recognition_keys_no_replace",
+        "card_purchase_recognition_keys_no_replace_rowid",
         "card_purchase_recognition_keys_no_update",
         "card_purchase_recognition_keys_one_live_holder",
         "purchase_retirement_card_purchase_recognition_keys_delete",
@@ -4134,6 +4146,7 @@
         "card_purchase_recognitions_guard",
         "card_purchase_recognitions_no_delete",
         "card_purchase_recognitions_no_replace",
+        "card_purchase_recognitions_no_replace_rowid",
         "card_purchase_recognitions_no_update",
         "purchase_retirement_card_purchase_recognitions_delete",
         "purchase_retirement_card_purchase_recognitions_insert",
@@ -4285,6 +4298,7 @@
       "triggers": [
         "card_settlement_allocation_withdrawals_guard",
         "card_settlement_allocation_withdrawals_no_delete",
+        "card_settlement_allocation_withdrawals_no_replace_rowid",
         "card_settlement_allocation_withdrawals_no_update"
       ],
       "noUpdateTriggers": [
@@ -4441,6 +4455,7 @@
       "triggers": [
         "card_settlement_candidates_no_delete",
         "card_settlement_candidates_no_replace",
+        "card_settlement_candidates_no_replace_rowid",
         "card_settlement_candidates_no_update"
       ],
       "noUpdateTriggers": [
@@ -4674,6 +4689,7 @@
         "card_settlement_decisions_economic_sealed",
         "card_settlement_decisions_guard",
         "card_settlement_decisions_no_delete",
+        "card_settlement_decisions_no_replace_rowid",
         "card_settlement_decisions_no_update"
       ],
       "noUpdateTriggers": [
@@ -4814,6 +4830,7 @@
       "triggers": [
         "change_plans_no_delete",
         "change_plans_no_replace",
+        "change_plans_no_replace_rowid",
         "change_plans_status_only"
       ],
       "noUpdateTriggers": [],
@@ -6030,6 +6047,7 @@
       "triggers": [
         "decision_operations_no_delete",
         "decision_operations_no_replace",
+        "decision_operations_no_replace_rowid",
         "decision_operations_no_update"
       ],
       "noUpdateTriggers": [
@@ -6230,6 +6248,7 @@
         "decision_outbox_completion_guard",
         "decision_outbox_no_delete",
         "decision_outbox_no_replace",
+        "decision_outbox_no_replace_rowid",
         "decision_outbox_progress_only"
       ],
       "noUpdateTriggers": [],
@@ -6381,6 +6400,7 @@
         "decision_revisions_bump_revision_update",
         "decision_revisions_no_delete",
         "decision_revisions_no_replace",
+        "decision_revisions_no_replace_rowid",
         "decision_revisions_no_update",
         "decision_revisions_subject"
       ],
@@ -6527,6 +6547,7 @@
         "economic_claims_guard",
         "economic_claims_no_delete",
         "economic_claims_no_replace",
+        "economic_claims_no_replace_rowid",
         "economic_claims_no_update",
         "economic_claims_one_live_holder",
         "economic_claims_sealed"
@@ -6642,6 +6663,7 @@
         "economic_commit_log_guard",
         "economic_commit_log_no_delete",
         "economic_commit_log_no_replace",
+        "economic_commit_log_no_replace_rowid",
         "economic_commit_log_no_update"
       ],
       "noUpdateTriggers": [
@@ -6789,6 +6811,7 @@
       "triggers": [
         "economic_event_revisions_no_delete",
         "economic_event_revisions_no_replace",
+        "economic_event_revisions_no_replace_rowid",
         "economic_event_revisions_provenance",
         "economic_event_revisions_supersede_only",
         "purchase_retirement_economic_event_revisions_delete",
@@ -6862,6 +6885,7 @@
         "economic_event_times_guard",
         "economic_event_times_no_delete",
         "economic_event_times_no_replace",
+        "economic_event_times_no_replace_rowid",
         "economic_event_times_no_update",
         "economic_event_times_sealed"
       ],
@@ -7002,6 +7026,7 @@
         "economic_leg_effects_guard",
         "economic_leg_effects_no_delete",
         "economic_leg_effects_no_replace",
+        "economic_leg_effects_no_replace_rowid",
         "economic_leg_effects_no_update",
         "economic_leg_effects_sealed"
       ],
@@ -7142,6 +7167,7 @@
         "card_purchase_recognition_legs_sealed",
         "economic_legs_no_delete",
         "economic_legs_no_replace",
+        "economic_legs_no_replace_rowid",
         "economic_legs_no_update",
         "economic_legs_sealed"
       ],
@@ -7292,6 +7318,7 @@
         "economic_revision_seals_guard",
         "economic_revision_seals_no_delete",
         "economic_revision_seals_no_replace",
+        "economic_revision_seals_no_replace_rowid",
         "economic_revision_seals_no_update"
       ],
       "noUpdateTriggers": [
@@ -7418,6 +7445,7 @@
         "entity_relations_bump_revision_update",
         "entity_relations_no_delete",
         "entity_relations_no_replace",
+        "entity_relations_no_replace_rowid",
         "entity_relations_no_update",
         "entity_relations_provenance"
       ],
@@ -9193,6 +9221,7 @@
         "identity_instrument_uses_bump_revision_update",
         "identity_instrument_uses_no_delete",
         "identity_instrument_uses_no_replace",
+        "identity_instrument_uses_no_replace_rowid",
         "identity_instrument_uses_no_update",
         "identity_use_provenance"
       ],
@@ -9311,6 +9340,7 @@
         "identity_observations_bump_revision_update",
         "identity_observations_no_delete",
         "identity_observations_no_replace",
+        "identity_observations_no_replace_rowid",
         "identity_observations_no_update",
         "identity_vpass_observation_binding"
       ],
@@ -9394,6 +9424,7 @@
       "triggers": [
         "identity_run_policies_no_delete",
         "identity_run_policies_no_replace",
+        "identity_run_policies_no_replace_rowid",
         "identity_run_policies_no_update",
         "identity_run_policies_provenance",
         "purchase_retirement_identity_run_policies_delete",
@@ -9456,6 +9487,7 @@
         "identity_run_seals_bump_revision_update",
         "identity_run_seals_no_delete",
         "identity_run_seals_no_replace",
+        "identity_run_seals_no_replace_rowid",
         "identity_run_seals_no_update",
         "identity_seal_complete",
         "identity_seal_success",
@@ -9524,6 +9556,7 @@
         "identity_runs_bump_revision_update",
         "identity_runs_no_delete",
         "identity_runs_no_replace",
+        "identity_runs_no_replace_rowid",
         "identity_runs_no_update"
       ],
       "noUpdateTriggers": [
@@ -9599,6 +9632,7 @@
         "identity_vpass_binding_provenance",
         "identity_vpass_bindings_no_delete",
         "identity_vpass_bindings_no_replace",
+        "identity_vpass_bindings_no_replace_rowid",
         "identity_vpass_bindings_no_update",
         "purchase_retirement_identity_vpass_bindings_delete",
         "purchase_retirement_identity_vpass_bindings_insert",
@@ -10056,6 +10090,7 @@
         "instrument_identifiers_bump_revision_update",
         "instrument_identifiers_no_delete",
         "instrument_identifiers_no_replace",
+        "instrument_identifiers_no_replace_rowid",
         "instrument_identifiers_no_update"
       ],
       "noUpdateTriggers": [
@@ -10170,6 +10205,7 @@
         "instrument_mappings_bump_revision_update",
         "instrument_mappings_no_delete",
         "instrument_mappings_no_replace",
+        "instrument_mappings_no_replace_rowid",
         "instrument_mappings_no_update"
       ],
       "noUpdateTriggers": [
@@ -10254,6 +10290,7 @@
         "instrument_temporal_acceptances_guard",
         "instrument_temporal_acceptances_no_delete",
         "instrument_temporal_acceptances_no_replace",
+        "instrument_temporal_acceptances_no_replace_rowid",
         "instrument_temporal_acceptances_no_update"
       ],
       "noUpdateTriggers": [
@@ -10354,6 +10391,7 @@
         "instrument_temporal_versions_guard",
         "instrument_temporal_versions_no_delete",
         "instrument_temporal_versions_no_replace",
+        "instrument_temporal_versions_no_replace_rowid",
         "instrument_temporal_versions_no_update"
       ],
       "noUpdateTriggers": [
@@ -10412,6 +10450,7 @@
         "instruments_bump_revision_update",
         "instruments_no_delete",
         "instruments_no_replace",
+        "instruments_no_replace_rowid",
         "instruments_no_update"
       ],
       "noUpdateTriggers": [
@@ -11340,6 +11379,7 @@
       "triggers": [
         "obligation_revisions_no_delete",
         "obligation_revisions_no_replace",
+        "obligation_revisions_no_replace_rowid",
         "obligation_revisions_supersede_only"
       ],
       "noUpdateTriggers": [],
@@ -12112,6 +12152,7 @@
       "triggers": [
         "operation_receipts_no_delete",
         "operation_receipts_no_replace",
+        "operation_receipts_no_replace_rowid",
         "operation_receipts_status_only"
       ],
       "noUpdateTriggers": [],
@@ -12532,6 +12573,7 @@
       "triggers": [
         "ops_requests_no_delete",
         "ops_requests_no_replace",
+        "ops_requests_no_replace_rowid",
         "ops_requests_progress_only"
       ],
       "noUpdateTriggers": [],
@@ -12672,6 +12714,7 @@
       "triggers": [
         "own_transfer_proposal_retirements_no_delete",
         "own_transfer_proposal_retirements_no_replace",
+        "own_transfer_proposal_retirements_no_replace_rowid",
         "own_transfer_proposal_retirements_no_update"
       ],
       "noUpdateTriggers": [
@@ -12857,6 +12900,7 @@
         "own_transfer_proposals_guard",
         "own_transfer_proposals_no_delete",
         "own_transfer_proposals_no_replace",
+        "own_transfer_proposals_no_replace_rowid",
         "own_transfer_proposals_no_update"
       ],
       "noUpdateTriggers": [
@@ -14217,6 +14261,7 @@
       "triggers": [
         "projection_input_records_no_delete",
         "projection_input_records_no_replace",
+        "projection_input_records_no_replace_rowid",
         "projection_input_records_no_update"
       ],
       "noUpdateTriggers": [
@@ -14819,6 +14864,7 @@
       "indexes": [],
       "triggers": [
         "raw_objects_no_delete",
+        "raw_objects_no_replace_rowid",
         "raw_objects_no_update",
         "raw_objects_reject_duplicate_insert"
       ],
@@ -14974,6 +15020,7 @@
         "reconciliation_proposals_insert_proposed",
         "reconciliation_proposals_no_delete",
         "reconciliation_proposals_no_replace",
+        "reconciliation_proposals_no_replace_rowid",
         "reconciliation_proposals_resolve_only"
       ],
       "noUpdateTriggers": [],
@@ -16506,6 +16553,7 @@
       "triggers": [
         "settlement_relations_no_delete",
         "settlement_relations_no_replace",
+        "settlement_relations_no_replace_rowid",
         "settlement_relations_supersede_only"
       ],
       "noUpdateTriggers": [],
@@ -16575,6 +16623,7 @@
         "source_accounts_bump_revision_update",
         "source_accounts_no_delete",
         "source_accounts_no_replace",
+        "source_accounts_no_replace_rowid",
         "source_accounts_no_update"
       ],
       "noUpdateTriggers": [
@@ -17721,6 +17770,13 @@
       "sqlSha256": "586b934595c22b41"
     },
     {
+      "name": "account_mappings_no_replace_rowid",
+      "table": "account_mappings",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "4dd78f637707f699"
+    },
+    {
       "name": "account_mappings_no_update",
       "table": "account_mappings",
       "timing": "BEFORE",
@@ -17761,6 +17817,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "67d6948ed76695c0"
+    },
+    {
+      "name": "accounts_no_replace_rowid",
+      "table": "accounts",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "b16c4ddfa162a067"
     },
     {
       "name": "accounts_no_update",
@@ -17819,6 +17882,13 @@
       "sqlSha256": "e31ac732b558168b"
     },
     {
+      "name": "allocations_no_replace_rowid",
+      "table": "allocations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "df80e69516d5ec9f"
+    },
+    {
       "name": "allocations_supersede_only",
       "table": "allocations",
       "timing": "BEFORE",
@@ -17838,6 +17908,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "e9ebfdabbd9c7254"
+    },
+    {
+      "name": "approvals_no_replace_rowid",
+      "table": "approvals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5ad17849e33e9baa"
     },
     {
       "name": "approvals_uses_only",
@@ -18113,6 +18190,13 @@
       "sqlSha256": "5502deffe25ac7cc"
     },
     {
+      "name": "audit_records_no_replace_rowid",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "24489ee0020df7ca"
+    },
+    {
       "name": "audit_records_no_update",
       "table": "audit_records",
       "timing": "BEFORE",
@@ -18295,6 +18379,13 @@
       "sqlSha256": "8b04d11199f47d7b"
     },
     {
+      "name": "card_purchase_recognition_keys_no_replace_rowid",
+      "table": "card_purchase_recognition_keys",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "e4ad8ced3f43f963"
+    },
+    {
       "name": "card_purchase_recognition_keys_no_update",
       "table": "card_purchase_recognition_keys",
       "timing": "BEFORE",
@@ -18351,6 +18442,13 @@
       "sqlSha256": "e5d06bdadf250904"
     },
     {
+      "name": "card_purchase_recognitions_no_replace_rowid",
+      "table": "card_purchase_recognitions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "04c61640e682e704"
+    },
+    {
       "name": "card_purchase_recognitions_no_update",
       "table": "card_purchase_recognitions",
       "timing": "BEFORE",
@@ -18372,6 +18470,13 @@
       "sqlSha256": "198a751a610abb7b"
     },
     {
+      "name": "card_settlement_allocation_withdrawals_no_replace_rowid",
+      "table": "card_settlement_allocation_withdrawals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "550aa66efd1bc8b2"
+    },
+    {
       "name": "card_settlement_allocation_withdrawals_no_update",
       "table": "card_settlement_allocation_withdrawals",
       "timing": "BEFORE",
@@ -18391,6 +18496,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "f4889aabb64ff5ca"
+    },
+    {
+      "name": "card_settlement_candidates_no_replace_rowid",
+      "table": "card_settlement_candidates",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "25516d10b0240663"
     },
     {
       "name": "card_settlement_candidates_no_update",
@@ -18470,6 +18582,13 @@
       "sqlSha256": "79210e794b12fb73"
     },
     {
+      "name": "card_settlement_decisions_no_replace_rowid",
+      "table": "card_settlement_decisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "07b811cc42af94a4"
+    },
+    {
       "name": "card_settlement_decisions_no_update",
       "table": "card_settlement_decisions",
       "timing": "BEFORE",
@@ -18489,6 +18608,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "7ae9109dcaabf202"
+    },
+    {
+      "name": "change_plans_no_replace_rowid",
+      "table": "change_plans",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "02375218f6f470e6"
     },
     {
       "name": "change_plans_status_only",
@@ -18631,6 +18757,13 @@
       "sqlSha256": "28b7662915ecf8fb"
     },
     {
+      "name": "decision_operations_no_replace_rowid",
+      "table": "decision_operations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "de649a12e5929959"
+    },
+    {
       "name": "decision_operations_no_update",
       "table": "decision_operations",
       "timing": "BEFORE",
@@ -18657,6 +18790,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "bdbc9e771962e827"
+    },
+    {
+      "name": "decision_outbox_no_replace_rowid",
+      "table": "decision_outbox",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "764b18d430e62dc8"
     },
     {
       "name": "decision_outbox_progress_only",
@@ -18699,6 +18839,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "d120a44be0e62231"
+    },
+    {
+      "name": "decision_revisions_no_replace_rowid",
+      "table": "decision_revisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "abf03e002437c088"
     },
     {
       "name": "decision_revisions_no_update",
@@ -18750,6 +18897,13 @@
       "sqlSha256": "31ee118901e35ce6"
     },
     {
+      "name": "economic_claims_no_replace_rowid",
+      "table": "economic_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "930340e234f6bcc7"
+    },
+    {
       "name": "economic_claims_no_update",
       "table": "economic_claims",
       "timing": "BEFORE",
@@ -18792,6 +18946,13 @@
       "sqlSha256": "4a92072675a73a68"
     },
     {
+      "name": "economic_commit_log_no_replace_rowid",
+      "table": "economic_commit_log",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "74d7eb2c21914249"
+    },
+    {
       "name": "economic_commit_log_no_update",
       "table": "economic_commit_log",
       "timing": "BEFORE",
@@ -18811,6 +18972,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "f1baf360be4724bc"
+    },
+    {
+      "name": "economic_event_revisions_no_replace_rowid",
+      "table": "economic_event_revisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "22e758f3a915d5be"
     },
     {
       "name": "economic_event_revisions_provenance",
@@ -18846,6 +19014,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "415f9f0f9e455d50"
+    },
+    {
+      "name": "economic_event_times_no_replace_rowid",
+      "table": "economic_event_times",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "0f413ba700c506b4"
     },
     {
       "name": "economic_event_times_no_update",
@@ -18904,6 +19079,13 @@
       "sqlSha256": "3d8d791433b3c1b0"
     },
     {
+      "name": "economic_leg_effects_no_replace_rowid",
+      "table": "economic_leg_effects",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "12071f1851db239f"
+    },
+    {
       "name": "economic_leg_effects_no_update",
       "table": "economic_leg_effects",
       "timing": "BEFORE",
@@ -18930,6 +19112,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "30b1593f78590ab4"
+    },
+    {
+      "name": "economic_legs_no_replace_rowid",
+      "table": "economic_legs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "67c18dd0255f0cd1"
     },
     {
       "name": "economic_legs_no_update",
@@ -18965,6 +19154,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "29bf60c0732b34c9"
+    },
+    {
+      "name": "economic_revision_seals_no_replace_rowid",
+      "table": "economic_revision_seals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "57db54b3263d677d"
     },
     {
       "name": "economic_revision_seals_no_update",
@@ -19007,6 +19203,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "bd8f83bfa1ecc99d"
+    },
+    {
+      "name": "entity_relations_no_replace_rowid",
+      "table": "entity_relations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "7c1992e5cad8cb3b"
     },
     {
       "name": "entity_relations_no_update",
@@ -19478,6 +19681,13 @@
       "sqlSha256": "1046617de1ab0f9f"
     },
     {
+      "name": "identity_instrument_uses_no_replace_rowid",
+      "table": "identity_instrument_uses",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "7f3d04bb0ea369cd"
+    },
+    {
       "name": "identity_instrument_uses_no_update",
       "table": "identity_instrument_uses",
       "timing": "BEFORE",
@@ -19527,6 +19737,13 @@
       "sqlSha256": "98c1f1cc9a7f9ffa"
     },
     {
+      "name": "identity_observations_no_replace_rowid",
+      "table": "identity_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "f993416f2b525986"
+    },
+    {
       "name": "identity_observations_no_update",
       "table": "identity_observations",
       "timing": "BEFORE",
@@ -19546,6 +19763,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "a77ecdfc8497557f"
+    },
+    {
+      "name": "identity_run_policies_no_replace_rowid",
+      "table": "identity_run_policies",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "fa2c57d522e1d33f"
     },
     {
       "name": "identity_run_policies_no_update",
@@ -19597,6 +19821,13 @@
       "sqlSha256": "82610415e385e740"
     },
     {
+      "name": "identity_run_seals_no_replace_rowid",
+      "table": "identity_run_seals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a191f71e07a39267"
+    },
+    {
       "name": "identity_run_seals_no_update",
       "table": "identity_run_seals",
       "timing": "BEFORE",
@@ -19637,6 +19868,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "a9a7dced4c83d141"
+    },
+    {
+      "name": "identity_runs_no_replace_rowid",
+      "table": "identity_runs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c290bf8a4599279d"
     },
     {
       "name": "identity_runs_no_update",
@@ -19686,6 +19924,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "b8ed37415a5df080"
+    },
+    {
+      "name": "identity_vpass_bindings_no_replace_rowid",
+      "table": "identity_vpass_bindings",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "ac4e43db3ab7b298"
     },
     {
       "name": "identity_vpass_bindings_no_update",
@@ -19779,6 +20024,13 @@
       "sqlSha256": "e6037eb6cc2e7464"
     },
     {
+      "name": "instrument_identifiers_no_replace_rowid",
+      "table": "instrument_identifiers",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "d635243d51ad25b4"
+    },
+    {
       "name": "instrument_identifiers_no_update",
       "table": "instrument_identifiers",
       "timing": "BEFORE",
@@ -19828,6 +20080,13 @@
       "sqlSha256": "1f09be7f6a2eb3ad"
     },
     {
+      "name": "instrument_mappings_no_replace_rowid",
+      "table": "instrument_mappings",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "736a3e6914aaec82"
+    },
+    {
       "name": "instrument_mappings_no_update",
       "table": "instrument_mappings",
       "timing": "BEFORE",
@@ -19856,6 +20115,13 @@
       "sqlSha256": "39151d8c359e21e9"
     },
     {
+      "name": "instrument_temporal_acceptances_no_replace_rowid",
+      "table": "instrument_temporal_acceptances",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5b8e88d46953898f"
+    },
+    {
       "name": "instrument_temporal_acceptances_no_update",
       "table": "instrument_temporal_acceptances",
       "timing": "BEFORE",
@@ -19882,6 +20148,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "e1215ec9f2e477d5"
+    },
+    {
+      "name": "instrument_temporal_versions_no_replace_rowid",
+      "table": "instrument_temporal_versions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "428ab87ab62898aa"
     },
     {
       "name": "instrument_temporal_versions_no_update",
@@ -19924,6 +20197,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "cc3cd284be62073c"
+    },
+    {
+      "name": "instruments_no_replace_rowid",
+      "table": "instruments",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "d556e608662cc07a"
     },
     {
       "name": "instruments_no_update",
@@ -20073,6 +20353,13 @@
       "sqlSha256": "eeb2c4b157d3ee93"
     },
     {
+      "name": "obligation_revisions_no_replace_rowid",
+      "table": "obligation_revisions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "df1d8a3a8e112e3b"
+    },
+    {
       "name": "obligation_revisions_supersede_only",
       "table": "obligation_revisions",
       "timing": "BEFORE",
@@ -20157,6 +20444,13 @@
       "sqlSha256": "f576dd51c1f7f260"
     },
     {
+      "name": "operation_receipts_no_replace_rowid",
+      "table": "operation_receipts",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "520b5e8b04d02254"
+    },
+    {
       "name": "operation_receipts_status_only",
       "table": "operation_receipts",
       "timing": "BEFORE",
@@ -20213,6 +20507,13 @@
       "sqlSha256": "d8f965690b226cad"
     },
     {
+      "name": "ops_requests_no_replace_rowid",
+      "table": "ops_requests",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "8be0e7b5844f4722"
+    },
+    {
       "name": "ops_requests_progress_only",
       "table": "ops_requests",
       "timing": "BEFORE",
@@ -20232,6 +20533,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "c8277be83aff4a46"
+    },
+    {
+      "name": "own_transfer_proposal_retirements_no_replace_rowid",
+      "table": "own_transfer_proposal_retirements",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a3450dcd04271dda"
     },
     {
       "name": "own_transfer_proposal_retirements_no_update",
@@ -20260,6 +20568,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "538f6e69c71ec8f8"
+    },
+    {
+      "name": "own_transfer_proposals_no_replace_rowid",
+      "table": "own_transfer_proposals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c8f325dfee597462"
     },
     {
       "name": "own_transfer_proposals_no_update",
@@ -20526,6 +20841,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "4e9bc22602381d27"
+    },
+    {
+      "name": "projection_input_records_no_replace_rowid",
+      "table": "projection_input_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a966bc72ae00f1df"
     },
     {
       "name": "projection_input_records_no_update",
@@ -20948,6 +21270,13 @@
       "sqlSha256": "5a7b63dbbfb20029"
     },
     {
+      "name": "raw_objects_no_replace_rowid",
+      "table": "raw_objects",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "6ded56e35ebe96fa"
+    },
+    {
       "name": "raw_objects_no_update",
       "table": "raw_objects",
       "timing": "BEFORE",
@@ -20981,6 +21310,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "37087bc621653c52"
+    },
+    {
+      "name": "reconciliation_proposals_no_replace_rowid",
+      "table": "reconciliation_proposals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "4bf273093837a9b4"
     },
     {
       "name": "reconciliation_proposals_resolve_only",
@@ -21305,6 +21641,13 @@
       "sqlSha256": "b3a445fb0a177773"
     },
     {
+      "name": "settlement_relations_no_replace_rowid",
+      "table": "settlement_relations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c552ae38065b2792"
+    },
+    {
       "name": "settlement_relations_supersede_only",
       "table": "settlement_relations",
       "timing": "BEFORE",
@@ -21345,6 +21688,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "32fe2d070bd09147"
+    },
+    {
+      "name": "source_accounts_no_replace_rowid",
+      "table": "source_accounts",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "afe2b9d0e72a9a31"
     },
     {
       "name": "source_accounts_no_update",
@@ -22150,7 +22500,7 @@
   "summary": {
     "tableCount": 142,
     "viewCount": 44,
-    "triggerCount": 538,
+    "triggerCount": 581,
     "explicitIndexCount": 147,
     "byClassification": {
       "core-keep": [
@@ -22425,6 +22775,6 @@
       "0100_sbi_supplemental_unit_eligibility.sql",
       "0101_myjcb_document_unit_eligibility.sql"
     ],
-    "schemaSha256": "28706e40ed863c826e77f7209b60f4a35d5d8b475f49b84c4672c1e1faf12e4c"
+    "schemaSha256": "efc09ddff5b8e2158d904734fa1277972e3b68d2518ce73cd544f3322c645a74"
   }
 }

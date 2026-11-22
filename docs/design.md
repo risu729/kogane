@@ -112,6 +112,47 @@ their append-only guards with their exact text, and keeps every id, raw
 object and other column. No other migration may rewrite evidence without a
 new ADR.
 
+Append-only tables refuse `UPDATE` and `DELETE` by trigger. SQLite's
+`INSERT OR REPLACE` deletes every row a new row collides with (on the primary
+key, a unique index or the rowid) without firing `DELETE` triggers while
+`recursive_triggers` is off, as on D1, so a table also needs a replacement
+guard: a `BEFORE INSERT` trigger that refuses an insert colliding with a
+stored row. What the guards cover today:
+
+- The keys each guard names (`*_no_replace`, `*_reject_duplicate_insert` and a
+  few `*_guard` triggers; 0001, 0018, 0029, 0105 and later migrations).
+- The rowid, on every table with a guard: an INTEGER PRIMARY KEY is its rowid
+  and its guard names it (`economic_identity_epochs` instead requires the next
+  ordinal); the observation decimal and price tables check
+  `rowid` in their 0105 guard; and since migration 0106 the 43 other tables
+  with a hidden rowid or an unchecked integer key (`raw_objects`, identity,
+  the decision log, plans, receipts, the outbox, audit, the economic tables
+  and the card relations) have a second trigger, `<table>_no_replace_rowid`.
+  0106 adds triggers only and changes no existing one. The rowid check relies
+  on `NEW.rowid` being -1 when an insert names no rowid; SQLite documents that
+  value as undefined, bun:sqlite and Miniflare's D1 give -1, and no writer
+  names a rowid.
+
+Open limits, pinned by `packages/storage-d1/test/no-replace-rowid-migration.test.ts`:
+
+- Thirty-six tables refuse `DELETE` by trigger but have no replacement guard,
+  among them `card_debit_account_statement`,
+  `card_settlement_debit_account_evidence`, `fetch_run_annotations`,
+  `parse_runs`, `published_parse_runs`, `metadata_projections`,
+  `calculation_results`, `report_artifacts` and the reward claim tables; a
+  REPLACE on their key or rowid still deletes a stored row. `parser_releases`
+  has a `BEFORE INSERT` trigger that refuses only a changed code digest, so
+  its `release_id` is not guarded either.
+- Some guards do not name a unique key of their table: the live-pair indexes
+  of `allocations` and `settlement_relations`, the idempotency and
+  confirm-once indexes of `audit_records`, the policy key of
+  `identity_run_policies`, the idempotency key of `ops_requests` and the
+  digest of `reconciliation_proposals`. A REPLACE colliding on one of those
+  still deletes the stored row.
+
+No production writer uses `OR REPLACE`, so these limits are reachable only
+through a statement the code does not issue.
+
 Evidence is not "the truth" — providers correct their own data. Evidence is a
 record of _what a source claimed at a point in time_. That is why nothing
 overwrites it, and why multiple conflicting claims can coexist.
