@@ -16,13 +16,16 @@
 // timestamps docs/design.md separates.
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
+import { parseLocalDate } from "../../../domain/src/time.ts";
 import { amountToMinorUnits, decimalText, decodeUtf8, isObject } from "./util.ts";
 
 const SOURCE_ACCOUNT = "sbi-securities:domestic";
 
 export const sbiDomesticTradeRecords: Parser = {
   name: "sbi-domestic-trade-records",
-  version: "0.2.1",
+  // 0.2.2: a stated `tradeDate` that is not a calendar `YYYY-MM-DD` date gives
+  // no as_of and a warning; every valid date reads as in 0.2.1.
+  version: "0.2.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "domestic-trade-records";
@@ -75,7 +78,20 @@ export const sbiDomesticTradeRecords: Parser = {
           : undefined;
         const description =
           typeof rawCells?.[1] === "string" ? rawCells[1] : String(record["issueName"] ?? "");
-        const tradeDate = typeof record["tradeDate"] === "string" ? record["tradeDate"] : undefined;
+        // The collector writes `20YY-MM-DD` from the page's `YY/MM/DD` cell
+        // without a calendar check, and as_of orders transactions by text.
+        // Only a calendar `YYYY-MM-DD` date is one; any other stated value
+        // stays in `extra` and is never stored as if it were a date.
+        const statedDate = record["tradeDate"];
+        const tradeDate =
+          typeof statedDate === "string" && parseLocalDate(statedDate) !== null
+            ? statedDate
+            : undefined;
+        if (statedDate !== undefined && tradeDate === undefined) {
+          warnings.push(
+            `records[${index}]: tradeDate is not a calendar YYYY-MM-DD date; recorded without as_of`,
+          );
+        }
         const externalId = typeof record["id"] === "string" ? record["id"] : undefined;
         return {
           kind: "transaction",
