@@ -179,11 +179,13 @@ same instrument is never used. Exclusion counts cover only the rows the read
 returns. Before the window the read returns only the rows of the newest
 instant (`before-window`), whatever their rule, kind, amount, basis or
 effective-time shape (a date-only row, or one the domain cannot read). When
-the policy excludes every one of them, no older row is read, so a key whose
-older price would have been usable reads `missing` rather than `stale`, and
-the age of that price is not reported; no amount is taken as zero. In
-`known-at` mode a row whose `recorded_at` SQLite cannot read as a time is not
-read. Nothing fetches a price or rate from an external source.
+every one of them is excluded (by the policy, a non-positive amount, an
+unreadable effective time or, in `known-at` mode, a `recorded_at` after K) and
+no other row read is eligible, no older row is read, so a key whose older
+price would have been usable reads `missing` rather than `stale`, and the age
+of that price is not reported; no amount is taken as zero. In `known-at` mode
+a row whose `recorded_at` SQLite cannot read as a time is not read. Nothing
+fetches a price or rate from an external source.
 The candidate read reaches each key by index but reads that key's whole
 history (the window bounds what it returns, not what it reads): 13 currencies
 four times a day took about 90 ms over 1,000 boards and 360–500 ms over 4,380
