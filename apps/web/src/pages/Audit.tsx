@@ -28,7 +28,7 @@ import {
   type AuditRecordWire,
 } from "../audit-api.ts";
 import { displayLabel, ownEntry } from "../labels.ts";
-import { Pagination } from "../pagination.tsx";
+import { CursorPager } from "../pagination.tsx";
 import { isOperationId, operationRoute } from "../operations-api.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Badge, EmptyState, Notice, Panel, QueryBoundary, type Tone } from "../ui.tsx";
@@ -317,7 +317,9 @@ function RecordRow({ record }: { record: AuditRecordWire }): ReactNode {
 
 /** A refusal the page can explain; anything else goes to the shared error state. */
 function Refusal({ error, onRestart }: { error: ApiError; onRestart: () => void }): ReactNode {
-  if (error.status === 403)
+  // The App answers 401 to a caller Access did not verify and 403 to a
+  // verified one that is not the operator; neither may read this log.
+  if (error.status === 401 || error.status === 403)
     return (
       <div className="state state-error" role="alert">
         <span className="state-title">監査ログは管理者だけが表示できます</span>
@@ -331,7 +333,7 @@ function Refusal({ error, onRestart }: { error: ApiError; onRestart: () => void 
   if (error.status === 409)
     return (
       <div className="state state-error" role="alert">
-        <span className="state-title">続きのページを読めません</span>
+        <span className="state-title">このページの続きを読み込めません</span>
         <p>
           ページの続きは、それを読み始めたときの絞り込み条件でしか読めません。最新の記録から読み直してください。
         </p>
@@ -360,7 +362,7 @@ function Records({ filters }: { filters: AuditFilters }): ReactNode {
   if (
     query.isError &&
     query.error instanceof ApiError &&
-    [400, 403, 404, 409].includes(query.error.status)
+    [400, 401, 403, 404, 409].includes(query.error.status)
   )
     return <Refusal error={query.error} onRestart={restart} />;
   return (
@@ -405,31 +407,19 @@ function Records({ filters }: { filters: AuditFilters }): ReactNode {
               </table>
             </div>
           )}
-          <Pagination
+          <CursorPager
             label="監査ログのページ"
-            status={page.cursor === null ? "最後のページです" : "続きがあります"}
-            previous={{
-              label: "前のページ",
-              disabled: query.isFetching || trail.length === 1,
-              onClick: () => setTrail(trail.slice(0, -1)),
+            fetching={query.isFetching}
+            canGoBack={trail.length > 1}
+            hasMore={page.cursor !== null}
+            onPrevious={() => setTrail(trail.slice(0, -1))}
+            onNext={() => {
+              if (page.cursor !== null) setTrail([...trail, page.cursor]);
             }}
-            next={{
-              label: "次のページ",
-              disabled: query.isFetching || page.cursor === null,
-              onClick: () => {
-                if (page.cursor !== null) setTrail([...trail, page.cursor]);
-              },
+            restart={{
+              label: "最新の記録から読み直す",
+              onClick: () => (trail.length === 1 ? void query.refetch() : restart()),
             }}
-            actions={
-              <button
-                className="button"
-                type="button"
-                disabled={query.isFetching}
-                onClick={() => (trail.length === 1 ? void query.refetch() : restart())}
-              >
-                最新の記録から読み直す
-              </button>
-            }
           />
         </Panel>
       )}

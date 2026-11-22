@@ -21,7 +21,7 @@ import {
 } from "../../../packages/application/src/query/card-purchases.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 
 export const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
 const PARAMETERS = [
@@ -125,8 +125,7 @@ export async function cardPurchasesApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== CARD_PURCHASES_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (!(await cardPurchasesAvailable(env))) throw new HttpError(404, "not_found");
   const principal = principalFor(env, subject);
   if (principal.kind !== "human" || !principal.capabilities.includes("interpretation.accept"))

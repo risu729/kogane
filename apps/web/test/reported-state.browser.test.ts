@@ -112,14 +112,17 @@ describe.if(runnable)("reported state on a date", () => {
     expect(main).toContain("4日以上前の取得");
     expect(main).toContain("3日以内に取得");
     // Provider valuations in the provider's currency, side by side.
-    expect(main).toContain("12000 JPY");
+    expect(main).toContain("12,000 JPY");
     expect(main).toContain("150.25 USD");
-    expect(main).toContain("50000 JPY");
+    expect(main).toContain("50,000 JPY");
     // An unreadable balance stays unknown, never zero.
     expect(main).toContain("不明（stored:unparsed） · JPY");
-    // Nothing is added: no sum of the JPY figures appears anywhere.
-    for (const combined of ["62000", "80000", "92000", "112000"])
+    // Nothing is added: no sum of the JPY figures appears anywhere, grouped
+    // as the shared formatter writes it or not.
+    for (const combined of ["62000", "80000", "92000", "112000"]) {
       expect(main).not.toContain(combined);
+      expect(main).not.toContain(`${combined.slice(0, -3)},${combined.slice(-3)}`);
+    }
     expect(main).toContain("この一覧は資産や負債の合計ではありません。");
     await page.close();
   }, 30_000);

@@ -374,7 +374,7 @@ function DispositionTable({
               </td>
               <td>
                 {row.gap === null ? (
-                  <Nullable value={null} placeholder="—" />
+                  <Nullable value={null} placeholder="なし" />
                 ) : (
                   <>
                     {reason(row.gap)} <code className="dim">{row.gap}</code>

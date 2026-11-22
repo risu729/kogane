@@ -571,7 +571,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                           <td>
                             <Nullable
                               value={data.currentRevisions[row.subjectRef]}
-                              placeholder="—"
+                              placeholder="現在の版の報告なし"
                             />
                           </td>
                           <td>{targetLabel(row.currentTargetRef)}</td>
@@ -607,7 +607,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   <KvRow label="再処理対象の解析実行">{data.simulation.affectedParseRuns} 件</KvRow>
                   <KvRow label="影響する取得元">
                     {data.simulation.affectedScopes.length === 0 ? (
-                      <Nullable value={null} placeholder="—" />
+                      <Nullable value={null} placeholder="なし" />
                     ) : (
                       data.simulation.affectedScopes.join("、")
                     )}

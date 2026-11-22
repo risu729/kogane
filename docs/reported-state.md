@@ -362,7 +362,8 @@ processes):
 The five reads are issued concurrently through the executor, one statement
 each, plus the settlement read. What grows with history: the snapshot CTEs
 read every artifact once per read (through
-`idx_fetch_artifacts_source_dataset_time`), as the current-state reads do, and
+`idx_fetch_artifacts_source_dataset_time`; the current-state reads scan them
+two or three times, [read model: rows read by the latest-state reads](read-model.md#rows-read-by-the-latest-state-reads)), and
 the statement read and the count of the statements before the window each
 rank every captured statement total before the cutoff, as
 `card_statement_facts` does. Everything else is reached by key: parses through

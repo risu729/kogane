@@ -120,7 +120,7 @@ describe("a stored basis refuses a repeated reference", () => {
     ...inactivity,
     ruleId: "rule:program-a:tiered",
     applicability: { ...inactivity.applicability, tiers: ["elite"] },
-    deadlineCalendar: { ...inactivity.deadlineCalendar, zoneBasis: "assumed" },
+    deadlineCalendar: { ...inactivity.deadlineCalendar!, zoneBasis: "assumed" },
   };
   const claim: MembershipState = {
     programId: "program:a",

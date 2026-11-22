@@ -12,7 +12,7 @@ import {
   d1CommandStore,
   ERROR_STATUS,
   auditPageFilters,
-  financialError,
+  wholeStoreReadRefusal,
   readEconomicRowReadinessForGrant,
   readCardSettlementsForGrant,
   readCardSettlementStatementsForGrant,
@@ -186,7 +186,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.card-settlements.unmatched":
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.card-settlements.debit-accounts":
-    "Which bank account each credit card is debited from, the same answer as the operator's カード照合 page. Default view: per card (at most 100; cardsTruncated says when more exist) its newest statement, the provider-stated side (the newest MyJCB 「カード情報」 readings; status named, conflicting, not_named or absent with source_has_no_debit_account_statement or evidence_not_recorded), accepted and undecided candidates per bank account, and the answer: provider-stated, else accepted-settlement (weaker: an amount match a person accepted), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed codes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting). A provider-stated answer with any code is not confirmed: with newer_reading_unresolved the account may have changed. Undecided candidates never answer. view: upcoming (the page's 次回の引落, ?view=upcoming) is compact: bills (each card whose newest statement is due today or later, Asia/Tokyo: card label, statementPeriod, debitDate, amount as exact decimal text or status and reason, debitAccount with answer, account, label, since, codes); byDebitAccount, one line per account and debit date counting every bill to it due by then (cardBills summed exactly) with the account's newest reported balance (never summed) and capturedAt, and covers: yes or no only on exact figures, else unknown with reasons debit_account_unknown, bill_not_exact, balance_not_exact, balance_before_previous_debit, cards_with_unknown_account or cards_with_unknown_due_date; the note other_debits_not_modelled is always there (only known card bills are compared); notListed, other cards with no_statement, payment_date_not_published, no_statement_due, statement_settled or statement_total_refund_or_zero (refund or zero, never netted) and their last statement, never a zero bill. Under records.read and a whole-store read grant. Read-only; it changes no candidate and no setting at any provider.",
+    "Which bank account each credit card is debited from, the same answer as the operator's カード照合 page. Default view: per card (at most 100; cardsTruncated says when more exist) its newest statement, the provider-stated side (the newest MyJCB 「カード情報」 readings; status named, conflicting, not_named or absent with source_has_no_debit_account_statement or evidence_not_recorded), accepted and undecided candidates per bank account, and the answer: provider-stated, else accepted-settlement (weaker: an amount match a person accepted), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed codes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting). A provider-stated answer with any code is not confirmed: with newer_reading_unresolved the account may have changed. Undecided candidates never answer. view: upcoming (the page's 次回の引落, ?view=upcoming) is compact: bills (each card whose newest statement is due today or later, Asia/Tokyo: card label, statementPeriod, debitDate, amount as exact decimal text or status and reason, debitAccount with answer, account, label, since, codes); byDebitAccount, one line per account and debit date counting every bill to it due by then (cardBills summed exactly) with the account's newest reported balance (never summed) and capturedAt, and covers: yes or no only on exact figures, else unknown with reasons debit_account_unknown, unit_mismatch, bill_not_exact, balance_not_exact, balance_before_previous_debit, cards_with_unknown_account or cards_with_unknown_due_date; the note other_debits_not_modelled is always there (only known card bills are compared); notListed, other cards with no_statement, payment_date_not_published, no_statement_due, statement_settled or statement_total_refund_or_zero (refund or zero, never netted) and their last statement, never a zero bill. Under records.read and a whole-store read grant. Read-only; it changes no candidate and no setting at any provider.",
   "kogane.decisions.pending":
     "What waits for the owner's decision, in one answer under 8 KB, the same as the operator's ホーム page (GET /api/v2/decisions/pending): one line per kind of open proposal (card-settlement.statement: statements with an undecided candidate and no live acceptance; card-ownership.account: accounts those candidates name with no current accepted ownership claim; account-candidate.open/held and instrument-candidate.open/held: the candidate reviews' views; pending-posted.link: undecided pending-to-posted proposals; maintenance-survey.proposal: undecided re-survey proposals of the grant's schedule sources; change-plan.open: planned or approved plans not yet expired), each with its count (complete false: at least countBound), the first ids (at most 5), the oldest proposal time where one is recorded (timeBasis), and its handler: the page, the read tool, the argument an id goes in and the tool that decides it. A line its deployment does not serve, its grant cannot read or its own read refuses past its bounds is unavailable with not_served, unauthorized or budget_exceeded; the other lines still answer. notCovered names the queues it does not count and why. Under records.read and a whole-store read grant. Read-only: it decides, proposes and changes nothing.",
   "kogane.changes.since":
@@ -288,22 +288,8 @@ async function readTool(
       case "kogane.reported-state.read": {
         // The grant first, before the body is validated: records.read over the
         // whole store (plan D5, ADR 0063 decision 10).
-        if (!grantAllows(grant, "records.read"))
-          return {
-            status: ERROR_STATUS.unauthorized,
-            body: financialError("unauthorized", "reported-state.read", [
-              "capability:records.read",
-            ]),
-          };
-        const narrowed = [
-          ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-          ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-        ];
-        if (narrowed.length > 0)
-          return {
-            status: ERROR_STATUS.evidence_restricted,
-            body: financialError("evidence_restricted", "reported-state.read", narrowed),
-          };
+        const refused = wholeStoreReadRefusal(grant, "records.read", "reported-state.read");
+        if (refused) return { status: ERROR_STATUS[refused.code], body: refused };
         // The route's own service decides the body: its request rules, its
         // reader and its refusal codes, once for both transports.
         const state = await readReportedState(env, body ?? {});

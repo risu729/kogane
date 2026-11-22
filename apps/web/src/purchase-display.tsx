@@ -174,7 +174,10 @@ export function statementCell(view: CardPurchaseView): string {
 }
 
 export function settlementCell(view: CardPurchaseView): string {
-  if (view.settlement === null) return view.statement.status === "linked" ? "未照合" : "—";
+  // Without a linked statement there is no debit to follow; the detail page
+  // says the same in a sentence, and the statement cell gives the reason.
+  if (view.settlement === null)
+    return view.statement.status === "linked" ? "未照合" : "引落をたどれません";
   return view.settlement.bankDebit === null
     ? SETTLEMENT_STATUS[view.settlement.reviewStatus]
     : "引落を確認済み";

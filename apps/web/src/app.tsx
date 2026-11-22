@@ -261,7 +261,7 @@ export function App(): ReactNode {
             ) : (
               "データの種類は未確認です"
             )}
-            {metadata.isError && metadata.data ? "（前回の接続情報）" : ""}
+            {metadata.isError && metadata.data ? "（前回読み込んだ接続情報を表示しています）" : ""}
           </>
         ),
       }}

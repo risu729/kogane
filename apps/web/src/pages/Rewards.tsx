@@ -13,6 +13,7 @@ import { displayLabel } from "../labels.ts";
 import type { RewardProviderExpirySection } from "../../../../packages/domain/src/reward-expiry-observations.ts";
 import { type ReactNode } from "react";
 import { useFeatures } from "../api.ts";
+import { formatDecimal } from "../money.ts";
 import { Badge, EmptyState, Kv, KvRow, Loading, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
   useRewardExpiry,
@@ -100,6 +101,8 @@ const REASON_LABELS: Record<string, string> = {
   fixed_deadline_not_derivable:
     "この規約では期限が個別に決まり、取得元の表示以外に根拠がありません",
   qualifying_activity_policy_missing: "期限延長の対象になる活動の定義が見つかりません",
+  deadline_calendar_unreadable:
+    "期限を数える暦（タイムゾーンと日の区切り）の保存値を読み取れないため、期限を算定していません",
   provider_expiry_unparsed: "取得元の期限表示を読み取れませんでした",
   provider_expiry_not_a_calendar_date: "取得元の期限表示が暦日として成立しません",
   stored_expiry_invalid: "保存された期限の形式を読み取れませんでした",
@@ -134,13 +137,9 @@ function Quantity({ quantity }: { quantity: RewardQuantity }): ReactNode {
         <span className="reward-unit">{reasonText(quantity.value.reasonCode)}</span>
       </span>
     );
-  const { coefficient, scale } = quantity.value.value;
-  const negative = coefficient.startsWith("-");
-  const digits = (negative ? coefficient.slice(1) : coefficient).padStart(scale + 1, "0");
-  const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
   return (
     <span className="amount">
-      {`${negative ? "-" : ""}${text}`} <span className="reward-unit">{quantity.unitRef}</span>
+      {formatDecimal(quantity.value.value)} <span className="reward-unit">{quantity.unitRef}</span>
     </span>
   );
 }

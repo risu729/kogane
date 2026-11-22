@@ -13,7 +13,7 @@ import type {
   AccountHistoryRead,
 } from "../../../packages/application/src/query/account-history-read.ts";
 import { displayLabel } from "./labels.ts";
-import { Loading, Notice } from "./ui.tsx";
+import { QueryBoundary } from "./ui.tsx";
 
 const LABELS = { mapping: "対応付け", decision: "判断", relation: "関係" } as const;
 const RELATION_LABELS: Readonly<Record<string, string>> = {
@@ -93,28 +93,27 @@ export function AccountHistory({ sourceAccountId }: { sourceAccountId: string })
       </button>
       {opened ? (
         <div>
-          {query.isPending ? <Loading label="訂正履歴を読み込んでいます" /> : null}
-          {query.isError ? (
-            <Notice tone="bad" role="alert">
-              {query.error.message}
-            </Notice>
-          ) : null}
-          {query.data ? (
-            <>
-              <p className="footnote">
-                記録順の履歴です。以前の判断は消さず、訂正は後の記録として残ります。有効期間ごとの対応付けは未対応です。
-              </p>
-              {query.data.entries.length === 0 ? (
-                <p>履歴はありません。</p>
-              ) : (
-                <ol className="warning-list">
-                  {query.data.entries.map((entry) => (
-                    <HistoryEntry key={`${entry.entry}:${entry.recordId}`} entry={entry} />
-                  ))}
-                </ol>
-              )}
-            </>
-          ) : null}
+          {/* Reopening reads the history again; if that read fails, the
+              earlier answer stays only under QueryBoundary's 前回読み込んだ
+              warning. */}
+          <QueryBoundary query={query} label="取得元の口座の訂正履歴">
+            {(data) => (
+              <>
+                <p className="footnote">
+                  記録順の履歴です。以前の判断は消さず、訂正は後の記録として残ります。有効期間ごとの対応付けは未対応です。
+                </p>
+                {data.entries.length === 0 ? (
+                  <p>履歴はありません。</p>
+                ) : (
+                  <ol className="warning-list">
+                    {data.entries.map((entry) => (
+                      <HistoryEntry key={`${entry.entry}:${entry.recordId}`} entry={entry} />
+                    ))}
+                  </ol>
+                )}
+              </>
+            )}
+          </QueryBoundary>
         </div>
       ) : null}
     </div>

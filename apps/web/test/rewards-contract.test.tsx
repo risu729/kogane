@@ -44,7 +44,7 @@ const page: RewardReadExpiryPage = {
         unitRef: "points:synthetic",
         value: {
           status: "exact",
-          value: { coefficient: "12345", scale: 2 },
+          value: { coefficient: "123456789", scale: 2 },
           normalizationVersion: "decimal-v1",
         },
       },
@@ -79,7 +79,7 @@ test("READ expiry keeps undated buckets, native quantities, snapshot time and pa
   for (const text of [
     "期限未確認",
     "未確定",
-    "123.45",
+    "1,234,567.89",
     "points:synthetic",
     "2026-12-31",
     "取得元の表示",
@@ -310,7 +310,7 @@ test("READ expiry displays unclassified dated and undated quantities with the co
   const html = renderToStaticMarkup(<RewardExpiryResults data={data} />);
   for (const text of [
     "種類未確認",
-    "123.45",
+    "1,234,567.89",
     "points:synthetic",
     "2026-12-31",
     "期限未確認",
