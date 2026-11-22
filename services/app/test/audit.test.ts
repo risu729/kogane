@@ -510,6 +510,18 @@ describe("the schedule settings routes (ui)", () => {
     expect(
       (await recordsOf(conflict.requestId)).map((row) => [row["result"], row["result_code"]]),
     ).toEqual([["refused", "revision_conflict"]]);
+    // The answer crosses as its bytes, a leading byte-order mark included; the
+    // record reads a decoded copy, which drops the mark as a text read did, so
+    // the refusal keeps its closed code.
+    const conflictBytes = new TextEncoder().encode('{"error":"revision_conflict"}');
+    const marked = await settings(
+      "/sony-bank",
+      () => new Response(new Uint8Array([0xef, 0xbb, 0xbf, ...conflictBytes]), { status: 409 }),
+    );
+    expect(marked.response.status).toBe(409);
+    expect(
+      (await recordsOf(marked.requestId)).map((row) => [row["result"], row["result_code"]]),
+    ).toEqual([["refused", "revision_conflict"]]);
     const saved = await settings(
       "/leases/sony-bank",
       () =>
