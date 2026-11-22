@@ -65,7 +65,7 @@ export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
 
 /** Parts of the perimeter a reported state deliberately does not list (decision 2). */
 export const REPORTED_STATE_EXCLUSIONS = [
-  { scope: "source:moneyforward", reasonCode: "aggregator" },
+  { scope: "source:moneyforward-me", reasonCode: "aggregator" },
   { scope: "container:sbi-account-assets-current", reasonCode: "aggregate_total" },
   { scope: "container:sony-bank-gross-balance", reasonCode: "aggregate_total" },
   { scope: "metric:event-reported", reasonCode: "balance_after_transaction" },

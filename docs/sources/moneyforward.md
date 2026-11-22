@@ -49,6 +49,12 @@ Only three collector read surfaces are allowed.
 2. One detail HTML for each account enumerated from that index
 3. Monthly statement HTML fragments for the latest 12 months including current month, per account
 
+The 12 months are JST calendar months, computed once per run from the run's start instant (the
+terminal's `startedAt`), so every account is asked for the same months even when a run crosses a JST
+month boundary between accounts. Until 2026-11-21 each account read the clock again, so such a run
+could ask a later account for a window one month later. Verified with a mocked clock and a synthetic
+provider in `services/collector-moneyforward/test/moneyforward.test.ts`.
+
 Manifest `moneyforward-worker-poc-v1` declares dates, run UUID, start/completion times, status, artifact order,
 dataset, media type, byte size, SHA-256, failure stage. Saving it last prevents incomplete runs being treated
 as successes based only on prefixes.

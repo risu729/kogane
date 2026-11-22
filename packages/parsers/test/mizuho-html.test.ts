@@ -107,11 +107,15 @@ describe("account HTML parser", () => {
     failure(() => parseAccountPage(accountPage() + accountPage()), "unrecognized-page");
   });
   test("errors never include private provider text", () => {
+    // Caught outside the catch, so a page that parses without an error fails
+    // here instead of passing with no assertion.
+    let caught: unknown;
     try {
       parseAccountPage(accountPage().replaceAll("1,234", "private-secret"));
     } catch (error) {
-      expect(String(error)).toBe("MizuhoParseError: invalid-yen-amount");
+      caught = error;
     }
+    expect(String(caught)).toBe("MizuhoParseError: invalid-yen-amount");
   });
 });
 

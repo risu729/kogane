@@ -106,7 +106,7 @@ export interface ApiCapabilities {
   readonly identityReadModes: readonly IdentityReadMode[];
   /** Pagination of the v1 list routes. */
   readonly paginationVersion: PaginationVersion;
-  /** `/api/v2/balances/latest` and `/api/v2/balances/history` are served. */
+  /** `/api/v2/balances/latest`, `/history` and `/cash` are served. */
   readonly balancesV2: boolean;
   /** Pagination of the v2 balance routes; `none` when they are not served. */
   readonly balancesV2Pagination: PaginationVersion;
@@ -193,6 +193,15 @@ export interface ApiCapabilities {
    */
   readonly reportArtifacts?: boolean;
   /**
+   * `GET /api/v2/decisions/pending` is served: what waits for the owner's
+   * decision, one line per kind (ADR 0126), the ホーム page's 判断待ち panel.
+   * The App Worker serves it wherever it runs; a store without the route
+   * (the local evidence browser) leaves it off, so the panel discovers the
+   * route instead of probing for it. Not an authorization decision: the
+   * route is the operator's and refuses anyone else.
+   */
+  readonly pendingDecisions?: boolean;
+  /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
    * progress of one accepted operation. False everywhere the
@@ -230,6 +239,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
   reportArtifacts: false,
+  pendingDecisions: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -267,6 +277,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
   reportArtifacts: false,
+  pendingDecisions: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -348,6 +359,9 @@ export const LIST_REQUEST_SCHEMA = {
     offset: "paginationVersion:offset-v1",
     latestOffset: "paginationVersion:offset-v1",
     identityRead: "identityReadModes",
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-20),
+    // gated as on `/api/overview`: the local store answers its full list only.
+    detail: "sharedQuery",
   },
   "/api/positions": {
     source: "collectionFilters",
@@ -387,6 +401,16 @@ export const LIST_REQUEST_SCHEMA = {
     // `summary` (the default) or `full` (ADR 0123).
     detail: "balancesV2",
   },
+  // Cash per account (ADR 0123, amendment 2026-11-20): one detail, its own
+  // lines, so no `metric`, `view` or `detail`.
+  "/api/v2/balances/cash": {
+    source: "collectionFilters",
+    account: "collectionFilters",
+    instrument: "collectionFilters",
+    identityRead: "identityReadModes",
+    cursor: "balancesV2",
+    limit: "balancesV2",
+  },
 } as const satisfies Record<string, Record<string, CapabilityRequirement>>;
 export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
 
@@ -398,6 +422,7 @@ export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
 export const LIST_PATH_CAPABILITY: Partial<Record<ListPath, CapabilityRequirement>> = {
   "/api/v2/balances/latest": "balancesV2",
   "/api/v2/balances/history": "balancesV2",
+  "/api/v2/balances/cash": "balancesV2",
 };
 
 export function isListPath(path: string): path is ListPath {

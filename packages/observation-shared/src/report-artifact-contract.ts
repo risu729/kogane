@@ -34,7 +34,9 @@ export const REPORTS_PATH = "/api/v2/reports";
 const REPORT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 /** The explanation node schema the report job writes. */
 const REPORT_EXPLANATION_SCHEMA = "report-explanation-v1";
-const REPORT_INPUT_MANIFEST_SCHEMA = "report-inputs-v1";
+/** The manifest schema the report job writes; v1 nodes stored before it stay readable. */
+const REPORT_INPUT_MANIFEST_SCHEMA = "report-inputs-v2";
+const REPORT_INPUT_MANIFEST_SCHEMA_V1 = "report-inputs-v1";
 const CALCULATION_RUN_STATUSES = ["building", "complete", "failed"] as const;
 const LIST_BOUND = 200;
 const EVENT_BOUND = 200;
@@ -124,8 +126,8 @@ export type ReportDetail =
       body: null;
     };
 
-interface ReportInputManifest {
-  schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA;
+interface ReportInputManifestV1 {
+  schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA_V1;
   perimeterRef: string;
   unitRef: string;
   /** Newest moment any included evidence was recorded, or "none". */
@@ -136,6 +138,25 @@ interface ReportInputManifest {
   valuationObservationIds: number[];
   priceObservationIds: string[];
 }
+
+/**
+ * The manifest of a report stored since 2026-11-19: the v1 fields and the
+ * release of the price selection, the admitted price rules, the valuation and
+ * the body build, and whether the positions were cut at the row bound (ADR
+ * 0072, amendment of 2026-11-19). A v1 node stays valid:
+ * stored explanation nodes are never rewritten.
+ */
+interface ReportInputManifestV2 extends Omit<ReportInputManifestV1, "schemaVersion"> {
+  schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA;
+  priceSelectionRelease: string;
+  priceRuleIds: string[];
+  valuationRelease: string;
+  reportBuildRelease: string;
+  /** More positions were in scope than the report kept (its body's `coverage.truncated`). */
+  truncated: boolean;
+}
+
+type ReportInputManifest = ReportInputManifestV1 | ReportInputManifestV2;
 
 interface ReportExplanationPrice {
   id: string;
@@ -344,21 +365,47 @@ function validReportDetail(value: unknown, reportId: string): value is ReportDet
   );
 }
 
-function validManifest(value: unknown): value is ReportInputManifest {
+const MANIFEST_V1_KEYS = [
+  "schemaVersion",
+  "perimeterRef",
+  "unitRef",
+  "knowledgeCutoffEffective",
+  "decimalPolicyRelease",
+  "instrumentValuationPolicyId",
+  "positionObservationIds",
+  "valuationObservationIds",
+  "priceObservationIds",
+] as const;
+const MANIFEST_V2_KEYS = [
+  ...MANIFEST_V1_KEYS,
+  "priceSelectionRelease",
+  "priceRuleIds",
+  "valuationRelease",
+  "reportBuildRelease",
+  "truncated",
+] as const;
+
+/** The fields v2 adds: the releases (the rule list sorted as the job writes it) and the cut. */
+function validManifestReleases(value: Record<string, unknown>): boolean {
   return (
-    record(value) &&
-    exactKeys(value, [
-      "schemaVersion",
-      "perimeterRef",
-      "unitRef",
-      "knowledgeCutoffEffective",
-      "decimalPolicyRelease",
-      "instrumentValuationPolicyId",
-      "positionObservationIds",
-      "valuationObservationIds",
-      "priceObservationIds",
-    ]) &&
-    value.schemaVersion === REPORT_INPUT_MANIFEST_SCHEMA &&
+    text(value.priceSelectionRelease, 128) &&
+    textList(value.priceRuleIds, 100) &&
+    value.priceRuleIds.every((id, index, ids) => index === 0 || ids[index - 1]! < id) &&
+    text(value.valuationRelease, 128) &&
+    text(value.reportBuildRelease, 128) &&
+    typeof value.truncated === "boolean"
+  );
+}
+
+function validManifest(value: unknown): value is ReportInputManifest {
+  if (!record(value)) return false;
+  const versioned =
+    value.schemaVersion === REPORT_INPUT_MANIFEST_SCHEMA
+      ? exactKeys(value, MANIFEST_V2_KEYS) && validManifestReleases(value)
+      : value.schemaVersion === REPORT_INPUT_MANIFEST_SCHEMA_V1 &&
+        exactKeys(value, MANIFEST_V1_KEYS);
+  return (
+    versioned &&
     text(value.perimeterRef) &&
     text(value.unitRef, 128) &&
     text(value.knowledgeCutoffEffective, 64) &&

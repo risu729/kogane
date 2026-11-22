@@ -16,19 +16,31 @@ import {
   scheduleSnapshotSummary,
 } from "../../../packages/collection/src/schedule-model";
 import { overviewSummary } from "../../../packages/application/src/query/overview-detail";
-import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
+import type {
+  OverviewPage,
+  OverviewSummary,
+} from "../../../packages/observation-shared/src/api-contract";
 import {
   balanceHistorySummary,
+  balanceListSummary,
   latestBalanceSummary,
 } from "../../../packages/application/src/query/read-detail";
 import {
+  accountCoverageSummary,
   collectionQualityCellSummary,
   collectionQualitySummaryLines,
 } from "../../../packages/application/src/query/collection-quality-detail";
+import {
+  REALISTIC_ACCOUNT_SCALE,
+  syntheticAccountCoverage,
+} from "../../../packages/application/test/account-coverage-scale";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
+  ACCOUNT_SUMMARY_BYTES,
+  type AccountCoverage,
   COLLECTION_QUALITY_API_VERSION,
   COLLECTION_QUALITY_LINE_PAGE,
+  pageReadAnswerBytes,
   type CollectionQualityCell,
   type CollectionQualityCells,
   validCollectionQualityCells,
@@ -38,7 +50,7 @@ import {
   collectionFreshness,
 } from "../../../packages/domain/src/collection-freshness";
 import { pageReadHarness } from "./page-read-harness";
-import { seedRegistry } from "./fixtures";
+import { seedRegistry, seedRun } from "./fixtures";
 import { REALISTIC_BALANCES, seedRealisticStore } from "./realistic-store";
 
 /** What the owner's client shows of a tool result (#1414). */
@@ -104,6 +116,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.accounts.candidates", {}],
     ["kogane.card-settlements.unmatched", {}],
     ["kogane.card-settlements.debit-accounts", {}],
+    ["kogane.decisions.pending", {}],
     ["kogane.card-settlements.read", {}],
     ["kogane.card-settlements.statements", {}],
     ["kogane.audit.search", {}],
@@ -117,6 +130,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.store.read", { page: "filter-options", kind: "balances" }],
     ["kogane.observations.list", { kind: "transactions" }],
     ["kogane.observations.list", { kind: "balances" }],
+    ["kogane.observations.list", { kind: "balances", detail: "full" }],
     ["kogane.observations.list", { kind: "positions" }],
     ["kogane.observations.list", { kind: "artifacts" }],
     ["kogane.observations.get", { kind: "balance", id: balanceId }],
@@ -124,6 +138,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.balances.read", { collection: "latest", detail: "full" }],
     ["kogane.balances.read", { collection: "history" }],
     ["kogane.balances.read", { collection: "history", detail: "full" }],
+    ["kogane.balances.read", { collection: "cash" }],
     ["kogane.rewards.read", { collection: "holdings" }],
     ["kogane.events.read", { collection: "activity" }],
     ["kogane.events.read", { collection: "obligations" }],
@@ -133,6 +148,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.collection-quality.read", { source: "sony-bank" }],
     ["kogane.collection-quality.read", { source: "sony-bank", detail: "full" }],
     ["kogane.collection-quality.read", { source: "sony-bank", view: "accounts" }],
+    ["kogane.collection-quality.read", { source: "sony-bank", view: "accounts", detail: "full" }],
     ["kogane.evidence.read", { page: "meta" }],
     ["kogane.schedules.read", {}],
     ["kogane.schedules.read", { detail: "full" }],
@@ -168,13 +184,21 @@ describe("MCP read answer sizes (ADR 0123)", () => {
     for (const call of [
       'kogane.balances.read {"collection":"latest"}',
       'kogane.balances.read {"collection":"history"}',
+      'kogane.balances.read {"collection":"cash"}',
       "kogane.schedules.read {}",
       "kogane.collection-quality.read {}",
       'kogane.collection-quality.read {"source":"sony-bank"}',
+      'kogane.collection-quality.read {"source":"sony-bank","view":"accounts"}',
       'kogane.store.read {"page":"overview"}',
       "kogane.schedules.maintenance.read {}",
+      'kogane.observations.list {"kind":"balances"}',
+      "kogane.decisions.pending {}",
     ])
       expect(sizes.get(call), call).toBeLessThan(CLIENT_BYTES);
+    // The v1 grouped list in full (ADR 0123, amendment 2026-11-20) is what it was.
+    expect(
+      sizes.get('kogane.observations.list {"kind":"balances","detail":"full"}'),
+    ).toBeGreaterThan(10 * CLIENT_BYTES);
     // The two reads the amendment of 2026-11-19 summarizes were over it in full.
     expect(sizes.get('kogane.store.read {"page":"overview","detail":"full"}')).toBeGreaterThan(
       CLIENT_BYTES,
@@ -317,6 +341,109 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
   });
 });
 
+describe("kogane.observations.list balances summary (ADR 0123, amendment 2026-11-20)", () => {
+  it("is the full list shaped by the one shared function, on the route and the tool alike", async () => {
+    for (const query of ["", "?offset=3&latestOffset=7", "?source=vpass"]) {
+      const params = new URLSearchParams(query);
+      const at = {
+        offset: Number(params.get("offset") ?? 0),
+        latestOffset: Number(params.get("latestOffset") ?? 0),
+      };
+      const args = {
+        kind: "balances",
+        ...Object.fromEntries(
+          [...params].map(([key, value]) => [key, key === "source" ? value : Number(value)]),
+        ),
+      };
+      const summary = await page.route(`/api/balances${query}`);
+      expect(summary.status).toBe(200);
+      const full = await page.route(`/api/balances${query}${query ? "&" : "?"}detail=full`);
+      expect(full.status).toBe(200);
+      expect(full.body).not.toHaveProperty("detail");
+      expect(validApiResponse("/api/balances", full.body, "full")).toBe(true);
+      expect(validApiResponse("/api/balances", summary.body, "summary")).toBe(true);
+      expect(validApiResponse("/api/balances", summary.body, "full")).toBe(false);
+      expect(validApiResponse("/api/balances", full.body, "summary")).toBe(false);
+      expect(summary.body).toEqual(balanceListSummary(full.body as never, at));
+      expect(await page.http("kogane.observations.list", args)).toEqual({
+        status: 200,
+        body: { schemaVersion: "kogane-page-read-v1", data: summary.body },
+      });
+      expect((await page.mcp("kogane.observations.list", args)).body.data).toEqual(summary.body);
+      expect(
+        (await page.mcp("kogane.observations.list", { ...args, detail: "full" })).body.data,
+      ).toEqual(full.body);
+    }
+  });
+
+  it("pages every row of both lists once, each page under 8 KB on /mcp", async () => {
+    const full = (await page.route("/api/balances?detail=full")).body as {
+      latest: { id: number }[];
+      history: { id: number }[];
+    };
+    expect(full.latest).toHaveLength(REALISTIC_BALANCES);
+    expect(full.history).toHaveLength(REALISTIC_BALANCES);
+    const seen = { latest: [] as number[], history: [] as number[] };
+    // An agent follows `coverage.next` alone: it never needs the lists' lengths.
+    let at: { offset: number; latestOffset: number } | null = { offset: 0, latestOffset: 0 };
+    for (let pages = 0; at !== null && pages < 100; pages++) {
+      const message = await page.mcpMessage({
+        method: "tools/call",
+        params: { name: "kogane.observations.list", arguments: { kind: "balances", ...at } },
+      });
+      // What a client shows: the result's text, which is its structured content serialized.
+      const text = message["result"].content[0].text as string;
+      expect(new TextEncoder().encode(text).length).toBeLessThan(CLIENT_BYTES);
+      const data = message["result"].structuredContent.data;
+      seen.latest.push(...data.latest.map((line: { observationId: number }) => line.observationId));
+      seen.history.push(
+        ...data.history.map((line: { observationId: number }) => line.observationId),
+      );
+      at = data.coverage.next;
+    }
+    expect(at).toBeNull();
+    expect(seen.latest).toEqual(full.latest.map((row) => row.id));
+    expect(seen.history).toEqual(full.history.map((row) => row.id));
+  });
+
+  it("keeps a value that is not exact as its status, never a zero", async () => {
+    const answer = await page.mcp("kogane.observations.list", { kind: "balances" });
+    const lines = [...answer.body.data.latest, ...answer.body.data.history] as {
+      amount: { value: string | null; unit: string | null; status: string; scale: number | null };
+    }[];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines)
+      expect(line.amount).toEqual(
+        line.amount.status === "exact"
+          ? {
+              value: expect.stringMatching(/^[1-9][0-9]*$/u),
+              unit: "JPY",
+              status: "exact",
+              scale: 0,
+            }
+          : { value: null, unit: "JPY", status: "unparsed", scale: null },
+      );
+  });
+
+  it("refuses a detail it does not offer, and a detail on the other lists", async () => {
+    expect((await page.route("/api/balances?detail=compact")).body).toMatchObject({
+      error: "invalid_detail",
+    });
+    const answer = await page.mcp("kogane.observations.list", {
+      kind: "balances",
+      detail: "compact",
+    });
+    expect(answer.isError).toBe(true);
+    expect(answer.body.error).toBe("invalid_request");
+    for (const kind of ["transactions", "positions", "artifacts"]) {
+      expect((await page.route(`/api/${kind}?detail=full`)).status).toBe(400);
+      expect((await page.mcp("kogane.observations.list", { kind, detail: "full" })).body).toEqual({
+        error: "invalid_query",
+      });
+    }
+  });
+});
+
 describe("kogane.schedules.read summary (ADR 0123)", () => {
   it("is the full snapshot shaped by the one shared function, on the route and the tool alike", async () => {
     const summary = await page.route("/api/ops/v1/schedules");
@@ -363,19 +490,81 @@ describe("kogane.collection-quality.read summary (ADR 0123)", () => {
     expect((await page.route("/api/collection-quality/sony-bank?detail=full")).body).toMatchObject({
       cells: [expect.any(Object)],
     });
-    // The account view has one detail.
-    expect(
-      (await page.route("/api/collection-quality/sony-bank/accounts?detail=full")).status,
-    ).toBe(400);
+  });
+
+  it("answers the account view as its full answer's summary, on the route and the tool alike (amendment 2026-11-20)", async () => {
+    const path = "/api/collection-quality/sony-bank/accounts";
+    const summary = await page.route(path);
+    const full = await page.route(`${path}?detail=full`);
+    expect(summary.status).toBe(200);
+    expect(full.status).toBe(200);
+    expect(full.body).not.toHaveProperty("detail");
+    expect(validApiResponse(path, summary.body, "summary")).toBe(true);
+    expect(validApiResponse(path, summary.body, "full")).toBe(false);
+    expect(validApiResponse(path, full.body, "full")).toBe(true);
+    expect(validApiResponse(path, full.body, "summary")).toBe(false);
+    // Both answers count ages to their own instant, which can differ by a call.
+    const { freshnessAsOf: _a, ...summaryRest } = summary.body as Record<string, unknown>;
+    const { freshnessAsOf: _b, ...derived } = accountCoverageSummary(
+      full.body as AccountCoverage,
+      0,
+    ) as unknown as Record<string, unknown>;
+    expect(summaryRest).toEqual(derived);
+    // The tool answers the route's body under `data`; the bytes the summary
+    // is held to are exactly the tool's answer, as the client receives it.
+    const tool = await page.mcp("kogane.collection-quality.read", {
+      source: "sony-bank",
+      view: "accounts",
+    });
+    expect(tool.isError).toBe(false);
+    expect(tool.body.schemaVersion).toBe("kogane-page-read-v1");
+    expect(Object.keys(tool.body.data)).toEqual(Object.keys(summary.body as object));
+    expect(bytes(tool.body)).toBe(pageReadAnswerBytes(tool.body.data));
+    expect(bytes(tool.body)).toBeLessThanOrEqual(ACCOUNT_SUMMARY_BYTES);
+    const fullTool = await page.mcp("kogane.collection-quality.read", {
+      source: "sony-bank",
+      view: "accounts",
+      detail: "full",
+    });
+    expect(Object.keys(fullTool.body.data)).toEqual(Object.keys(full.body as object));
+    // The full answer stays unpaged.
     expect(
       (
         await page.mcp("kogane.collection-quality.read", {
           source: "sony-bank",
           view: "accounts",
           detail: "full",
+          offset: 0,
         })
       ).body,
-    ).toEqual({ error: "invalid_request", refs: ["detail"] });
+    ).toEqual({ error: "invalid_request", refs: ["offset"] });
+    expect((await page.route(`${path}?detail=full&offset=0`)).status).toBe(400);
+  });
+
+  it("pages the account view of a source with 62 accounts under 8 KB through the tool's envelope", () => {
+    const full = syntheticAccountCoverage(REALISTIC_ACCOUNT_SCALE, "sbi-shinsei");
+    expect(validApiResponse("/api/collection-quality/sbi-shinsei/accounts", full, "full")).toBe(
+      true,
+    );
+    expect(bytes({ schemaVersion: "kogane-page-read-v1", data: full })).toBeGreaterThan(
+      100 * CLIENT_BYTES,
+    );
+    const accounts: string[] = [];
+    let apart = 0;
+    for (let offset: number | null = 0; offset !== null;) {
+      const summary = accountCoverageSummary(full, offset);
+      expect(
+        validApiResponse("/api/collection-quality/sbi-shinsei/accounts", summary, "summary"),
+      ).toBe(true);
+      expect(bytes({ schemaVersion: "kogane-page-read-v1", data: summary })).toBeLessThanOrEqual(
+        CLIENT_BYTES,
+      );
+      accounts.push(...summary.accounts.map((line) => line.accountId));
+      apart += summary.unattributed.reduce((sum, line) => sum + line.cells, 0);
+      offset = summary.coverage.nextOffset;
+    }
+    expect(accounts).toEqual(full.accounts.map((account) => account.accountId));
+    expect(apart).toBe(full.unattributed.length);
   });
 
   it("collapses a source the size of the Vpass cells (about 300) into pages under 8 KB", () => {
@@ -651,13 +840,23 @@ function worstOverview(options: {
  * 76 source and dataset lines of unit updates. Source ids, parser names and
  * datasets are as long as the longest the source and parser registries and
  * the collectors use today (17, 40 and 37 characters); counts and ids are as
- * wide as `worstOverview`'s.
+ * wide as `worstOverview`'s. `widths` lengthens the names past today's (to
+ * the schema's 100-character source ids and 200-character datasets, and
+ * parser names of any length) and `sources` adds sources.
  */
-function boundOverview(): OverviewPage {
-  const sources = Array.from({ length: 38 }, (_, index) => `synthetic-feed-${nn(index)}`);
-  const parsers = Array.from(
-    { length: 57 },
-    (_, index) => `synthetic-provider-${nn(index)}-card-statement-pdf`,
+function boundOverview(
+  widths: { source: number; parser: number; dataset: number } = {
+    source: 17,
+    parser: 40,
+    dataset: 37,
+  },
+  sourceCount = 38,
+): OverviewPage {
+  const sources = Array.from({ length: sourceCount }, (_, index) =>
+    `synthetic-feed-${nn(index)}`.padEnd(widths.source, "x"),
+  );
+  const parsers = Array.from({ length: 57 }, (_, index) =>
+    `synthetic-provider-${nn(index)}-card-statement-pdf`.padEnd(widths.parser, "x"),
   );
   const longest = [...PARSE_FAILURE_CODES].sort((left, right) => right.length - left.length);
   return {
@@ -705,7 +904,11 @@ function boundOverview(): OverviewPage {
     }),
     unitUpdates: Array.from({ length: 500 }, (_, index) => ({
       source_id: sources[index % sources.length]!,
-      dataset: `synthetic-dataset-${nn(Math.floor(index / sources.length) % 2)}-statement-detail`,
+      dataset:
+        `synthetic-dataset-${nn(Math.floor(index / sources.length) % 2)}-statement-detail`.padEnd(
+          widths.dataset,
+          "x",
+        ),
       fetch_run_id: 900_500 - index,
       fetched_at: instant(index * 30),
       updated_units: 3,
@@ -790,6 +993,9 @@ describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", 
     expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
     const size = bytes({ schemaVersion: "kogane-page-read-v1", data: summary });
     expect(size).toBeLessThan(7 * 1024);
+    // The caps alone hold it: the byte budget trims nothing.
+    expect(summary.budget).toEqual({ bytes: CLIENT_BYTES, trimmed: false });
+    expect(summary.sourcesOmitted).toBe(0);
     // Every run is counted once, under its status; each status that is not a
     // success names the five sources or parsers with the newest runs and
     // counts the rest, with their runs.
@@ -855,9 +1061,77 @@ describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", 
     expect(bound.unitUpdatesOmitted?.lines).toBe(76 - 5);
     const bounded = bytes({ schemaVersion: "kogane-page-read-v1", data: bound });
     expect(bounded).toBeLessThan(CLIENT_BYTES);
+    // At today's names the caps alone still hold it.
+    expect(bound.budget.trimmed).toBe(false);
     console.log(
       `overview summary at the realistic worst: ${size} bytes (full ${bytes(worst)}); at its bound: ${bounded} (full ${bytes(boundFull)})`,
     );
+  });
+
+  it("past today's names and sources, trims to 8 KB and says so, every state and code kept", () => {
+    // The bound with three more sources, with three more characters on every
+    // source id, at the schema's longest source ids (100) and datasets (200)
+    // with parser names of 120 characters, and that over 120 sources. Each
+    // passes 8 KB under the caps alone: the budget trims only then.
+    const sizes: string[] = [];
+    for (const [label, full] of [
+      ["three more sources", boundOverview(undefined, 41)],
+      [
+        "three more characters on every source id",
+        boundOverview({ source: 20, parser: 40, dataset: 37 }),
+      ],
+      ["the schema's longest names", boundOverview({ source: 100, parser: 120, dataset: 200 })],
+      [
+        "the longest names over 120 sources",
+        boundOverview({ source: 100, parser: 120, dataset: 200 }, 120),
+      ],
+    ] as const) {
+      expect(validApiResponse("/api/overview", full, "full"), label).toBe(true);
+      const summary = overviewSummary(full);
+      const size = bytes({ schemaVersion: "kogane-page-read-v1", data: summary });
+      expect(size, label).toBeLessThanOrEqual(CLIENT_BYTES);
+      expect(validApiResponse("/api/overview", summary, "summary"), label).toBe(true);
+      expect(summary.budget, label).toEqual({ bytes: CLIENT_BYTES, trimmed: true });
+      // Every run is counted under its status, and every code stays on the error line.
+      expect(
+        summary.fetchRuns.byStatus.reduce((sum, line) => sum + line.runs, 0),
+        label,
+      ).toBe(500);
+      expect(
+        summary.parseRuns.byStatus.reduce((sum, line) => sum + line.runs, 0),
+        label,
+      ).toBe(500);
+      expect(
+        summary.parseRuns.byStatus.find((line) => line.status === "error")?.failureCodes,
+        label,
+      ).toEqual(expect.arrayContaining([...PARSE_FAILURE_CODES]));
+      // What a list leaves out is counted with its runs, never dropped.
+      const listedAndLeft = (
+        listed: readonly { runs: number }[],
+        omitted: readonly { runs: number }[],
+      ) => [...listed, ...omitted].reduce((sum, entry) => sum + entry.runs, 0);
+      expect(
+        listedAndLeft(summary.fetchRuns.notSuccessful, summary.fetchRuns.notSuccessfulOmitted),
+        label,
+      ).toBe(full.fetchRuns.filter((run) => run.status === "partial").length);
+      expect(listedAndLeft(summary.parseRuns.notOk, summary.parseRuns.notOkOmitted), label).toBe(
+        full.parseRuns.filter((run) => run.status !== "ok").length,
+      );
+      expect(
+        summary.unitUpdates!.reduce((sum, line) => sum + line.runs, 0) +
+          summary.unitUpdatesOmitted!.runs,
+        label,
+      ).toBe(500);
+      expect(
+        summary.sources.reduce((sum, line) => sum + line.sourceIds.length, 0) +
+          summary.sourcesOmitted,
+        label,
+      ).toBe(full.sources.length);
+      sizes.push(
+        `${label}: ${size} bytes, listing ${summary.fetchRuns.notSuccessful.length}/${summary.parseRuns.notOk.length}/${summary.unitUpdates!.length} lines with ${summary.parseRuns.notOk.reduce((sum, line) => sum + line.failureCodes.length, 0)} line codes and ${summary.sources.reduce((sum, line) => sum + line.sourceIds.length, 0)} of ${full.sources.length} sources`,
+      );
+    }
+    console.log(`overview summary trimmed by its byte budget: ${sizes.join("; ")}`);
   });
 });
 
@@ -1033,5 +1307,84 @@ describe("kogane.schedules.maintenance.read summary (ADR 0123, amendment 2026-11
     console.log(
       `maintenance summary at many sources and rules: largest page ${Math.max(...pages.map((summary) => bytes(summary)))} bytes over ${pages.length} pages (full ${bytes(worst)}); one source with 30 rules: ${crowded.map((summary) => bytes(summary)).join(", ")} bytes`,
     );
+  });
+});
+
+// Last in this file: it writes a parse run with a parser name no registry
+// has, which every later overview read of this store would answer with.
+describe("kogane.store.read overview past its byte budget (ADR 0123, amendment 2026-11-20)", () => {
+  it("trims a multibyte answer to 8,192 UTF-8 bytes of the text /mcp sends, the same on every transport", async () => {
+    // A failed parse under a parser name of 1,500 three-byte characters: the
+    // newest of its status, so on the `error` line and its own `notOk` line,
+    // 9,000 bytes of name but 3,000 UTF-16 code units. Measured in bytes,
+    // the budget trims it; measured as a string's length, it would not.
+    const run = await seedRun({ count: 1 });
+    await env.DB.prepare(
+      `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,error,warnings_json)
+       VALUES (?,?,'1','2099-01-01T00:00:00Z','error','parser_rejected','[]')`,
+    )
+      .bind(run.artifacts[0]!.id, "合成パーサー".padEnd(1_500, "あ"))
+      .run();
+    const message = await page.mcpMessage({
+      method: "tools/call",
+      params: { name: "kogane.store.read", arguments: { page: "overview" } },
+    });
+    const text = message["result"].content[0].text as string;
+    // What the client shows is this text: within the budget, in bytes.
+    expect(new TextEncoder().encode(text).length).toBeLessThanOrEqual(CLIENT_BYTES);
+    expect(JSON.parse(text)).toEqual(message["result"].structuredContent);
+    const answer = message["result"].structuredContent as {
+      schemaVersion: string;
+      data: OverviewSummary;
+    };
+    expect(answer.data.budget).toEqual({ bytes: CLIENT_BYTES, trimmed: true });
+    expect(validApiResponse("/api/overview", answer.data, "summary")).toBe(true);
+    // The status line keeps the name and the code; its own line is counted.
+    const error = answer.data.parseRuns.byStatus.find((line) => line.status === "error")!;
+    expect(error.newest.parser).toHaveLength(1_500);
+    expect(error.failureCodes).toContain("parser_rejected");
+    // The same answer on /api/agent/v1 and, under `data`, on the route.
+    expect(await page.http("kogane.store.read", { page: "overview" })).toEqual({
+      status: 200,
+      body: answer,
+    });
+    const route = await page.routeResponse("/api/overview");
+    expect(route.status).toBe(200);
+    const routeText = await route.text();
+    expect(JSON.parse(routeText)).toEqual(answer.data);
+    // The route's `data` alone is the envelope's 47 bytes shorter.
+    expect(new TextEncoder().encode(routeText).length).toBe(
+      new TextEncoder().encode(text).length - 47,
+    );
+  });
+
+  it("refuses with 413 result_limit_exceeded, naming detail full, when its status lines alone pass 8 KB", async () => {
+    // Parser names have no schema bound: the newest failed parse under a
+    // 9,000-character name is the `error` line's newest, which leaves no
+    // room once nothing else is left to trim, and a status line is never cut.
+    const run = await seedRun({ count: 1 });
+    await env.DB.prepare(
+      `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,error,warnings_json)
+       VALUES (?,?,'1','2099-01-01T00:00:00Z','error','parser_rejected','[]')`,
+    )
+      .bind(run.artifacts[0]!.id, "synthetic-failing-parser-".padEnd(9_000, "x"))
+      .run();
+    const refusal = { error: "result_limit_exceeded", retryWith: { detail: "full" } };
+    expect(await page.route("/api/overview")).toEqual({
+      status: 413,
+      body: expect.objectContaining(refusal),
+    });
+    const tool = await page.mcp("kogane.store.read", { page: "overview" });
+    expect(tool.isError).toBe(true);
+    expect(tool.body).toEqual(refusal);
+    expect(await page.http("kogane.store.read", { page: "overview" })).toEqual({
+      status: 413,
+      body: refusal,
+    });
+    // The full answer is still there, and carries that run.
+    const full = await page.route("/api/overview?detail=full");
+    expect(full.status).toBe(200);
+    expect(validApiResponse("/api/overview", full.body, "full")).toBe(true);
+    expect((full.body as OverviewPage).parseRuns[0]!.parser_name).toHaveLength(9_000);
   });
 });

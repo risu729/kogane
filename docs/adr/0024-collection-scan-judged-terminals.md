@@ -8,9 +8,9 @@
   [amendment of 2026-11-08](#amendment-2026-11-08-a-pending-run-whose-terminal-is-missing-spends-no-continuation)
   is accepted (#1155); the
   [visibility amendment of 2026-11-12](#amendment-2026-11-12-the-backlog-reports-retryable-registrations)
-  is proposed (#1270); the
+  is accepted (merged 2026-11-12 in [#1314](https://github.com/risu729/kogane/pull/1314)); the
   [amendment of 2026-11-19](#amendment-2026-11-19-a-continuation-answered-from-its-row-spends-no-continuation)
-  is proposed (accepted when its pull request merges)
+  is accepted (merged 2026-11-20 in [#1443](https://github.com/risu729/kogane/pull/1443))
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -546,7 +546,7 @@ The existing collection scan suites pass unchanged.
 
 ## Amendment 2026-11-12: The backlog reports retryable registrations
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-12 in [#1314](https://github.com/risu729/kogane/pull/1314)).
 
 ### Context
 
@@ -574,7 +574,7 @@ CORE migrations.
 
 ## Amendment 2026-11-19: a continuation answered from its row spends no continuation
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-20 in [#1443](https://github.com/risu729/kogane/pull/1443))
 - Date: 2026-11-19
 
 ### Context

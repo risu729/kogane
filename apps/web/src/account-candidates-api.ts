@@ -6,7 +6,7 @@
 // candidate may be accepted.
 import { useQuery } from "@tanstack/react-query";
 import { getJson, useFeatures } from "./api.ts";
-import { postCommand, type ChangePlanView } from "./command-api.ts";
+import { postCommand, StalePlanError, type ChangePlanView } from "./command-api.ts";
 import type {
   AccountCandidate,
   AccountCandidateItem,
@@ -52,7 +52,7 @@ export function isAccountConnection(item: AccountCandidateItem): item is Account
 
 export type AccountCandidateDecision = "accept" | "reject";
 
-const STALE = "候補が更新されています。一覧を更新して、内容を確認し直してください。";
+const STALE = "候補が更新されています。一覧を読み直すので、内容を確認し直してください。";
 
 /** The candidate as the server answers it now, in the view it is shown in; null when gone. */
 async function currentCandidate(candidate: AccountCandidate): Promise<AccountCandidate | null> {
@@ -98,7 +98,7 @@ export async function planAccountCandidateDecision(
     current.hold !== candidate.hold ||
     JSON.stringify(current.commands) !== JSON.stringify(candidate.commands)
   )
-    throw new Error(STALE);
+    throw new StalePlanError(STALE);
   const response = await postCommand<{ plan: ChangePlanView }>(
     "plan",
     {

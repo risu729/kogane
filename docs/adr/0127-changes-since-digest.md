@@ -1,15 +1,15 @@
 # ADR 0127: What was recorded since a time, per source, as `kogane.changes.since`
 
-- Status: proposed. A new published MCP tool (`kogane.changes.since`), a new
-  catalogue operation (`changes.since`) and a new read route: **the owner's
-  approval is needed before merge**, as for every published tool change
+- Status: accepted (merged 2026-11-20 in [#1469](https://github.com/risu729/kogane/pull/1469)). A new published MCP tool (`kogane.changes.since`), a new
+  catalogue operation (`changes.since`) and a new read route: the owner's
+  approval was required before merge, as for every published tool change
   (AGENTS.md, merging: an agent or MCP operation added to `catalogue.ts`).
   The owner allowed new tools where needed for issue #1414 (2026-11-19, "you
   may add new tools if needed"); that allows the proposal, not this tool.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap G3
-  of the MCP everyday-questions audit (`docs/plans/2026-11-mcp-everyday-questions.md`,
-  proposed in its own pull request; question Q15, "what changed since
+  of the MCP everyday-questions audit ([its plan](../plans/2026-11-mcp-everyday-questions.md),
+  merged in [#1449](https://github.com/risu729/kogane/pull/1449); question Q15, "what changed since
   yesterday?")
 - Related: [ADR 0081](0081-ui-parity-through-mcp.md) (UI/MCP parity, one
   service), [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (MCP
@@ -94,7 +94,10 @@ order is its recording order.
    `unavailable` with `not_served` where the projection is absent. Closed codes,
    counts, times and ids only: no amount, label or provider text, and nothing is
    compared by value (`notCovered` names `value.change`, which
-   `kogane.reported-holdings-change.read` answers).
+   `kogane.reported-holdings-change.read` answers). A section the grant cannot
+   read is not counted: without `evidence.read`, a source whose only new rows
+   are runs and captures is listed in `unchanged`, and `sections` says those
+   two were not counted.
 4. **Handlers.** Each count names the existing read that lists its items and
    the argument a line's value goes in (ADR 0126's pattern): runs
    `kogane.evidence.read` (`page: runs`, `source`); captures
@@ -104,10 +107,17 @@ order is its recording order.
    (`source`, `kind` per position); events `kogane.events.read`
    (`collection: activity`); an unchanged source
    `kogane.collection-quality.read` (`source`), which says why nothing came.
+   `kogane.evidence.read` serves only the configured evidence source
+   (`EVIDENCE_SOURCE_ID`, which only `sony-bank` may be), so for any other
+   source the runs and captures handlers answer `404 not_found`; no read lists
+   another source's runs by id yet (Consequences).
 5. **The grant decides first.** `records.read` over the whole store, refused
    (`unauthorized`, `evidence_restricted`) before the request is checked or
-   anything is read. `runs` and `captures` also need `evidence.read`, the
-   catalogue capability of their handler: without it both are `null` with
+   anything is read: the tool grades it before its body's form
+   (`changesSinceGrantRefusal`), and the service asks whether the events
+   projection exists (a schema read) only once the grant and the request pass.
+   `runs` and `captures` also need `evidence.read`, the catalogue capability of
+   their handler: without it both are `null` with
    `sections` saying `unauthorized`, and their tables are not read. Each
    handler's capability is its tool's catalogue capability
    (`CHANGES_SINCE_HANDLER_CAPABILITIES`, held equal by a test).
@@ -132,10 +142,20 @@ order is its recording order.
    count that reached its row bound cuts the same way. A walk relies on
    recording order (the writers stamp the time when they insert, and nothing is
    deleted); clock skew between Workers can move a row near `since` by that
-   skew.
+   skew, and so can a writer that stamps a batch with the instant it started:
+   the card purchase sweep (`cardPurchaseSweep`, a Processor lane) stamps every
+   event revision it writes with the instant the sweep started, so a revision
+   it records after `since` with an earlier stamp is not new, and one recorded
+   after a later-stamped row can sit past a walk's boundary by at most one
+   sweep's duration.
 8. **8 KB.** The answer is cut between sources before it passes 8,192 bytes
    (`maxBytes`, measured with the continuation it would carry); `next.after`
    names the last source listed, and the same request with `after` continues.
+   `after` is a place in source id order, not a source the registry must hold:
+   an id no source has continues from where it sorts. Each answer is a fresh
+   read: a source's counts are those of the call that lists it, a walk's cut
+   is judged again, and a source registered before `after` between two calls is
+   listed only by a new first call.
 9. **Reads only (INV07).** The service decides, proposes and writes nothing;
    each served agent call records one R0 audit read (catalogue entry
    `changes.since`, `records.read`) with the sources it covers, truncated when
@@ -162,6 +182,11 @@ order is its recording order.
   list only the new ones.
 - New published tool and route: one more adapter each; the parity guard lists
   the tool with the route no screen reads.
+- The runs and captures handlers list items only for the configured evidence
+  source: `kogane.evidence.read` answers `404 not_found` for any other source
+  (decision 4). Another source's new captures are listed by
+  `kogane.observations.list` (`kind: artifacts`, `source`) once their run is
+  sealed; its new runs by id are not listed by any read yet.
 
 ### Next slice
 
@@ -193,7 +218,7 @@ tool off the parity guard's list of tools without a UI route.
   each handler's capability equal to its tool's catalogue capability; plans
   without table statistics (every table by key or one index range, the two
   rowid walks under their LIMIT, no sort of a table); every answer against the
-  wire contract.
+  wire contract; what the deployment serves is not asked before a refusal.
 - `packages/observation-shared/test/changes-since-contract.test.ts`: the wire
   contract admits what the service produces and refuses a code, order, bound
   or handler outside the domain's lists, a newest value without its count,
@@ -203,10 +228,66 @@ tool off the parity guard's list of tools without a UI route.
 - `services/processor/test/changes-since-cost.test.ts`: on workerd's SQLite
   with every CORE migration, each query's `rows_read` is equal over two
   histories past every walk, the answers are equal, and the queries run under
-  D1's limit of five terms in a compound SELECT.
+  D1's limit of five terms in a compound SELECT; D1's own `EXPLAIN QUERY PLAN`
+  with no `sqlite_stat` table scans only the two rowid walks, uses every index
+  named above, and sorts only the newest-parse window's own rows.
 - `services/app/test/changes-since-api.test.ts`: the route, the agent HTTP
   route and MCP give the same answer (but `asOf`), valid against the contract
   and under 8 KB; GET-only, a signed-in subject, `since` and `after` only and
-  once each; the grant refusals and the unauthorized run sections; the audit
-  read; no write. The UI/MCP parity guard lists the tool; the published tool
-  lists include it; its description is under 2,048 characters.
+  once each; the grant refusals, before the body's form and before any
+  statement (the events projection probe included), and the unauthorized run
+  sections; the audit read; no write. The UI/MCP parity guard lists the tool;
+  the published tool lists include it; its description is under 2,048
+  characters.
+
+## Amendment: the events handler names `since` (2026-11-20)
+
+- Status: accepted (merged 2026-11-21 in [#1493](https://github.com/risu729/kogane/pull/1493)). The digest's `handlers` are part of its published answer:
+  the owner's approval was required before merge.
+- Date: 2026-11-20
+
+### Context
+
+The next slice above landed as
+[ADR 0081's amendment of 2026-11-20](0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20):
+`kogane.events.read`'s activity list takes `since` and `before` on when a
+revision was recorded, compared as this digest compares `created_at`, and
+`account` and `source`. The events handler still named only
+`collection: activity`, so a client following it paged every current event.
+It takes no event-date window: a filter on the effective time is left to its
+own amendment.
+
+### Options considered
+
+1. **Leave the handler as it is** and let the client know that the tool takes
+   `since`. The handler is the digest's own statement of which call lists a
+   count's items; a client that follows it should get those items.
+2. **Name the argument the answer's `since` goes in (chosen)**, as
+   `sourceArgument` names where a line's source goes.
+
+### Decision
+
+`ChangesSinceHandler` gains `sinceArgument`: the answer's `since` goes in that
+argument. The events handler is `{ tool: "kogane.events.read", arguments:
+{ collection: "activity" }, sinceArgument: "since" }`. The other handlers are
+unchanged.
+
+### Consequences
+
+- The events line's handler lists the current revisions recorded since, one
+  basis a call (`cash-movement` by default; `basis: purchase-recognition`
+  lists the cost recognised at purchase).
+- It lists fewer than the line counts where a revision recorded since was
+  superseded since (the line counts every revision; the list is of current
+  ones) or has no leg on the basis asked. The list is in event-id order, a
+  walk of at most 5,000 current revisions a call, so it may take several
+  calls whose pages are short or empty.
+
+### Verification
+
+`services/app/test/page-read-events-filters.test.ts`: every argument any
+handler names (`arguments`, `sourceArgument`, `sinceArgument`, the id and
+kind arguments) is in its tool's published input schema, and calling
+`kogane.events.read` with the events handler's arguments and `since` lists
+exactly the revisions recorded since. The contract test holds `handlers`
+equal to `CHANGES_SINCE_HANDLERS`, so the published answer carries the new key.

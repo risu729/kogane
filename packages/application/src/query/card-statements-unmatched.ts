@@ -28,7 +28,9 @@
 //   offers a next page past it (`nextPage`, ./page-budget.ts).
 import {
   cardSettlementCandidate,
+  statementDueDate,
   type CardBankDebitFact,
+  type StatementDueDateReason,
 } from "../../../domain/src/card-settlement.ts";
 import {
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
@@ -68,7 +70,7 @@ import {
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type Grant, grantAllows } from "../grants.ts";
+import { type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import { statementTotal } from "./card-statement-total.ts";
 import { budgetPagedFields, pageBeyondBudget, withinBudget } from "./page-budget.ts";
 import type { PagedFields } from "../../../observation-shared/src/paging-contract.ts";
@@ -141,6 +143,12 @@ export interface UnmatchedCardStatement {
     amount: Quantity;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
+    /**
+     * Why `paymentDate` is null, present exactly then (INV05):
+     * `payment_date_absent` or `payment_date_invalid`
+     * (`STATEMENT_DUE_DATE_REASONS`).
+     */
+    paymentDateReason?: StatementDueDateReason;
     period: string | null;
   };
   code: UnmatchedStatementCode;
@@ -459,17 +467,8 @@ export async function reviewUnmatchedCardStatements(input: {
   request: UnmatchedCardStatementsRequest;
 }): Promise<UnmatchedCardStatementsOutcome> {
   const { grant, sql, request } = input;
-  if (!grantAllows(grant, "records.read"))
-    return {
-      ok: false,
-      error: financialError("unauthorized", REQUEST_ID, ["capability:records.read"]),
-    };
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0)
-    return { ok: false, error: financialError("evidence_restricted", REQUEST_ID, narrowed) };
+  const refused = wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   // The grant's row budget bounds how deep a caller pages.
   if (pageBeyondBudget(request.offset, UNMATCHED_PAGE_SIZE, grant))
     return {
@@ -493,10 +492,8 @@ export async function reviewUnmatchedCardStatements(input: {
     // The answer shows every total, with its status and reason when not exact.
     const amount = statementTotal(row);
     if (amount === null) throw invalid();
-    const date =
-      row.payment_date !== null && parseLocalDate(row.payment_date) !== null
-        ? row.payment_date
-        : null;
+    const due = statementDueDate(row.payment_date);
+    const date = due.paymentDate;
     const item: UnmatchedCardStatement = {
       statement: {
         ref: {
@@ -508,10 +505,16 @@ export async function reviewUnmatchedCardStatements(input: {
         sourceAccount: row.source_account,
         accountId: row.account_id ?? null,
         amount,
-        paymentDate:
-          date === null
-            ? null
-            : { kind: "local-date", value: date, zone: "Asia/Tokyo", basis: "provider" },
+        ...(due.paymentDate === null
+          ? { paymentDate: null, paymentDateReason: due.paymentDateReason }
+          : {
+              paymentDate: {
+                kind: "local-date",
+                value: due.paymentDate,
+                zone: "Asia/Tokyo",
+                basis: "provider",
+              },
+            }),
         period: row.period ?? null,
       },
       code: unmatchedStatementCode(total, false, null),

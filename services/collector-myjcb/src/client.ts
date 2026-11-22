@@ -4,7 +4,7 @@ import {
 } from "../../../packages/domain/src/myjcb-jpoint-response";
 import { CookieJar } from "./cookie-jar";
 import { allowedUrl, assertAllowedRequest, type ReadOperation } from "./policy";
-import { PastMonthsRefusalError, StopConditionError } from "./types";
+import { MAX_DETAIL_POSITION, PastMonthsRefusalError, StopConditionError } from "./types";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 type GetOperation = Exclude<ReadOperation, "login-submit" | "credit-past-json" | "jpoint-json">;
@@ -179,7 +179,11 @@ export class MyJcbReadClient {
         "request_invalid",
       );
     }
-    if (!Number.isInteger(input.detailMonth) || input.detailMonth < 0 || input.detailMonth > 17) {
+    if (
+      !Number.isInteger(input.detailMonth) ||
+      input.detailMonth < 0 ||
+      input.detailMonth > MAX_DETAIL_POSITION
+    ) {
       throw new PastMonthsRefusalError(
         "Rejected invalid MyJCB JSON-RPC referer month",
         "request_invalid",

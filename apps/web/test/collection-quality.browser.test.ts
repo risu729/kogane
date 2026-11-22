@@ -106,11 +106,11 @@ describe.if(runnable)("collection quality browser", () => {
           });
         if (url.pathname === "/api/collection-quality" && url.search === "?view=status")
           return Response.json(await queryCollectionQualityStatus(executor, { asOf: AS_OF }));
-        // The page reads the full summary and cells; the routes' default is the summary (ADR 0123).
+        // The page reads the full summary, cells and account view; the routes'
+        // default is the summary (ADR 0123 and its amendment of 2026-11-20).
         // The status view, matched above, takes no `detail`.
         if (
           url.pathname.startsWith("/api/collection-quality") &&
-          !url.pathname.endsWith("/accounts") &&
           url.searchParams.get("detail") !== "full"
         )
           return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
@@ -344,7 +344,7 @@ describe.if(runnable)("collection quality browser", () => {
       await page.goto(`${origin}/collection-quality?source=global-pass`);
       // The default view reads the cells, never the account regrouping.
       await page.getByRole("heading", { name: "口座・カード × データ種別 × 期間" }).waitFor();
-      expect(requests.slice(before).some((request) => request.path.endsWith("/accounts"))).toBe(
+      expect(requests.slice(before).some((request) => request.path.includes("/accounts"))).toBe(
         false,
       );
       await page.getByRole("link", { name: "口座ごと", exact: true }).click();
@@ -388,8 +388,10 @@ describe.if(runnable)("collection quality browser", () => {
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
       expect(
-        requests.slice(before).filter((request) => request.path.endsWith("/accounts")),
-      ).toEqual([{ path: "/api/collection-quality/global-pass/accounts", method: "GET" }]);
+        requests.slice(before).filter((request) => request.path.includes("/accounts")),
+      ).toEqual([
+        { path: "/api/collection-quality/global-pass/accounts?detail=full", method: "GET" },
+      ]);
       expect(await auditView(page)).toEqual([]);
     } finally {
       await page.close();
@@ -444,8 +446,9 @@ describe.if(runnable)("collection quality browser", () => {
       expect(await auditView(page)).toEqual([]);
       // More cells than the bound is refused whole (413): no account, period
       // or count is shown, only the refusal.
-      await page.route("**/api/collection-quality/global-pass/accounts", (route) =>
-        route.fulfill({ status: 413, json: { error: "result_limit_exceeded" } }),
+      await page.route(
+        (url) => url.pathname === "/api/collection-quality/global-pass/accounts",
+        (route) => route.fulfill({ status: 413, json: { error: "result_limit_exceeded" } }),
       );
       await page.goto(`${origin}/collection-quality?source=global-pass&view=accounts`);
       await page.getByRole("alert").filter({ hasText: "(HTTP 413)" }).waitFor();

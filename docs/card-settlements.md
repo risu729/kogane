@@ -62,13 +62,16 @@ the row's fields and its position (`mizuho:<fingerprint>:<occurrence>`,
 payment re-observed after the page changed could carry another id and count
 twice. They need a stable row identity first.
 
-Which card pays from which bank: the code does not know, and no setting names
-a card's debit account. A card and a bank are paired only as a candidate
-(equal amount, due date ±3 days) and only an accepted review with shared
-ownership makes the pairing a decision. In production at the time of writing
-(2026-09-26), every proposed review pairs a Vpass or MyJCB statement with an
-SMBC debit, none is accepted, and there is no published SBI Shinsei
-transaction: every stored capture of the SBI Shinsei activity page was
+Which card pays from which bank: no setting names a card's debit account. A
+card and a bank are paired only as a candidate (equal amount, due date ±3
+days) and only an accepted review with shared ownership makes the pairing a
+decision. [Debit account per card](#debit-account-per-card) answers it per
+card: the account the provider's statement names, else the account of the
+newest accepted settlement, else `unknown`; a candidate nobody decided never
+answers ([ADR 0114](adr/0114-card-debit-account-answer.md)). In production at
+the time of writing (2026-09-26), every proposed review pairs a Vpass or MyJCB
+statement with an SMBC debit, none is accepted, and there is no published SBI
+Shinsei transaction: every stored capture of the SBI Shinsei activity page was
 rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
 adapter admits nothing until the parser accepts them. A card provider's own
 statement of the debit account is recorded beside each MyJCB candidate as
@@ -138,7 +141,7 @@ statement are not handled.
 Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md), its
 2026-09-27 amendment and its
 [2026-11-07 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader)
-(proposed). What the code does today:
+(accepted). What the code does today:
 
 **The page.** Every MyJCB credit detail page observed in round 4 (the
 confirmed statement and the ショッピングスキップ払い page, live and in the
@@ -304,7 +307,7 @@ Limits:
 
 ### Debit account per card
 
-Design: [ADR 0114](adr/0114-card-debit-account-answer.md) (proposed).
+Design: [ADR 0114](adr/0114-card-debit-account-answer.md).
 `reviewCardDebitAccounts`
 (`packages/application/src/query/card-debit-accounts.ts`) answers which bank
 account each card is debited from, under rule `card-debit-account-answer-v1`
@@ -323,7 +326,13 @@ settlement candidate is listed, by source and source account, at most 100
   the card purchase read gives the same view's `providerTotal`; it is never
   null or zero (INV05), and the page shows it as unknown with that reason. An
   `exact` status without both decimal-v1 columns, which CORE 0024's CHECK
-  never stores, fails the read (`card_debit_accounts_row_invalid`);
+  never stores, fails the read (`card_debit_accounts_row_invalid`). The due
+  date (`paymentDate`) is a `local-date` when the stored `_kogane.paymentDate`
+  is a civil `YYYY-MM-DD` date, else null with `paymentDateReason`
+  ([ADR 0114, amendment 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)):
+  `payment_date_absent` when nothing is recorded there, `payment_date_invalid`
+  when a value that is not a civil date is. The reason is there exactly when
+  the date is null;
 - `stated`: the readings the settlement sweep compared with a candidate (the
   `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
   that `card_settlement_debit_account_evidence` cites under
@@ -340,7 +349,10 @@ settlement candidate is listed, by source and source account, at most 100
   `evidence_not_recorded` for a MyJCB card;
 - `settled`: per bank account, the candidates whose latest decision is
   `accepted`, with the number of distinct statements and the one with the
-  latest debit date. A withdrawn or rejected candidate is not counted;
+  latest debit date (`latest.debitDate`; null with `debitDateReason`
+  `debit_date_invalid` when the candidate's stored `bankDebit.occurred` is
+  not a `local-date` with a civil value, which the only candidate writer
+  never stores). A withdrawn or rejected candidate is not counted;
 - `proposed`: the same for candidates still `proposed`, of statements no
   accepted candidate covers. They are listed for the reviewer and never
   answer (INV07). A statement is covered as the acceptance guard reserves it
@@ -360,7 +372,8 @@ settlement candidate is listed, by source and source account, at most 100
   review), but its statement is not settled;
 - `answer`: `provider-stated` from `lastNamed` (the account, the reading and
   its capture time); else `accepted-settlement` from the newest accepted
-  settlement (the account, the candidate and its debit date), which is an
+  settlement (the account, the candidate and its debit date, with its
+  `debitDateReason` when null), which is an
   amount match a person accepted and so weaker than a stated account; else
   `unknown` with `stated_reading_conflicting`, `only_unreviewed_candidates`
   or `no_debit_account_evidence`. Closed `codes` say what disagrees:
@@ -408,6 +421,16 @@ Limits:
   per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
+- A null date's reason says only what is stored: `payment_date_absent` and
+  `payment_date_invalid` do not say why the provider page or the parser left
+  the due date so, and a stored debit date that is an `unknown` time with its
+  own `reasonCode` would read `debit_date_invalid` too (the candidates read
+  takes the date only from a `local-date`). The two parsers the view reads
+  today (`vpass-statement-page`, `myjcb-credit-statement-total`) always
+  record a civil due date, and the only candidate writer always a civil
+  debit date, so the reasons are for rows they did not write. The page shows a null date as
+  不明（reason）; the 次回の引落 view keeps its own `payment_date_not_published`
+  for a card whose due date is null, whichever reason it has.
 
 ### Upcoming bills
 
@@ -439,9 +462,14 @@ date, and nothing else but the account entities' labels.
   `deposit.balance` of the entity's references from the newest capture,
   never a sum of references. `covers` is `yes` or `no` only on exact figures
   with no reason; otherwise `unknown` with `debit_account_unknown`,
+  `unit_mismatch` (the bills the line counts are in more than one unit, so
+  `sumQuantities` does not add them and `cardBills` is `missing` with that
+  code),
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
-  due by the date), `cards_with_unknown_account` (a bill with no known
+  due by the date, so it may not show it; or on the due date of a bill the
+  line counts, so it may already show it, and comparing it with that bill
+  would count the debit twice), `cards_with_unknown_account` (a bill with no known
   account is due by the line's date) or `cards_with_unknown_due_date` (a card
   of this account, or of an unknown one, has a newest statement with no
   readable due date that no accepted settlement pays, so its total may be
@@ -577,6 +605,10 @@ or zero (INV05), and the page shows it as unknown with that reason. Such a
 statement is still `statement_not_comparable`. An `exact` status without both
 decimal-v1 columns, or a status outside decimal-v1, which CORE 0024's CHECK
 never stores, fails the read (`card_statements_unmatched_row_invalid`).
+A due date (`paymentDate`) that is null carries `paymentDateReason`, the same
+as each card's debit account gives it: `payment_date_absent` or
+`payment_date_invalid` ([ADR 0114, amendment 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)). Such a
+statement is `statement_not_comparable`, with no window read.
 
 For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
 ([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))

@@ -7,7 +7,7 @@ import { transactionFamilyEntry } from "../../../packages/domain/src/event-famil
 import type { EconomicGenerationGate } from "../../../packages/observation-shared/src/economic-readiness-contract.ts";
 import type { ObservationDetail } from "./api.ts";
 import { useEconomicReadiness } from "./economic-readiness-api.ts";
-import { Notice, Panel } from "./ui.tsx";
+import { Panel, QueryBoundary } from "./ui.tsx";
 
 const REASONS: Record<ReadinessReason, string> = {
   identity_fingerprint_only: "取得元が付けた取引番号ではなく、記録の内容から作った識別子です。",
@@ -67,7 +67,6 @@ function ReadinessPanel({
     opened,
   );
   const title = family === "bank-movement" ? "銀行の入出金" : "証券の約定";
-  const row = query.data?.manifest.rows[0];
   return (
     <Panel id={`economic-readiness-${family}`} title={`${title}からの新しい計算用取引`}>
       <div className="panel-body">
@@ -79,44 +78,41 @@ function ReadinessPanel({
             新規作成の条件を確認する
           </button>
         ) : (
-          <div aria-live="polite">
-            {query.isFetching ? <p role="status">新規作成の条件を確認しています。</p> : null}
-            {query.isError ? (
-              <Notice tone="warn">
-                <p>新規作成の条件を取得できませんでした。この記録と原本は引き続き確認できます。</p>
-                <p>{query.error.message}</p>
-              </Notice>
-            ) : null}
-            {row && query.data && !query.isError && !query.isFetching ? (
-              <>
-                <p>
-                  <strong>記録の識別状態:</strong> {IDENTITY[row.identity]}
-                </p>
-                <p>
-                  識別条件を満たしていても、この記録から新しい計算用取引を作成・採用できるという意味ではありません。
-                </p>
-                {row.reasons.length ? (
-                  <ul aria-label="新規作成に向けたこの記録の確認事項">
-                    {row.reasons.map((code) => (
-                      <li key={code}>{REASONS[code]}</li>
+          <QueryBoundary query={query} label="新規作成の条件" coverageNotice={false}>
+            {(data) => {
+              // The answer matched this one row (economicReadinessMatches).
+              const row = data.manifest.rows[0]!;
+              return (
+                <>
+                  <p>
+                    <strong>記録の識別状態:</strong> {IDENTITY[row.identity]}
+                  </p>
+                  <p>
+                    識別条件を満たしていても、この記録から新しい計算用取引を作成・採用できるという意味ではありません。
+                  </p>
+                  {row.reasons.length ? (
+                    <ul aria-label="新規作成に向けたこの記録の確認事項">
+                      {row.reasons.map((code) => (
+                        <li key={code}>{REASONS[code]}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <p>
+                    <strong>この機能から新しい計算用取引を作成することは、まだできません。</strong>
+                    この確認では取引を作成・採用しません。
+                  </p>
+                  <ul aria-label="新規作成に必要な未対応の機能">
+                    {data.generationGates.map((code) => (
+                      <li key={code}>{GATES[code]}</li>
                     ))}
                   </ul>
-                ) : null}
-                <p>
-                  <strong>この機能から新しい計算用取引を作成することは、まだできません。</strong>
-                  この確認では取引を作成・採用しません。
-                </p>
-                <ul aria-label="新規作成に必要な未対応の機能">
-                  {query.data.generationGates.map((code) => (
-                    <li key={code}>{GATES[code]}</li>
-                  ))}
-                </ul>
-                <p className="footnote">
-                  取引履歴がすべて取得されているかは未確認です。根拠はこのページの原本から確認できます。
-                </p>
-              </>
-            ) : null}
-          </div>
+                  <p className="footnote">
+                    取引履歴がすべて取得されているかは未確認です。根拠はこのページの原本から確認できます。
+                  </p>
+                </>
+              );
+            }}
+          </QueryBoundary>
         )}
       </div>
     </Panel>

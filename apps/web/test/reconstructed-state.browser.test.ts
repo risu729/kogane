@@ -182,14 +182,14 @@ describe.if(runnable)("reconstructed state", () => {
     await ask(page, WORLD_BANK);
     const main = await answered(page);
     const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
-    expect(table).toContain("10000 JPY");
-    expect(table).toContain("9000 JPY");
-    expect(table).toContain("8500 JPY");
+    expect(table).toContain("10,000 JPY");
+    expect(table).toContain("9,000 JPY");
+    expect(table).toContain("8,500 JPY");
     // reported − reconstructed, exact; not a zero and not an adjustment.
     expect(table).toContain("-500 JPY");
     expect(table).toContain("比較できない");
     expect(table).toContain("reconstruction_incomplete");
-    expect(table).toContain("適用 1 件 -1000 JPY");
+    expect(table).toContain("適用 1 件 -1,000 JPY");
     // The status and every reason as closed codes.
     expect(main).toContain("一部のみ");
     expect(main).toContain("family_not_evented");
@@ -207,6 +207,12 @@ describe.if(runnable)("reconstructed state", () => {
       .getByRole("region", { name: "イベントの扱いの一覧" })
       .innerText();
     expect(dispositions).toContain("ev-settle@1#0");
+    // A row with no gap says so in words, never a dash (INV05).
+    const reasons = await page
+      .getByRole("region", { name: "イベントの扱いの一覧" })
+      .locator("tbody tr td:last-child")
+      .allInnerTexts();
+    expect(reasons).toEqual(["なし", "なし"]);
     expect(requests.at(-1)?.searchParams.get("account")).toBe(WORLD_BANK);
     await page.close();
   }, 30_000);
@@ -251,8 +257,8 @@ describe.if(runnable)("reconstructed state", () => {
     await ask(page, LIABILITY);
     await answered(page);
     const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
-    expect(table).toContain("-10000 JPY");
-    expect(table).toContain("取得元の表示 10000 JPY");
+    expect(table).toContain("-10,000 JPY");
+    expect(table).toContain("取得元の表示 10,000 JPY");
     expect(table).toContain("符号を反転");
     // The asset-positive end figure carries no such note.
     expect(table.match(/符号を反転/gu)).toHaveLength(1);
@@ -312,12 +318,11 @@ describe.if(runnable)("reconstructed state", () => {
     const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
     expect(table).toContain(WORLD_SCOPE_BANK);
     expect(table).toContain(WORLD_SCOPE_SAVINGS);
-    expect(table).toContain("9000 JPY");
-    expect(table).toContain("49900 JPY");
-    expect(table).toContain("49800 JPY");
-    // Nothing totalled across the two accounts.
-    expect(table).not.toContain("58900 JPY");
-    expect(table).not.toContain("58800 JPY");
+    expect(table).toContain("9,000 JPY");
+    expect(table).toContain("49,900 JPY");
+    expect(table).toContain("49,800 JPY");
+    // Nothing totalled across the two accounts, grouped or not.
+    for (const total of ["58,900", "58,800", "58900", "58800"]) expect(table).not.toContain(total);
     const accounts = await page
       .getByRole("region", { name: "口座ごとの状況", exact: true })
       .innerText();

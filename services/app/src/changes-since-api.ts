@@ -15,7 +15,7 @@ import { CHANGES_SINCE_PATH } from "../../../packages/observation-shared/src/cha
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
 import { eventsV2Available } from "./events-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 
 export { CHANGES_SINCE_PATH };
 
@@ -34,7 +34,8 @@ export async function changesSinceFor(
   return readChangesSince({
     grant,
     sql: d1Executor(env.DB),
-    served: { events: await eventsV2Available(env) },
+    // Asked by the service once the grant and the request pass.
+    served: async () => ({ events: await eventsV2Available(env) }),
     request,
     now: new Date().toISOString(),
   });
@@ -52,8 +53,7 @@ export async function changesSinceApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== CHANGES_SINCE_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   for (const key of new Set(url.searchParams.keys()))
     if (
       !(PARAMETERS as readonly string[]).includes(key) ||

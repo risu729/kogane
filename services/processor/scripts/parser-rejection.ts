@@ -208,6 +208,7 @@ const SBI_CASH_ACCOUNT = `${SBI_CASH_ROOT}[]`;
 const SBI_CASH_CURRENCY = `${SBI_CASH_ACCOUNT}.currencyCashBalances[]`;
 const SBI_CASH_ROW = `${SBI_CASH_CURRENCY}.foreignScheduleCashBalances[]`;
 const SBI_CASH_FIELDS = [
+  "businessDate",
   "buyPossibleAmount",
   "keepCash",
   "transferPossibleAmount",

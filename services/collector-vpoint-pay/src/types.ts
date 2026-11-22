@@ -35,8 +35,13 @@ export interface CollectionManifest {
   status: "success" | "partial" | "failed";
   earliestMonth: string | null;
   latestMonth: string | null;
-  transactionMonthCount: number;
-  transactionCount: number;
+  /**
+   * Present only when the collection finished and returned them. A run that
+   * stopped earlier never learned them, so they are absent, never 0 (INV05);
+   * its `failures` carry the reason.
+   */
+  transactionMonthCount?: number;
+  transactionCount?: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
 }

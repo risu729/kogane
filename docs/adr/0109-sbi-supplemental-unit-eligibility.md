@@ -1,6 +1,6 @@
 # ADR 0109: Isolate SBI supplementary completeness from core publication
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1310](https://github.com/risu729/kogane/pull/1310))
 - Date: 2026-11-11
 
 ## Context
@@ -87,6 +87,8 @@ containers, refusal fallback and historical cutoff. Migration tests verify
 exact scope, idempotence and preservation of every nondefault policy field.
 
 ## Amendment 2026-11-19: SBI Shinsei's importer partition joins the native one
+
+Status: accepted (merged 2026-11-20 in [#1435](https://github.com/risu729/kogane/pull/1435)).
 
 **Context.** SBI Shinsei's three container-snapshot datasets
 (`top-accounts-balance-and-activity`, `yen-deposit-account`, `exchange-rate`)

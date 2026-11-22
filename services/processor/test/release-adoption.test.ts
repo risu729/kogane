@@ -475,6 +475,24 @@ test("comparison, adoption and rollback keep the visible result set exactly repr
     });
     expect(activated.status).toBe(200);
     expect(activated.json).toMatchObject({ kind: "activate", changed: true, pointersMoved: 2 });
+    // Compared again once active, the release is its own base: each artifact's
+    // published run is its candidate run, and both sides are the same rows.
+    const active = await local.post("/release/compare", {
+      ...target,
+      releaseId: candidateRelease.releaseId,
+    });
+    expect(active.status).toBe(200);
+    expect(active.json.baseReleaseId).toBe(candidateRelease.releaseId);
+    expect(active.json.countsByKind).toEqual([{ kind: "balance", base: 2, candidate: 2 }]);
+    expect(active.json.locators).toEqual({
+      matched: 2,
+      baseOnly: 0,
+      candidateOnly: 0,
+      ambiguous: 0,
+    });
+    expect(active.json.values).toEqual({ compared: 2, differing: 0, missingOnOneSide: 0 });
+    expect(active.json.coverage).toEqual({ baseClaims: 2, candidateClaims: 2, differing: 0 });
+    expect(active.json.sample).toEqual([]);
     const after = await local.visible();
     expect(after).not.toEqual(before);
     expect(after.map((row) => row.parse_run_id)).toEqual([

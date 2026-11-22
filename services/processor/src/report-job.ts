@@ -2,9 +2,11 @@
 //
 // It does three separable things and keeps them separable:
 //
-//   1. fixes the input set it used as a manifest and derives the context id
-//      from that manifest, so the same inputs always give the same context and
-//      a corrected price gives a different one (AR12, UC36/AT36);
+//   1. fixes the input set it used, and the release of the code that turns it
+//      into a body, as a manifest and derives the context id from that
+//      manifest, so the same inputs under the same code always give the same
+//      context and a corrected price or a changed rule gives a different one
+//      (AR12, UC36/AT36, INV09);
 //   2. writes a calculation run with typed unvalued reasons, never a zero for
 //      a missing price (addendum 09 section 3);
 //   3. stores the report body once, content-addressed under `reports/`, and
@@ -20,6 +22,8 @@ import {
   canonicalDigest,
   canonicalJson,
   DEFAULT_INSTRUMENT_VALUATION_POLICY,
+  HOLDING_VALUATION_RELEASE,
+  REPORT_BODY_SCHEMA_VERSION,
   replayabilityFor,
   reportPartition,
   reportStorageRef,
@@ -39,13 +43,19 @@ import {
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
+import { POSITION_CUT_SQL } from "../../../packages/read-model/src/sql";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
-const INPUT_MANIFEST_VERSION = "report-inputs-v1";
+const INPUT_MANIFEST_VERSION = "report-inputs-v2";
 const DEFAULT_MAX_ROWS = 500;
 /** Positions one reader page returns with their valuations (`PAGE_LIMIT` less its probe row). */
 const POSITION_PAGE = PAGE_LIMIT - 1;
 const DECIMAL_LOOKUP_CHUNK = 80;
+/**
+ * Reads of the whole position set before the job refuses a cut that keeps
+ * moving (`snapshot_changed`): the first, and one more from the first page.
+ */
+const POSITION_CUT_ATTEMPTS = 2;
 
 /** Feature flag. Off unless the deployment explicitly sets the string "true". */
 export function reportsEnabled(flag: string | undefined): boolean {
@@ -165,6 +175,96 @@ async function recordedAfterCutoff(
 }
 
 /**
+ * The in-scope positions of one cut of the current positions, in page order,
+ * read until they exceed `maxRows` or the store ends; `null` when every
+ * attempt saw the cut move.
+ *
+ * The reader answers pages of `POSITION_PAGE` positions plus one row that
+ * only says another page exists (and carries no valuations). Positions
+ * recorded after the cutoff are dropped page by page, so the in-scope set is
+ * read until it exceeds the bound or the store ends: dropping late rows from
+ * the first page alone would leave the rows behind it unread and the report
+ * would claim a shorter set is the whole scope.
+ *
+ * The pages are separate reads at moving offsets. A parse published between
+ * two of them shifts the next page, so a row comes back or one is never read;
+ * a snapshot republished between them replaces rows an earlier page returned
+ * with the same holdings under new ids, so one holding can come back under
+ * two ids and both would be counted (INV06). After the last page one more
+ * read (`POSITION_CUT_SQL`) checks that the ids read, late ones included, are
+ * exactly the current positions up to the last one read, and all of them when
+ * the store ended. When they are not, the whole read starts again from the
+ * first page; a cut that moves on every attempt is refused, never merged.
+ *
+ * The check is on the set read, not on the order it arrived in: a row
+ * published between two reads can arrive on a later page than rows that sort
+ * after it while the set still passes (rows added before the offset and gone
+ * again by the check). A passing set is sorted back into page order, so the
+ * first `maxRows` are the ones a read of that one cut keeps.
+ */
+async function readPositionCut(
+  db: D1Database,
+  reader: ReturnType<typeof createD1ObservationReader>,
+  cutoffMs: number,
+  maxRows: number,
+): Promise<PositionWithValuations[] | null> {
+  for (let attempt = 0; attempt < POSITION_CUT_ATTEMPTS; attempt += 1) {
+    const kept: PositionWithValuations[] = [];
+    const seen = new Set<number>();
+    let ended = false;
+    for (let offset = 0; ; offset += POSITION_PAGE) {
+      const page = await reader.listPositions({ offset });
+      const entries = page.slice(0, POSITION_PAGE);
+      const late = await recordedAfterCutoff(
+        db,
+        entries.map((entry) => entry.position.id),
+        cutoffMs,
+      );
+      for (const entry of entries) {
+        if (seen.has(entry.position.id)) continue;
+        seen.add(entry.position.id);
+        if (!late.has(entry.position.id)) kept.push(entry);
+      }
+      ended = page.length <= POSITION_PAGE;
+      if (kept.length > maxRows || ended) break;
+    }
+    const cut = await db
+      .prepare(POSITION_CUT_SQL)
+      .bind(JSON.stringify([...seen]))
+      .first<{ current_rows: number; read_current: number; prefix_rows: number }>();
+    if (
+      cut !== null &&
+      cut.read_current === seen.size &&
+      cut.prefix_rows === seen.size &&
+      (!ended || cut.current_rows === seen.size)
+    )
+      return kept.sort(pageOrder);
+  }
+  return null;
+}
+
+const utf8 = new TextEncoder();
+
+/** SQLite `BINARY` order of two TEXT values: their UTF-8 bytes, compared bytewise. */
+function binaryText(left: string, right: string): number {
+  if (left === right) return 0;
+  const a = utf8.encode(left);
+  const b = utf8.encode(right);
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) if (a[i] !== b[i]) return a[i]! - b[i]!;
+  return a.length - b.length;
+}
+
+/** The reader's position page order (`ORDER_KEYS.positionsByScope`): source, account, code, id. */
+export function pageOrder(left: PositionWithValuations, right: PositionWithValuations): number {
+  return (
+    binaryText(left.position.source_id, right.position.source_id) ||
+    binaryText(left.position.source_account, right.position.source_account) ||
+    binaryText(left.position.security_code, right.position.security_code) ||
+    left.position.id - right.position.id
+  );
+}
+
+/**
  * The newest moment Kogane learned any of the included evidence. The manifest
  * records this rather than the requested cutoff instant: a sweep five minutes
  * later with no new evidence must produce the same context, not a new one
@@ -250,12 +350,56 @@ SELECT position_id, id, base_instrument_ref, base_quantity_coefficient, base_qua
  source_claim_ref, market_ref, adjustment_policy_ref
 FROM ranked WHERE rank_in_key=1`;
 
+/**
+ * The release of `SNAPSHOT_PRICE_SQL` and of how its rows become prices
+ * (`priceObservation`). Bump it with any change that can choose another price,
+ * or none, for the same stored rows; the frozen digest in
+ * `test/report-job-releases.test.ts` fails until it is bumped with the text.
+ */
+export const SNAPSHOT_PRICE_RELEASE = "report-snapshot-price-v1";
+
+/**
+ * The release of how this job turns its inputs into a body: the instrument
+ * class it values under, `quantityFromNormalizedDecimal`, the row and
+ * unvalued-reason mapping, the provider rows, the coverage, `reportPartition`
+ * and the body schema. Bump it with any change that can give another body for
+ * the same manifest.
+ */
+export const REPORT_BUILD_RELEASE = `${REPORT_BODY_SCHEMA_VERSION}:build-v1`;
+
+/**
+ * The code a report body depends on beyond its stored inputs, by release
+ * (INV09). Each is part of the input manifest, so the report id changes with
+ * any of them and a later build never reuses a body an earlier build computed.
+ */
+export interface ReportBuildReleases {
+  /** `SNAPSHOT_PRICE_RELEASE`: which price a holding is valued at. */
+  priceSelectionRelease: string;
+  /** ADR 0020's closed rule list the selection admits, each id with its version, sorted. */
+  priceRuleIds: string[];
+  /** `HOLDING_VALUATION_RELEASE`: `valueHolding` and `summarizeValuation`. */
+  valuationRelease: string;
+  /** `REPORT_BUILD_RELEASE`: rows, partition and body schema. */
+  reportBuildRelease: string;
+}
+
+/** The releases this build ships. */
+export function reportBuildReleases(): ReportBuildReleases {
+  return {
+    priceSelectionRelease: SNAPSHOT_PRICE_RELEASE,
+    priceRuleIds: [...PRICE_RULE_IDS].sort(),
+    valuationRelease: HOLDING_VALUATION_RELEASE,
+    reportBuildRelease: REPORT_BUILD_RELEASE,
+  };
+}
+
 /** The snapshot price of each position, keyed by position observation id. */
 async function snapshotPrices(
   db: D1Database,
   wanted: readonly { ref: string; positionId: number }[],
   unitRef: string,
   cutoff: string,
+  ruleIds: readonly string[],
 ): Promise<Map<number, PriceObservation>> {
   const prices = new Map<number, PriceObservation>();
   if (wanted.length === 0) return prices;
@@ -265,7 +409,7 @@ async function snapshotPrices(
       JSON.stringify(wanted.map((entry) => [entry.ref, entry.positionId])),
       unitRef,
       cutoff,
-      JSON.stringify(PRICE_RULE_IDS),
+      JSON.stringify(ruleIds),
     )
     .all<PriceRow & { position_id: number }>();
   for (const row of rows.results) {
@@ -277,11 +421,12 @@ async function snapshotPrices(
 
 /**
  * Every version this run used, as the set itself rather than as a latest id or
- * a timestamp (AR12). The digest of this object is the context id, so adding a
- * corrected price or a later observation produces a new context instead of
- * silently changing an existing one.
+ * a timestamp (AR12), and the release of the code that turns those inputs into
+ * the body (INV09). The digest of this object is the context id, so a
+ * corrected price, a later observation or a changed rule produces a new
+ * context instead of silently reusing an existing one.
  */
-interface ReportInputManifest {
+interface ReportInputManifest extends ReportBuildReleases {
   schemaVersion: typeof INPUT_MANIFEST_VERSION;
   perimeterRef: string;
   unitRef: string;
@@ -289,6 +434,13 @@ interface ReportInputManifest {
   knowledgeCutoffEffective: string;
   decimalPolicyRelease: string;
   instrumentValuationPolicyId: string;
+  /**
+   * More positions were in scope than the bound kept (the body's
+   * `coverage.truncated`). The position ids name only the kept rows, so the
+   * same first `maxRows` positions with and without positions past the bound
+   * would otherwise give one id for a whole body and a cut one (INV05, INV09).
+   */
+  truncated: boolean;
   positionObservationIds: number[];
   valuationObservationIds: number[];
   priceObservationIds: string[];
@@ -325,12 +477,15 @@ async function restrictionsFor(
 
 /**
  * Build (or reuse) the holdings report at the context implied by the current
- * inputs. Re-running with unchanged inputs reuses the stored artifact; it does
- * not rewrite it.
+ * inputs and the current code. Re-running with unchanged inputs and releases
+ * reuses the stored artifact; it does not rewrite it. `releases` defaults to
+ * the ones this build ships; a test passes another set to stand for a later
+ * build.
  */
 export async function runReportJob(
   env: ReportJobEnv,
   options: ReportJobOptions,
+  releases: ReportBuildReleases = reportBuildReleases(),
 ): Promise<ReportJobResult> {
   const empty: ReportJobResult = {
     generated: 0,
@@ -349,34 +504,8 @@ export async function runReportJob(
   const reader = createD1ObservationReader(env.DB);
   const cutoffMs = Date.parse(options.knowledgeCutoff);
   if (!Number.isFinite(cutoffMs)) return { ...empty, skipped: "invalid_knowledge_cutoff" };
-  // The reader answers pages of `POSITION_PAGE` positions plus one row that
-  // only says another page exists (and carries no valuations). Positions
-  // recorded after the cutoff are dropped page by page, so the in-scope set
-  // is read until it exceeds the bound or the store ends: dropping late rows
-  // from the first page alone would leave the rows behind it unread and the
-  // report would claim a shorter set is the whole scope. The pages are
-  // separate reads: a parse published between two of them shifts the offset,
-  // so a row can come back on the next page, and it is kept once (INV06).
-  // A shift the other way (a snapshot replaced between reads) can leave a row
-  // unread; that is a limit of offset pages, and the manifest still names
-  // exactly the ids the report used.
-  const all: PositionWithValuations[] = [];
-  const read = new Set<number>();
-  for (let offset = 0; ; offset += POSITION_PAGE) {
-    const page = await reader.listPositions({ offset });
-    const entries = page.slice(0, POSITION_PAGE);
-    const late = await recordedAfterCutoff(
-      env.DB,
-      entries.map((entry) => entry.position.id),
-      cutoffMs,
-    );
-    for (const entry of entries) {
-      if (late.has(entry.position.id) || read.has(entry.position.id)) continue;
-      read.add(entry.position.id);
-      all.push(entry);
-    }
-    if (all.length > maxRows || page.length <= POSITION_PAGE) break;
-  }
+  const all = await readPositionCut(env.DB, reader, cutoffMs, maxRows);
+  if (all === null) return { ...empty, skipped: "snapshot_changed" };
   const truncated = all.length > maxRows;
   const positions = all.slice(0, maxRows);
 
@@ -413,6 +542,7 @@ export async function runReportJob(
     })),
     options.unitRef,
     options.knowledgeCutoff,
+    releases.priceRuleIds,
   );
 
   const manifest: ReportInputManifest = {
@@ -422,6 +552,11 @@ export async function runReportJob(
     knowledgeCutoffEffective: await knowledgeBoundary(env.DB, positionIds),
     decimalPolicyRelease: options.decimalPolicyRelease,
     instrumentValuationPolicyId: DEFAULT_INSTRUMENT_VALUATION_POLICY.policyId,
+    priceSelectionRelease: releases.priceSelectionRelease,
+    priceRuleIds: [...releases.priceRuleIds].sort(),
+    valuationRelease: releases.valuationRelease,
+    reportBuildRelease: releases.reportBuildRelease,
+    truncated,
     positionObservationIds: [...positionIds].sort((a, b) => a - b),
     valuationObservationIds: [...valuationIds].sort((a, b) => a - b),
     priceObservationIds: [...new Set([...prices.values()].map((price) => price.id))].sort(),
@@ -493,11 +628,20 @@ export async function runReportJob(
           },
     );
     // Provider-reported values and costs are kept beside the own calculation,
-    // never promoted to the single truth (UC30/AT30).
+    // never promoted to the single truth (UC30/AT30). One row per
+    // `calculation_results` key (subject, scope, metric): one instrument held
+    // in two scopes keeps each scope's row, and only a repeat within one
+    // scope is skipped, before the insert's `ON CONFLICT DO NOTHING` could
+    // drop it unseen.
     for (const valuation of entry.valuations) {
       if (valuation.currency !== options.unitRef) continue;
       const metric = `provider.${valuation.metric}`.slice(0, 128);
-      if (providerRows.some((row) => row.subjectRef === ref && row.metric === metric)) continue;
+      if (
+        providerRows.some(
+          (row) => row.subjectRef === ref && row.scopeRef === scopeRef && row.metric === metric,
+        )
+      )
+        continue;
       providerRows.push({
         subjectRef: ref,
         scopeRef,
@@ -525,7 +669,7 @@ export async function runReportJob(
   });
 
   const body: ReportBody = {
-    schemaVersion: "report-holdings-v1",
+    schemaVersion: REPORT_BODY_SCHEMA_VERSION,
     purpose: "holdings-view",
     contextId,
     calculationRunId: runId,
@@ -559,6 +703,16 @@ export async function runReportJob(
       options.now,
     )
     .run();
+  // The run id is the manifest digest, so a retry over the same inputs meets
+  // the run an interrupted job left. A building run takes its results again
+  // (`ON CONFLICT DO NOTHING`). A complete one already holds them, and
+  // `calculation_results_run_building` refuses any insert for it before the
+  // conflict clause is considered, so its results are not offered again. This
+  // job marks a run complete only with its artifact (below); a complete run
+  // without one is what an earlier build left when it failed between the two.
+  const run = await env.DB.prepare("SELECT status FROM calculation_runs WHERE run_id=?")
+    .bind(runId)
+    .first<{ status: string }>();
   const inserts = [
     ...cells.map((cell, index) => {
       const row = rows[index]!;
@@ -603,12 +757,7 @@ export async function runReportJob(
       );
     }),
   ];
-  if (inserts.length > 0) await env.DB.batch(inserts);
-  await env.DB.prepare(
-    "UPDATE calculation_runs SET status='complete',completed_at=?,replayability=? WHERE run_id=? AND status='building'",
-  )
-    .bind(options.now, replayability, runId)
-    .run();
+  if (run?.status !== "complete" && inserts.length > 0) await env.DB.batch(inserts);
 
   // The stored bytes are the canonical form the digest was taken over, so a
   // reader can verify sha256(bytes) == content_digest without re-serializing.
@@ -638,7 +787,16 @@ export async function runReportJob(
       }),
     ),
   );
+  // The run is marked complete in the same batch that writes its artifact, so
+  // a failure anywhere before it leaves the run building and the next run over
+  // the same manifest finishes it, never a complete run that no report names.
+  // The `generated` event is written only when the report has none: two jobs
+  // that both found the run unfinished write one artifact (`ON CONFLICT`) and
+  // one event, never a second generation of the same report (INV06).
   await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE calculation_runs SET status='complete',completed_at=?,replayability=? WHERE run_id=? AND status='building'",
+    ).bind(options.now, replayability, runId),
     env.DB.prepare(
       `INSERT INTO report_artifacts(report_id,context_id,purpose,schema_version,content_digest,storage_ref,created_by,created_at)
        VALUES(?,?,'holdings-view',?,?,?,?,?) ON CONFLICT(report_id) DO NOTHING`,
@@ -652,8 +810,10 @@ export async function runReportJob(
       options.now,
     ),
     env.DB.prepare(
-      "INSERT INTO report_events(report_id,kind,actor,related_report_id,occurred_at) VALUES(?,'generated',?,NULL,?)",
-    ).bind(reportId, options.actor, options.now),
+      `INSERT INTO report_events(report_id,kind,actor,related_report_id,occurred_at)
+       SELECT ?,'generated',?,NULL,?
+       WHERE NOT EXISTS(SELECT 1 FROM report_events WHERE report_id=? AND kind='generated')`,
+    ).bind(reportId, options.actor, options.now, reportId),
   ]);
 
   return {

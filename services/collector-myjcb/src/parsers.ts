@@ -1,6 +1,6 @@
 import { MYJCB_ORIGIN } from "./policy";
 import type { CreditExportKind, DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
-import { PastMonthsRefusalError, StopConditionError } from "./types";
+import { MAX_DETAIL_POSITION, PastMonthsRefusalError, StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
 import {
   CONFIRMED_STATEMENT_HEADING,
@@ -147,7 +147,7 @@ export interface CreditMenuPositions {
   /** Positions under 「ボーナス#回払い・ショッピングスキップ払い」, ascending. */
   readonly schedules: readonly number[];
   /**
-   * Detail links naming a position above 17, which are not read; present
+   * Detail links naming a position above `MAX_DETAIL_POSITION`, which are not read; present
    * only when there is one. A count only, for the past-month refusal log.
    */
   readonly linksBeyondRange?: number;
@@ -184,7 +184,7 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
       heading = compactText(node);
     if (isElement(node) && node.tagName === "a") {
       const position = creditDetailLinkPosition(node);
-      if (position !== undefined && position > 17) beyond += 1;
+      if (position !== undefined && position > MAX_DETAIL_POSITION) beyond += 1;
       else if (position !== undefined) {
         if (heading === undefined) outside += 1;
         else {
@@ -227,7 +227,8 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
 
 /**
  * The `detailMonth` a menu link opens (one or two digits, so at most 99), or
- * undefined for any other link. The caller reads only positions up to 17.
+ * undefined for any other link. The caller reads only positions up to
+ * `MAX_DETAIL_POSITION`.
  */
 function creditDetailLinkPosition(link: HtmlElement): number | undefined {
   const href = link.attrs.find((attribute) => attribute.name === "href")?.value;
@@ -942,9 +943,9 @@ function numericMonth(value: unknown, itemCount: number, itemIndex: number): num
       : typeof value === "string" && /^\d{1,2}$/u.test(value)
         ? Number(value)
         : Number.NaN;
-  if (!Number.isInteger(number) || number < 0 || number > 17) {
+  if (!Number.isInteger(number) || number < 0 || number > MAX_DETAIL_POSITION) {
     throw new PastMonthsRefusalError(
-      "MyJCB past-month detailMonth was outside 0..17",
+      `MyJCB past-month detailMonth was outside 0..${MAX_DETAIL_POSITION}`,
       "month_out_of_range",
       { itemCount, itemIndex, monthType: jsonType(value), ...monthShape(value) },
     );

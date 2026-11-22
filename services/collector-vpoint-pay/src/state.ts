@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { credentialFromSecrets, inspectCredential, type CredentialStatus } from "./credentials";
 import { persistVPointPayRun } from "./shared-run";
 import type {
+  ApiCollection,
   CollectionFailure,
   CollectionManifest,
   CollectionResult,
@@ -78,8 +79,9 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     const failures: CollectionFailure[] = [];
     let earliestMonth: string | null = null;
     let latestMonth: string | null = null;
-    let transactionMonthCount = 0;
-    let transactionCount = 0;
+    // Unknown until the collection returns: a run that stops earlier reports
+    // no counts rather than zeros (INV05).
+    let counts: Pick<ApiCollection, "transactionMonthCount" | "transactionCount"> | undefined;
     try {
       const credential = await this.credential();
       const collection = await collectVPointPay({
@@ -90,8 +92,10 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       });
       earliestMonth = collection.earliestMonth;
       latestMonth = collection.latestMonth;
-      transactionMonthCount = collection.transactionMonthCount;
-      transactionCount = collection.transactionCount;
+      counts = {
+        transactionMonthCount: collection.transactionMonthCount,
+        transactionCount: collection.transactionCount,
+      };
       {
         // One terminal-last run replaces the per-artifact writes below.
         collected.push(...collection.artifacts);
@@ -112,8 +116,7 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       status,
       earliestMonth,
       latestMonth,
-      transactionMonthCount,
-      transactionCount,
+      ...counts,
       artifacts,
       failures,
     };
@@ -137,8 +140,10 @@ export class VPointPayCredentialState extends DurableObject<Env> {
           status,
           earliestMonth,
           latestMonth,
-          transactionMonthCount,
-          transactionCount,
+          // An unknown count is undefined, so the JSON line leaves it out
+          // instead of writing 0 (INV05).
+          transactionMonthCount: counts?.transactionMonthCount,
+          transactionCount: counts?.transactionCount,
           artifactCount: collected.length,
           failureCount: failures.length,
           terminalOutcome: persisted.outcome,

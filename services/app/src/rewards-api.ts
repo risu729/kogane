@@ -36,7 +36,7 @@ import {
   type Page,
   type RewardHoldingView,
 } from "../../../packages/read-model/src/index";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
 const REWARDS_PREFIX = "/api/v2/rewards";
@@ -177,8 +177,7 @@ function pageEnvelope<T, U>(source: Page<T>, map: (row: T) => U): Page<U> {
 export async function rewardsApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== REWARDS_PREFIX && !path.startsWith(`${REWARDS_PREFIX}/`)) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   return json(await readRewardRoute(env, url));
 }
 

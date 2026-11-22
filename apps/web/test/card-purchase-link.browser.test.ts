@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import {
@@ -234,7 +234,7 @@ describe.if(runnable)("pending-to-posted link review", () => {
     const entries = section.getByRole("list", { name: "確認待ちの対応候補" }).getByRole("listitem");
     expect(await entries.count()).toBe(1);
     const text = (await entries.first().innerText()).replace(/\s+/gu, " ");
-    for (const expected of ["未確定", "2026-08-03", "-800 JPY", "確定", "2026-08-15", "-1234 JPY"])
+    for (const expected of ["未確定", "2026-08-03", "-800 JPY", "確定", "2026-08-15", "-1,234 JPY"])
       expect(text).toContain(expected);
     expect(text).toContain("金額・日付などからの候補");
     expect(
@@ -278,7 +278,7 @@ describe.if(runnable)("pending-to-posted link review", () => {
       "-800 JPY",
       "状態不明（合計に含めていません）",
       "2026-08-15",
-      "-1234 JPY",
+      "-1,234 JPY",
       // Rationale codes and rejection conditions, as words.
       "未確定の明細と確定の明細の組",
       "同じ請求月",
@@ -424,11 +424,15 @@ describe.if(runnable)("pending-to-posted link review", () => {
     pinDrift = 1;
     const page = await openDetail();
     await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
-    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+    const button = page.getByRole("button", { name: "同一の利用として統合", exact: true });
+    await button.focus();
+    await page.keyboard.press("Enter");
     await page
       .getByRole("alert")
       .filter({ hasText: "候補または利用の記録が更新されています" })
       .waitFor();
+    // The refusal leaves a keyboard user on the button they pressed.
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
     expect(new URL(page.url()).pathname).toBe(`/purchases/${POSTED_EVENT}`);
     expect(posted.map((row) => row.operation)).toEqual(["plan"]);
     await page.close();
@@ -538,4 +542,77 @@ describe.if(runnable)("pending-to-posted link review", () => {
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);
+
+  /** Answers every plan with the refusal the server gives, as `fail` in the Processor does. */
+  async function refusePlans(page: Page, status: number, error: string): Promise<void> {
+    await page.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status,
+        json: { error, refs: [`reconciliation-proposal:${candidate.proposalId}`] },
+      }),
+    );
+  }
+
+  test("a plan refused as stale reads the purchase again, and a closed candidate's refusal shows at the top", async () => {
+    const page = await openDetail();
+    // After the page was shown, the proposal was rejected elsewhere: the
+    // planner refuses it (`proposal_closed` answers `stale_context`).
+    candidate = linkCandidate({
+      proposalStatus: "rejected",
+      proposalRevision: 1,
+      actions: [],
+      blockers: ["proposal_closed"],
+    });
+    await refusePlans(page, 409, "stale_context");
+    await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
+    const reread = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).searchParams.get("eventId") === POSTED_EVENT &&
+        new URL(response.url()).pathname === "/api/v2/card-purchases",
+    );
+    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+    await reread;
+    // The closed candidate offers no decision, so its refusal shows at the
+    // top of the page, and focus moves there from the button that went away.
+    const notice = page.getByRole("alert").filter({ hasText: "読み直した表示には" });
+    await notice.waitFor();
+    expect(await notice.innerText()).toContain("対象が変更されました");
+    expect(await notice.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(await page.getByRole("button", { name: "同一の利用として統合" }).count()).toBe(0);
+    expect(new URL(page.url()).pathname).toBe(`/purchases/${POSTED_EVENT}`);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  test("a plan pinned to anything but the candidate on screen reads the purchase again", async () => {
+    pinDrift = 1;
+    const page = await openDetail();
+    await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
+    const reread = page.waitForResponse(
+      (response) => new URL(response.url()).searchParams.get("eventId") === POSTED_EVENT,
+    );
+    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+    await reread;
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "候補または利用の記録が更新されています" })
+      .waitFor();
+    await page.close();
+  }, 30_000);
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const page = await openDetail();
+    const reads: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/v2/card-purchases") reads.push(request.url());
+    });
+    // As the planner answers a merge whose events it cannot draft.
+    await refusePlans(page, 400, "unsupported_semantics");
+    await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
+    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "まだ対応していない内容" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(reads).toEqual([]);
+    await page.close();
+  }, 30_000);
 });

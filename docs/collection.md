@@ -419,14 +419,41 @@ expected total, already checked against every walked JSON page. A zero total
 skips CSV; a positive total requires a CSV whose logical data-row count,
 excluding the header and blank lines, equals that total. The collector uses
 the shared CSV reader so quoted multiline cells and quote recovery count as
-in parsing. This check runs before collection returns artifacts, so failures
-end the shared run as `failed`, with no JSON transaction fallback:
+in parsing. This check runs before the history step returns any artifact, so a
+refusal stops the core run with no JSON transaction fallback:
 `history_csv_missing_with_transactions` (empty/missing body or failed CSV
 HTTP request), `history_csv_count_mismatch` (short or long CSV), or
 `history_csv_invalid` (invalid encoding/header). The allowlisted code is
 stored at terminal, report and account-unit scope, without provider text or
-amounts. Transport failures likewise fail the run. Existing failed-run
-artifact retention is unchanged. See [ADR 0092](adr/0092-sony-history-csv-only.md).
+amounts. Transport failures likewise stop the run. See
+[ADR 0092](adr/0092-sony-history-csv-only.md).
+
+The core steps run in order: `login`, `gross-balance`, `monthly-history`,
+`retained-history`, `wallet` (`CORE_STEPS`, `src/sony-bank.ts`). Each step is
+all-or-nothing across the eleven currencies. When one throws, the run keeps
+the artifacts of the steps that finished, under the names a complete run gives
+them (the month window stays `monthly-*`; a canonical history name appears only
+once the retained step finished), and keeps nothing of the step that threw. It
+is then `partial` (`failed` with no artifact when nothing finished that stores
+one, which is a stop at `login` or `gross-balance`). A stopped run writes no
+`collection-summary.json` and, WALLET being last, no WALLET page or
+`wallet-months` range. Its `manifest.json` adds `coreSteps` (`completed`,
+`failed`, `notAttempted`), names the stopped step as the failure's
+`operation`, and has a null `transactionCount` unless the retained step
+finished. The terminal's code is the allowlisted history reason above when
+there is one, else `core_monthly_history_failed`,
+`core_retained_history_failed` or `core_wallet_failed`; the account unit's
+`coverageStatus` is `partial` and it carries that code (so its registered unit
+report is `failed`). `sonyBankRunPlan` refuses a stopped run carrying an
+artifact no finished step produced, or one stored under any name other than
+the one its dataset is stored under (`core_partial_scope_invalid`); a refused
+plan writes no terminal, the Worker logs
+`sony-bank-shared-persistence-refused` with the closed code, and the
+occurrence fails with `collection_failed`. A partial core run is never parsed: every Sony core dataset has run-scoped eligibility,
+so it is evidence only, and the scheduler records it `completed` like any
+persisted `partial` run
+([ADR 0099, amendment 2026-11-18](adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)).
+The realised-gains and documents runs are read only after a complete core.
 
 Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
 statements), the same pass the retired legacy path applied before the importer
@@ -454,9 +481,10 @@ has a null start and yesterday as its end, and `requestedScope.scopeKind` is
 `full_snapshot` over the same bounds, so a later successful run recovers a day
 an earlier missed run did not read, as long as the provider still retains it
 and each currency's retained history fits the 1,000-page walk (beyond it the
-run fails with `history_page_limit_exceeded`). `coverageStatus` is `complete`
-for a successful run and `unknown` for a failure; the core run is never
-`partial`, because a core failure keeps no artifact. The null start names the
+retained step stops the core run, `partial`, with
+`history_page_limit_exceeded`). `coverageStatus` is `complete` for a successful
+run, `partial` for a core run that stopped after a step that stores an
+artifact, and `unknown` for a failure. The null start names the
 provider's retention, not proved account-opening coverage.
 
 The realised-gains and documents runs, read only after the core steps succeed,
@@ -509,7 +537,9 @@ bounds is not declared captured. These manifest-based ranges do not prove the
 aggregator's underlying provider data is fresh or its full history is retained;
 one `terminal` report carries the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
-aggregator currently shows) listing the accounts as `unitKeys`.
+aggregator currently shows) listing the accounts as `unitKeys`. Every account
+is asked for the same 12 JST calendar months, computed once from the run's
+`startedAt` ([source notes](sources/moneyforward.md#collection-surfaces-and-run-boundaries)).
 
 The unit key is the account identity the parser requires,
 `moneyforward-account-v2-<64 hex>`
@@ -527,6 +557,21 @@ carries `identity: derived` or one closed code (`identity_tuple_absent`,
 themselves. The parsers also accept the importer's `moneyforward-account-v1-`
 identities, which are a different account from the v2 identity of the same
 service ([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
+
+Run result: `runSharedCollection` returns the run's id, status, artifact and
+failure counts, persistence outcome and terminal key. `accountDetailCount` and
+`monthlyFragmentCount` are in that result and in the collector's
+`manifest.json` only when the collection finished; a finished run with no
+account reports a known 0 for both. A run that stopped earlier (no credential,
+a refused sign-in, a refused account or month page) never learned them, so
+they are absent, not 0 (INV05); its failure code is the reason. Such a run is
+`failed` and keeps no artifact, so it writes no `manifest.json` at all. A
+`success` input that carries no `accountDetailCount` cannot be checked against
+its identities, so its units stay positional (`identity_incomplete`;
+[ADR 0027, amendment 2026-11-21](adr/0027-moneyforward-collector-account-identity.md#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)). Until
+2026-11-21 a stopped run reported both counts as 0 in its result. Verified
+with a synthetic passkey provider behind a mocked `fetch` in
+`services/collector-moneyforward/test/diagnostics.test.ts`.
 
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
@@ -911,6 +956,20 @@ page stops the collection (`premature-end`) instead of ending the walk: an
 early end of history has not been observed. Only the first V Money page may
 answer with an empty `results`, read as an empty history.
 
+`results.total` is read as a count only when the page states one: a
+non-negative safe integer number, or a string of at most 16 ASCII digits whose
+value is a safe integer. Anything else (`null`, an empty or blank string, a
+boolean, an array, an exponent or hex string, a fraction) stops the collection
+as `invalid-total`. Until 2026-11-21 `Number()` read most of these as 0, so a
+page of rows under a missing total ended the walk as a complete history of zero
+rows (INV05). A page whose rows carry the walk past the stated total stops it as
+`rows-exceed-total`: the walk ends only on a page whose rows reach the total
+exactly. Both are synthetic cases in
+`services/collector-vpoint/test/vpoint.test.ts`; neither shape has been
+observed. Like every other stopped walk, these keep no page: `collectVPoint`
+returns no artifacts, so the run's terminal is `failed` with no artifact, not
+a `partial` run of its finished pages.
+
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the
 bytes are `Response.text()` encoded again as UTF-8, the same content but not
@@ -935,6 +994,18 @@ stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 `safeErrorCode` from the run's first safe failure code (`collector_failed` when
 a failure carried none). `ranges` and `reports` are empty; `transformations`
 holds the `reencoded` steps above.
+
+Run outcome and log: `runCollection` returns the run's manifest, and the
+`vpoint-collection-persisted` log line carries its status, counts and closed
+codes (artifact, failure and object counts, terminal outcome, key and digest,
+and `reasonCode` when the terminal was not written). `historyTotal`,
+`historyPageCount`, `vMoneyHistoryTotal` and `vMoneyHistoryPageCount` are in
+both only when both history walks finished. A run that stopped earlier (no
+session, a refused read, a stopped walk) never learned them, so they are
+absent, not 0 (INV05); its failure codes are the reason. Until 2026-11-21
+such a run reported all four as 0. Verified with mocked `fetch` responses and
+a session stub with no session in
+`services/collector-vpoint/test/diagnostics.test.ts`.
 
 Not carried over: the V Point Pay email reconciliation report. It was built by
 listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
@@ -1014,6 +1085,18 @@ When the month window is unknown — a run that failed before the balance
 response — the scope is `unspecified` and no range is stated rather than a
 guessed one.
 
+Run outcome and log: the Durable Object's `runCollection` returns the run's
+manifest, and the `vpoint-pay-collection-persisted` log line carries its
+status, month bounds, counts and closed codes (artifact and failure counts,
+terminal outcome, key and digest). `transactionMonthCount` and
+`transactionCount` are in both only when the collection finished; a finished
+run whose months hold no transaction reports a known 0. A run that stopped
+earlier (no credential, a refused token, balance or month request) never
+learned them, so they are absent, not 0 (INV05); its failure codes are the
+reason. Until 2026-11-21 such a run reported both as 0. Verified with a mocked
+`fetch` and a stub Durable Object storage in
+`services/collector-vpoint-pay/test/state.test.ts`.
+
 This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
 answer 410, there is no cron, and the notification mail this source is actually
 observed through is collected by `services/collector-vpoint` as
@@ -1056,6 +1139,20 @@ collector proved it reached the end of the history; an unproven boundary is
 The media type in the terminal is `text/html`: `terminal-v1` media types carry
 no parameters, and `text/html` is what the central descriptor already declares
 for this artifact, with the CP932 charset a constant of the source.
+
+Run log: the `mobile-suica-collection-persisted` line carries the run's
+status, counts and closed codes (artifact and failure counts, terminal
+outcome, key and digest, and `reasonCode` when the terminal was not written).
+`transactionCount` and `pageCount` are in it, and in the run's returned
+manifest, only when the history walk finished; a finished walk over an empty
+history reports a known 0 transactions on its one page. A run that stopped
+earlier (no credential, a failed browser bootstrap, a refused or invalid
+history page) never learned them, so they are absent, not 0 (INV05); its
+failure code is the reason. The pages a stopped walk kept are counted in
+`artifactCount`, not as its `pageCount`. Until 2026-11-21 a stopped run
+reported a transaction count of 0 and its kept pages as its page count.
+Verified with a stubbed browser bootstrap and a mocked `fetch` in
+`services/collector-mobile-suica/test/run-counts.test.ts`.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
