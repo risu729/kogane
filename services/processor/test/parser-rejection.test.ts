@@ -333,6 +333,32 @@ describe("SBI Securities closed replay categories", () => {
       reason: "row_unreadable",
       label: `${root}[].currencyCashBalances[].foreignScheduleCashBalances[]`,
     });
+    // A stated schedule date that is not a calendar date (parser 0.2.2) is
+    // named by its field, never by the value the issue message leaves out.
+    const dated = sbiForeignCashBalances.parse(
+      encode({
+        listForeignScheduleCashBalances: {
+          foreignCashBalances: [
+            {
+              currencyCashBalances: [
+                {
+                  currencyCode: "USD",
+                  foreignScheduleCashBalances: [{ businessDate: "SENTINEL", keepCash: "1.00" }],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      meta("foreign-cash-balances"),
+    );
+    expect(dated.issues).toHaveLength(1);
+    expect(dated.issues![0]!.message).not.toContain("SENTINEL");
+    expect(classifySbiCashIssue(dated.issues![0]!)).toEqual({
+      reason: "row_unreadable",
+      label: `${root}[].currencyCashBalances[].foreignScheduleCashBalances[]`,
+      field: "businessDate",
+    });
     for (const locator of [
       "SENTINEL",
       `${row}.SENTINEL`,
