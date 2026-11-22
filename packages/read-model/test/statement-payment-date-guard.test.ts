@@ -9,7 +9,7 @@
 // pins for each registered release of them, on synthetic pages: the Vpass
 // fixture is the parsers' synthetic `web.json` with the invented header of
 // vpass-statement-total.test.ts, the MyJCB page is myjcb-statement.test.ts's.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { parseLocalDate } from "../../domain/src/time.ts";
@@ -19,10 +19,18 @@ import { cardSettlementReadinessCtes } from "../src/card-settlement-readiness.ts
 import { DATED_STATEMENTS_BEFORE_WINDOW_SQL, DATED_STATEMENTS_SQL } from "../src/dated-state.ts";
 
 const FIXTURES = join(import.meta.dir, "../../../tests/fixtures/observation-pipeline");
-const MIGRATION_0044 = join(
-  import.meta.dir,
-  "../../storage-d1/migrations/core/0044_card_statement_settlements.sql",
-);
+const CORE_MIGRATIONS = join(import.meta.dir, "../../storage-d1/migrations/core");
+
+/** The newest core migration that defines `card_statement_facts` (0044 today). */
+function cardStatementFactsMigration(): string {
+  const defining = readdirSync(CORE_MIGRATIONS)
+    .filter((file) => file.endsWith(".sql"))
+    .sort()
+    .map((file) => readFileSync(join(CORE_MIGRATIONS, file), "utf8"))
+    .filter((text) => /CREATE VIEW (?:IF NOT EXISTS )?card_statement_facts\b/u.test(text));
+  expect(defining.length).toBeGreaterThan(0);
+  return defining.at(-1)!;
+}
 
 /** A statement capture of one parser with the given payment date, synthetic. */
 interface StatementFixture {
@@ -94,11 +102,20 @@ function rankedStatementParsers(sql: string): string[][] {
     ),
   ];
   expect(rankings.length).toBeGreaterThan(0);
-  return rankings.flatMap((ranking) =>
-    [...ranking[1]!.matchAll(/a\.source_id='([^']+)' AND p\.parser_name='([^']+)'/gu)].map(
+  return rankings.flatMap((ranking) => {
+    const clause = ranking[1]!;
+    const pairs = [...clause.matchAll(/a\.source_id='([^']+)' AND p\.parser_name='([^']+)'/gu)].map(
       (pair) => [pair[1]!, pair[2]!],
-    ),
-  );
+    );
+    // The filter is these pairs and nothing else: a parser admitted in any
+    // other shape changes the text and fails here.
+    expect(clause).toBe(
+      pairs
+        .map(([source, parser]) => `a.source_id='${source}' AND p.parser_name='${parser}'`)
+        .join(") OR ("),
+    );
+    return pairs;
+  });
 }
 
 const statementTotals = (observations: readonly Observation[]) =>
@@ -123,7 +140,7 @@ const IMPOSSIBLE: readonly (readonly [number, number, number])[] = [
 describe("statement parsers never publish an impossible payment date", () => {
   test("every shipped statement ranking reads only the parsers guarded here", () => {
     const texts = {
-      card_statement_facts: readFileSync(MIGRATION_0044, "utf8"),
+      card_statement_facts: cardStatementFactsMigration(),
       DATED_STATEMENTS_SQL,
       DATED_STATEMENTS_BEFORE_WINDOW_SQL,
       cardSettlementReadinessCtes: cardSettlementReadinessCtes(),
