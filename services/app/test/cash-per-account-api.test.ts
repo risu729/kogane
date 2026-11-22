@@ -208,9 +208,9 @@ describe("cash per account", () => {
 
   it("never adds two adopted amounts of one account reached through two references (INV06)", async () => {
     // A second provider reference of the bank whose identity maps it onto an
-    // account the store already has: the projection adopts both (the
-    // provider lists them apart), so the cash read is where the account
-    // entity shows they are one account.
+    // account the store already has: the provider lists them apart, but the
+    // projection sees one account entity and leaves both unresolved, so the
+    // cash read shows both on one line and counts neither.
     // The bank's next capture lists it beside the accounts it listed before.
     const account = smbcCapture().accounts[0]!;
     await seedCashSource(
@@ -233,17 +233,17 @@ describe("cash per account", () => {
     expect(twice.references).toHaveLength(2);
     for (const reference of twice.references)
       expect(reference.amounts.map((amount) => [amount.counted, amount.reasons])).toEqual([
-        [false, [CASH_REPORTED_TWICE]],
+        [false, ["adoption:account_entity_shared"]],
       ]);
     const yen = pages[0]!.subtotals.byUnit[0]!;
     expect(yen).toMatchObject({ unit: "JPY", status: "partial", counted: 7, notCounted: 4 });
-    expect(yen.reasons).toContain(CASH_REPORTED_TWICE);
-    expect(pages[0]!.dataCoverage.reasons).toContain(CASH_REPORTED_TWICE);
-    // The latest page's subtotal keys on the provider reference, so it adds
-    // both: the difference the ADR records as an open limit of that subtotal.
+    expect(yen.reasons).toContain("adoption:account_entity_shared");
+    expect(pages[0]!.dataCoverage.reasons).toContain("unresolved:account_entity_shared");
+    // The latest page's subtotal adds neither reference either: both reads
+    // agree on the 7 amounts they count.
     const latest = (await page.route("/api/v2/balances/latest?source=smbc-bank"))
       .body as LatestBalanceSummaryPage;
-    expect(latest.subtotals.knownAssetsSubtotal![0]!.adoptedCount).toBe(9);
+    expect(latest.subtotals.knownAssetsSubtotal![0]!.adoptedCount).toBe(7);
   });
 
   it("expires a cursor when an identity decision regroups lines anywhere in the scope", async () => {

@@ -4,6 +4,10 @@
 - Date: 2026-11-08
 - Decision basis: the owner's allow-list variant of option 2, recorded at
   2026-11-08 06:59 UTC in [issue 1150](https://github.com/risu729/kogane/issues/1150).
+- Amended by: [ADR 0001's amendment of 2026-11-20](0001-domain-axes.md#amendment-2026-11-20-two-references-of-one-account-entity-are-not-disjoint)
+  (proposed): `distinct-identified-accounts-v3` declares no pair of scopes
+  whose mappings name one account entity disjoint, under any of the rules
+  below.
 
 ## Context
 

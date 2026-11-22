@@ -552,6 +552,9 @@ async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
       authorityRank: authorityRank(row.source_id),
       measureView: row.measureView,
       latestInGroup: row.latestInGroup,
+      // The current mapping's account entity: two references of one entity
+      // are never declared disjoint (ADR 0001's amendment of 2026-11-20).
+      accountEntity: fields?.account_target ?? null,
     });
   }
   // Two witnesses of one measurement collapse into one candidate, so the
