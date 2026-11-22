@@ -12,10 +12,10 @@ import type { D1Like } from "../d1.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { identityKey } from "./identity-keys.ts";
 
-export const IDENTITY_COMMAND_ACTIONS = ["assign", "release-override"] as const;
-export type IdentityCommandAction = (typeof IDENTITY_COMMAND_ACTIONS)[number];
-export type IdentityCommandKind = "account" | "instrument";
-export type ActorVerification = "server" | "legacy-unknown";
+const IDENTITY_COMMAND_ACTIONS = ["assign", "release-override"] as const;
+type IdentityCommandAction = (typeof IDENTITY_COMMAND_ACTIONS)[number];
+type IdentityCommandKind = "account" | "instrument";
+type ActorVerification = "server" | "legacy-unknown";
 
 export interface IdentityCommand {
   /** Caller-chosen idempotency key. A resend with the same payload replays the stored result. */
@@ -33,7 +33,7 @@ export interface IdentityCommand {
   reason: string;
 }
 
-export interface IdentityCommandReceipt {
+interface IdentityCommandReceipt {
   operationId: string;
   action: IdentityCommandAction;
   kind: IdentityCommandKind;
@@ -60,7 +60,7 @@ export type IdentityCommandResult =
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
 const REF_PATTERN = /^[^\u0000-\u001f]{1,512}$/u;
 
-export function validIdentityCommand(value: unknown): value is IdentityCommand {
+function validIdentityCommand(value: unknown): value is IdentityCommand {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
   return (
@@ -86,7 +86,7 @@ export function validIdentityCommand(value: unknown): value is IdentityCommand {
 }
 
 /** The digest that makes a resend comparable; the actor and operation id are outside it. */
-export async function identityCommandDigest(command: IdentityCommand): Promise<string> {
+async function identityCommandDigest(command: IdentityCommand): Promise<string> {
   return canonicalDigest({
     action: command.action,
     kind: command.kind,
@@ -154,7 +154,7 @@ function replayOrConflict(
 }
 
 /** One statement of the command's batch, as SQL plus its bindings. */
-export interface IdentityCommandWrite {
+interface IdentityCommandWrite {
   sql: string;
   binds: readonly unknown[];
 }
