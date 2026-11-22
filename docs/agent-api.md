@@ -1508,7 +1508,8 @@ beside the stored `body`, the partition the page shows: a body stored
 ([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).
 
 `kogane.collection-quality.read` takes `{ source?, view?, offset?, detail? }`:
-without `source` the summary (which takes no `offset` and no `view`), with it
+without `source` the summary (which takes no `view`, and `offset` only with
+`detail: "summary"`), with it
 that source's cells (`view: "cells"`, the default; `offset` pages them) or the
 same cells regrouped by the accounts their captures' observations name
 (`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`;
@@ -1518,12 +1519,21 @@ whose lines would be equal share one, naming each in `sourceIds`): freshness,
 newest fetch run, reasons, each job's newest receipt status and failure code
 with its terminals' distinct blocked and failure codes (`terminalCodes`), the
 count of unregistered collectors and their distinct codes
-(`unregisteredCodes`), and the provider data types counted by status; and a
+(`unregisteredCodes`), and the provider data types counted by status, with
+the jobs under no CORE source (`otherSchedules`) on every page and
+`coverage` giving the source and line counts; and a
 source's cells are read whole (refused past 2,000 cells with
 `413 result_limit_exceeded`, never cut) and answered as one line per dataset,
 parser and fetch unit, collapsed over periods, with the union of the cells'
-reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
-(`offset` then counts lines, and `coverage` gives the cell and line counts).
+reasons, failure codes (`failureCodes`) and coverage causes (`coverage` gives
+the cell and line counts). Both summaries page their lines by `offset`: up to
+20 a page, fewer when the next would carry the tool's answer past 8,192 bytes
+(`coverage.nextOffset` is where the next page starts), and a page whose first
+line, or the summary's `otherSchedules`, alone would pass that is
+`413 result_limit_exceeded`, never cut
+([ADR 0123, amendment of 2026-11-21](adr/0123-summary-detail-for-large-reads.md#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21);
+proposed, needs the owner's approval). `offset` with the summary's
+`detail: "full"`, which is unpaged, is `400 invalid_request`.
 The account view's summary
 ([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20);
 proposed, needs the owner's approval) is one line per account, in id order:

@@ -5,7 +5,8 @@
 // docs/evidence-browser.md); and `GET /api/collection-quality/<sourceId>/accounts`,
 // the same source's cells regrouped by the accounts their captures'
 // observations name (ADR 0088), as a paged summary by default (ADR 0123,
-// amendment 2026-11-20); and `GET /api/collection-quality?view=status`,
+// amendment 2026-11-20; every summary page is held to 8 KB, amendment
+// 2026-11-21); and `GET /api/collection-quality?view=status`,
 // one line per configured job saying whether it is stuck (ADR 0045, amendment
 // 2026-11-19). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
@@ -107,10 +108,15 @@ export async function readCollectionQuality(
           throw new HttpError(400, "invalid_query");
         return await queryCollectionQualityStatus(d1Executor(env.DB), { asOf });
       }
-      const detail = detailOf(url.searchParams, []);
+      // The full summary is unpaged; its summary lines are paged by `offset`
+      // and held to 8 KB a page (ADR 0123, amendment 2026-11-21).
+      const detail = detailOf(url.searchParams, ["offset"]);
+      if (detail === "full" && url.searchParams.has("offset"))
+        throw new HttpError(400, "invalid_query");
+      const offset = offsetOf(url.searchParams);
       const summary = await queryCollectionQualitySummary(d1Executor(env.DB), { asOf });
       await readAlarms(env, summary);
-      return detail === "full" ? summary : collectionQualitySummaryLines(summary);
+      return detail === "full" ? summary : collectionQualitySummaryLines(summary, offset);
     }
     const rest = path.slice(COLLECTION_QUALITY_PATH.length + 1);
     if (rest.endsWith(ACCOUNT_COVERAGE_SUFFIX)) {
@@ -181,7 +187,7 @@ function detailOf(params: URLSearchParams, others: readonly string[]): Collectio
   return detail as CollectionQualityDetail;
 }
 
-/** The `offset` a cell or account request names; absent is 0. */
+/** The `offset` a summary, cell or account request names; absent is 0. */
 function offsetOf(params: URLSearchParams): number {
   const text = params.get("offset") ?? "0";
   if (!OFFSET.test(text)) throw new HttpError(400, "invalid_offset");

@@ -869,7 +869,13 @@ accounts take `detail`: absent or `summary` answers them as short lines
 derived from the answers below, and `detail=full` answers them as described
 here, which the collection quality page asks for
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
-[agent API](agent-api.md#ui-read-pages)).
+[agent API](agent-api.md#ui-read-pages)). Each summary pages its lines by
+`offset`: up to 20 a page, fewer when the next would carry the tool's answer
+past 8,192 bytes, with `coverage.nextOffset` where the next page starts; a
+page whose first line alone passes that (on the summary, with its jobs under
+no source) is `413 result_limit_exceeded`, never cut ([ADR 0123, amendment of 2026-11-21](adr/0123-summary-detail-for-large-reads.md#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21)).
+`offset` with `detail=full` on the summary or the accounts is
+`400 invalid_query`.
 
 - **Summary** (`/api/collection-quality?detail=full`, no other parameter): every configured job
   (`collection_schedules`) under the CORE sources its collectors register

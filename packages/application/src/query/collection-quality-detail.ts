@@ -1,5 +1,6 @@
 // The `summary` detail of the collection quality reads (ADR 0123 and its
-// amendment of 2026-11-20), derived from their `full` answers alone, so
+// amendments of 2026-11-20 and 2026-11-21), derived from their `full` answers
+// alone, so
 // `GET /api/collection-quality[/<source>[/accounts]]` and
 // `kogane.collection-quality.read` (ADR 0081) shape it once. A summary
 // collapses lines, never codes: every reason, state and failure code of what
@@ -13,6 +14,7 @@ import {
   type AccountCoverageSummary,
   type AccountCoverageUnattributedLine,
   COLLECTION_QUALITY_LINE_PAGE,
+  COLLECTION_QUALITY_SUMMARY_BYTES,
   type CollectionQualityCell,
   type CollectionQualityCellLine,
   type CollectionQualityCells,
@@ -27,6 +29,34 @@ import {
   PROVIDER_DATA_TYPES,
 } from "../../../observation-shared/src/collection-quality-contract.ts";
 import { CollectionQualityLimitError } from "./collection-quality.ts";
+
+/**
+ * The page of `total` lines from `offset` that `build(end)` answers for the
+ * largest `end` up to `limit` lines on whose answer the tool's bytes
+ * (`pageReadAnswerBytes`) stay within `bytes`: lines in order until the page
+ * holds its limit or the next would pass the bytes. A page that cannot hold
+ * its first line, or past the last line its header, is refused
+ * (`CollectionQualityLimitError`, `413`), never cut.
+ */
+function byteBoundedPage<T>(
+  total: number,
+  offset: number,
+  limit: number,
+  bytes: number,
+  build: (end: number) => T,
+): T {
+  let answer = build(offset);
+  let end = offset;
+  for (let next = offset + 1; next <= Math.min(offset + limit, total); next++) {
+    const page = build(next);
+    if (pageReadAnswerBytes(page) > bytes) break;
+    answer = page;
+    end = next;
+  }
+  if ((end === offset && offset < total) || pageReadAnswerBytes(answer) > bytes)
+    throw new CollectionQualityLimitError();
+  return answer;
+}
 
 /** Each distinct code of `codes`, in order of first appearance; a null is no code. */
 function distinctCodes(codes: Iterable<string | null>): string[] {
@@ -61,15 +91,20 @@ function scheduleLine(schedule: CollectionQualitySchedule): CollectionQualitySch
 }
 
 /**
- * The summary of the collection quality summary: one line per source with its
- * freshness, newest fetch run, reasons, jobs (newest receipt only, with its
- * terminals' closed codes), its unregistered collectors' count and codes and
- * its data type counts, and the jobs under no CORE source. Sources whose lines would
- * be the same apart from their id (such as the sources no collector serves)
- * share one line that names them all, in the summary's order.
+ * One page of the summary of the collection quality summary: one line per
+ * source with its freshness, newest fetch run, reasons, jobs (newest receipt
+ * only, with its terminals' closed codes), its unregistered collectors' count
+ * and codes and its data type counts, and, on every page, the jobs under no
+ * CORE source. Sources whose lines would be the same apart from their id
+ * (such as the sources no collector serves) share one line that names them
+ * all, in the summary's order. `offset` counts lines; a page holds up to
+ * `COLLECTION_QUALITY_LINE_PAGE` of them, and fewer when the next would carry
+ * the tool's answer past `COLLECTION_QUALITY_SUMMARY_BYTES` (ADR 0123,
+ * amendment 2026-11-21); `coverage.nextOffset` is where the next page starts.
  */
 export function collectionQualitySummaryLines(
   summary: CollectionQualitySummary,
+  offset = 0,
 ): CollectionQualitySummaryLines {
   const lines = new Map<string, CollectionQualitySourceLine>();
   for (const source of summary.sources) {
@@ -97,13 +132,29 @@ export function collectionQualitySummaryLines(
     if (same) same.sourceIds.push(source.sourceId);
     else lines.set(key, { sourceIds: [source.sourceId], ...line });
   }
-  return {
-    apiVersion: summary.apiVersion,
-    detail: "summary",
-    freshnessAsOf: summary.freshnessAsOf,
-    sources: [...lines.values()],
-    otherSchedules: summary.otherSchedules.map(scheduleLine),
-  };
+  const all = [...lines.values()];
+  const otherSchedules = summary.otherSchedules.map(scheduleLine);
+  return byteBoundedPage(
+    all.length,
+    offset,
+    COLLECTION_QUALITY_LINE_PAGE,
+    COLLECTION_QUALITY_SUMMARY_BYTES,
+    (end) => ({
+      apiVersion: summary.apiVersion,
+      detail: "summary",
+      freshnessAsOf: summary.freshnessAsOf,
+      sources: all.slice(Math.min(offset, all.length), end),
+      otherSchedules,
+      coverage: {
+        sources: summary.sources.length,
+        lines: all.length,
+        limit: COLLECTION_QUALITY_LINE_PAGE,
+        offset,
+        truncated: end < all.length,
+        nextOffset: end < all.length ? end : null,
+      },
+    }),
+  );
 }
 
 /**
@@ -162,7 +213,11 @@ function collectionQualityCellLines(
 
 /**
  * One page of a source's summary lines. `pages` are every page of that
- * source's cell read at one instant, in order; `offset` counts lines.
+ * source's cell read at one instant, in order; `offset` counts lines. A page
+ * holds up to `COLLECTION_QUALITY_LINE_PAGE` lines, and fewer when the next
+ * would carry the tool's answer past `COLLECTION_QUALITY_SUMMARY_BYTES` (ADR
+ * 0123, amendment 2026-11-21); `coverage.nextOffset` is where the next page
+ * starts.
  */
 export function collectionQualityCellSummary(
   pages: readonly CollectionQualityCells[],
@@ -171,22 +226,27 @@ export function collectionQualityCellSummary(
   const head = pages[0]!;
   const cells = pages.flatMap((page) => page.cells);
   const lines = collectionQualityCellLines(cells);
-  const end = offset + COLLECTION_QUALITY_LINE_PAGE;
-  return {
-    apiVersion: head.apiVersion,
-    detail: "summary",
-    freshnessAsOf: head.freshnessAsOf,
-    sourceId: head.sourceId,
-    latestFetchRun: head.latestFetchRun,
-    lines: lines.slice(offset, end),
-    coverage: {
-      cells: cells.length,
-      lines: lines.length,
-      limit: COLLECTION_QUALITY_LINE_PAGE,
-      truncated: end < lines.length,
-      nextOffset: end < lines.length ? end : null,
-    },
-  };
+  return byteBoundedPage(
+    lines.length,
+    offset,
+    COLLECTION_QUALITY_LINE_PAGE,
+    COLLECTION_QUALITY_SUMMARY_BYTES,
+    (end) => ({
+      apiVersion: head.apiVersion,
+      detail: "summary",
+      freshnessAsOf: head.freshnessAsOf,
+      sourceId: head.sourceId,
+      latestFetchRun: head.latestFetchRun,
+      lines: lines.slice(Math.min(offset, lines.length), end),
+      coverage: {
+        cells: cells.length,
+        lines: lines.length,
+        limit: COLLECTION_QUALITY_LINE_PAGE,
+        truncated: end < lines.length,
+        nextOffset: end < lines.length ? end : null,
+      },
+    }),
+  );
 }
 
 /** The smallest and largest named period value of `values`; both null when none is named. */
@@ -323,16 +383,5 @@ export function accountCoverageSummary(
       nextOffset: end < total ? end : null,
     },
   });
-  // Lines in order until the page holds its limit or the next would pass the bytes.
-  let answer = page(offset);
-  for (let end = offset + 1; end <= Math.min(offset + ACCOUNT_SUMMARY_LINE_PAGE, total); end++) {
-    const next = page(end);
-    if (pageReadAnswerBytes(next) > ACCOUNT_SUMMARY_BYTES) break;
-    answer = next;
-  }
-  // A page that cannot hold one line (or, past the last line, its header) is refused.
-  const listed = answer.accounts.length + answer.unattributed.length;
-  if ((listed === 0 && offset < total) || pageReadAnswerBytes(answer) > ACCOUNT_SUMMARY_BYTES)
-    throw new CollectionQualityLimitError();
-  return answer;
+  return byteBoundedPage(total, offset, ACCOUNT_SUMMARY_LINE_PAGE, ACCOUNT_SUMMARY_BYTES, page);
 }
