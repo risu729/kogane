@@ -20,6 +20,7 @@ import {
   validLocalDateText,
   validTemporalReference,
   validTemporalValue,
+  validZoneOffsetInstantText,
   type TemporalValue,
 } from "../src/time.ts";
 
@@ -413,6 +414,15 @@ describe("validators", () => {
     expect(validInstantText("2026-03-01T23:59:60Z")).toBe(false);
     expect(validInstantText(1)).toBe(false);
     expect(validInstantText(null)).toBe(false);
+    // The domain reads offsets to ±18:59; zones use -12:00 to +14:00.
+    for (const offset of ["Z", "+00:00", "-00:00", "+14:00", "-12:00", "+05:45", "-09:30"])
+      expect(validZoneOffsetInstantText(`2026-09-08T12:00:00${offset}`)).toBe(true);
+    for (const offset of ["+14:01", "+15:00", "+18:59", "-12:01", "-13:00", "-18:00"]) {
+      expect(validInstantText(`2026-09-08T12:00:00${offset}`)).toBe(true);
+      expect(validZoneOffsetInstantText(`2026-09-08T12:00:00${offset}`)).toBe(false);
+    }
+    expect(validZoneOffsetInstantText("2026-09-08T12:00:00+19:00")).toBe(false);
+    expect(validZoneOffsetInstantText(1)).toBe(false);
     expect(validLocalDateText("2000-02-29")).toBe(true);
     expect(validLocalDateText("1900-02-29")).toBe(false);
     expect(validLocalDateText("2026-04-31")).toBe(false);

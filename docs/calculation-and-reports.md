@@ -134,7 +134,10 @@ knowledge mode: `current` reads the parses `published_parse_runs` names now;
 `publication_events` row of the claim's artifact and parser at or before K
 adopted, so a later re-parse or a rollback is seen as it stood at K. K may
 carry at most three fractional digits, the precision SQLite compares at, and
-the domain re-checks each price's `recorded_at` against K exactly. One read
+an offset a zone uses, -12:00 to +14:00; any other K is refused as an
+invalid request (SQLite reads no offset past 14 hours, so a K at `+15:00`
+would match no row and every key would read `missing`), and the domain
+re-checks each price's `recorded_at` against K exactly. One read
 (`selectPriceCandidates`, two SQL texts `PRICE_CANDIDATES_SQL` and
 `PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key every row in a coarse window
 around the freshness span, the rows of the newest instant before it and every

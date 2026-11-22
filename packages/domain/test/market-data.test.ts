@@ -203,6 +203,11 @@ describe("filter and counts", () => {
     expect(selected(selectPrice(USD, [unreadable], BOUND, POLICY, null))).toBeTruthy();
     expect(validSelectionBound(at("2026-09-10T02:00:00.123Z"), "Asia/Tokyo")).toBe(true);
     expect(validSelectionBound(at("2026-09-10T02:00:00.1234Z"), "Asia/Tokyo")).toBe(false);
+    // K's offset must be one a zone uses: SQLite's julianday reads none past 14 hours.
+    expect(validSelectionBound(at("2026-09-10T16:00:00+14:00"), "Asia/Tokyo")).toBe(true);
+    expect(validSelectionBound(at("2026-09-09T14:00:00-12:00"), "Asia/Tokyo")).toBe(true);
+    expect(validSelectionBound(at("2026-09-10T17:00:00+15:00"), "Asia/Tokyo")).toBe(false);
+    expect(validSelectionBound(at("2026-09-09T13:00:00-13:00"), "Asia/Tokyo")).toBe(false);
   });
 
   test("a zero or negative stored price is never a candidate", () => {

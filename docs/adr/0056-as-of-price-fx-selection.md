@@ -519,3 +519,76 @@ With synthetic data only:
   the account and source checks' plans without statistics.
 - `mise run //packages/domain:ci`, `//packages/read-model:ci`,
   `//packages/application:ci`, `//packages/parsers:test` and `mise run ci:root`.
+
+## Amendment (2026-11-22): a known-at offset no zone uses is refused
+
+- Status: proposed
+- Date: 2026-11-22
+
+### Context
+
+`parseInstant` (`packages/domain/src/time.ts`) reads UTC offsets up to
+±18:59, so `validKnownAtInstant` accepted a K such as
+`2026-09-09T03:00:00+15:00`. The candidate read compares K through SQLite's
+`julianday`, which reads no offset past 14 hours and returns NULL, so
+`PRICE_CANDIDATES_KNOWN_AT_SQL` matched no row and every key read `missing`,
+as if no price had been known at K. Nothing said why. No provider and no
+writer produces such an offset; a caller can still send one in a known-at
+request.
+
+### Options considered
+
+1. **Narrow `parseInstant` to the offsets zones use.** Rejected: every stored
+   instant, parser claim and contract validates through it, so stored values
+   that parse today would stop parsing.
+2. **Normalize K to UTC before the read.** Rejected: an offset no zone uses
+   is not a time anyone recorded, and the manifest would then carry an
+   instant the caller did not send.
+3. **Refuse a K whose offset no zone uses (chosen).** A refusal is a closed
+   reason the caller sees, never an empty read.
+
+### Decision
+
+A known-at K must also carry an offset a time zone uses, from -12:00 to
++14:00 (`validZoneOffsetInstantText`, the span of the IANA fixed-offset zones
+`Etc/GMT+12` to `Etc/GMT-14`, inside what SQLite reads). `validKnownAtInstant`
+refuses any other K, so `validSelectionBound` refuses the bound,
+`selectMarketData` and the valuation on a date answer `invalid_request`, and
+`priceCandidateArgs` throws `knowledge_invalid`. The balance projection reads
+the same span before naming a stored instant's fixed-offset zone: past it a
+stored `as_of` or `observed_at` is `unknown` with `offset_zone_unsupported`,
+never a zone name such as `Etc/GMT-15` that does not exist
+([balance read model](../balance-read-model.md#the-api)).
+
+### Consequences
+
+- A known-at request whose K has an offset past -12:00 or +14:00 is refused
+  instead of answering every key `missing`. Every K that SQLite could read and
+  a zone uses is read as before.
+- Stored instants are untouched: a stored price whose effective time has such
+  an offset still parses, and the candidate read still returns it as
+  `unordered`, as before.
+- The legacy `selectPrices` cutoff is frozen by its digest and still accepts
+  any offset `parseInstant` reads; no caller outside tests uses it. That is
+  an open limit.
+
+### Verification
+
+With synthetic instants only:
+
+- `packages/domain/test/time.test.ts`: `validZoneOffsetInstantText` accepts
+  `Z`, `-12:00`, `+14:00` and offsets between, and refuses `+14:01`,
+  `+15:00`, `+18:59`, `-12:01`, `-13:00` and `-18:00`, all of which
+  `validInstantText` accepts.
+- `packages/domain/test/market-data.test.ts`: `validSelectionBound` accepts a
+  K at `+14:00` and at `-12:00` and refuses one at `+15:00` and at `-13:00`.
+- `packages/read-model/test/price-candidates.test.ts`: one moment written at
+  `+14:00` and at `-12:00` reads the price known then; SQLite's `julianday`
+  returns NULL for `+15:00` and `+18:00`, and those K, and one at `-13:00`, are
+  refused with `knowledge_invalid` (before this amendment they resolved with
+  every key `missing`).
+- `packages/read-model/test/balance-projection.test.ts`: `+14:00` and
+  `-12:00` name `Etc/GMT-14` and `Etc/GMT+12`, which the runtime knows;
+  `+15:00`, `+18:00`, `-13:00` and `-14:00` read `offset_zone_unsupported`.
+- `mise run //packages/domain:ci`, `//packages/read-model:ci` and
+  `mise run ci:root`.

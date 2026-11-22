@@ -509,6 +509,38 @@ describe("balance projection builder", () => {
     });
   });
 
+  test("an offset no zone uses is unknown, never a zone name that does not exist", () => {
+    // The span real zones use, -12:00 to +14:00, names the IANA zones at its ends.
+    const ends = [
+      ["2026-09-08T23:00:00+14:00", "Etc/GMT-14"],
+      ["2026-09-07T21:00:00-12:00", "Etc/GMT+12"],
+    ] as const;
+    for (const [value, zone] of ends) {
+      expect(temporalReferenceFor(value, null).time).toEqual({
+        kind: "instant",
+        value,
+        zone,
+        basis: "provider",
+      });
+      expect(() => new Intl.DateTimeFormat("en", { timeZone: zone })).not.toThrow();
+    }
+    // The domain reads offsets up to ±18:59; past the span the fixed-offset
+    // name the offset would get does not exist, so the time is unknown.
+    const outside = [
+      ["2026-09-09T00:00:00+15:00", "Etc/GMT-15"],
+      ["2026-09-09T03:00:00+18:00", "Etc/GMT-18"],
+      ["2026-09-07T20:00:00-13:00", "Etc/GMT+13"],
+      ["2026-09-07T19:00:00-14:00", "Etc/GMT+14"],
+    ] as const;
+    for (const [value, zone] of outside) {
+      expect(() => new Intl.DateTimeFormat("en", { timeZone: zone })).toThrow(RangeError);
+      expect(temporalReferenceFor(value, null).time).toEqual({
+        kind: "unknown",
+        reasonCode: "offset_zone_unsupported",
+      });
+    }
+  });
+
   test("the source authority policy ranks aggregators below direct sources", () => {
     expect(authorityRank("smbc-bank")).toBe(AUTHORITY_RANKS.direct);
     expect(authorityRank("moneyforward-me")).toBe(AUTHORITY_RANKS.aggregator);

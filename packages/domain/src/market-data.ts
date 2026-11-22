@@ -62,6 +62,7 @@ import {
   validLocalDateText,
   validTemporalValue,
   validZone,
+  validZoneOffsetInstantText,
   type CivilDate,
   type TemporalBasis,
   type TemporalValue,
@@ -401,12 +402,14 @@ export interface SelectionBound {
 
 /**
  * A known-at instant the candidate read can compare exactly: an RFC 3339
- * instant with at most three fractional digits. SQLite's `julianday` works in
- * milliseconds, so a finer K would be rounded there; the domain then
+ * instant with at most three fractional digits and an offset a zone uses
+ * (-12:00 to +14:00). SQLite's `julianday` works in milliseconds, so a finer
+ * K would be rounded there; it reads no offset past 14 hours, so such a K
+ * would match no row and every key would read `missing`. The domain then
  * re-checks every candidate's `recordedAt` against K exactly.
  */
 export function validKnownAtInstant(value: unknown): value is string {
-  if (!validInstantText(value)) return false;
+  if (!validZoneOffsetInstantText(value)) return false;
   const fraction = /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/u.exec(value);
   return fraction === null || fraction[1]!.length <= 3;
 }
