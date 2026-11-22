@@ -643,7 +643,10 @@ export function splitSqlStatements(sql: string): string[] {
 export interface MigrationRecord {
   file: string;
   statementCount: number;
-  /** Top-level `INSERT` statements: seed rows and in-migration backfill (06 §1). */
+  /**
+   * Top-level `INSERT` and `REPLACE` statements, one behind a `WITH` included:
+   * seed rows and in-migration backfill (06 §1).
+   */
   insertStatements: { table: string; kind: "seed-or-backfill" }[];
   sha256: string;
 }
@@ -704,10 +707,12 @@ const QUOTE_CLOSERS: Readonly<Record<string, string>> = { "'": "'", '"': '"', "`
  * A row-writing statement need not begin with `INSERT`: `REPLACE INTO` is one,
  * and so is an `INSERT` behind common table expressions (`WITH [RECURSIVE] …
  * INSERT …`). Only the statement's own top level counts, so the text inside
- * parentheses and quotes (a CTE body, a subquery, a string literal) is set
- * aside first; a trigger's body is the `CREATE TRIGGER` statement's, not an
- * insert of its own. A writing statement whose table cannot be read is
- * `(unknown)`, never left out.
+ * parentheses and quotes (a CTE body, a subquery, a string literal, a quoted
+ * name that reads like a keyword) is set aside first; a trigger's body is the
+ * `CREATE TRIGGER` statement's, not an insert of its own. A writing statement
+ * whose table cannot be read, a quoted one included, is `(unknown)`, never
+ * left out. The statement comes from `splitSqlStatements`, which has already
+ * dropped its comments.
  */
 export function insertTarget(statement: string): string | undefined {
   let top = "";
@@ -717,8 +722,7 @@ export function insertTarget(statement: string): string | undefined {
     const closer = QUOTE_CLOSERS[character];
     if (closer !== undefined) {
       const end = statement.indexOf(closer, index + 1);
-      const quoted = statement.slice(index, end === -1 ? statement.length : end + 1);
-      if (depth === 0) top += character === "'" ? "''" : quoted;
+      if (depth === 0) top += character + closer;
       index = end === -1 ? statement.length : end;
       continue;
     }

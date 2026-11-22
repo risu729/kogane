@@ -226,13 +226,27 @@ describe("G0-01 CORE schema ledger", () => {
       ),
     ).toBe("d");
     expect(insertTarget("WITH m AS (SELECT 1) REPLACE INTO e SELECT * FROM m")).toBe("e");
-    // A CTE that feeds an UPDATE or a SELECT writes no new rows, and an INSERT
-    // inside parentheses (a trigger body, a subquery's text) is not this statement's.
+    // A quoted name that reads like a keyword neither hides nor fakes a write,
+    // and a quoted target table is still counted, as `(unknown)`.
+    expect(insertTarget('WITH "insert" AS (SELECT 1) INSERT INTO k SELECT 1')).toBe("k");
+    expect(insertTarget('WITH "select" AS (SELECT 1) REPLACE INTO l SELECT 1')).toBe("l");
+    expect(insertTarget('INSERT INTO "m" VALUES (1)')).toBe("(unknown)");
+    // A CTE that feeds an UPDATE or a SELECT writes no new rows, text in quotes
+    // or parentheses is not this statement's, and a trigger body's INSERT runs
+    // when the trigger fires, not when the migration does.
     expect(insertTarget("WITH m AS (SELECT 1) UPDATE f SET x = 1")).toBeUndefined();
     expect(insertTarget("UPDATE g SET note = 'INSERT INTO h'")).toBeUndefined();
     expect(
       insertTarget("CREATE TRIGGER t AFTER UPDATE ON i BEGIN INSERT INTO j VALUES (1); END"),
     ).toBeUndefined();
+    expect(insertTarget("WITH m AS (SELECT 'INSERT INTO n') SELECT * FROM m")).toBeUndefined();
+    // Comments are gone before the statement is read, apostrophes and
+    // parentheses in them included.
+    expect(
+      splitSqlStatements(
+        "-- don't (INSERT INTO o\nWITH m AS (SELECT 1 /* it's ( */) INSERT INTO p SELECT 1;\n/* INSERT INTO q */ SELECT 1;",
+      ).map(insertTarget),
+    ).toEqual(["p", undefined]);
   });
 });
 
