@@ -187,6 +187,15 @@ pin them, are new under v3. Nothing stores them, so nothing is rebuilt.
 one resolved account id. The answer has no total, subtotal or net worth, and
 the wire contract refuses one.
 
+The `/state` page asks only for a date. It shows each account as a card with
+the captures its rows came from, and lists every chosen capture no account
+came from (complete and empty, or holding only rows counted in
+`excludedRows`) under 表示する記載のない取得結果, with its source, capture time
+and freshness. A capture that listed nothing is therefore never shown as no
+capture: a container without one is named in the coverage notes instead, and
+only when the date has no account and no such capture does the page say that
+this does not mean nothing is held.
+
 ## HTTP
 
 `GET /api/v2/reported-state?date=YYYY-MM-DD[&source=…][&account=…]`, GET and

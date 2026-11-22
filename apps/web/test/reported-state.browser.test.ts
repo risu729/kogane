@@ -10,6 +10,7 @@ import {
   reportedStateWorld,
 } from "../../../packages/application/test/reported-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { DatedStore } from "../../../packages/read-model/test/dated-state-fixture.ts";
 import { tokyoToday } from "../src/reported-state-api.ts";
 import { settledTest } from "./settle.ts";
 
@@ -32,9 +33,27 @@ describe.if(runnable)("reported state on a date", () => {
   let tooMany = false;
   const requests: URL[] = [];
   const world = reportedStateWorld();
+  // A world whose first capture is complete and lists nothing: the provider
+  // reported no holding on 2026-09-08, then a bank capture lists a balance.
+  const emptyWorld = new DatedStore();
+  emptyWorld.capture({
+    source: "sbi-securities",
+    dataset: "domestic-cash-positions",
+    parser: "sbi-domestic-cash-positions",
+    fetchedAt: "2026-09-08T01:00:00Z",
+  });
+  emptyWorld.capture({
+    source: "smbc-bank",
+    dataset: "balance-normalized",
+    parser: "smbc-direct-balance",
+    fetchedAt: "2026-09-09T02:00:00Z",
+    balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 50_000 }],
+  });
+  let served = world;
   beforeEach(() => {
     advertised = true;
     tooMany = false;
+    served = world;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -52,7 +71,7 @@ describe.if(runnable)("reported state on a date", () => {
         if (url.pathname === "/api/v2/reported-state") {
           requests.push(url);
           if (tooMany) return Response.json({ error: "result_limit_exceeded" }, { status: 413 });
-          return Response.json(await reportedStateBody(world, url.searchParams.get("date")!));
+          return Response.json(await reportedStateBody(served, url.searchParams.get("date")!));
         }
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -175,6 +194,36 @@ describe.if(runnable)("reported state on a date", () => {
     expect(older).toContain("vpass · 引落予定日が不明で、基準日の45日より前に取得: 1 件");
     await page.close();
   }, 30_000);
+
+  test("a complete capture that lists nothing is named with its capture, never left out", async () => {
+    served = emptyWorld;
+    const page = await open();
+    // Only the empty capture by the end of 2026-09-08: no account, but the
+    // capture is complete, so the page names it instead of saying nothing is known.
+    await choose(page, "2026-09-08");
+    const empty = page.getByRole("list", { name: "表示する記載のない取得結果" });
+    const listed = await empty.innerText();
+    expect(listed).toContain("sbi-securities");
+    expect(listed).toContain("sbi-domestic-cash-positions");
+    expect(listed).toContain("取得日時 2026-09-08T01:00:00.000Z");
+    expect(listed).toContain("当日取得");
+    const main = await page.locator("main").innerText();
+    expect(main).not.toContain("保有がないという意味ではありません。");
+    expect(main).not.toContain("0 JPY");
+    // With a bank capture beside it, the empty one is still named apart.
+    await choose(page, "2026-09-10");
+    expect(await empty.innerText()).toContain("sbi-domestic-cash-positions");
+    expect(await empty.innerText()).not.toContain("smbc-bank");
+    await page.getByRole("region", { name: "smbc-bank · smbc-aの残高", exact: true }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    // Before every capture nothing is known, and the page says so.
+    await choose(page, "2026-09-01");
+    expect(await empty.count()).toBe(0);
+    expect(await page.locator("main").innerText()).toContain(
+      "保有がないという意味ではありません。",
+    );
+    await page.close();
+  }, 60_000);
 
   test("a date with too many records says so instead of a partial answer", async () => {
     tooMany = true;

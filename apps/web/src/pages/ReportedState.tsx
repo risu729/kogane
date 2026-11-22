@@ -83,10 +83,18 @@ function UnavailableNotice(): ReactNode {
   return <EmptyState>この接続先は基準日の保有状況を提供していません。</EmptyState>;
 }
 
-function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
+function SnapshotLine({
+  snapshot,
+  withSource = false,
+}: {
+  snapshot: ReportedSnapshot;
+  /** Name the source first, for a capture shown outside its account's card. */
+  withSource?: boolean;
+}): ReactNode {
   const freshness = FRESHNESS[snapshot.freshness];
   return (
     <li>
+      {withSource ? <>{snapshot.sourceId}: </> : null}
       取得日時 <time dateTime={snapshot.capturedAt}>{snapshot.capturedAt}</time>{" "}
       <span className="dim">（日本時間 {snapshot.captureDate}）</span>{" "}
       <Badge tone={freshness.tone} title={`基準日の${snapshot.ageDays}日前`}>
@@ -294,6 +302,26 @@ function PayableTable({ payables }: { payables: ReportedPayable[] }): ReactNode 
   );
 }
 
+/**
+ * The chosen captures no listed account came from: complete, yet nothing in
+ * them is listed (the provider listed nothing, or only rows the coverage
+ * counts as excluded). Without an account filter every chosen capture is a
+ * capture of the whole answer, so one no account names is shown here rather
+ * than left out. Two parsers can read one artifact, so a capture is its ref
+ * and parser.
+ */
+function unlistedSnapshots(state: ReportedState): ReportedSnapshot[] {
+  if (state.filters.account !== null) return [];
+  const listed = new Set(
+    state.accounts.flatMap((account) =>
+      account.snapshots.map((snapshot) => JSON.stringify([snapshot.ref, snapshot.parserName])),
+    ),
+  );
+  return state.snapshots.filter(
+    (snapshot) => !listed.has(JSON.stringify([snapshot.ref, snapshot.parserName])),
+  );
+}
+
 function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
   const { coverage } = state;
   return (
@@ -360,6 +388,98 @@ function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
   );
 }
 
+/**
+ * One date's answer: the summary, the coverage notes, the accounts, the
+ * captures no account came from and the payables.
+ */
+function ReportedStateAnswer({ state }: { state: ReportedState }): ReactNode {
+  const unlisted = unlistedSnapshots(state);
+  return (
+    <>
+      <Panel id="reported-state-summary" title={`${state.date} の保有状況`}>
+        <div className="panel-body">
+          <Kv>
+            <KvRow label="対象の取得">
+              <time dateTime={state.cutoff}>{state.cutoff}</time> より前（UTC）
+            </KvRow>
+            <KvRow label="口座">{state.accounts.length} 件</KvRow>
+            <KvRow label="カードの請求">{state.payables.length} 件</KvRow>
+            <KvRow label="照会 ID">
+              <code>{state.contextId.slice(0, 12)}</code>
+            </KvRow>
+          </Kv>
+        </div>
+      </Panel>
+      <CoverageNotes state={state} />
+      {state.accounts.length === 0 ? (
+        <EmptyState>
+          {unlisted.length === 0 ? (
+            <>
+              <p>この基準日までに完全な取得結果のある口座はありません。</p>
+              <p>保有がないという意味ではありません。</p>
+            </>
+          ) : (
+            <p>
+              この基準日までの完全な取得結果に、口座ごとに表示する記載はありません。取得結果は下に挙げます。
+            </p>
+          )}
+        </EmptyState>
+      ) : (
+        state.accounts.map((account, index) => (
+          <AccountCard
+            key={JSON.stringify([account.sourceId, account.sourceAccount, account.accountId])}
+            account={account}
+            index={index}
+            split={
+              state.accounts.filter(
+                (other) =>
+                  other.sourceId === account.sourceId &&
+                  other.sourceAccount === account.sourceAccount,
+              ).length > 1
+            }
+          />
+        ))
+      )}
+      {unlisted.length === 0 ? null : (
+        <Panel
+          id="reported-state-unlisted-captures"
+          title="表示する記載のない取得結果"
+          count={`${unlisted.length}件`}
+        >
+          <div className="panel-body">
+            <p>
+              完全な取得結果ですが、口座ごとに表示する保有や残高の記載がありません。取得元が何も記載していないか、対象外の記載（取引ごとの残高やポイント）だけです。
+            </p>
+            <ul className="plain-list" aria-label="表示する記載のない取得結果">
+              {unlisted.map((snapshot) => (
+                <SnapshotLine
+                  key={`${snapshot.ref}/${snapshot.parserName}`}
+                  snapshot={snapshot}
+                  withSource
+                />
+              ))}
+            </ul>
+          </div>
+        </Panel>
+      )}
+      <Panel
+        id="reported-state-payables"
+        title="カードの請求"
+        count={`${state.payables.length}件`}
+        note={`引落予定日が ${state.coverage.payablesFromPaymentDate} 以降の請求と、引落予定日が不明な最近の請求です。`}
+      >
+        {state.payables.length === 0 ? (
+          <div className="panel-body">
+            <p>この期間の請求は取得されていません。</p>
+          </div>
+        ) : (
+          <PayableTable payables={state.payables} />
+        )}
+      </Panel>
+    </>
+  );
+}
+
 export function ReportedStatePage(): ReactNode {
   const features = useFeatures();
   const today = tokyoToday();
@@ -420,64 +540,7 @@ export function ReportedStatePage(): ReactNode {
             </Notice>
           ) : (
             <QueryBoundary query={query} label="基準日の保有状況">
-              {(state) => (
-                <>
-                  <Panel id="reported-state-summary" title={`${state.date} の保有状況`}>
-                    <div className="panel-body">
-                      <Kv>
-                        <KvRow label="対象の取得">
-                          <time dateTime={state.cutoff}>{state.cutoff}</time> より前（UTC）
-                        </KvRow>
-                        <KvRow label="口座">{state.accounts.length} 件</KvRow>
-                        <KvRow label="カードの請求">{state.payables.length} 件</KvRow>
-                        <KvRow label="照会 ID">
-                          <code>{state.contextId.slice(0, 12)}</code>
-                        </KvRow>
-                      </Kv>
-                    </div>
-                  </Panel>
-                  <CoverageNotes state={state} />
-                  {state.accounts.length === 0 ? (
-                    <EmptyState>
-                      <p>この基準日までに完全な取得結果のある口座はありません。</p>
-                      <p>保有がないという意味ではありません。</p>
-                    </EmptyState>
-                  ) : (
-                    state.accounts.map((account, index) => (
-                      <AccountCard
-                        key={JSON.stringify([
-                          account.sourceId,
-                          account.sourceAccount,
-                          account.accountId,
-                        ])}
-                        account={account}
-                        index={index}
-                        split={
-                          state.accounts.filter(
-                            (other) =>
-                              other.sourceId === account.sourceId &&
-                              other.sourceAccount === account.sourceAccount,
-                          ).length > 1
-                        }
-                      />
-                    ))
-                  )}
-                  <Panel
-                    id="reported-state-payables"
-                    title="カードの請求"
-                    count={`${state.payables.length}件`}
-                    note={`引落予定日が ${state.coverage.payablesFromPaymentDate} 以降の請求と、引落予定日が不明な最近の請求です。`}
-                  >
-                    {state.payables.length === 0 ? (
-                      <div className="panel-body">
-                        <p>この期間の請求は取得されていません。</p>
-                      </div>
-                    ) : (
-                      <PayableTable payables={state.payables} />
-                    )}
-                  </Panel>
-                </>
-              )}
+              {(state) => <ReportedStateAnswer state={state} />}
             </QueryBoundary>
           )}
           <HoldingsChangePanel to={date} />
