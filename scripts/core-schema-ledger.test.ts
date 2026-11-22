@@ -21,6 +21,7 @@ import {
   applyMigrations,
   buildSchemaLedger,
   describeSchema,
+  insertTarget,
   renderSchemaMarkdown,
   splitSqlStatements,
 } from "./core-schema-ledger.ts";
@@ -206,6 +207,32 @@ describe("G0-01 CORE schema ledger", () => {
     expect(ledger.summary.migrationsWithInserts).toContain("0024_observation_decimals.sql");
     expect(ledger.summary.migrationsWithInserts).toContain("0029_decision_log.sql");
     expect(ledger.summary.migrationsWithInserts).not.toContain("0001_initial.sql");
+    // 0095 writes its rows through a recursive CTE (`WITH RECURSIVE … INSERT
+    // OR IGNORE INTO`): a statement that does not begin with INSERT still
+    // writes rows, and the inventory must say so.
+    expect(
+      ledger.migrations.find((entry) => entry.file === "0095_sbi_vc_classic_unit_eligibility.sql")
+        ?.insertStatements,
+    ).toEqual([{ table: "dataset_snapshot_policies", kind: "seed-or-backfill" }]);
+  });
+
+  test("an INSERT behind a common table expression, and a REPLACE, are inserts", () => {
+    expect(insertTarget("INSERT INTO a (x) VALUES (1)")).toBe("a");
+    expect(insertTarget("insert or ignore into b SELECT 1")).toBe("b");
+    expect(insertTarget("REPLACE INTO c (x) VALUES (1)")).toBe("c");
+    expect(
+      insertTarget(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3), m AS (SELECT 'INSERT INTO z' AS t)\nINSERT OR IGNORE INTO d (i) SELECT i FROM n",
+      ),
+    ).toBe("d");
+    expect(insertTarget("WITH m AS (SELECT 1) REPLACE INTO e SELECT * FROM m")).toBe("e");
+    // A CTE that feeds an UPDATE or a SELECT writes no new rows, and an INSERT
+    // inside parentheses (a trigger body, a subquery's text) is not this statement's.
+    expect(insertTarget("WITH m AS (SELECT 1) UPDATE f SET x = 1")).toBeUndefined();
+    expect(insertTarget("UPDATE g SET note = 'INSERT INTO h'")).toBeUndefined();
+    expect(
+      insertTarget("CREATE TRIGGER t AFTER UPDATE ON i BEGIN INSERT INTO j VALUES (1); END"),
+    ).toBeUndefined();
   });
 });
 
