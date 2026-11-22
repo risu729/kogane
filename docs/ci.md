@@ -254,7 +254,11 @@ Operational tasks are not dependencies of the check graph.
 
 The manifest guard checks task discovery, workspace coverage, runnable `ci`
 tasks, deployment dry-run coverage, tracked Wrangler configurations, untracked
-Wrangler types output and the ban on package scripts. A workspace is not
+Wrangler types output and the ban on package scripts. It also checks that a
+test task which lists its files or a shell glob (`bun test test/a.test.ts …`,
+`bun test ./test/*.test.ts`, `node --test …`) leaves no test file beside them
+that no command of the local `checks` graph runs; Vitest `include` patterns are
+not read. A workspace is not
 silently omitted because someone forgot to add another Actions matrix row or
 root task-file include.
 
