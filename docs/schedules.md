@@ -323,10 +323,15 @@ and counts only:
 - `schedule_dispatch_start`, written just before the collector call, with the
   target workspace.
 - `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
-  `durationMs`; when the call threw, also the error's `errorName` and a closed
+  `durationMs`; when the call threw, also a closed `errorName` and a closed
   `errorKind` (`network_lost`, `object_reset`, `timeout`, `limit_exceeded`,
   `overloaded`, `d1`, `other`). The error message itself is never logged,
-  because a collector's error may carry provider text.
+  because a collector's error may carry provider text, and neither is a name
+  outside the closed set: `errorName` is the runtime's own error name
+  (`Error`, `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError`,
+  `AggregateError`, `AbortError`, `TimeoutError`) or `CollectionLeaseAbort`,
+  `non_error` for a thrown value that is not an `Error`, and `other` for any
+  other name (`LOGGED_ERROR_NAMES`, `packages/collection/src/error-name.ts`).
 - `schedule_bookkeeping_retry` now also names the `jobId`, the
   `occurrenceId` once claimed, the `phase` that threw (`load`, `plan`,
   `claim`, `dispatch`, `record`), `errorName` and `errorKind`.
@@ -349,7 +354,7 @@ reference (the one the operator's release names), its `started_at` and
 `heartbeat_at` on D1's).
 The read that describes the holder is best-effort; the refusal never depends
 on it. A claim statement that throws logs `collection_lease_claim_failed` with
-the error's name. Vpass also logs the answer it returns to the Processor as
+the same closed `errorName`. Vpass also logs the answer it returns to the Processor as
 `vpass-scheduled-result` (`nominalAt`, `status`, `failureCode`, `runCount`,
 `durationMs`).
 Workers Logs keep seven days.
