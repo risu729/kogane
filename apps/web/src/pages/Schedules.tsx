@@ -300,6 +300,112 @@ function CollectionRequest({
     </div>
   );
 }
+/**
+ * Whether a settings write's answer leaves what is stored unknown: no answer
+ * (a network error), a 2xx whose body cannot be read, a 5xx, 408 or 429 (a
+ * lost relay is `503 scheduling_unavailable`, possibly after the Processor
+ * wrote). Every other 4xx is the server's refusal before it wrote anything.
+ */
+const outcomeUnknown = (error: unknown): boolean =>
+  !(error instanceof ApiError) ||
+  error.status >= 500 ||
+  error.status === 408 ||
+  error.status === 429;
+/**
+ * A `409` (the version check found another revision, or the proposal was
+ * decided): what is stored may be this very change, saved by an earlier
+ * attempt whose answer was lost.
+ */
+const conflict = (error: unknown): boolean => error instanceof ApiError && error.status === 409;
+/** JSON with object keys sorted, so two values compare by content, not key order. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+/**
+ * The page's snapshot read again after a write whose answer did not say what
+ * is stored, or null when that read fails too. The read starts after the
+ * answer, so it shows the write if the server stored it.
+ */
+async function readBack(
+  client: ReturnType<typeof useQueryClient>,
+): Promise<ScheduleSnapshot | null> {
+  try {
+    await client.invalidateQueries({ queryKey: ["schedules"] }, { throwOnError: true });
+  } catch {
+    return null;
+  }
+  return client.getQueryData<ScheduleSnapshot>(["schedules"]) ?? null;
+}
+const READ_BACK_FAILED = "保存されたか確認できません。表示を更新して保存状態を確認してください。";
+const NOT_STORED = "読み直した時点では保存されていません。もう一度保存できます。";
+/**
+ * What a save says once the stored revision is read back after an unknown
+ * answer or a `409`. Saved means the stored revision moved past the one the
+ * save was made from and holds exactly this change; a revision that did not
+ * move means nothing is stored yet, and the version check refuses a retry if
+ * an earlier attempt lands after all.
+ */
+function readBackText(
+  error: unknown,
+  from: number,
+  stored: { revision: number } | undefined,
+  same: boolean,
+): string {
+  if (!stored) return READ_BACK_FAILED;
+  if (stored.revision > from && same)
+    return conflict(error)
+      ? "この変更はすでに保存されています。読み直した設定はこの変更と同じです。"
+      : "応答を受け取れませんでしたが、読み直した設定はこの変更と同じで、保存されています。";
+  if (stored.revision > from)
+    return conflict(error)
+      ? "他の変更が先に保存されました。読み直した設定を表示しています。必要なら再度変更してください。"
+      : "この変更が保存されたかは分かりません。読み直した設定はこの変更と異なります。表示中の設定を確認し、必要なら再度変更してください。";
+  return conflict(error) ? failure(error) : NOT_STORED;
+}
+const RESERVATION_PENDING = "実行予約の反映を待っています。";
+/** A maintenance rule's stored fields, compared by content: what one save asks to store. */
+const ruleChange = (r: Omit<MaintenanceRule, "id" | "revision">): string =>
+  canonical({
+    source: r.source,
+    timezone: r.timezone,
+    pattern: r.pattern,
+    enabled: r.enabled,
+    scope: r.scope,
+    referenceUrl: r.referenceUrl,
+    verifiedAt: r.verifiedAt,
+  });
+/**
+ * A callback ref that focuses its element once, when it mounts: a module
+ * function keeps one identity, so React does not call it again on re-render.
+ */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+/**
+ * A proposal as the read back shows it: still `listed` (undecided), decided
+ * with the rule revision accepting it would write (`accepted`), or `decided`
+ * some other way; null when the read failed, or when the snapshot leaves out
+ * undecided proposals past the shown bound and does not list this one.
+ */
+function decidedAfterReadBack(
+  snapshot: ScheduleSnapshot | null,
+  proposal: MaintenanceSurveyProposalView,
+): "listed" | "accepted" | "decided" | null {
+  const survey = snapshot?.survey;
+  if (!snapshot || !survey) return null;
+  if (survey.proposals.some((p) => p.id === proposal.id)) return "listed";
+  if (survey.attention > survey.proposals.length) return null;
+  const accepted = ruleChange({ ...proposal, verifiedAt: proposal.fetchedAt });
+  return snapshot.maintenance.some(
+    (r) =>
+      (proposal.ruleId === null || r.id === proposal.ruleId) &&
+      r.revision === proposal.baseRevision + 1 &&
+      ruleChange(r) === accepted,
+  )
+    ? "accepted"
+    : "decided";
+}
 function ScheduleCard({
   value,
   lease,
@@ -320,10 +426,12 @@ function ScheduleCard({
     [timezone, setTimezone] = useState(value.timezone),
     [pattern, setPattern] = useState<SchedulePattern>(value.pattern);
   const [busy, setBusy] = useState(false);
+  const client = useQueryClient();
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setMessage({ from: value.revision, revision: value.revision, text: "" });
+    const intended = canonical({ enabled, timezone, pattern });
     try {
       const result = await request<{ reservation: string }>(`/${value.id}`, {
         revision: value.revision,
@@ -344,7 +452,26 @@ function ScheduleCard({
       });
       await refresh();
     } catch (error) {
-      setMessage({ from: value.revision, revision: value.revision, text: failure(error) });
+      if (!outcomeUnknown(error) && !conflict(error)) {
+        setMessage({ from: value.revision, revision: value.revision, text: failure(error) });
+        return;
+      }
+      // The answer does not say whether this change is stored: read the job
+      // back, so the card shows what the server holds and says how that
+      // compares with this change.
+      const stored = (await readBack(client))?.schedules.find((s) => s.id === value.id);
+      const same =
+        stored !== undefined &&
+        canonical({
+          enabled: stored.enabled,
+          timezone: stored.timezone,
+          pattern: stored.pattern,
+        }) === intended;
+      setMessage({
+        from: value.revision,
+        revision: stored?.revision ?? value.revision,
+        text: readBackText(error, value.revision, stored, same),
+      });
     } finally {
       setBusy(false);
     }
@@ -524,16 +651,20 @@ const REASON: Record<ProposalReason, string> = {
 };
 function SurveyProposal({
   value,
+  report,
   refresh,
   earlier,
 }: {
   value: MaintenanceSurveyProposalView;
+  /** Where the decision's result is said: the section, which outlives a decided proposal. */
+  report: (text: string) => void;
   refresh: () => Promise<unknown>;
   /** The page shows an earlier answer: the list of proposals may be out of date. */
   earlier: boolean;
 }): ReactNode {
   const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    client = useQueryClient();
   async function decide(decision: "accept" | "reject") {
     if (earlier) return;
     if (
@@ -543,11 +674,43 @@ function SurveyProposal({
       return;
     setBusy(true);
     setMessage("");
+    // A decided proposal leaves the list, and its result with it: the section
+    // says what was decided, prefixed with which proposal it was.
+    const said = (text: string) => report(`${name(value.source)}の${KIND[value.kind]}：${text}`);
     try {
-      await request(`/proposals/${value.id}`, { decision });
+      const answer = await request<{ decided: string; reservation?: string }>(
+        `/proposals/${value.id}`,
+        { decision },
+      );
+      said(
+        answer.decided === "accepted"
+          ? `採用し、メンテナンス時間に反映しました。${answer.reservation === "pending" ? RESERVATION_PENDING : ""}`
+          : "却下しました。メンテナンス時間は変わりません。",
+      );
       await refresh();
     } catch (error) {
-      setMessage(failure(error));
+      if (!outcomeUnknown(error) && !conflict(error)) {
+        setMessage(failure(error));
+        return;
+      }
+      // The answer does not say whether the decision is stored (a lost
+      // answer, or a 409 that an earlier attempt's own decision may explain):
+      // read the proposals and rules back.
+      const decided = decidedAfterReadBack(await readBack(client), value);
+      if (decided === null)
+        setMessage("決定されたか確認できません。表示を更新して確認してください。");
+      else if (decided === "listed")
+        setMessage(
+          conflict(error)
+            ? failure(error)
+            : "読み直した時点では決定されていません。もう一度選べます。",
+        );
+      else
+        said(
+          decided === "accepted"
+            ? "この提案は採用済みで、メンテナンス時間に反映されています。"
+            : "この提案は決定済みで、確認待ちの一覧から外れました。採用・却下のどちらになったかは、メンテナンス時間の一覧で確認してください。",
+        );
     } finally {
       setBusy(false);
     }
@@ -593,12 +756,21 @@ function SurveySection({
   refresh: () => Promise<unknown>;
   earlier: boolean;
 }): ReactNode {
+  // A decision's result takes focus, since the decided proposal's buttons
+  // are gone: each result is a new paragraph (its own key), so a repeated
+  // text takes focus again.
+  const [report, setReport] = useState<{ key: number; text: string } | null>(null);
   return (
     <section className="schedule-section" aria-labelledby="maintenance-survey">
       <h2 id="maintenance-survey">公式サイトの再調査</h2>
       <p>
         確認済みの公式ページだけを定期的に取得し、停止時間が変わっていれば提案します。採用するまでメンテナンス時間は変わりません。取得の失敗や空のページは「停止時間なし」とはみなしません。
       </p>
+      {report ? (
+        <p role="status" tabIndex={-1} key={report.key} ref={focusOnMount}>
+          {report.text}
+        </p>
+      ) : null}
       {!survey ? (
         <p className="muted">再調査の状態を読み込めません。</p>
       ) : (
@@ -635,7 +807,13 @@ function SurveySection({
               ) : null}
               <ul className="maintenance-list">
                 {survey.proposals.map((p) => (
-                  <SurveyProposal key={p.id} value={p} refresh={refresh} earlier={earlier} />
+                  <SurveyProposal
+                    key={p.id}
+                    value={p}
+                    refresh={refresh}
+                    earlier={earlier}
+                    report={(text) => setReport((last) => ({ key: (last?.key ?? 0) + 1, text }))}
+                  />
                 ))}
               </ul>
             </>
@@ -687,11 +865,17 @@ function MaintenanceEditor({
   const [url, setUrl] = useState(rule?.referenceUrl ?? ""),
     [verified, setVerified] = useState(local(rule?.verifiedAt ?? new Date().toISOString())),
     [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    // A stored save's result: the editor then shows only it, since the form
+    // still carries the revision the save was made from.
+    [saved, setSaved] = useState("");
+  const client = useQueryClient();
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMessage("");
+    // Set once the request is about to be sent: a failure before it stored nothing.
+    let intended: string | null = null;
     try {
       const pattern =
         kind === "once"
@@ -703,7 +887,7 @@ function MaintenanceEditor({
           : kind === "weekly"
             ? { kind, weekdays, start, end }
             : { kind, weekday, nth, offsetDays, start, end };
-      await request("/maintenance", {
+      const body = {
         id,
         revision: rule?.revision ?? 0,
         source,
@@ -713,15 +897,52 @@ function MaintenanceEditor({
         pattern,
         referenceUrl: url,
         verifiedAt: new Date(`${verified}:00+09:00`).toISOString(),
-      });
+      };
+      intended = ruleChange(body);
+      const answer = await request<{ reservation?: string }>("/maintenance", body);
+      setSaved(
+        `停止時間を保存しました。${answer.reservation === "pending" ? RESERVATION_PENDING : ""}`,
+      );
       await refresh();
-      close();
     } catch (error) {
-      setMessage(failure(error));
+      if (intended === null || (!outcomeUnknown(error) && !conflict(error))) {
+        setMessage(failure(error));
+        return;
+      }
+      // The answer does not say whether this revision is stored: read the
+      // rules back. A rule the read does not list has no stored revision.
+      const from = rule?.revision ?? 0;
+      const snapshot = await readBack(client);
+      const stored = snapshot
+        ? (snapshot.maintenance.find((r) => r.id === id) ?? { revision: 0 })
+        : undefined;
+      const same = stored !== undefined && "source" in stored && ruleChange(stored) === intended;
+      const text = readBackText(error, from, stored, same);
+      if (stored && stored.revision > from && same) setSaved(text);
+      else
+        setMessage(
+          stored && stored.revision > from
+            ? `${text}一覧の「変更」から開き直すと、保存済みの設定から変更できます。`
+            : text,
+        );
     } finally {
       setBusy(false);
     }
   }
+  if (saved)
+    return (
+      <div className="maintenance-editor">
+        <h3>{rule ? "停止時間を変更" : "停止時間を追加"}</h3>
+        <p role="status" tabIndex={-1} ref={focusOnMount}>
+          {saved}
+        </p>
+        <div className="schedule-actions">
+          <button className="button" type="button" onClick={close}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    );
   return (
     <form onSubmit={save} className="maintenance-editor">
       <h3>{rule ? "停止時間を変更" : "停止時間を追加"}</h3>
