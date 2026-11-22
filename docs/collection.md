@@ -978,6 +978,18 @@ stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 a failure carried none). `ranges` and `reports` are empty; `transformations`
 holds the `reencoded` steps above.
 
+Run outcome and log: `runCollection` returns the run's manifest, and the
+`vpoint-collection-persisted` log line carries its status, counts and closed
+codes (artifact, failure and object counts, terminal outcome, key and digest,
+and `reasonCode` when the terminal was not written). `historyTotal`,
+`historyPageCount`, `vMoneyHistoryTotal` and `vMoneyHistoryPageCount` are in
+both only when both history walks finished. A run that stopped earlier (no
+session, a refused read, a stopped walk) never learned them, so they are
+absent, not 0 (INV05); its failure codes are the reason. Until 2026-11-21
+such a run reported all four as 0. Verified with mocked `fetch` responses and
+a session stub with no session in
+`services/collector-vpoint/test/diagnostics.test.ts`.
+
 Not carried over: the V Point Pay email reconciliation report. It was built by
 listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
 are now content-addressed runs that no prefix enumerates, so the collector no
