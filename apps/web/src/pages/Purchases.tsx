@@ -1,3 +1,4 @@
+import { displayLabel } from "../labels.ts";
 import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, useFeatures } from "../api.ts";
@@ -394,7 +395,7 @@ export function PurchasesPage(): ReactNode {
                       <summary>対象外の条件</summary>
                       <ul className="warning-list">
                         {data.coverage.unsupportedShapes.map((code) => (
-                          <li key={code}>{EXCLUSION_LABELS[code] ?? code}</li>
+                          <li key={code}>{displayLabel(EXCLUSION_LABELS, code)}</li>
                         ))}
                       </ul>
                     </details>
@@ -520,7 +521,7 @@ export function PurchasePage({ eventId }: { eventId: string }): ReactNode {
                   <ol className="plain-list">
                     {view.history.map((entry) => (
                       <li key={entry.revision}>
-                        版 {entry.revision}: {HISTORY_ACTIONS[entry.action] ?? entry.action} ·{" "}
+                        版 {entry.revision}: {displayLabel(HISTORY_ACTIONS, entry.action)} ·{" "}
                         <PurchaseStateBadge view={entry} /> · {entry.createdAt}
                         <br />
                         <code className="wrap-any">{entry.decisionRevisionId}</code>

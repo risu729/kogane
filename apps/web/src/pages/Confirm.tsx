@@ -5,6 +5,7 @@
 // has not advertised, reuse an approval after the targets moved, or report a
 // change as finished when it is only accepted. The counts, the staleness and
 // the receipt state all come from the server.
+import { displayLabel, ownEntry } from "../labels.ts";
 import { useCallback, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
@@ -380,7 +381,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
           <>
             <Panel
               id="plan-summary"
-              title={COMMAND_KIND_LABELS[data.simulation.kind] ?? data.simulation.kind}
+              title={displayLabel(COMMAND_KIND_LABELS, data.simulation.kind)}
               note={
                 features.known && !features.commands
                   ? "この接続先は確認操作を提供していません。内容の表示のみ行えます。"
@@ -764,15 +765,15 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               <Panel id="plan-receipt" title="操作の記録">
                 <Notice
                   tone={
-                    RECEIPT_STATE[receipt.status]?.tone === "bad"
+                    ownEntry(RECEIPT_STATE, receipt.status)?.tone === "bad"
                       ? "bad"
-                      : RECEIPT_STATE[receipt.status]?.tone === "warn"
+                      : ownEntry(RECEIPT_STATE, receipt.status)?.tone === "warn"
                         ? "warn"
                         : undefined
                   }
                   role="status"
                 >
-                  {RECEIPT_STATE[receipt.status]?.note ?? ""}
+                  {ownEntry(RECEIPT_STATE, receipt.status)?.note ?? ""}
                 </Notice>
                 <div className="panel-body">
                   <Kv>
@@ -780,8 +781,8 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       <code>{receipt.operationId}</code>
                     </KvRow>
                     <KvRow label="状態">
-                      <Badge tone={RECEIPT_STATE[receipt.status]?.tone ?? "neutral"}>
-                        {RECEIPT_STATE[receipt.status]?.label ?? receipt.status}
+                      <Badge tone={ownEntry(RECEIPT_STATE, receipt.status)?.tone ?? "neutral"}>
+                        {ownEntry(RECEIPT_STATE, receipt.status)?.label ?? receipt.status}
                       </Badge>
                     </KvRow>
                     <KvRow label="受理">{receipt.acceptedAt}</KvRow>

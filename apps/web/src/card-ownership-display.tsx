@@ -1,3 +1,4 @@
+import { displayLabel, ownEntry } from "./labels.ts";
 import type { ReactNode } from "react";
 import type { CardOwnershipSide } from "../../../packages/domain/src/card-ownership-review.ts";
 import {
@@ -43,7 +44,7 @@ const SCOPE_UNCONFIRMED: Record<OwnershipDeclarationScope, string> = {
  */
 export function ownershipBlockerText(code: string, scope: OwnershipDeclarationScope): string {
   if (code === "single_account_scope_unconfirmed") return SCOPE_UNCONFIRMED[scope];
-  return BLOCKERS[code] ?? DECLARATION_BLOCKERS[code] ?? code;
+  return ownEntry(BLOCKERS, code) ?? displayLabel(DECLARATION_BLOCKERS, code);
 }
 export function ownerLabel(ref: string): string {
   return ref.startsWith("party:") ? ref.slice(6) : ref;
@@ -72,7 +73,7 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
         <Notice tone="warn" inline role="note">
           <ul className="warning-list">
             {side.blockers.map((code) => (
-              <li key={code}>{BLOCKERS[code] ?? code}</li>
+              <li key={code}>{displayLabel(BLOCKERS, code)}</li>
             ))}
           </ul>
           <Link to="/identities">口座の整理を確認</Link>
