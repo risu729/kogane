@@ -112,6 +112,24 @@ describe("sbi-domestic-trade-records keeps evidence but never guesses an amount"
     expect(transaction(parse([{ amount: "1" }]).observations[0]).description).toBe("");
   });
 
+  test("a trade date that is not a calendar YYYY-MM-DD date is no as_of and is warned", () => {
+    // The collector writes `20YY-MM-DD` from the page's `YY/MM/DD` cell
+    // without a calendar check; as_of orders transactions by text (0.2.2).
+    for (const tradeDate of ["2026-02-30", "2026-13-01", "", "26/08/12", "2026/08/12", null, 7]) {
+      const result = parse([{ ...record("1"), tradeDate }]);
+      const observation = transaction(result.observations[0]);
+      expect(observation.asOf).toBeUndefined();
+      expect(observation).toMatchObject({ amountMinor: 1, externalId: "synthetic:1" });
+      expect(observation.extra["tradeDate"]).toEqual(tradeDate);
+      expect(result.warnings).toEqual([
+        "records[0]: tradeDate is not a calendar YYYY-MM-DD date; recorded without as_of",
+      ]);
+    }
+    const valid = parse([{ ...record("1"), tradeDate: "2024-02-29" }]);
+    expect(transaction(valid.observations[0]).asOf).toBe("2024-02-29");
+    expect(valid.warnings).toEqual([]);
+  });
+
   test("a truncated window is flagged and a wrong body is refused", () => {
     expect(parse([], true).warnings).toEqual([
       "hasMore=true: the source truncated this window; artifact covers a partial page",
