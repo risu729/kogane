@@ -248,7 +248,8 @@ export const REWARD_CLAIM_INSERT_SQL = `INSERT INTO reward_bucket_claims_v2
 
 /**
  * A claim batch the schema refused (a CHECK, NOT NULL, foreign key or trigger
- * failure). The scheduler records the class name as the lane's failure code;
+ * failure). The scheduler records this class, matched by identity, as the
+ * lane's failure code `RewardClaimWriteRefused` (`LANE_ERROR_CLASSES`, worker.ts);
  * the SQLite text is dropped, never kept or logged.
  */
 export class RewardClaimWriteRefused extends Error {}

@@ -202,7 +202,7 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
       "records the RewardClaimWriteRefused class as its code and the text is dropped",
   },
   "services/processor/src/worker.ts": {
-    count: 8,
+    count: 6,
     reason:
       "PipelineError, MetadataError and ReleaseCommandError messages are closed codes; the " +
       "publication repair keeps only publication_* codes; parse_issues.message is a SQL path",

@@ -389,3 +389,38 @@ test("a record that cannot be written is logged with a safe code and changes not
   expect(failures[0]).toMatchObject({ lane: "reconciliation_sweep" });
   expect(JSON.stringify(failures)).not.toContain("synthetic refusal");
 });
+
+test("a mark that cannot be read names only a closed audit code or a built-in error class", async () => {
+  class Synthetic_private_account_label extends Error {}
+  const refuse = () => {
+    throw new Error("synthetic private trap");
+  };
+  const hostile = new Proxy({}, { get: refuse, getPrototypeOf: refuse, has: refuse });
+  const coded = (code: unknown, error: Error = new Error("synthetic")) =>
+    Object.assign(error, { code });
+  for (const [thrown, code] of [
+    [new Synthetic_private_account_label("synthetic"), "Error"],
+    ["synthetic private text", "unknown"],
+    [hostile, "unknown"],
+    // A lower-case `code` that no audit builder throws is free text too.
+    [coded("synthetic_private_label"), "Error"],
+    [coded("synthetic_private_label", new Synthetic_private_account_label()), "Error"],
+    [coded("audit_record_invalid", new TypeError("synthetic")), "audit_record_invalid"],
+    [coded("audit_diff_invalid"), "audit_diff_invalid"],
+  ] as const) {
+    const lines: string[] = [];
+    const mark = await markLaneAudit(
+      {
+        prepare: () => {
+          throw thrown;
+        },
+      } as unknown as D1Database,
+      "reconciliation_sweep",
+      (line) => lines.push(line),
+    );
+    expect(mark).toBeNull();
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      { event: "lane_audit_record_failed", lane: "reconciliation_sweep", code },
+    ]);
+  }
+});
