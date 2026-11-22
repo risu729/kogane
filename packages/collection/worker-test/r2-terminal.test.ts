@@ -14,7 +14,7 @@ import { sha256Hex } from "../src/digest";
 import { objectKey, terminalKey } from "../src/keys";
 import { listTerminals, readTerminal, verifyReferencedObjects } from "../src/reader";
 import { sha256HexOfStream } from "../src/stream-digest";
-import { persistRun } from "../src/writer";
+import { persistRun, planManifest } from "../src/writer";
 import type { PersistArtifact, PersistRunPlan } from "../src/writer";
 import type { TerminalRunFields } from "../src/manifest";
 
@@ -197,5 +197,56 @@ describe("streamed digest of a refused terminal in the Workers runtime", () => {
       });
       expect(await sha256HexOfStream(stream)).toBe(await sha256Hex(whole));
     }
+  });
+});
+
+describe("verifyReferencedObjects streamHash in the Workers runtime", () => {
+  it("hashes an unprovable R2 object as it streams, to the digest of its buffered bytes", async () => {
+    // A put without a declared sha256 and without custom metadata: R2 keeps
+    // no native SHA-256, so only reading the body can prove the digest.
+    const size = 9 * 1024 * 1024 + 3;
+    const bytes = Uint8Array.from({ length: size }, (_, at) => (at * 13 + 7) & 0xff);
+    const digest = await sha256Hex(bytes);
+    const key = objectKey(digest);
+    expect(await env.DATA.put(key, bytes)).not.toBeNull();
+    const head = await env.DATA.head(key);
+    expect(nativeSha256Hex(head!)).toBeNull();
+    // The digest the option used to compute by buffering the whole body.
+    const buffered = await env.DATA.get(key);
+    expect(await sha256Hex(new Uint8Array(await buffered!.arrayBuffer()))).toBe(digest);
+
+    const manifest = planManifest({
+      run: run("stream-hash"),
+      artifacts: [
+        {
+          artifactKey: "large.bin",
+          sha256: digest,
+          byteSize: size,
+          mediaType: "application/octet-stream",
+          role: "provider_response",
+          body: { kind: "bytes", bytes },
+        },
+      ],
+    });
+    const unproven = await verifyReferencedObjects(env.DATA, manifest);
+    expect(unproven.problems.map((problem) => problem.reasonCode)).toEqual([
+      "object_digest_unverifiable",
+    ]);
+    expect(await verifyReferencedObjects(env.DATA, manifest, { streamHash: true })).toEqual({
+      outcome: "ok",
+      checked: 1,
+      problems: [],
+    });
+
+    // The same stored bytes against another declared digest are a mismatch.
+    const artifact = manifest.artifacts[0]!;
+    const mismatched = await verifyReferencedObjects(
+      env.DATA,
+      { ...manifest, artifacts: [{ ...artifact, sha256: "0".repeat(64) }] },
+      { streamHash: true },
+    );
+    expect(mismatched.problems.map((problem) => problem.reasonCode)).toEqual([
+      "object_hash_mismatch",
+    ]);
   });
 });

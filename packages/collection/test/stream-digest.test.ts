@@ -5,7 +5,7 @@
 // R2 bodies. Every input is synthetic.
 import { describe, expect, test } from "bun:test";
 import { sha256Hex } from "../src/digest";
-import { sha256HexOfStream } from "../src/stream-digest";
+import { digestOfStream, sha256HexOfStream } from "../src/stream-digest";
 
 function streamOf(chunks: readonly Uint8Array[]): ReadableStream<Uint8Array> {
   let next = 0;
@@ -57,6 +57,17 @@ describe("sha256HexOfStream", () => {
       for (const cuts of chunkings) {
         expect(await sha256HexOfStream(streamOf(split(whole, cuts)))).toBe(expected);
       }
+    }
+  });
+
+  test("digestOfStream counts every byte it hashes, empty chunks included", async () => {
+    for (const length of [0, 1, 64, 4097, 100_003]) {
+      const whole = bytes(length, 3);
+      const cuts = [0, Math.floor(length / 3), Math.floor(length / 3), length];
+      expect(await digestOfStream(streamOf(split(whole, cuts)))).toEqual({
+        sha256: await sha256Hex(whole),
+        byteSize: length,
+      });
     }
   });
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { sha256Hex } from "../src/digest";
 import { objectKey, terminalKey } from "../src/keys";
 import {
   listTerminals,
@@ -175,6 +176,128 @@ describe("verifyReferencedObjects", () => {
     expect(withoutStreaming.problems[0]?.reasonCode).toBe("object_digest_unverifiable");
     const withStreaming = await verifyReferencedObjects(bucket, manifest, { streamHash: true });
     expect(withStreaming).toEqual({ outcome: "ok", checked: 1, problems: [] });
+  });
+
+  test("streamHash accepts exactly the digest the buffered sha256Hex gives, at any size", async () => {
+    // The digest the option compares is the one the buffered read computed
+    // before it streamed: `sha256Hex` of the whole body. Sizes straddle the
+    // fake body's 4 KiB chunk and SHA-256's 64-byte block.
+    for (const length of [0, 1, 55, 64, 4095, 4096, 4097, 100_003]) {
+      const bucket = new FakeR2Bucket();
+      const bytes = Uint8Array.from({ length }, (_, at) => (at * 29 + length) & 0xff);
+      const buffered = await sha256Hex(bytes);
+      const artifact = await syntheticArtifact("opaque.bin", "", {
+        sha256: buffered,
+        byteSize: length,
+      });
+      bucket.entries.set(objectKey(buffered), {
+        bytes,
+        etag: `etag-${length}`,
+        uploaded: new Date(1_700_000_000_000),
+        contentType: "application/octet-stream",
+        customMetadata: undefined,
+        nativeSha256: null,
+      });
+      const manifest = planManifest(await syntheticPlan({ artifacts: [artifact] }));
+      expect(await verifyReferencedObjects(bucket, manifest, { streamHash: true })).toEqual({
+        outcome: "ok",
+        checked: 1,
+        problems: [],
+      });
+      // One flipped bit anywhere is a hash mismatch, as it was buffered.
+      if (length > 0) {
+        bytes[length - 1] = bytes[length - 1]! ^ 0x01;
+        const flipped = await verifyReferencedObjects(bucket, manifest, { streamHash: true });
+        expect(flipped.problems.map((problem) => problem.reasonCode)).toEqual([
+          "object_hash_mismatch",
+        ]);
+      }
+    }
+  });
+});
+
+describe("verifyReferencedObjects with streamHash on a large object", () => {
+  // Over the reader's 8 MiB terminal cap and the size a raw artifact can
+  // reach: the body must be hashed as it streams, never read whole.
+  const SIZE = 9 * 1024 * 1024 + 3;
+  const CHUNK = 64 * 1024;
+  const byteAt = (at: number): number => (at * 13 + 7) & 0xff;
+
+  /**
+   * An object R2 metadata cannot prove (no native checksum, no declared
+   * digest), whose generated body yields `bodyLength` bytes and whose
+   * `arrayBuffer()` throws, as a body larger than a Worker's memory would.
+   */
+  function largeObject(bodyLength: number, flipAt: number | null) {
+    const reads = { chunks: 0, bytes: 0, buffered: 0 };
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bodyLength) {
+          controller.close();
+          return;
+        }
+        const end = Math.min(offset + CHUNK, bodyLength);
+        const chunk = Uint8Array.from({ length: end - offset }, (_, at) => byteAt(offset + at));
+        if (flipAt !== null && flipAt >= offset && flipAt < end) {
+          chunk[flipAt - offset] = chunk[flipAt - offset]! ^ 0x80;
+        }
+        reads.chunks += 1;
+        reads.bytes += chunk.byteLength;
+        offset = end;
+        controller.enqueue(chunk);
+      },
+    });
+    const head = { size: SIZE, etag: "etag-large", checksums: {} };
+    const object = {
+      ...head,
+      body,
+      async arrayBuffer(): Promise<ArrayBuffer> {
+        reads.buffered += 1;
+        throw new Error("synthetic_body_exceeds_memory");
+      },
+    };
+    return { reads, head, object };
+  }
+
+  async function verifyLarge(bodyLength: number, flipAt: number | null = null) {
+    const whole = Uint8Array.from({ length: SIZE }, (_, at) => byteAt(at));
+    const artifact = await syntheticArtifact("large.bin", "", {
+      sha256: await sha256Hex(whole),
+      byteSize: SIZE,
+    });
+    const manifest = planManifest(await syntheticPlan({ artifacts: [artifact] }));
+    const key = objectKey(artifact.sha256);
+    const { reads, head, object } = largeObject(bodyLength, flipAt);
+    const bucket = new FakeR2Bucket();
+    bucket.head = async (requested) => (requested === key ? { ...head, key } : null);
+    bucket.get = async (requested) => (requested === key ? { ...object, key } : null);
+    const result = await verifyReferencedObjects(bucket, manifest, { streamHash: true });
+    return { result, reads };
+  }
+
+  test("hashes the body chunk by chunk and never calls arrayBuffer()", async () => {
+    const { result, reads } = await verifyLarge(SIZE);
+    expect(result).toEqual({ outcome: "ok", checked: 1, problems: [] });
+    expect(reads).toEqual({ chunks: Math.ceil(SIZE / CHUNK), bytes: SIZE, buffered: 0 });
+  });
+
+  test("a streamed body of another length is object_size_mismatch", async () => {
+    for (const length of [SIZE - 1, SIZE + 1]) {
+      const { result, reads } = await verifyLarge(length);
+      expect(result.problems.map((problem) => problem.reasonCode)).toEqual([
+        "object_size_mismatch",
+      ]);
+      // The size R2 reported for the object, as before.
+      expect(result.problems[0]?.observedByteSize).toBe(SIZE);
+      expect(reads.buffered).toBe(0);
+    }
+  });
+
+  test("a streamed body of the right length but other bytes is object_hash_mismatch", async () => {
+    const { result, reads } = await verifyLarge(SIZE, 5 * 1024 * 1024 + 11);
+    expect(result.problems.map((problem) => problem.reasonCode)).toEqual(["object_hash_mismatch"]);
+    expect(reads).toMatchObject({ bytes: SIZE, buffered: 0 });
   });
 });
 

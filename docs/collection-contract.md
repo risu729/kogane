@@ -196,10 +196,19 @@ Worker used the same pattern in production.
   `object_digest_unverifiable`). The native `checksums.sha256` is R2's proof
   for single-part objects; for a multipart object the check is against the
   `customMetadata.sha256` the writer declared, which the writer computed over
-  the bytes it uploaded but is still a declaration. With `{ streamHash: true }`
-  the object is read and hashed when metadata cannot prove the digest. This is
-  what lets the Processor register the collector's own bytes without copying
-  them.
+  the bytes it uploaded but is still a declaration. This re-check is what lets
+  the Processor register the collector's own bytes without copying them. With
+  `{ streamHash: true }` the object is read and hashed when metadata cannot
+  prove the digest: its body is hashed as it streams (`digestOfStream` in
+  `stream-digest.ts`), never buffered, so memory stays at one chunk whatever
+  the artifact's size. The
+  size it compares is the bytes the body yielded and the digest is the
+  `sha256Hex` of those bytes, as the buffered read it replaced computed. The
+  time still grows with the size, which is why the option is off by default.
+  No production caller turns it on: the Processor's registration
+  (`registerTerminal` in `packages/application`) accepts a `streamHash` input
+  that the Processor never sets, so an unprovable object blocks registration
+  as `object_digest_unverifiable`. Only tests set it.
 - `listTerminals(bucket, { source?, cursor, limit })` is a **bounded scan of
   the whole `runs/` prefix**, paged by the R2 cursor. It is never a time window
   and never a lexicographic watermark: a run whose terminal is confirmed after

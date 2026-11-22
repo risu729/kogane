@@ -4,7 +4,9 @@
 // with it means reading the whole object into memory first. That is fine for
 // what the reader accepts (a terminal of at most 8 MiB) and not for what it
 // refuses: a terminal over the cap can be any size R2 stores, larger than a
-// Worker's memory. This module hashes such a body as it is read.
+// Worker's memory. The same holds for a raw artifact that
+// `verifyReferencedObjects({ streamHash: true })` re-hashes. This module
+// hashes such a body as it is read.
 //
 // In Workers the hash is Cloudflare's `crypto.DigestStream`, the runtime's
 // Web Crypto extension: a `WritableStream` whose `digest` resolves once the
@@ -63,22 +65,36 @@ function incrementalSha256(): IncrementalSha256 {
   throw new Error("sha256_stream_unavailable");
 }
 
+/** What a stream yielded: the SHA-256 of its bytes and how many there were. */
+export interface StreamDigest {
+  /** Lower-case hex, as `sha256Hex` writes it. */
+  readonly sha256: string;
+  readonly byteSize: number;
+}
+
 /**
- * Lower-case hex SHA-256 of every byte the stream yields, read through
- * `getReader()` one chunk at a time. Equal to `sha256Hex` of the same bytes
- * concatenated; no more than the chunk being hashed is held at once.
+ * The SHA-256 and the byte count of every byte the stream yields, read through
+ * `getReader()` one chunk at a time. The digest equals `sha256Hex` of the same
+ * bytes concatenated; no more than the chunk being hashed is held at once.
  */
-export async function sha256HexOfStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+export async function digestOfStream(stream: ReadableStream<Uint8Array>): Promise<StreamDigest> {
   const hash = incrementalSha256();
   const reader = stream.getReader();
+  let byteSize = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      byteSize += value.byteLength;
       await hash.update(value);
     }
   } finally {
     reader.releaseLock();
   }
-  return hash.hex();
+  return { sha256: await hash.hex(), byteSize };
+}
+
+/** Lower-case hex SHA-256 of every byte the stream yields: {@link digestOfStream}'s digest. */
+export async function sha256HexOfStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+  return (await digestOfStream(stream)).sha256;
 }
