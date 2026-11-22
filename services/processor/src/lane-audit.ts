@@ -274,8 +274,11 @@ const AUDIT_FAILURE_CODES: readonly unknown[] = ["audit_record_invalid", "audit_
  */
 function laneAuditFailureCode(error: unknown): string {
   try {
-    if (error instanceof Error && "code" in error && AUDIT_FAILURE_CODES.includes(error.code))
-      return error.code as string;
+    if (error instanceof Error && "code" in error) {
+      // Read once: a getter may answer differently on a second read.
+      const code: unknown = error.code;
+      if (AUDIT_FAILURE_CODES.includes(code)) return code as string;
+    }
   } catch {
     // A throwing `code` getter or a hostile proxy names no code.
   }

@@ -410,11 +410,11 @@ terminals is finished in one tick
 
 Each stage is isolated: a failure is logged as its own `<event>_failed` line
 and never stops the stages after it, so a parse-sweep failure does not prevent
-the identity sweep from running. A failure code is either the pipeline's safe
-code or the error's built-in class (`processor.md` §6.1), never exception
-text or a class name the thrower chose. Health signals,
-load budgets and the recovery drills for these stages are in
-`docs/operations.md`.
+the identity sweep from running. A failure code is the pipeline's safe code,
+one of the two documented lane error classes, or the error's built-in class
+(`processor.md` §6.1), never exception text or a class name the thrower
+chose. Health signals, load budgets and the recovery drills for these stages
+are in `docs/operations.md`.
 
 The lanes that keep no state of their own — `identity_sweep`,
 `reconciliation_sweep`, `card_debit_account_sweep`, `card_settlement_sweep`,

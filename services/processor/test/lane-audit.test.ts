@@ -398,6 +398,12 @@ test("a mark that cannot be read names only a closed audit code or a built-in er
   const hostile = new Proxy({}, { get: refuse, getPrototypeOf: refuse, has: refuse });
   const coded = (code: unknown, error: Error = new Error("synthetic")) =>
     Object.assign(error, { code });
+  const alternating = () => {
+    let reads = 0;
+    return Object.defineProperty(new Error("synthetic"), "code", {
+      get: () => (reads++ === 0 ? "audit_record_invalid" : "synthetic_private_label"),
+    });
+  };
   for (const [thrown, code] of [
     [new Synthetic_private_account_label("synthetic"), "Error"],
     ["synthetic private text", "unknown"],
@@ -407,6 +413,8 @@ test("a mark that cannot be read names only a closed audit code or a built-in er
     [coded("synthetic_private_label", new Synthetic_private_account_label()), "Error"],
     [coded("audit_record_invalid", new TypeError("synthetic")), "audit_record_invalid"],
     [coded("audit_diff_invalid"), "audit_diff_invalid"],
+    // A getter that names a closed code once and free text after is read once.
+    [alternating(), "audit_record_invalid"],
   ] as const) {
     const lines: string[] = [];
     const mark = await markLaneAudit(
