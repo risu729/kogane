@@ -7,10 +7,15 @@ import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { METRIC_REGISTRY_RELEASE } from "../../domain/src/metrics.ts";
-import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import {
+  payableStatus,
+  REPORTED_STATE_EXCLUSIONS,
+  snapshotFreshness,
+} from "../../domain/src/reported-state.ts";
 import { validReportedState } from "../../observation-shared/src/reported-state-contract.ts";
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 import {
+  DATED_STATE_EXCLUDED_SOURCES,
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
@@ -176,6 +181,13 @@ describe("accounts and their snapshots", () => {
 });
 
 describe("coverage", () => {
+  test("the sources the perimeter leaves out are the source: scopes, by id", () => {
+    const sources = REPORTED_STATE_EXCLUSIONS.flatMap(({ scope }) =>
+      scope.startsWith("source:") ? [scope.slice("source:".length)] : [],
+    );
+    expect(sources).toEqual([...DATED_STATE_EXCLUDED_SOURCES]);
+  });
+
   test("containers without a snapshot, stale snapshots, the perimeter and liabilities", async () => {
     const state = await queryDatedState(executor(holdings()), { date: "2026-09-10" });
     const missing = state.coverage.containersWithoutSnapshot.map((c) => c.parserName);
@@ -193,7 +205,7 @@ describe("coverage", () => {
         ageDays: 4,
       },
     ]);
-    expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward");
+    expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward-me");
     expect(state.coverage.liabilitiesCoverage).toBe("partial");
     expect(state.coverage.liabilitiesMissing).toContain("unbilled_card_usage");
     expect(state.coverage.payablesFromPaymentDate).toBe("2026-08-10");
@@ -223,7 +235,7 @@ describe("coverage", () => {
     });
     const after = await queryDatedState(executor(store), { date: "2026-09-10" });
     for (const state of [before, after]) {
-      expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward");
+      expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward-me");
       expect(state.accounts.map((a) => a.sourceId)).not.toContain("moneyforward-me");
       expect(state.snapshots.map((s) => s.sourceId)).not.toContain("moneyforward-me");
       expect(state.coverage.containersWithoutSnapshot.map((c) => c.sourceId)).not.toContain(

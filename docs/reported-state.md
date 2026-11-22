@@ -78,8 +78,9 @@ MoneyForward is left out by source (`moneyforward-me`,
 its detail container (`moneyforward-detail-balances`) a selecting policy row.
 Until the source exclusion, every answer on a store with that row listed the
 connection's provider totals beside the direct accounts, or named the
-container in `containersWithoutSnapshot`; the scope name in
-`coverage.excluded` stays `source:moneyforward`. On such a store the
+container in `containersWithoutSnapshot`. The scope in `coverage.excluded`
+is `source:moneyforward-me`, the source id itself (it read
+`source:moneyforward`, an id no source has, until 2026-11-22). On such a store the
 context id changes once, as the snapshots, rows and containers it pins do; the
 answer's keys and `reported-state-v3` are unchanged, and nothing stores a
 reported context id.

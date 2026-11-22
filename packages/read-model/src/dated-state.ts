@@ -31,12 +31,13 @@ const DATED_STATE_EXCLUDED_PARSERS = [
 /**
  * Sources a reported state does not list at all: MoneyForward is an
  * aggregator that restates accounts the direct sources list (ADR 0019,
- * decision 2, `source:moneyforward` in `REPORTED_STATE_EXCLUSIONS`). Its
+ * decision 2, `source:moneyforward-me` in `REPORTED_STATE_EXCLUSIONS`). Its
  * detail container has a selecting policy row (migration 0091), so the
  * perimeter leaves the source out here rather than trusting the policy table
- * to name no container of it.
+ * to name no container of it. The ids here are the `source:` scopes of
+ * `REPORTED_STATE_EXCLUSIONS`; dated-state-query.test.ts holds the two equal.
  */
-const DATED_STATE_EXCLUDED_SOURCES = ["moneyforward-me"] as const;
+export const DATED_STATE_EXCLUDED_SOURCES = ["moneyforward-me"] as const;
 
 /**
  * The container parsers in the perimeter whose snapshots hold positions. A
