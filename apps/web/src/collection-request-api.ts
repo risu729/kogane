@@ -5,7 +5,7 @@
 import { displayLabel } from "./labels.ts";
 import { OPERATION_STATUS_LABELS } from "./operations-api.ts";
 
-export const COLLECTIONS_PATH = "/api/ops/v1/collections";
+const COLLECTIONS_PATH = "/api/ops/v1/collections";
 
 export interface AcceptedCollection {
   operationId: string;
@@ -37,7 +37,7 @@ export function acceptedCollectionMessage(accepted: AcceptedCollection): string 
 }
 
 /** Today in Japan, as the date-only bound the request carries. */
-export function tokyoDate(now: Date = new Date()): string {
+function tokyoDate(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo",
     year: "numeric",
