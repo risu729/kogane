@@ -261,6 +261,18 @@ export interface DatedSnapshotRow {
 }
 
 /**
+ * True for a statement whose `payment_date` is a real calendar date
+ * (`YYYY-MM-DD`), the due dates `payableStatus` reads (`parseLocalDate`): an
+ * impossible day of that shape such as 2026-02-30, any other text, and none
+ * make it NULL or false, so the payable window puts such a statement on the
+ * undated side, where its status is `payment_date_unknown` (INV05). SQLite's
+ * `date` rolls an impossible day over to a later one, so the round trip
+ * differs from the stored text; GLOB keeps a number (a Julian day to `date`)
+ * and other text out, and its pattern fits D1's 50-byte limit.
+ */
+const READABLE_PAYMENT_DATE = `payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(payment_date,'+0 days')=payment_date`;
+
+/**
  * `card_statement_facts` (migration 0044) restated with the capture-time
  * bound: the newest published provider statement total of each statement key
  * captured before `?1`. With a bound past every capture it returns the view's
@@ -318,7 +330,7 @@ export interface DatedStatementRow {
  */
 export const DATED_STATEMENTS_SQL = `WITH ${DATED_STATEMENT_FACTS_CTE}, dated_statements AS MATERIALIZED (
  SELECT * FROM dated_statement_facts
- WHERE CASE WHEN payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+ WHERE CASE WHEN ${READABLE_PAYMENT_DATE}
   THEN payment_date>=?2 ELSE fetched_at>=?3 END
 ), observed AS (SELECT id AS observation_id FROM dated_statements),
 ${cardSettlementOwnershipCtes("balance")}
@@ -349,10 +361,10 @@ export interface DatedStatementsBeforeWindowRow {
  */
 export const DATED_STATEMENTS_BEFORE_WINDOW_SQL = `WITH ${DATED_STATEMENT_FACTS_CTE}, dated_statements_before AS MATERIALIZED (
  SELECT id,source_id,
- CASE WHEN payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+ CASE WHEN ${READABLE_PAYMENT_DATE}
   THEN 'due_before_window' ELSE 'undated_captured_before_window' END AS reason_code
  FROM dated_statement_facts
- WHERE CASE WHEN payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+ WHERE CASE WHEN ${READABLE_PAYMENT_DATE}
   THEN payment_date<?2 ELSE fetched_at<?3 END
 ), observed AS (SELECT id AS observation_id FROM dated_statements_before),
 ${cardSettlementOwnershipCtes("balance")}

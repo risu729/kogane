@@ -122,7 +122,12 @@ A perimeter container with no snapshot before the cutoff is listed in
   in the 45 days before the cutoff, each with the resolved card account (the
   keyed form of `card_settlement_fact_ownership`) and the settlement review of
   its (account, source, period), accepted first (the purchases page's
-  `SETTLEMENT_SQL`). Status on `D`:
+  `SETTLEMENT_SQL`). A due date is readable when it is a real calendar date
+  `YYYY-MM-DD` (`parseLocalDate`): the window's SQL checks it with
+  `date(payment_date,'+0 days')=payment_date` as `payableStatus` checks it,
+  so a date of that shape that names no day, such as 2026-02-30, is a
+  statement without a readable due date in the window, the count and the
+  status alike. Status on `D`:
 
   | Status                      | When                                                                 |
   | --------------------------- | -------------------------------------------------------------------- |
@@ -401,6 +406,14 @@ no migration. `packages/application/test/dated-state-scale.test.ts` builds the
 smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
+`packages/read-model/test/dated-state-statements-differential.test.ts` holds
+the statement read and the count of the statements before the window to their
+text before the calendar check (`dated-state-statements-legacy-sql.ts`,
+pinned by SHA-256): on random synthetic stores every other due date gives the
+frozen rows and counts, and only a date of the shape that names no day moves,
+to the undated side; on `STATEMENT_CI_SCALE` (every due date a real day) both
+reads return the frozen result; without table statistics the plans are the
+frozen ones step for step; and every GLOB pattern fits D1's 50-byte limit.
 `packages/read-model/test/dated-state-differential.test.ts` holds the
 positions, balances and snapshots reads to their text before the MoneyForward
 source exclusion (`dated-state-legacy-sql.ts`): on random synthetic stores
