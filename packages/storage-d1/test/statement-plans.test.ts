@@ -74,6 +74,7 @@ import * as readSql from "../src/read/sql.ts";
 import * as rewardSql from "../src/read/rewards.ts";
 import { projectionMeasureSql } from "../../read-model/src/balance-projection-sql.ts";
 import type { CollectionScope } from "../../read-model/src/scope.ts";
+import { writeRowChunk, writeScopeRelations } from "../src/read/writer.ts";
 
 beforeAll(() => {
   fullCoreDatabase().close();
@@ -181,6 +182,44 @@ describe("every exported READ statement, without table statistics", () => {
       expect(wholeTableReads(sqlite, sql, READ_SINGLETONS)).toEqual([]);
       sqlite.close();
     });
+});
+
+// The rows a chunk writes, in both READ writers, restate that the build is
+// still `building` under the chunk's lease. That condition names no column of
+// the row, so it is one search of the build by its key per statement, the same
+// search the chunk's checkpoint makes.
+describe("the READ chunk writes, without table statistics", () => {
+  test("every row and checkpoint finds its build by key", async () => {
+    const { db, prepared } = preparedStatements();
+    const context = { lease: "lease", fence: 1, now: "2026-01-01T00:00:00.000Z", rowsWritten: 0 };
+    // Nothing runs, so a row needs only what the writer reads off it.
+    const row = { row: { rowSeq: 0 } as never, digest: "digest" };
+    await writeRowChunk(db, "s", [row], context);
+    await writeScopeRelations(db, "s", [{ source: "decision" } as never], context);
+    await rewardSql.writeRewardEstimateChunk(db, "s", [row], context);
+    await rewardSql.writeRewardSimulationChunk(db, "s", [row], context);
+    const inserts = prepared.filter((sql) => /^\s*INSERT\b/iu.test(sql));
+    // A row statement and its checkpoint, per chunk.
+    expect(inserts.length).toBe(4 * 2);
+    const { sqlite } = createSqliteReadDatabase();
+    for (const sql of inserts) {
+      const plan = planOf(sqlite, sql);
+      expect(wholeTableReads(sqlite, sql, READ_SINGLETONS)).toEqual([]);
+      expect(
+        plan.some((step) =>
+          /^SEARCH s EXISTS USING INDEX sqlite_autoindex_\w+_snapshots_1 [(]snapshot_id=[?][)]$/u.test(
+            step,
+          ),
+        ),
+        plan.join("\n"),
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.includes("CORRELATED")),
+        plan.join("\n"),
+      ).toBe(false);
+    }
+    sqlite.close();
+  });
 });
 
 // The cash read's projection scan (`measureRows`, ADR 0123 amendment of

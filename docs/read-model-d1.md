@@ -172,7 +172,9 @@ A build writes rows while `building`, and:
   chunk writes restates that the build is still `building` under the chunk's
   lease, in both writers (the reward provider sections also restate the
   fence), so a displaced writer's chunk writes no row and reports
-  `lease_lost`;
+  `lease_lost`. That condition is one search of the build by its key per
+  statement (`packages/storage-d1/test/statement-plans.test.ts`, without
+  table statistics);
 - the balance writer (`packages/storage-d1/src/read/writer.ts`) skips only a
   row or input ref whose primary key is already written:
   `ON CONFLICT(snapshot_id,scope_key) DO NOTHING` for
