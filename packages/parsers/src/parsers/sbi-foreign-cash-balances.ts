@@ -19,6 +19,7 @@
 // still counts as a complete snapshot (contract v2, coverage.ts).
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
+import { parseLocalDate } from "../../../domain/src/time.ts";
 import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { decimalText, decimalToMinorUnits, decodeUtf8, isObject } from "./util.ts";
 
@@ -44,7 +45,9 @@ function withoutChild(value: Record<string, unknown>, child: string): Record<str
 
 export const sbiForeignCashBalances: Parser = {
   name: "sbi-foreign-cash-balances",
-  version: "0.2.1",
+  // 0.2.2: a stated `businessDate` that is not a calendar `YYYY-MM-DD` date
+  // gives no as_of and a membership issue; every valid date reads as in 0.2.1.
+  version: "0.2.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-cash-balances";
@@ -127,7 +130,24 @@ export const sbiForeignCashBalances: Parser = {
             );
             return;
           }
-          const asOf = typeof row["businessDate"] === "string" ? row["businessDate"] : undefined;
+          // The schedule date is the only thing that tells a row's balances
+          // apart from its other days' (T+0, T+2, ...), and as_of ranks the
+          // latest balance by text. Only the observed calendar `YYYY-MM-DD`
+          // is one; any other stated value is read as no date and breaks the
+          // container, never stored as if it were a date (0.2.2). A row that
+          // states no `businessDate` at all is read as before.
+          const businessDate = row["businessDate"];
+          const asOf =
+            typeof businessDate === "string" && parseLocalDate(businessDate) !== null
+              ? businessDate
+              : undefined;
+          if (businessDate !== undefined && asOf === undefined) {
+            skipped(
+              "row_unreadable",
+              `${locator}.businessDate`,
+              `${locator}.businessDate: not a calendar YYYY-MM-DD date; the row's balances carry no as_of`,
+            );
+          }
           // Fields of the enclosing account and currency entry are carried on
           // every observation, so an unmodelled sibling (a balance the schema
           // does not know about yet) is never lost.

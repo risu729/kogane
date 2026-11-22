@@ -105,6 +105,10 @@ page passes when:
   control, `summary`, `.button` link and navigation link is at least 24px
   or has no other target within its 24px circle (WCAG 2.5.8). Text links in a
   sentence, cell or breadcrumb are the inline exception.
+- A plan refused because the reviewed item changed reads the item again
+  without moving focus while the focused control is still on the page; when
+  the read again removes or hides it, focus moves to the refusal, in the item
+  or at the top of the page (docs/frontend.md, "Plan refusals").
 
 ## Review gate
 
