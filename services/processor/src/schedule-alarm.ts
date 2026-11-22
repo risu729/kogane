@@ -5,6 +5,7 @@ import {
   type SchedulePattern,
 } from "../../../packages/collection/src/schedule-model";
 import { alarmClaimWrite } from "../../../packages/application/src/index.ts";
+import { loggedErrorName } from "../../../packages/collection/src/error-name";
 import { isLeaseAbortCode } from "../../../packages/collection/src/schedule-result";
 import { collectorBindingName } from "./collector-binding";
 import {
@@ -52,14 +53,6 @@ export function alarmErrorKind(error: unknown): AlarmErrorKind {
   if (/overloaded/iu.test(message)) return "overloaded";
   if (/D1_|SQLITE/u.test(message)) return "d1";
   return "other";
-}
-function errorName(error: unknown): string {
-  try {
-    const name: unknown = error instanceof Error ? error.name : typeof error;
-    return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(name) ? name : "other";
-  } catch {
-    return "other";
-  }
 }
 /**
  * One structured line per alarm decision (ADR 0085 follow-up): which job,
@@ -128,7 +121,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
             jobId: trace.jobId,
             occurrenceId: trace.occurrenceId,
             phase: trace.phase,
-            errorName: errorName(error),
+            errorName: loggedErrorName(error),
             errorKind: alarmErrorKind(error),
           }),
         );
@@ -371,7 +364,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
       durationMs: Date.now() - dispatchStarted,
       ...(thrown === null
         ? {}
-        : { errorName: errorName(thrown), errorKind: alarmErrorKind(thrown) }),
+        : { errorName: loggedErrorName(thrown), errorKind: alarmErrorKind(thrown) }),
     });
     trace.phase = "record";
     // Never throw a provider uncertainty back into an automatic login retry.

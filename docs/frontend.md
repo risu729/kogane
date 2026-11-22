@@ -168,6 +168,46 @@ empty, never a dash.
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.
 
+### Plan refusals
+
+A review page plans a decision with `postCommand("plan")` and shows a
+refusal in the item that asked for it (`PlanRefusal`). A refusal that says the
+item changed since the page read it (`planRefusedAsStale` in
+`command-api.ts`) makes the page read that item again: the server's
+`stale_context` (409: the candidate is no longer in the state the plan needs,
+a pinned revision moved, or another holder claimed the debit) and
+`target_missing` (400: the candidate is gone), the two codes the plan route
+answers about its target, and the page's own `StalePlanError` (the candidate
+read again before planning differs from the one shown, or the plan pinned
+another revision than the one shown). The page's `PlanRefreshScope`
+invalidates exactly the reads that show the reviewed items, so the ones on
+screen are fetched again:
+
+| Page                                                    | Reads again                                                                                                                                                       |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `カード照合` and one candidate (`/reconciliation/<id>`) | `card-settlements` statements, one statement's candidates, one candidate, its competitors; not the debit accounts, the upcoming bills or the unmatched statements |
+| `口座の保有者を確認`                                    | that candidate's `card-ownership` read                                                                                                                            |
+| `カード利用の説明`                                      | every `card-purchases` read: a pending-to-posted candidate shows on both its purchases and on the list                                                            |
+| `口座の対応候補`, `銘柄の同一性の候補`                  | every view and page of that candidate list                                                                                                                        |
+
+Every other refusal (a missing grant, an invalid payload, evidence or scope
+that is not ready, unsupported semantics, a budget) reads nothing again: it
+says nothing about whether the page is current. `plan_not_open` and the other
+lifecycle codes are answers to simulate, approve and commit on the
+confirmation screen, not to plan. A read again that fails keeps the earlier
+answer under `QueryBoundary`'s warning, as any read does.
+
+The refusal stays visible. While the item read again still shows it, it
+stays in the item. When the item no longer does (it left the list or view,
+its form started over for a new revision, it offers no decision any more, or
+it sits in a disclosure that closed when its status changed), the page shows
+the refusal once below its head (`PlanRefreshNotice`) until the next plan is
+sent. Focus stays where it is, on the pressed button while that button is
+still there; only when the page read again removed or hid the focused
+element does focus move, to wherever the refusal is shown. The review pages'
+browser tests check each page's reads, the refusals that read nothing, and
+where the refusal and focus end up.
+
 ## API metadata and capabilities
 
 `/api/meta` describes the connection. Its `source.kind` (`local-store`,
@@ -250,6 +290,29 @@ The hand-off in both directions is by reference, never by number or prose:
   allows — computed for that grant, not the page's numbers filtered down.
 
 See [Agent API](agent-api.md) for the grants, tools and result contract.
+
+### Recent changes on ホーム
+
+The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) reads
+`GET /api/v2/changes`, the service of `kogane.changes.since`
+([ADR 0127, amendment of 2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)).
+It sends `since` as the browser's clock minus the chosen window (24時間 by
+default, 7日間, 30日間), taken again on each first read (a refetch on focus or
+a retry included), and a continuation sends its first answer's `since`; the
+retry of a continuation the route refused (`400`) reads the answer again.
+While a window whose continuation failed is read again (that retry, a
+refocus, a return to the window), its answer read and the continuation's
+error stay on screen until the read settles; a continuation refused for
+authentication (`401`) withdraws the answer read, and the panel shows its
+error state. It
+checks every answer with `validChangesSince`, and
+shows the digest's counts per source by closed state, with labels typed by the
+domain's closed lists. A count the digest cut, and every count of an
+incomplete events line, reads 以上, and the states or kinds such a section or
+line does not list read そのほか 0件以上; unchanged sources and what the digest does
+not cover sit in closed disclosures; 続きを読み込む follows `next.after`. A
+`403` or `404` from the route hides the panel; any other failure, a malformed
+answer included, is the error state with no count.
 
 ## Safe preview
 

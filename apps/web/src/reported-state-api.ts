@@ -5,6 +5,7 @@ import type { ReportedState } from "../../../packages/domain/src/reported-state.
 export type {
   ReportedAccount,
   ReportedPayable,
+  ReportedScheduledPaymentCapture,
   ReportedSnapshot,
   ReportedState,
 } from "../../../packages/domain/src/reported-state.ts";

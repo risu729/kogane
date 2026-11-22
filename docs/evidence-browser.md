@@ -148,7 +148,9 @@ organized lists and on `/api/identity/*` (production only): `latest` reads
 the current mapping revisions, `as-recorded` the revisions the sealed
 identity run pinned, and every such response carries an
 `interpretationContext` naming the mode and the releases it was computed
-under. `snapshot` is refused as `unsupported_semantics` until that contract
+under: the releases of the rows the page returns (a position's valuations
+included), never of the row a list reads past its 500 to say it is
+truncated. `snapshot` is refused as `unsupported_semantics` until that contract
 exists. See [decision-log.md](decision-log.md).
 
 Capabilities are not authorization. The production Worker verifies the

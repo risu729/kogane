@@ -2,7 +2,9 @@
 
 - Status: accepted (merged 2026-11-08 in [#1172](https://github.com/risu729/kogane/pull/1172));
   the [2026-11-21 amendment](#amendment-2026-11-21-an-empty-holdings-or-coverage-scope-is-a-gap-not-a-complete-answer)
-  is proposed
+  is accepted (merged 2026-11-22 in [#1555](https://github.com/risu729/kogane/pull/1555)), and the
+  [second 2026-11-21 amendment](#amendment-2026-11-21-rows-a-date-window-cannot-place-are-a-gap)
+  is accepted (merged 2026-11-22 in [#1556](https://github.com/risu729/kogane/pull/1556))
 - Date: 2026-11-08; amended 2026-11-21
 - Carried by: `packages/application/src/context/open.ts` (`pagingBasisRef`),
   `packages/application/src/query/cursor.ts`,
@@ -115,7 +117,7 @@ intent or filter, or a stated knowledge cutoff that differs.
 
 ## Amendment 2026-11-21: an empty `holdings` or `coverage` scope is a gap, not a complete answer
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1555](https://github.com/risu729/kogane/pull/1555))
 - Date: 2026-11-21
 - Carried by: `packages/application/src/query/execute.ts` (`executeQuery`:
   `unheldGranted`, the `holdings` and `coverage` branches),
@@ -186,7 +188,7 @@ whole-store grant stay `complete`. Seven of these fail against the previous
 
 ## Amendment 2026-11-21: rows a date window cannot place are a gap
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1556](https://github.com/risu729/kogane/pull/1556))
 - Date: 2026-11-21
 - Carried by: `packages/application/src/query/execute.ts` (`executeQuery`,
   `rowResult`), `packages/read-model/src/sql.ts` (`undatedTransactionsSql`),

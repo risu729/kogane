@@ -169,6 +169,12 @@ export function secureResponse(response: Response, request: Request, requestId: 
   // across origins keeps a handle on this one.
   headers.set("cross-origin-resource-policy", "same-origin");
   headers.set("cross-origin-opener-policy", "same-origin");
+  // Once a browser has one answer over HTTPS it uses only HTTPS for this host
+  // for a year, so a typed hostname or an `http://` link is never sent in
+  // clear text first (ADR 0131). This host only, and not preloaded: those
+  // reach other names or outlive a rollback. A browser ignores the header on
+  // a plain-HTTP answer, so a local `http://` run is unaffected.
+  headers.set("strict-transport-security", "max-age=31536000");
   headers.set("x-request-id", requestId);
   if (!headers.has("content-security-policy")) {
     headers.set(

@@ -295,6 +295,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   reconstructedStateOnDate: optional(boolean),
   reportArtifacts: optional(boolean),
   pendingDecisions: optional(boolean),
+  changesSince: optional(boolean),
   opsApi: boolean,
 });
 const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({

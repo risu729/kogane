@@ -278,9 +278,48 @@ describe("acceptance", () => {
     });
   });
 
+  test("a mapping no capture lists moves the context id when it changes which account a container lists (INV09)", async () => {
+    const h = world();
+    const before = await queryReconstructedState(storeExecutor(h.db), input({ accounts: [CARD] }));
+    expect(before.status).toBe("unavailable");
+    expect(before.reasons).toContain("no_reported_container");
+    expect(before.reconstruction!.accounts[0]).toMatchObject({ startContainer: false });
+    expect(before.manifest!.accountSources).toEqual([[CARD, "vpass"]]);
+    // A source account of the bank, mapped to the card account. No capture
+    // lists it, so neither dated state changes: only the container check reads it.
+    h.db.run(
+      "INSERT INTO source_accounts SELECT 'sa-card-at-bank',source_id,producer_id,'[\"sa-card-at-bank\"]' FROM source_accounts WHERE source_id=? LIMIT 1",
+      [SMBC.source],
+    );
+    h.db.run(
+      "INSERT INTO account_mappings VALUES('sa-card-at-bank-r1','sa-card-at-bank',1,?,'manual','synthetic',1,'2098-01-01','Synthetic','identified')",
+      [CARD],
+    );
+    const after = await queryReconstructedState(storeExecutor(h.db), input({ accounts: [CARD] }));
+    expect(after.reported).toEqual(before.reported);
+    expect(after.reasons).not.toContain("no_reported_container");
+    expect(after.reconstruction!.accounts[0]).toMatchObject({ startContainer: true });
+    expect(after.manifest!.accountSources).toEqual([
+      [CARD, SMBC.source],
+      [CARD, "vpass"],
+    ]);
+    expect(after.contextId).not.toBe(before.contextId);
+    expect(after.contextId).toBe(await canonicalDigest(after.manifest!));
+  });
+
   test("it never counts the statements before the payable window, and its context records no count", async () => {
     const h = world();
     settle(h, "ev-settle", "2026-03-15");
+    // The account is already mapped to the card source before the first read,
+    // so the statement added below changes nothing but the count.
+    const earlier = h.store.statement({
+      card: "card-b",
+      period: "2025-11",
+      paymentDate: "2025-11-26",
+      minor: 1,
+      fetchedAt: "2025-11-05T01:00:00Z",
+    });
+    h.store.identify(earlier, "vpass", BANK, "identified");
     const statements: string[] = [];
     const inner = storeExecutor(h.db);
     const recording: SqlExecutor = {

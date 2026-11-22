@@ -32,6 +32,7 @@ import {
   type TemporalReference,
   type TemporalValue,
 } from "../../domain/src/time.ts";
+import { validZoneOffsetInstantText } from "../../domain/src/zone-offset.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { AUTHORITY_POLICY_RELEASE, AUTHORITY_RANKS } from "./authority";
@@ -198,7 +199,11 @@ export interface ProjectionBuild {
 
 // ── time ─────────────────────────────────────────────────────────────────
 
-/** `+09:00` is the fixed-offset zone `Etc/GMT-9`; the POSIX sign is inverted. */
+/**
+ * `+09:00` is the fixed-offset zone `Etc/GMT-9`; the POSIX sign is inverted.
+ * The caller passes only offsets zones use (-12:00 to +14:00): past them no
+ * `Etc/GMT` zone exists.
+ */
 function offsetZone(text: string): string | null {
   if (text === "Z") return "UTC";
   const match = /^([+-])(\d{2}):(\d{2})$/u.exec(text);
@@ -211,8 +216,9 @@ function offsetZone(text: string): string | null {
 /**
  * The stored `as_of` / `observed_at` strings become a role-typed reference.
  * A date-only value stays a date: it is never given a time of day, and a
- * value that is neither a date nor an instant with a whole-hour offset is
- * reported as unknown rather than guessed (root review 07 section 5).
+ * value that is neither a date nor an instant with a whole-hour offset that
+ * a zone uses (-12:00 to +14:00) is reported as unknown rather than guessed
+ * (root review 07 section 5).
  */
 export function temporalReferenceFor(
   asOf: string | null,
@@ -232,7 +238,9 @@ function temporalValueFor(candidate: unknown): TemporalValue {
   if (validLocalDateText(candidate))
     return { kind: "local-date", value: candidate, zone: null, basis: "provider" };
   if (validInstantText(candidate)) {
-    const zone = offsetZone(candidate.endsWith("Z") ? "Z" : candidate.slice(-6));
+    const zone = validZoneOffsetInstantText(candidate)
+      ? offsetZone(candidate.endsWith("Z") ? "Z" : candidate.slice(-6))
+      : null;
     if (zone !== null) return { kind: "instant", value: candidate, zone, basis: "provider" };
     return { kind: "unknown", reasonCode: "offset_zone_unsupported" };
   }

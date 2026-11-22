@@ -280,7 +280,7 @@ contracts, not production acceptance or evidence of writer enablement.
 
 ## Amendment 2026-11-21: the panel's loading and failure through the shared boundary
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1521](https://github.com/risu729/kogane/pull/1521))
 - Date: 2026-11-21
 
 ### Context
