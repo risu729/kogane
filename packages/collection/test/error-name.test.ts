@@ -8,9 +8,12 @@ test("runtime error names and the lease's abort are logged as themselves", () =>
   expect(loggedErrorName(new RangeError("synthetic"))).toBe("RangeError");
   expect(loggedErrorName(new SyntaxError("synthetic"))).toBe("SyntaxError");
   expect(loggedErrorName(new ReferenceError("synthetic"))).toBe("ReferenceError");
+  expect(loggedErrorName(new EvalError("synthetic"))).toBe("EvalError");
+  expect(loggedErrorName(new URIError("synthetic"))).toBe("URIError");
   expect(loggedErrorName(new AggregateError([], "synthetic"))).toBe("AggregateError");
   expect(loggedErrorName(new DOMException("synthetic", "AbortError"))).toBe("AbortError");
   expect(loggedErrorName(new DOMException("synthetic", "TimeoutError"))).toBe("TimeoutError");
+  expect(loggedErrorName(new DOMException("synthetic", "DataCloneError"))).toBe("DataCloneError");
   expect(loggedErrorName(new CollectionLeaseAbort("collection_lease_lost"))).toBe(
     "CollectionLeaseAbort",
   );
@@ -40,10 +43,31 @@ test("any other name is `other`, and the message is never read", () => {
     },
   });
   expect(loggedErrorName(throwing)).toBe("other");
+  // A Proxy names nothing of its own: a revoked one or a throwing trap is
+  // `other`, and a trap's answer still has to be a closed code.
+  const { proxy, revoke } = Proxy.revocable(new Error("synthetic"), {});
+  revoke();
+  expect(loggedErrorName(proxy)).toBe("other");
+  const trap = new Proxy(new Error("synthetic"), {
+    getPrototypeOf() {
+      throw new Error("synthetic trap");
+    },
+  });
+  expect(loggedErrorName(trap)).toBe("other");
+  const renamed = new Proxy(new Error("synthetic"), { get: () => "SyntheticProviderToken42" });
+  expect(loggedErrorName(renamed)).toBe("other");
 });
 
 test("a thrown value that is not an Error is `non_error`", () => {
-  for (const value of ["synthetic provider text", 42, null, undefined, { name: "Error" }])
+  for (const value of [
+    "synthetic provider text",
+    42,
+    null,
+    undefined,
+    { name: "Error" },
+    Object.create(null),
+    Object.setPrototypeOf(new Error("synthetic"), null),
+  ])
     expect(loggedErrorName(value)).toBe("non_error");
 });
 

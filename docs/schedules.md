@@ -329,7 +329,8 @@ and counts only:
   because a collector's error may carry provider text, and neither is a name
   outside the closed set: `errorName` is the runtime's own error name
   (`Error`, `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError`,
-  `AggregateError`, `AbortError`, `TimeoutError`) or `CollectionLeaseAbort`,
+  `EvalError`, `URIError`, `AggregateError`, `AbortError`, `TimeoutError`,
+  `DataCloneError`) or `CollectionLeaseAbort`,
   `non_error` for a thrown value that is not an `Error`, and `other` for any
   other name (`LOGGED_ERROR_NAMES`, `packages/collection/src/error-name.ts`).
 - `schedule_bookkeeping_retry` now also names the `jobId`, the

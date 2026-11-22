@@ -5,6 +5,13 @@
  * when it is one of the runtime's own error names or the lease's abort;
  * every other name is `other`, and a thrown value that is not an `Error` is
  * `non_error`. The message is never read.
+ *
+ * The runtime's names are the language's own error types (the alarm's
+ * collector call carries only these across Workers RPC, and the Workers
+ * runtime throws `EvalError` for code generated from strings) and the
+ * `DOMException` names these paths can meet: an aborted or timed-out signal,
+ * and `DataCloneError`, which an RPC call throws when a value it carries
+ * cannot be serialized.
  */
 export const LOGGED_ERROR_NAMES = [
   "Error",
@@ -12,9 +19,12 @@ export const LOGGED_ERROR_NAMES = [
   "RangeError",
   "SyntaxError",
   "ReferenceError",
+  "EvalError",
+  "URIError",
   "AggregateError",
   "AbortError",
   "TimeoutError",
+  "DataCloneError",
   "CollectionLeaseAbort",
   "non_error",
   "other",
