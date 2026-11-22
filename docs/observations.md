@@ -2787,7 +2787,11 @@ triggers while `recursive_triggers` is off (as Miniflare's D1 reports it),
 which rewrote a stored observation and its amount past both guards. The keys
 checked are the primary key, each unique key and, for `observation_decimal_values`,
 `price_observations` and `price_observation_claims`, whose primary key is not
-an integer, the hidden `rowid`. Acquisition history, identity and the decision
+an integer, the hidden `rowid`. That check relies on `NEW.rowid` being -1 in
+a `BEFORE INSERT` trigger when the insert names no rowid: SQLite documents the
+value there as undefined, bun:sqlite and Miniflare's D1 both give -1, a test
+pins it on bun:sqlite, and no writer names a rowid, so no stored row has -1.
+Acquisition history, identity and the decision
 log already had the same guard on their declared keys. No writer depends on a
 collision: the Processor inserts observations, issues and coverage claims
 without an id, and prices behind `WHERE NOT EXISTS`

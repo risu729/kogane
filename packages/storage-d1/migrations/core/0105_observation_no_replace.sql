@@ -9,9 +9,12 @@
 -- Each trigger refuses an insert that would collide on any uniqueness path of
 -- its table. The three tables whose primary key is not an INTEGER PRIMARY KEY
 -- keep a hidden rowid, which a REPLACE naming an explicit rowid also collides
--- on, so their triggers check `rowid` too. NEW.rowid is -1 in a BEFORE INSERT
--- trigger when the insert names no rowid, and no stored row has rowid -1. No
--- writer relies on a collision: the Processor inserts
+-- on, so their triggers check `rowid` too. SQLite leaves NEW.rowid undefined
+-- in a BEFORE INSERT trigger when the insert names no rowid; bun:sqlite and
+-- Miniflare's D1 both give -1 there, for single, multi-row and trigger-made
+-- inserts alike, which no stored row has because no writer names a rowid.
+-- A storage-d1 test pins that value. No writer relies on a collision: the
+-- Processor inserts
 -- observations, issues and coverage claims without an id, a parse input
 -- reference once per new parse run, and prices and price claims behind
 -- `WHERE NOT EXISTS` on their key. Nothing writes these tables with

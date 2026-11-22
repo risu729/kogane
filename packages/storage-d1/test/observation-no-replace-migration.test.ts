@@ -353,3 +353,105 @@ describe("a replacing insert by rowid", () => {
     },
   );
 });
+
+/**
+ * The rowid checks above rely on NEW.rowid being -1 in a BEFORE INSERT
+ * trigger when the insert names no rowid, a value SQLite documents as
+ * undefined. This pins it for every insert shape the writers use: a plain
+ * insert into an empty table, a multi-row `INSERT ... SELECT` over
+ * `json_each`, and the 0024 decimal triggers' inserts made inside another
+ * trigger, on an empty store and on one that already holds rows.
+ */
+describe("NEW.rowid in a BEFORE INSERT trigger", () => {
+  test("is -1 for every ordinary insert into the three rowid tables, and each insert appends", () => {
+    const tables = ROWID_CASES.map((c) => c.table);
+    const db = new Database(":memory:");
+    db.exec("PRAGMA foreign_keys=ON");
+    for (const file of migrationFiles(CORE_MIGRATIONS_URL)) {
+      db.exec(migrationSql(CORE_MIGRATIONS_URL, file));
+    }
+    db.exec("CREATE TEMP TABLE seen(name TEXT NOT NULL, new_rowid)");
+    for (const table of tables) {
+      db.exec(
+        `CREATE TEMP TRIGGER seen_${table} BEFORE INSERT ON main.${table}
+          BEGIN INSERT INTO seen VALUES('${table}',NEW.rowid); END`,
+      );
+    }
+    // The pilot rows put the first decimal values into the empty table.
+    seedPilotRows(db);
+    const pilot = (
+      db.query("SELECT count(*) AS n FROM observation_decimal_values").get() as { n: number }
+    ).n;
+    expect(pilot).toBeGreaterThan(0);
+
+    // The Processor's observation and price promotion shapes, twice: on a
+    // store without prices, then on one that already holds them.
+    const observations = db.prepare(
+      `INSERT INTO valuation_observations(parse_run_id,source_account,subject,metric,amount_minor,amount_text,amount_scale,currency,raw_locator,extra_json)
+        SELECT 1,'synthetic-account','SYN1','evaluation_amount',json_extract(value,'$.minor'),json_extract(value,'$.text'),0,'JPY',json_extract(value,'$.locator'),'{}'
+        FROM json_each(?)`,
+    );
+    const prices = db.prepare(
+      `INSERT INTO price_observations(id,base_instrument_ref,base_quantity_coefficient,base_quantity_scale,quote_unit_ref,quote_amount_coefficient,quote_amount_scale,price_kind,effective_time,source_claim_ref,recorded_at)
+        SELECT json_extract(j.value,'$.id'),'synthetic-instrument','1',0,'JPY',json_extract(j.value,'$.quote'),0,'reference',${PRICE_TIME},json_extract(j.value,'$.claim'),'2026-01-05T00:00:00Z'
+        FROM json_each(?) j
+        WHERE NOT EXISTS(SELECT 1 FROM price_observations existing WHERE existing.id=json_extract(j.value,'$.id'))`,
+    );
+    const claims = db.prepare(
+      `INSERT INTO price_observation_claims(price_id,rule_id,claim_kind,observation_id,parse_run_id,json_path,created_at)
+        SELECT json_extract(j.value,'$.id'),'synthetic-rule','valuation',json_extract(j.value,'$.observation'),1,'$.amount','2026-01-05T00:00:00Z'
+        FROM json_each(?) j
+        WHERE NOT EXISTS(SELECT 1 FROM price_observation_claims existing WHERE existing.price_id=json_extract(j.value,'$.id'))`,
+    );
+    for (const round of [1, 2]) {
+      const locators = [`$[${round}0]`, `$[${round}1]`, `$[${round}2]`];
+      observations.run(
+        JSON.stringify(
+          locators.map((locator, i) => ({ minor: 100 + i, text: `${100 + i}`, locator })),
+        ),
+      );
+      const ids = (
+        db
+          .query(
+            `SELECT id FROM valuation_observations WHERE raw_locator IN (${locators.map(() => "?").join(",")}) ORDER BY id`,
+          )
+          .all(...locators) as { id: number }[]
+      ).map((row) => row.id);
+      const items = ids.map((id) => ({
+        id: `synthetic-price-${round}-${id}`,
+        quote: `${id}`,
+        claim: `synthetic-claim-${round}-${id}`,
+        observation: id,
+      }));
+      expect(prices.run(JSON.stringify(items)).changes).toBe(3);
+      expect(claims.run(JSON.stringify(items)).changes).toBe(3);
+    }
+
+    const seen = db
+      .query(
+        "SELECT name, count(*) AS n, min(new_rowid) AS low, max(new_rowid) AS high FROM seen GROUP BY name ORDER BY name",
+      )
+      .all();
+    const stored = Object.fromEntries(
+      tables.map((table) => [
+        table,
+        db.query(`SELECT count(*) AS n, min(rowid) AS low FROM ${table}`).get() as {
+          n: number;
+          low: number;
+        },
+      ]),
+    );
+    // The pilot values plus six trigger-made ones; six prices; six claims.
+    expect(seen).toEqual([
+      { name: "observation_decimal_values", n: pilot + 6, low: -1, high: -1 },
+      { name: "price_observation_claims", n: 6, low: -1, high: -1 },
+      { name: "price_observations", n: 6, low: -1, high: -1 },
+    ]);
+    expect(stored).toEqual({
+      observation_decimal_values: { n: pilot + 6, low: 1 },
+      price_observations: { n: 6, low: 1 },
+      price_observation_claims: { n: 6, low: 1 },
+    });
+    db.close();
+  });
+});
