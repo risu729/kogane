@@ -183,6 +183,9 @@ describe("API metadata", () => {
       "/api/transactions?view=balances",
       "/api/balances?view=summaries",
       "/api/balances?source=demo-bank",
+      // The balance list's summary is the shared service's (ADR 0123): the local store answers in full only.
+      "/api/balances?detail=full",
+      "/api/balances?detail=summary",
       "/api/artifacts?cursor=1",
       "/api/positions?offset=0",
       "/api/filter-options?kind=transactions",
@@ -263,6 +266,7 @@ describe("read-only enforcement", () => {
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
       const response = await app.fetch(new Request("http://api.test/api/overview", { method }));
       expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("GET, HEAD");
     }
   });
 

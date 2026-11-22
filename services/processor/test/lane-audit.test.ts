@@ -10,7 +10,13 @@
 // own rows are covered end to end in `card-purchase-lane-audit.test.ts`.
 import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
-import { LANE_AUDIT, RECONCILIATION_RULE_ACTOR, resolveLaneRef } from "../src/lane-audit.ts";
+import {
+  LANE_AUDIT,
+  markLaneAudit,
+  RECONCILIATION_RULE_ACTOR,
+  recordLaneAudit,
+  resolveLaneRef,
+} from "../src/lane-audit.ts";
 import { LANE_TICK_COUNTS } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
@@ -231,6 +237,54 @@ test("idle ticks, a lane that wrote nothing, a flag that is off and an unaudited
     },
     () => {},
   );
+  expect((await laneRecords()).length).toBe(before);
+});
+
+test("a lane named like a built-in property is an unaudited lane: no mark, no record, no log line and no reference", async () => {
+  const before = (await laneRecords()).length;
+  const lines: string[] = [];
+  const log = (line: string) => lines.push(line);
+  // A mark an audited lane took, then a proposal any writer could add.
+  const mark = await markLaneAudit(env.DB, "reconciliation_sweep", log);
+  expect(mark).not.toBeNull();
+  const id = await proposal("provider_same");
+  const refs = [
+    "decision-revisions:1-2",
+    "commit-seq:synthetic-epoch:1-2",
+    `proposals:reconciliation-provider-same:1-${Number.MAX_SAFE_INTEGER}`,
+    `proposals:card-settlement-candidate:1-${Number.MAX_SAFE_INTEGER}`,
+    `proposals:maintenance-survey-new:1-${Number.MAX_SAFE_INTEGER}`,
+  ];
+  // The audited lane's own reference still resolves: the refusal below is the lane's.
+  expect(await resolveLaneRef(env.DB, "reconciliation_sweep", refs[2]!)).toContain(id);
+  for (const lane of [
+    "constructor",
+    "toString",
+    "__proto__",
+    "hasOwnProperty",
+    "valueOf",
+    "unknown_lane",
+  ]) {
+    expect(await markLaneAudit(env.DB, lane, log)).toBeNull();
+    await recordLaneAudit(
+      env.DB,
+      lane,
+      mark,
+      { outcome: "ran", result: {} },
+      "corr-synthetic",
+      log,
+    );
+    await recordLaneAudit(
+      env.DB,
+      lane,
+      mark,
+      { outcome: "failed", code: "synthetic_code" },
+      "corr-synthetic",
+      log,
+    );
+    for (const ref of refs) expect(await resolveLaneRef(env.DB, lane, ref)).toBeNull();
+  }
+  expect(lines).toEqual([]);
   expect((await laneRecords()).length).toBe(before);
 });
 
