@@ -27,7 +27,7 @@ import {
   type AuditFilters,
   type AuditRecordWire,
 } from "../audit-api.ts";
-import { displayLabel } from "../labels.ts";
+import { displayLabel, ownEntry } from "../labels.ts";
 import { CursorPager } from "../pagination.tsx";
 import { isOperationId, operationRoute } from "../operations-api.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
@@ -263,7 +263,7 @@ function RecordRow({ record }: { record: AuditRecordWire }): ReactNode {
         </span>
       </td>
       <td>
-        <Badge tone={RESULT_TONES[record.result] ?? "neutral"}>
+        <Badge tone={ownEntry(RESULT_TONES, record.result) ?? "neutral"}>
           {displayLabel(AUDIT_RESULT_LABELS, record.result)}
         </Badge>
         {record.resultCode === null ? null : (
