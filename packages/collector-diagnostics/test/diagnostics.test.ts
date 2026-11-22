@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { createDiagnostics, safeErrorDetails, safeShape } from "../src/index";
+import {
+  closedErrorName,
+  closedErrorType,
+  createDiagnostics,
+  safeErrorDetails,
+  safeShape,
+} from "../src/index";
 
 const runId = "00000000-0000-4000-8000-000000000001";
 afterEach(() => {
@@ -251,5 +257,48 @@ describe("a failure's shape keeps closed codes, booleans and counts only", () =>
     });
     expect(records[1]).not.toHaveProperty("shape");
     expect(JSON.stringify(records)).not.toContain("private-text");
+  });
+});
+
+// A thrown value's name is whatever its thrower chose (a provider page script
+// included), so stored records and logs carry it only as a closed code.
+describe("closed error types", () => {
+  const throwingName = Object.defineProperty(new Error("private-message"), "name", {
+    get() {
+      throw new Error("private-getter");
+    },
+  });
+  test.each([
+    ["a runtime name", new TypeError("private-message"), "TypeError"],
+    [
+      "a custom name",
+      Object.assign(new Error("x"), { name: "PrivateProviderName" }),
+      "UnknownError",
+    ],
+    ["a name that is not a string", Object.assign(new Error("x"), { name: 17 }), "UnknownError"],
+    ["a thrown string", "private-provider-text", "UnknownError"],
+    ["a thrown object with a name", { name: "TypeError" }, "UnknownError"],
+    ["undefined", undefined, "UnknownError"],
+    ["a throwing name getter", throwingName, "UnknownError"],
+  ])("%s reads as a closed code", (_label, error, expected) => {
+    expect(closedErrorType(error)).toBe(expected);
+  });
+  test("a collector's own names are admitted only when it lists them", () => {
+    const own = Object.assign(new Error("x"), { name: "CollectionContractError" });
+    expect(closedErrorType(own)).toBe("UnknownError");
+    expect(closedErrorType(own, ["CollectionContractError"])).toBe("CollectionContractError");
+    expect(closedErrorType(throwingName, ["CollectionContractError"])).toBe("UnknownError");
+  });
+  test("a name received from another process is checked the same way", () => {
+    expect(closedErrorName("TimeoutError")).toBe("TimeoutError");
+    expect(closedErrorName("PrivateProviderName")).toBe("UnknownError");
+    expect(closedErrorName(undefined)).toBe("UnknownError");
+    expect(closedErrorName("Own", ["Own"])).toBe("Own");
+  });
+  test("the diagnostics line reads the same closed code", () => {
+    expect(safeErrorDetails(throwingName)).toEqual({
+      category: "unknown",
+      errorType: "UnknownError",
+    });
   });
 });

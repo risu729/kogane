@@ -45,16 +45,21 @@ the app shell, its assets, every API answer and every refusal:
 `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
 `Cross-Origin-Resource-Policy: same-origin` (another site cannot load an
-answer as an image, script or media subresource) and
+answer as an image, script or media subresource),
 `Cross-Origin-Opener-Policy: same-origin` (a window of another origin keeps
-no handle on a page of this Worker, nor it on that window). An answer without
+no handle on a page of this Worker, nor it on that window) and
+`Strict-Transport-Security: max-age=31536000` (after one answer over HTTPS a
+browser uses only HTTPS for this host for a year; this host only, not
+preloaded, [ADR 0131](adr/0131-strict-transport-security.md)). An answer without
 its own policy gets `Content-Security-Policy: default-src 'self';
 script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src
 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none';
 form-action 'none'`; the raw download sets its own `sandbox` policy.
 `test/api.test.ts` asserts `no-store`, `nosniff` and `frame-ancestors` on the
-shell, and both cross-origin policies on the shell, a read, a `404` and a
-`401`. The Cloudflare Access login and the Managed OAuth endpoints an MCP
+shell, both cross-origin policies on the shell, a read, a `404` and a
+`401`, and `Strict-Transport-Security` on the shell, its `304`
+revalidation, a `HEAD`, a read, a `404`, a `401`, a `405` and the raw
+download. The Cloudflare Access login and the Managed OAuth endpoints an MCP
 client uses are served by Access itself
 ([ADR 0047](adr/0047-mcp-client-connection.md)), not by this Worker, so
 these headers are not on them.

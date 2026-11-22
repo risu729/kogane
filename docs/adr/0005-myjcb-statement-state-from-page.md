@@ -1084,7 +1084,9 @@ statement months), not rows of a confirmed statement, and not a balance.
 - Limits: what a row's amount covers (one deferred payment, or the rest of
   it) and whether a row's payment later appears in a statement month is not
   confirmed, so rows are not matched against statements, settlements or
-  purchases. No read model, API or UI shows scheduled payments yet. A
+  purchases. No read model, API or UI shows scheduled payments yet
+  (_pointer, 2026-11-21: the reported state on a date lists them, never added
+  or matched, [ADR 0019's scheduled payments amendment](0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)). A
   candidate release of this parser is not compared by release adoption,
   whose comparison reads the four older tables only. The kind has no identity
   run or account mapping. Whether the headings use half-width parentheses

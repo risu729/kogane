@@ -863,7 +863,7 @@ Limits:
 
 ## Amendment: an unreadable deadline calendar computes nothing
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1520](https://github.com/risu729/kogane/pull/1520))
 - Date: 2026-11-21
 
 ### Context

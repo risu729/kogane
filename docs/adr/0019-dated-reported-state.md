@@ -512,3 +512,134 @@ snapshot);
 `apps/web/test/reported-state-contract.test.ts` (a manifest whose filters are
 not the body's, without `rows`, with an unknown identity status or a short
 statement account is refused).
+
+## Scheduled payments amendment — 2026-11-21
+
+- Status: proposed
+- Date: 2026-11-21
+- Issue: [#551](https://github.com/risu729/kogane/issues/551) (liabilities on
+  a date), Phase 4 of the [roadmap](../roadmap.md#phase-4--non-card-events-and-dated-state)
+
+**Context.** Since [ADR 0005, amendment (e)](0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)
+`myjcb-skip-payment-schedule` stores each row of MyJCB's
+ショッピングスキップ払い page, the only place the provider states payments it
+deferred, as a `scheduled_payment` observation
+(`scheduled_payment_observations`, migration 0061): usage date, payment date,
+the exact 今後のお支払い金額, merchant text and the page's as-of date. Nothing
+reads that table: the amendment's limits say "no read model, API or UI shows
+scheduled payments yet", and [economic events](../economic-events.md#scheduled-card-payments-are-observations-not-obligations)
+calls the missing read path a limit, not a design. The reported state on a
+date lists card statements as payables and names what it does not show
+(`liabilitiesMissing`), but a deferred payment the provider listed was in
+neither. What the amount covers (one deferred payment or the rest of it) and
+whether a later statement month carries it are not confirmed (ADR 0004), and
+the kind has no identity run, so no resolved account.
+
+**Options considered.**
+
+1. A read of its own (route, agent tool and page) for scheduled payments.
+   Rejected: what the provider said was still to be paid on a date is the
+   reported state's question, and a second dated read would repeat its cutoff,
+   freshness and manifest rules.
+2. List the rows as payables. Rejected: a payable is a statement total with a
+   settlement status, and these rows are not statement totals; matching them
+   with a statement or a settlement needs the unconfirmed meaning (INV06,
+   ADR 0004).
+3. Give the skip-payment container a selecting snapshot policy, so the dated
+   snapshot rules choose its capture. Rejected: it changes a policy row every
+   current-state read uses, puts the container in the perimeter and its
+   coverage, and needs coverage claims the parser does not write.
+4. List the newest published capture's rows beside the payables, apart from
+   them, with no status but the due date's and never added. Chosen.
+
+**Decision.** `reported-state-v4`.
+
+1. `DATED_SCHEDULED_PAYMENTS_SQL` chooses, per source and fetch unit (a MyJCB
+   connection), the newest sealed fetch run that has a published parse of
+   `myjcb-skip-payment-schedule` on an artifact captured before the cutoff,
+   and returns every such published page of that run with the rows its parse
+   stored. A page that listed none is returned once with no row. A newer page
+   whose parse is not published leaves the older published run the capture,
+   as `card_statement_facts` takes the newest published statement.
+2. The served answer gains `scheduledPayments`, after `payables`: one entry
+   per chosen page (`artifact:<id>`, source, parser, capture time, its Tokyo
+   date, age and freshness under `dated-state-freshness-v1`) with its
+   `payments` in due-date order: `scheduled-payment:<id>`, the provider
+   account, `scheduleKind`, usage and due dates, the amount as an exact
+   decimal of the stored canonical integer (a text that is not one stays
+   `unparsed`, never zero), the provider's text, the merchant text, the
+   page's as-of date and `dueStatus`: `due_after_date` or
+   `due_on_or_before_date`, from the due date alone (whether it was paid is
+   not read). An empty `payments` means the page listed none.
+3. Nothing is added, matched or adopted: no total, no settlement status, no
+   link to a statement or a purchase, and `liabilitiesMissing` and
+   `netAssets: "not-computed"` are unchanged.
+4. `source` narrows the captures to one source. Under `account` (or a scope
+   of accounts) none can match, since the rows have no resolved account: the
+   read is skipped, `scheduledPayments` is empty and
+   `coverage.scheduledPayments` is `not_listed_account_filter`; otherwise it
+   is `listed`.
+5. The manifest records `scheduledPaymentCaptures`, each chosen page as
+   `[artifact:<id>, parse_run:<id>]`, and `scheduledPaymentRefs`, each listed
+   payment, both sorted, so a newer capture, another parse of the same page
+   or another row is a new `contextId` (INV09). The wire contract checks the
+   new shapes, that the manifest pins exactly the listed pages and payments,
+   and that nothing is listed under `not_listed_account_filter`.
+6. The state the holdings change, the reconstructed state and the valuation
+   on a date build on (`includeStatementsBeforeWindow: false`, the
+   statements-before-window amendment's decision 6) skips this read as it
+   skips the count: it has no `scheduledPayments`, no
+   `coverage.scheduledPayments` and no manifest keys for them.
+7. `datedState` (`packages/application/src/query/store-schema.ts`) also
+   requires `scheduled_payment_observations`, so the route, the agent read
+   and the page are served only on a store that has it.
+8. The `/state` page shows the captures in a panel スキップ払いの予定 after
+   the card statements; `kogane.reported-state.read` answers the same body,
+   and its audit record counts the captures among its rows.
+
+**Consequences.** Every reported-state `contextId` changes once more
+(`reported-state-v4`), and so do the reported context ids that the holdings
+change, the valuation on a date and the reconstructed state pin, since their
+manifest names the schema version, although they read nothing new. Nothing
+stores them, so nothing is rebuilt. A stale client that validates
+`reported-state-v3` refuses a v4 body. The upcoming bills view of the card
+debit-account read (ADR 0114) builds on the full reported state for its
+balances, so it runs this read too; it uses only the accounts and pins no
+reported-state context id, so its answer is unchanged. The read scans the
+publication pointers (`published_parse_runs`) filtered by parser name and
+reaches each page's artifact by primary key and its rows through
+`idx_sched_pay_obs_parse_run`: on workerd, D1's own plan without statistics is
+that, and its `rows_read` is the pointers plus a few rows per page
+(`services/processor/test/myjcb-shared-r2.test.ts`, on a small store). It is
+not timed on D1 ([reported state, cost](../reported-state.md#cost)).
+
+Limits: only MyJCB's skip-payment page is read; the bonus page stays unread
+(ADR 0005, amendment e). Production has stored only pages that listed none
+(amendments i and k), so a row shape with payments is the parser's mirror of
+the observed head, exercised by synthetic tests only. A newer page whose parse
+is not published (pending, refused, or never parsed because its run was not
+failure-free), and a newer run that stored no skip page, leave an older
+capture current with its age shown, and the answer does not say that a newer
+page exists. A scheduled payment is not a liability
+figure: unbilled usage, installment remainders and loans stay named as
+missing.
+
+**Verification.** `packages/read-model/test/dated-state.test.ts` ("scheduled
+payments as of the cutoff": the newest run per fetch unit before the cutoff,
+rows as stored, an empty page kept, a later capture and an unpublished page
+ignored, two pages of one run listed, and the plan without table statistics);
+`packages/application/test/dated-state-query.test.ts` ("scheduled payments on
+the date": exact amounts and due statuses, an empty capture, the manifest pins
+and a new capture's new context id, the source and account filters, the
+uncounted state skipping the read, the pure due rule and contract refusals;
+the random-store test now also holds skip pages); `packages/application/test/propose-store.test.ts`;
+`services/app/test/reported-state-api.test.ts`;
+`apps/web/test/reported-state.browser.test.ts` (the panel lists both
+payments with their due statuses, the empty page as empty, no sum, and before
+any capture says that is not "none scheduled");
+`packages/application/test/dated-state-scale.test.ts` (on the complete CORE
+schema without statistics, the read walks no stored table whole but the
+publication pointers); `services/processor/test/myjcb-shared-r2.test.ts` (on
+workerd, a skip page the collector's plan registers and the processor parses
+is listed with both rows by the read and by `queryDatedState` through the wire
+contract, with D1's plan and `rows_read` as above).

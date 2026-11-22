@@ -273,14 +273,27 @@ describe.if(runnable)("account candidate review", () => {
     });
     await button.focus();
     await tab.keyboard.press("Enter");
-    await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
-    // The refusal leaves a keyboard user on the button they pressed.
-    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    // The pair left 確認待ち: the list is read again without it, and the
+    // refusal its card can no longer show is shown, and focused, at the top.
+    const notice = tab.getByRole("alert").filter({ hasText: "読み直した表示には" });
+    await notice.waitFor();
+    expect(await notice.innerText()).toContain("候補が更新されています");
+    expect(await notice.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(await tab.locator(".identity-card").count()).toBe(
+      (await page("open", 0, null)).items.length,
+    );
     expect(
       read.some(
         (url) => url.searchParams.get("sourceAccountId") === candidate!.directSourceAccountId,
       ),
     ).toBe(true);
+    expect(
+      read.filter(
+        (url) =>
+          url.pathname === "/api/identity/account-candidates" &&
+          !url.searchParams.has("sourceAccountId"),
+      ),
+    ).toHaveLength(2);
     expect(posted).toEqual([]);
     await tab.close();
   });
@@ -410,4 +423,31 @@ describe.if(runnable)("account candidate review", () => {
     expect(await auditView(confirm)).toEqual([]);
     await confirm.close();
   }, 60_000);
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const tab = await open();
+    const lists: string[] = [];
+    tab.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === "/api/identity/account-candidates" &&
+        !url.searchParams.has("sourceAccountId")
+      )
+        lists.push(url.search);
+    });
+    // As the server answers a malformed command: 400 invalid_command.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({ status: 400, json: { error: "invalid_command" } }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "送信した内容の形式" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(lists).toEqual([]);
+    expect(await tab.getByRole("alert").count()).toBe(1);
+    await tab.close();
+  });
 });

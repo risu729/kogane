@@ -235,7 +235,7 @@ mise run //services/processor:ops status
     {
       "lane": "purchase_recognition",
       "outcome": "ran", // or "skipped-by-flag", or "failed"
-      "errorCode": null, // a safe code when failed: a pipeline code or an error class name
+      "errorCode": null, // a closed code when failed: a pipeline code, a documented lane error class or a built-in error class (processor.md §6.1)
       "startedAt": "2026-09-24T03:05:00.412Z",
       "durationMs": 8412,
       "ageMs": 131000, // since the tick finished

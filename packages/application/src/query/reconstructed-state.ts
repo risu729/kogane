@@ -71,7 +71,7 @@ import {
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { queryDatedState } from "./dated-state.ts";
 
-export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v2";
+export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v3";
 /** The longest range asked about, in days. */
 export const RECONSTRUCTION_RANGE_MAX_DAYS = 366;
 /** The most accounts one scope names (ADR 0116). */
@@ -200,6 +200,14 @@ interface ReconstructedStateManifest {
   aliasRuleVersions: string[];
   coverageProducer: typeof COVERAGE_PRODUCER_NONE;
   snapshots: { startContextId: string; endContextId: string };
+  /**
+   * Each scope account's mapped sources (`[accountId, sourceId]`, sorted), as
+   * `ACCOUNTS_SOURCES_SQL` read them: with the perimeter the snapshot contexts
+   * pin, they decide which accounts no reported container lists. A mapping
+   * that no capture on either date lists changes neither snapshot context,
+   * so it is pinned here (INV09).
+   */
+  accountSources: [string, string][];
   /** `canonicalDigest` of the fold's own manifest. */
   innerManifestDigest: string;
 }
@@ -428,6 +436,7 @@ export async function queryReconstructedState(
     ]),
   );
   // Each account by itself: one the perimeter does not list is named as such.
+  // The mapped sources read here are pinned in the manifest (`accountSources`).
   const contained = new Set(
     sources.filter((row) => perimeter.has(row.source_id)).map((row) => row.account_id),
   );
@@ -544,6 +553,11 @@ export async function queryReconstructedState(
     aliasRuleVersions: now.aliasRuleVersions,
     coverageProducer: COVERAGE_PRODUCER_NONE,
     snapshots: { startContextId: start.side.contextId, endContextId: end.side.contextId },
+    accountSources: sources
+      .map((row): [string, string] => [row.account_id, row.source_id])
+      .sort((a, b) =>
+        a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0,
+      ),
     innerManifestDigest: await canonicalDigest(state.manifest),
   };
   return {

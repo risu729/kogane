@@ -404,7 +404,7 @@ an extra field, a v1 manifest with the v2 fields, and an unknown version.
 
 ## Amendment: a decimal with more places than its unit holds is grouped, not verbatim (2026-11-21)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1519](https://github.com/risu729/kogane/pull/1519))
 - Date: 2026-11-21
 
 ### Context
@@ -446,7 +446,7 @@ text.
 
 ## Amendment: the report job reads its positions from one cut (2026-11-21)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1541](https://github.com/risu729/kogane/pull/1541))
 - Date: 2026-11-21
 
 ### Context

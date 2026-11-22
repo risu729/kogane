@@ -66,7 +66,20 @@ stored receipt without a second revision, and reusing the key with a changed
 body is refused) and `"action": "release-override"` with `"targetId": null`,
 which appends a decision that lets automatic policy apply to the reference
 again from its current revision on. A release does not delete the manual
-mapping; the next scheduled sweep appends the rule's revision. Corrections
+mapping, and it re-identifies nothing: the sweep only identifies parses that
+have no sealed run at their required policy, so the manual mapping stays
+current until a parse whose plan names the same reference is next identified,
+which appends the rule's revision. Such a parse is a later capture of the
+reference, a reparse of an artifact that carries it (a new parser version or
+a replay), or a parse re-identified because its required policy version rose.
+A run-scoped reference (a Vpass card ordinal without a trusted binding, a
+V Point store-limited bucket or a common bucket without consistent point type
+and expiry, an SBI Securities foreign row without its account discriminator:
+every key that carries `fetch-run`) is named by its own fetch run only, so no
+later capture plans it: after a release its manual mapping stays current
+until a reparse or re-identification of that fetch run's artifact plans the
+same key again. This is a limit (`identity-decisions.test.ts` pins both
+cases). Corrections
 sent through this script are recorded with the actor `legacy-cli`
 (verification `legacy-unknown`); the trusted-caller header
 `x-kogane-verified-actor` records a named actor. The response carries the

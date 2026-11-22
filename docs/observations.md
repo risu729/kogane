@@ -17,6 +17,87 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank WALLET: a currency outside the minor-unit table keeps its exact decimal (WALLET 1.0.8)
+
+2026-11-22. `sony-bank-wallet-history` 1.0.7 read the transaction amount
+(`お取引通貨 金額`) and any of the four fee cells that names a currency through
+one helper that required an exact minor-unit integer (a bare-decimal fee was
+already only checked as an exact decimal). The minor-unit table
+(`packages/parsers/src/money.ts`) names only JPY, USD and AUD, so a row whose
+currency was any other code the parser accepts (BRL, CAD, CHF, CNH, EUR, GBP,
+HKD, NZD, SEK, ZAR) refused the whole month as
+`WALLET transaction amount is not exact`, even when the amount was unsigned
+and would not have been published at all. The history parsers refused the same
+way until
+[1.0.5 and 1.0.6](sources/sony-bank.md#2026-11-19-currencies-outside-the-minor-unit-table).
+
+1.0.8 applies the history rule to WALLET: for a currency the table does not
+name, the amount and fees must still be exact decimals with valid digit
+grouping, and an explicitly signed amount is published as `amountText` and
+`amountScale` with no `amountMinor`; its direction comes from the sign of the
+decimal (`-0.00` is not an outflow, as `-0` JPY was not), the provider-sign rule
+WALLET already applies to JPY, USD and AUD; nothing about the currency is
+inferred. An unsigned amount is still omitted with the same warning. Fees are
+validated and not published, as before. JPY, USD and AUD keep their minor-unit
+check, so `USD 12.345` and a `JPY 1.5` fee are still refused, and every row in
+those currencies reads as before, identity included. A currency code outside
+Sony's list is still refused.
+
+`sony-bank.ts` holds all four Sony parsers, so `sony-bank-gross-balance` 1.0.6
+to 1.0.7, `sony-bank-history-json` 1.0.5 to 1.0.6 and `sony-bank-history-csv`
+1.0.6 to 1.0.7 are released with only their digests moved, because a parser name
+and version may not carry a second code digest
+(`packages/parsers/test/parser-digests.test.ts`, migration 0028); they read
+every artifact as before. **Deploying rewrites nothing**: stored runs and rows
+stay (evidence is append-only), the processor registers the releases and the
+repair lane re-parses stored Sony captures under them. No migration and no
+operator step: no snapshot policy row or reader pins these parsers by version.
+Limits: production was not read, so whether a stored WALLET month carries such a
+currency is not established, and a non-JPY WALLET amount such as `EUR 12.34` is
+the shape the parser's cell pattern and currency list already admitted (1.0.7
+then refused it for a currency outside the table), not an observed capture.
+Downstream, such a row takes the path non-table history rows take since 1.0.5:
+`amount_minor` is null and the exact text is kept; the WALLET `card-purchase`
+and `fx-exchange` families stay unsupported, so no event writer reads it. Tests:
+`packages/parsers/test/sony-bank-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
+## SBI Securities: a foreign cash schedule date that is not a date is no as_of (cash balances 0.2.2)
+
+2026-11-22. `sbi-foreign-cash-balances` 0.2.1 copied a schedule row's
+`businessDate` into `as_of` whenever it was a string, so `2026-02-30`, an
+empty string, `20260820` or `2026/08/20` became an `as_of` with no issue and
+the container still claimed complete. The latest balance ranks by
+`COALESCE(as_of, observed_at, '')` as text, so such a value could outrank the
+real schedule dates of the same metric and currency; a stated non-string
+(`null`, a number) gave no `as_of`, also without an issue, leaving the row's
+day (T+0, T+2, ...) unstated. 0.2.2 reads only a calendar `YYYY-MM-DD` date,
+the form the repository's fixtures state and the only form the read model
+orders correctly. Any other stated value leaves
+`as_of` empty on that row's balances and records one `row_unreadable` issue
+of severity `error` and impact `membership` at
+`<row>.businessDate`, so the container is partial; its message names the
+locator only, never the value, which stays in `extra.row`. A row that states
+no `businessDate` at all is read as in 0.2.1. The replay diagnostics
+(`services/processor/scripts/parser-rejection.ts`) name the new issue by its
+field, `businessDate`. Every valid date reads exactly as in 0.2.1, and no
+other parser's digest changed.
+
+| Parser                    | Previous | Release |
+| ------------------------- | -------- | ------- |
+| sbi-foreign-cash-balances | 0.2.1    | 0.2.2   |
+
+**Deploying rewrites nothing**: stored 0.2.1 runs stay as they are; the
+processor registers 0.2.2 itself and the repair lane re-parses stored
+captures under it. No migration: the dataset's snapshot policy row
+(`legacy-warning-compat-v1`) pins no parser version, and the new issue's
+warning text is not one of the two that policy treats as harmless, so a
+capture with an unreadable date is not a complete snapshot under either
+policy. Limits: production was not read for this release, so whether any
+stored capture states another form is not established. Tests:
+`packages/parsers/test/sbi-refusals.test.ts`,
+`services/processor/test/parser-rejection.test.ts`.
+
 ## SBI Securities: a domestic trade date that is not a date is no as_of (trade records 0.2.2)
 
 2026-11-22. `sbi-domestic-trade-records` 0.2.1 copied a record's `tradeDate`
@@ -1101,12 +1182,16 @@ in `extra_json`, the first payment month the page names. Every other shape
 refuses the page with one closed code from
 `SKIP_PAYMENT_SCHEDULE_PARSER_CODES`; an empty ledger is zero rows.
 
-The kind is not a transaction or a balance, and nothing reads the new table:
-no read path, purchase recognition or settlement matching sees a scheduled
-payment, so nothing is counted twice. It is declared outside the parser
+The kind is not a transaction or a balance: no purchase recognition,
+settlement matching or transaction or balance read sees a scheduled payment,
+so nothing is counted twice (the reported state on a date only lists the
+rows, adding nothing). It is declared outside the parser
 contract's `types.ts` so that no deployed parser's digest changes. Limits:
-the rows' meaning beyond "a payment still due" is not confirmed; no read
-model shows them; skip pages stored before this change keep the old name and
+the rows' meaning beyond "a payment still due" is not confirmed; the only
+read that shows them is the reported state on a date, which lists them
+unmatched and unadded
+([ADR 0019](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21));
+skip pages stored before this change keep the old name and
 stay unread; release adoption does not compare this table. Tests:
 `packages/parsers/test/myjcb-skip-payment-schedule.test.ts`,
 `services/collector-myjcb/test/parsers.test.ts`,
@@ -2807,7 +2892,9 @@ production CORE schema has a fifth observation table,
 `scheduled_payment_observations` (migration 0061), for payments a provider
 says are still due (the MyJCB ショッピングスキップ払い page,
 [ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
-It is append-only like the four above and is read by nothing yet.
+It is append-only like the four above; only the reported state on a date
+reads it, listing its rows and adding nothing
+([ADR 0019, scheduled payments amendment](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)).
 
 The `source_account` comment is reproduced from `schema.sql` as it stands
 and is, as described above, not what the parsers do. The
@@ -3050,8 +3137,9 @@ dataset, the `data` object of `GetForeignCashBalance`. It walks accounts
 provider metric per row — `buy_possible_amount`, `keep_cash`,
 `transfer_possible_amount`, `remaining_buy_possible_amount`,
 `amount_pay_value` — with `instrument` from `currencyCode`, `as_of` from
-`businessDate`, and the three-part `{ account, currencyEntry, row }`
-context in `extra`. It does not decide which of the five is "the" balance.
+`businessDate` when it is a calendar `YYYY-MM-DD` date (any other stated
+value is a membership issue and no `as_of`, 0.2.2), and the three-part
+`{ account, currencyEntry, row }` context in `extra`. It does not decide which of the five is "the" balance.
 All five coexist, which is what `docs/design.md` means by balances being
 measurements rather than columns. It is also the parser whose container
 handling is described above: malformed containers are warned about and

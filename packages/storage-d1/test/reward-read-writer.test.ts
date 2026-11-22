@@ -367,7 +367,7 @@ describe("the reward build", () => {
   });
 
   test("a displaced writer writes nothing, seals nothing and publishes nothing", async () => {
-    const { db, instanceId } = await claimed();
+    const { db, sqlite, instanceId } = await claimed();
     const snapshotPlan = await plan();
     const started = await beginRewardSnapshot(db, instanceId, snapshotPlan, NOW);
     const projection = buildRewardProjection(rewardInput({ evaluatedAt: EVALUATED_AT }).content);
@@ -385,6 +385,24 @@ describe("the reward build", () => {
         rowsWritten: 0,
       }),
     ).toBe("lease_lost");
+    expect(
+      await writeRewardSimulationChunk(db, started!.snapshotId, rows.simulations, {
+        lease: "lease-old",
+        fence: staleFence,
+        now: NOW,
+        rowsWritten: 0,
+      }),
+    ).toBe("lease_lost");
+    // Not a row of either kind: the rows are fenced on the lease like their
+    // checkpoint, so the displaced chunk leaves the build as it found it.
+    expect(rows.estimates.length).toBeGreaterThan(0);
+    expect(rows.simulations.length).toBeGreaterThan(0);
+    for (const table of ["reward_expiry_estimates_v2", "reward_conversion_simulations"])
+      expect(
+        sqlite
+          .query(`SELECT count(*) AS n FROM ${table} WHERE snapshot_id=?1`)
+          .get(started!.snapshotId),
+      ).toEqual({ n: 0 });
     const sealed = await sealAndPublishRewardSnapshot(
       db,
       {
@@ -695,6 +713,100 @@ describe("publication", () => {
       (await rewardEstimatePage(db, second.snapshotId, { afterRowSeq: -1, limit: 10 })).length,
     ).toBeGreaterThan(0);
     expect((await activeRewardSnapshot(db))?.snapshot_id).toBe(second.snapshotId);
+  });
+
+  // The retirement and the deletion of the build's rows are one batch: a
+  // failed batch leaves the build complete with its rows, so the next pass
+  // retires it, instead of a retired build whose rows nothing selects again.
+  test("a retirement whose batch fails keeps the build and its rows for the next pass", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const first = await build(db, instanceId, { sourceRevision: 10 });
+    const second = await build(db, instanceId, {
+      contentKey: await readContentKey(REWARD_DIGEST_B, REWARD_DIGEST_A),
+      inputDigest: REWARD_DIGEST_B,
+      sourceRevision: 11,
+      evaluatedAt: "2026-09-12T00:00:00.000Z",
+    });
+    let failing = true;
+    const flaky: D1Like = {
+      prepare: (sql) => db.prepare(sql),
+      batch: async (statements) => {
+        if (failing) throw new Error("synthetic batch failure");
+        return await db.batch(statements);
+      },
+    };
+    await expect(retireOldRewardSnapshots(flaky, second.snapshotId, 1)).rejects.toThrow(
+      "synthetic batch failure",
+    );
+    const state = () =>
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM reward_expiry_estimates_v2 e
+            WHERE e.snapshot_id=s.snapshot_id)>0 AS has_rows FROM reward_expiry_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(first.snapshotId);
+    expect(state()).toEqual({ status: "complete", has_rows: 1 });
+    failing = false;
+    expect(await retireOldRewardSnapshots(flaky, second.snapshotId, 1)).toBe(1);
+    expect(state()).toEqual({ status: "retired", has_rows: 0 });
+  });
+
+  // Another writer switches the pointer onto a retained build after this call
+  // selected it: the published build is never retired, so it stays.
+  test("a build the pointer is switched to after the selection is not retired", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const first = await build(db, instanceId, { sourceRevision: 10 });
+    const second = await build(db, instanceId, {
+      contentKey: await readContentKey(REWARD_DIGEST_B, REWARD_DIGEST_A),
+      inputDigest: REWARD_DIGEST_B,
+      sourceRevision: 11,
+      evaluatedAt: "2026-09-12T00:00:00.000Z",
+    });
+    const outputDigest = (
+      sqlite
+        .query("SELECT output_digest FROM reward_expiry_snapshots WHERE snapshot_id=?1")
+        .get(first.snapshotId) as { output_digest: string }
+    ).output_digest;
+    let raced = false;
+    const racing: D1Like = {
+      prepare: (sql) => db.prepare(sql),
+      batch: async (statements) => {
+        if (!raced) {
+          raced = true;
+          const switched = await rewardPointerStatement(
+            db,
+            {
+              snapshotId: first.snapshotId,
+              readInstanceId: instanceId,
+              sourceRevision: 12,
+              visibilityRevision: 3,
+              coreEpoch: "core-epoch-1",
+              evaluatedAt: "2026-09-12T00:00:00.000Z",
+              outputDigest,
+            },
+            NOW,
+          ).run();
+          expect(switched.meta.changes).toBe(1);
+        }
+        return await db.batch(statements);
+      },
+    };
+    expect(await retireOldRewardSnapshots(racing, second.snapshotId, 1)).toBe(0);
+    expect((await activeRewardSnapshot(db))?.snapshot_id).toBe(first.snapshotId);
+    expect(
+      (await rewardEstimatePage(db, first.snapshotId, { afterRowSeq: -1, limit: 10 })).length,
+    ).toBeGreaterThan(0);
+  });
+
+  test("abandoning a build another writer sealed leaves it published with its rows", async () => {
+    const { db, instanceId } = await claimed();
+    const { snapshotId } = await build(db, instanceId);
+    await abandonRewardSnapshot(db, snapshotId);
+    expect((await activeRewardSnapshot(db))?.snapshot_id).toBe(snapshotId);
+    expect(
+      (await rewardEstimatePage(db, snapshotId, { afterRowSeq: -1, limit: 10 })).length,
+    ).toBeGreaterThan(0);
   });
 
   test("a page walks the contract order and filters by programme", async () => {
