@@ -204,7 +204,12 @@ export interface ExpiryRule {
   programId: string;
   applicability: ExpiryRuleApplicability;
   qualifyingActivity: QualifyingActivityPolicy | null;
-  deadlineCalendar: DeadlineCalendar;
+  /**
+   * `null` when the stored calendar reference could not be read (a missing or
+   * unknown zone, day boundary or zone basis): no day is derived in a guessed
+   * calendar, and `estimateExpiry` reports `deadline_calendar_unreadable`.
+   */
+  deadlineCalendar: DeadlineCalendar | null;
   priorityPolicyRef: string | null;
   evidenceRefs: string[];
   verification: RuleVerification;
@@ -242,7 +247,7 @@ export type DeadlineBasis = (typeof DEADLINE_BASES)[number];
  * Release of the expiry derivation: stamped on every computed expiry and
  * bumped whenever the same inputs could produce a different date or reason.
  */
-export const EXPIRY_DERIVATION_RELEASE = "reward-expiry-v2";
+export const EXPIRY_DERIVATION_RELEASE = "reward-expiry-v3";
 
 /**
  * The deadline the provider displayed for one bucket. An observation, never a
@@ -272,7 +277,8 @@ export interface ExpiryRuleBasis {
   validPeriod: TemporalValue | null;
   evidenceRefs: string[];
   qualifyingActivityPolicyRef: string | null;
-  deadlineCalendar: DeadlineCalendar;
+  /** The rule's calendar; `null` when its stored reference could not be read. */
+  deadlineCalendar: DeadlineCalendar | null;
 }
 
 /** The activity facts an inactivity rule consumed. */
@@ -323,6 +329,8 @@ export const COMPUTED_EXPIRY_REASONS = [
   "fixed_deadline_not_derivable",
   /** An inactivity rule whose qualifying-activity policy did not resolve. */
   "qualifying_activity_policy_missing",
+  /** The rule's stored deadline calendar (zone, day boundary, zone basis) could not be read. */
+  "deadline_calendar_unreadable",
   /** A tier-gated rule and no claim of a required tier for this holding. */
   "membership_out_of_scope",
   /** A required tier exists but did not cover the anchor activity (for family `none`, the evaluation day). */
@@ -723,7 +731,7 @@ export function validExpiryRule(value: unknown): value is ExpiryRule {
     (applicability.validPeriod === null || validTemporalValue(applicability.validPeriod)) &&
     (value.qualifyingActivity === null ||
       validQualifyingActivityPolicy(value.qualifyingActivity)) &&
-    validDeadlineCalendar(value.deadlineCalendar) &&
+    (value.deadlineCalendar === null || validDeadlineCalendar(value.deadlineCalendar)) &&
     isTextOrNull(value.priorityPolicyRef, 512) &&
     isRefList(value.evidenceRefs, 100) &&
     isOneOf(RULE_VERIFICATIONS)(value.verification)
@@ -763,7 +771,7 @@ function validExpiryRuleBasis(value: unknown): value is ExpiryRuleBasis {
     (value.validPeriod === null || validTemporalValue(value.validPeriod)) &&
     isRefList(value.evidenceRefs, 100) &&
     isTextOrNull(value.qualifyingActivityPolicyRef, 512) &&
-    validDeadlineCalendar(value.deadlineCalendar)
+    (value.deadlineCalendar === null || validDeadlineCalendar(value.deadlineCalendar))
   );
 }
 
@@ -1137,7 +1145,7 @@ function ruleBasis(rule: ExpiryRule): ExpiryRuleBasis {
     validPeriod: rule.applicability.validPeriod,
     evidenceRefs: [...new Set(rule.evidenceRefs)],
     qualifyingActivityPolicyRef: rule.qualifyingActivity?.policyRef ?? null,
-    deadlineCalendar: { ...rule.deadlineCalendar },
+    deadlineCalendar: rule.deadlineCalendar === null ? null : { ...rule.deadlineCalendar },
   };
 }
 
@@ -1205,10 +1213,12 @@ export function estimateExpiry(
   // every bucket the rule computes for, less the bucket's own reason code.
   const derivationCodes: string[] = [];
   const sourceExpiryRefs: string[] = [];
-  const zone = rule.deadlineCalendar.zone;
+  // Read only when the calendar is known: an unreadable one is a rule failure
+  // below, which derives no day at all.
+  const zone = rule.deadlineCalendar?.zone ?? "";
   const now = localDate(clock);
   const basisOfRule = ruleBasis(rule);
-  if (rule.deadlineCalendar.zoneBasis === "assumed") {
+  if (rule.deadlineCalendar?.zoneBasis === "assumed") {
     push(uncertaintyCodes, "deadline_zone_assumed");
     push(derivationCodes, "deadline_zone_assumed");
   }
@@ -1221,10 +1231,14 @@ export function estimateExpiry(
   else if (!versionInForce(rule, now)) ruleFailure = "rule_out_of_force";
   else if (rule.family === "inactivity" && !rule.qualifyingActivity)
     ruleFailure = "qualifying_activity_policy_missing";
+  // Without its calendar no family's answer is the rule's own: not a date,
+  // and not the "no expiry" its terms would state.
+  else if (rule.deadlineCalendar === null) ruleFailure = "deadline_calendar_unreadable";
   if (ruleFailure !== null)
     push(
       uncertaintyCodes,
-      ruleFailure === "qualifying_activity_policy_missing"
+      ruleFailure === "qualifying_activity_policy_missing" ||
+        ruleFailure === "deadline_calendar_unreadable"
         ? "rule_family_unsupported"
         : ruleFailure,
     );

@@ -389,15 +389,31 @@ page and one from an MCP client are the same kind of stored operation.
   request then waits), the next scheduled run and the maintenance status, and
   says that the collector runs its daily scope and that a started collection
   cannot be taken back. **依頼を送信** sends the request; **やめる** sends
-  nothing.
+  nothing. After a send whose answer did not say whether the request was
+  stored, **やめる** keeps that key and window: the section says the request
+  may already be stored and is not withdrawn by backing out, and the next
+  **収集を依頼** opens a confirmation that says it re-sends that request.
+  The key is held in the page's state only: leaving the Schedules page or
+  reloading it forgets it, and the next confirmation is a new request (the
+  notice says so). This is an open limit.
 - **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
   the window is the date in Japan of the confirmation's first send (stored,
   not applied: the collector runs its daily scope), and the key is
-  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
-  lost answer reuses the key and the window, so it is the same payload and the
-  same operation even after midnight; a new confirmation is a new request. A
+  `ui-collect-<uuid>`, new for each confirmation except as below. A retry
+  after a failed or lost answer reuses the key and the window, so it is the
+  same payload and the same operation even after midnight. A new
+  confirmation is a new request once a send under the key was answered with
+  202, or when every send under it was refused; while one send's outcome is
+  unknown, a new confirmation re-sends it under the same key and window. A
   4xx answer other than 408 or 429 is shown as refused and not stored, with
-  its code. The answer shows the operation id.
+  its code; it stored nothing itself, but the server answers it (sign-in,
+  grant, origin, schema or declared-source refusal) before it looks the key
+  up, so it does not settle an earlier unknown send. The
+  answer shows the operation id. A
+  202 with status `accepted` says the collection starts at the next
+  processing run; any other status is the stored operation's current one,
+  answered to a re-send (`running`, `completed`, `failed` or `blocked`), and
+  the page names it and says no new collection starts.
 - **Following it.** An accepted request links to **依頼の経過** ("request trail")
   at `/operations/{id}`. That read-only page follows the request through
   `GET /api/ops/v1/operations/{id}`. The link survives schedule-card refreshes;
@@ -474,7 +490,10 @@ login or render with JavaScript cannot be read this way.
   with its closed states and newest receipt, each source's maintenance
   status and rule count, and the held leases
   ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
-  parameter is accepted.
+  parameter is accepted. `HEAD` is the same read, `detail` included, without
+  the body; another method is `405` with `Allow: GET, HEAD`, except `POST`,
+  which is `404` here. A method other than `POST` on any path below the page
+  is `405` with `Allow: POST`, as it is on `POST /api/ops/v1/schedules/bootstrap`.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
@@ -491,6 +510,19 @@ The job edit, the maintenance edit, the survey acceptance and the lease
 release are each one batch: a job's settings and its history row in
 `collection_schedule_revisions`, or an accepted proposal's revision and
 decision, exist together or not at all. The page's `GET` is not recorded.
+
+Where these routes answer with the Processor's answer — the snapshot under
+`detail=full`, a Processor refusal under either detail, every write's answer
+and a bootstrap refusal — the App relays its status and its body bytes as
+they are, under its own `Content-Type: application/json`. No header of the
+Processor's crosses back, its `Content-Type` included, so a relayed body never
+chooses how the App's origin serves it; the App's own response headers apply
+as on every answer ([production evidence browser](production-evidence-browser.md#response-headers)).
+A summary is the App's own JSON of the snapshot, and a bootstrap success is
+the App's own JSON of the answer it checked. `services/app/test/schedules-relay.test.ts`
+serves a Processor answer labelled `text/html` on each of these paths, and a
+body with a leading byte-order mark or invalid UTF-8, which crosses unchanged
+because a write's answer is read as bytes, not text.
 
 A write that loses its version check — another edit saved the job or the rule
 first, including one by the same operator in the same millisecond — writes

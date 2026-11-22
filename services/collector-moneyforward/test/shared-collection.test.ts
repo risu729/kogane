@@ -285,23 +285,24 @@ describe("G1-08/G1-09 the outcome of the run survives persistence", () => {
 
   test("a failed run persists no artifact and stays a failure", async () => {
     const bucket = new FakeR2Bucket();
-    const outcome = await persistSharedRun(
-      bucket,
-      input({
-        status: "failed",
-        artifacts: [],
-        accountDetailCount: 0,
-        monthlyFragmentCount: 0,
-        failures: [
-          {
-            operation: "collect",
-            errorType: "Error",
-            message: "credential_configuration_required",
-            failureCode: "credential_configuration_required",
-          },
-        ],
-      }),
-    );
+    // A failed run never learned its counts, so its input carries none (INV05).
+    const {
+      accountDetailCount: _details,
+      monthlyFragmentCount: _fragments,
+      ...known
+    } = input({
+      status: "failed",
+      artifacts: [],
+      failures: [
+        {
+          operation: "collect",
+          errorType: "Error",
+          message: "credential_configuration_required",
+          failureCode: "credential_configuration_required",
+        },
+      ],
+    });
+    const outcome = await persistSharedRun(bucket, known);
     expect(outcome.artifactCount).toBe(0);
     const read = await readTerminal(bucket, "moneyforward-me", runId);
     if (read.outcome !== "found") throw new Error("unreachable");

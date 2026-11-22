@@ -1171,3 +1171,12 @@ form as a row's `as_of`; any other stated value is a `row_unreadable`
 membership issue that leaves the capture partial, instead of a text `as_of`
 that could rank ahead of the real schedule dates
 ([release note](../observations.md#sbi-securities-a-foreign-cash-schedule-date-that-is-not-a-date-is-no-as_of-cash-balances-022)).
+
+## 2026-11-22: domestic trade dates are read only as calendar dates
+
+No provider data was read for this entry. The collector turns the execution
+page's `YY/MM/DD` cell into `20YY-MM-DD` without checking the calendar.
+Parser `sbi-domestic-trade-records` 0.2.2 reads only a calendar `YYYY-MM-DD`
+date as a record's `as_of`; any other stated value is a warning and no `as_of`,
+the value staying in the record's `extra`
+([release note](../observations.md#sbi-securities-a-domestic-trade-date-that-is-not-a-date-is-no-as_of-trade-records-022)).

@@ -104,6 +104,10 @@ test("activity page distinguishes positive withdrawals, card payments, and quant
         "0.0001 BTC",
         "9999999 JPY",
         "金額未記録",
+        // A posted row reads as recorded in the history, which does not say
+        // the payment or delivery completed. The old label 記帳済み is no
+        // longer produced, so its absence alone checks nothing.
+        "履歴に記録",
       ])
         expect(body).toContain(label);
       expect(await table.locator(".amount-pos,.amount-neg").count()).toBe(0);

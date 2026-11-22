@@ -1,3 +1,4 @@
+import { displayLabel } from "../labels.ts";
 import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, useFeatures } from "../api.ts";
@@ -37,6 +38,7 @@ import {
 import { Link, navigate } from "../router.tsx";
 import { EmptyState, Kv, KvRow, Loading, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import { useViewState } from "../view-state.tsx";
+import { BusyButton } from "../busy-button.tsx";
 
 const PAGE_SIZE = 50;
 const PERIOD = /^[0-9]{4}-(?:0[1-9]|1[0-2])$/u;
@@ -155,7 +157,9 @@ function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }):
         この接続先では確認操作が有効ではないため、ここから判断することはできません。
       </p>
     );
-  const canPlan = reason.trim().length > 0 && !plan.isPending;
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
+  const canPlan = reason.trim().length > 0;
   const id = `candidate-reason-${candidate.proposalId}`;
   return (
     <div className="settlement-decision">
@@ -173,15 +177,14 @@ function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }):
       </div>
       <div className="button-row">
         {candidate.actions.map((action) => (
-          <button
+          <BusyButton
             key={action}
-            className="button"
-            type="button"
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate(action)}
           >
             {CANDIDATE_ACTION_LABELS[action]}
-          </button>
+          </BusyButton>
         ))}
       </div>
       {plan.isError ? (
@@ -394,7 +397,7 @@ export function PurchasesPage(): ReactNode {
                       <summary>対象外の条件</summary>
                       <ul className="warning-list">
                         {data.coverage.unsupportedShapes.map((code) => (
-                          <li key={code}>{EXCLUSION_LABELS[code] ?? code}</li>
+                          <li key={code}>{displayLabel(EXCLUSION_LABELS, code)}</li>
                         ))}
                       </ul>
                     </details>
@@ -520,7 +523,7 @@ export function PurchasePage({ eventId }: { eventId: string }): ReactNode {
                   <ol className="plain-list">
                     {view.history.map((entry) => (
                       <li key={entry.revision}>
-                        版 {entry.revision}: {HISTORY_ACTIONS[entry.action] ?? entry.action} ·{" "}
+                        版 {entry.revision}: {displayLabel(HISTORY_ACTIONS, entry.action)} ·{" "}
                         <PurchaseStateBadge view={entry} /> · {entry.createdAt}
                         <br />
                         <code className="wrap-any">{entry.decisionRevisionId}</code>

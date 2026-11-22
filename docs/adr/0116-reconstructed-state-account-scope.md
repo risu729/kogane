@@ -1,6 +1,6 @@
 # ADR 0116: Reconstruct a scope of up to 20 accounts in one answer, at one cut, never totalled
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1392](https://github.com/risu729/kogane/pull/1392))
 - Date: 2026-11-18
 - Issue: [#550](https://github.com/risu729/kogane/issues/550) (state at a date:
   reconstruct balances and holdings from adopted events), the "several accounts

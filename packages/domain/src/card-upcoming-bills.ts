@@ -62,11 +62,16 @@ export type NotListedReason = (typeof NOT_LISTED_REASONS)[number];
  *
  * - `debit_account_unknown`: the line holds the bills whose debit account
  *   ADR 0114 does not answer;
+ * - `unit_mismatch`: the bills counted on the line are in more than one
+ *   unit, so they are not added (INV03; the code `sumQuantities` refuses
+ *   them with);
  * - `bill_not_exact`: a bill counted on the line is not exact;
  * - `balance_not_exact`: the balance is not exact, or none was reported;
  * - `balance_before_previous_debit`: the balance was captured on or before
  *   the date of a card debit already due from the account, so it may not show
- *   that debit;
+ *   that debit, or on the due date of a bill the line counts, so it may
+ *   already show that debit and comparing it with the bill would count the
+ *   debit twice (INV06);
  * - `cards_with_unknown_account`: a bill due on or before the line's date has
  *   no known debit account and might be debited from this one;
  * - `cards_with_unknown_due_date`: a card debited from this account, or from
@@ -76,6 +81,7 @@ export type NotListedReason = (typeof NOT_LISTED_REASONS)[number];
  */
 export const COVERS_UNKNOWN_REASONS = [
   "debit_account_unknown",
+  "unit_mismatch",
   "bill_not_exact",
   "balance_not_exact",
   "balance_before_previous_debit",
@@ -159,7 +165,7 @@ export interface UpcomingDebitAccountLine {
   debitDate: string;
   /** Bills to this account due on or before `debitDate` (from the date on). */
   bills: number;
-  /** Their sum; not exact when one of them is not. */
+  /** Their sum; not exact when one of them is not, or when they are in two units. */
   cardBills: CompactQuantity;
   /** Null on the line of bills with no known debit account. */
   balance: (CompactQuantity & { capturedAt: string | null }) | null;
@@ -286,10 +292,16 @@ export function upcomingCardBills(input: {
         unit,
         counted.map(({ amount }) => amount),
       );
+      // Every reason that holds is named: bills in another unit than the
+      // line's first (the code `sumQuantities` refuses them with), and bills
+      // that are not exact. The sum's reason is the first of the two.
+      const mixed = counted.some(({ amount }) => amount.unitRef !== unit);
+      if (mixed) reasons.add("unit_mismatch");
+      if (counted.some(({ amount }) => amount.value.status !== "exact"))
+        reasons.add("bill_not_exact");
       const cardBills: CompactQuantity = sum.ok
         ? compactQuantity(sum.quantity)
-        : { unit, status: "missing", reason: "bill_not_exact" };
-      if (!sum.ok) reasons.add("bill_not_exact");
+        : { unit, status: "missing", reason: mixed ? "unit_mismatch" : "bill_not_exact" };
       let balance: UpcomingDebitAccountLine["balance"] = null;
       let order: -1 | 0 | 1 | null = null;
       if (key === null) reasons.add("debit_account_unknown");
@@ -300,10 +312,14 @@ export function upcomingCardBills(input: {
         if (account.balance.value.status !== "exact" || account.balance.unitRef !== unit)
           reasons.add("balance_not_exact");
         const captured = account.capturedAt === null ? null : captureDate(account.capturedAt);
+        // A balance captured on a counted bill's own due date (only the date
+        // itself: no capture is later) may come before or after the bank
+        // takes it; compared with that bill, a capture after it would count
+        // the debit twice (INV06).
         if (
           captured !== null &&
-          account.previousDebit !== null &&
-          captured <= account.previousDebit
+          ((account.previousDebit !== null && captured <= account.previousDebit) ||
+            counted.some((bill) => bill.debitDate === captured))
         )
           reasons.add("balance_before_previous_debit");
         if (unknownDates.some((unknown) => unknown <= debitDate))

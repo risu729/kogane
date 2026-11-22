@@ -67,8 +67,9 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionO
       const artifacts: StoredArtifact[] = [];
       const collected: RawArtifact[] = [];
       const failures: CollectionFailure[] = [];
-      let transactionCount = 0;
-      let pageCount = 0;
+      // Unknown until the history walk returns: a run that stops earlier
+      // reports no counts rather than zeros (INV05).
+      let counts: { transactionCount: number; pageCount: number } | undefined;
       let complete = false;
       let capturedSessionAt: string | undefined;
       try {
@@ -86,8 +87,7 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionO
         const collection = await diagnostic.step("history-collection", () =>
           collectMobileSuica({ session, asOfDateJst }),
         );
-        transactionCount = collection.rows.length;
-        pageCount = collection.pageCount;
+        counts = { transactionCount: collection.rows.length, pageCount: collection.pageCount };
         complete = collection.complete;
         if (!collection.complete) {
           diagnostic.failure("pagination", new Error("history_boundary_unproven"));
@@ -102,15 +102,15 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionO
           collected.push(...collection.artifacts);
         }
       } catch (error) {
-        if (error instanceof HistoryCollectionError) {
-          collected.push(...error.artifacts);
-          pageCount = error.artifacts.length;
-        }
+        // The pages a stopped walk kept are stored and counted as artifacts;
+        // the walk's own page and transaction counts stay unknown.
+        const keptPages = error instanceof HistoryCollectionError ? error.artifacts.length : 0;
+        if (error instanceof HistoryCollectionError) collected.push(...error.artifacts);
         failures.push(
           failure(
-            pageCount > 0 ? "pagination" : "collect",
+            keptPages > 0 ? "pagination" : "collect",
             error,
-            pageCount > 0 ? "history_boundary_unproven" : "collection_failed",
+            keptPages > 0 ? "history_boundary_unproven" : "collection_failed",
           ),
         );
       }
@@ -126,8 +126,7 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionO
         status,
         asOfDateJst,
         ...(capturedSessionAt ? { capturedSessionAt } : {}),
-        transactionCount,
-        pageCount,
+        ...counts,
         complete,
         artifacts,
         failures,
@@ -164,8 +163,10 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionO
             event: "mobile-suica-collection-persisted",
             runId,
             status,
-            transactionCount,
-            pageCount,
+            // An unknown count is undefined, so the JSON line leaves it out
+            // instead of writing 0 (INV05).
+            transactionCount: counts?.transactionCount,
+            pageCount: counts?.pageCount,
             artifactCount: collected.length,
             failureCount: failures.length,
             terminalOutcome: terminal.outcome,

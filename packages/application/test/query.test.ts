@@ -884,3 +884,228 @@ describe("cursors and budgets", () => {
     if (!outcome.ok) expect(outcome.error.code).toBe("stale_context");
   });
 });
+
+/**
+ * A projection that answers each scope pair from its own rows, as the READ
+ * database does: a pair whose account the snapshot never measured reads
+ * nothing at all.
+ */
+function scopedProjection(
+  measures: { account: string; rows: SubtotalRow[]; coverage: ProjectionCoverageRow[] }[],
+): HoldingsProjection {
+  const of = (scope: { account?: string }) =>
+    measures.filter((measure) => scope.account === undefined || measure.account === scope.account);
+  return {
+    servable: async () => ({
+      snapshot: {
+        snapshot_id: "b".repeat(64),
+        created_at: "2026-09-12T00:00:00Z",
+        row_count: 1,
+        input_manifest_json: "{}",
+        projection_release: "balance-projection-v1",
+      } as BalanceSnapshotRow,
+      behind: false,
+    }),
+    reader: {
+      summableQuantities: async (_snapshot, scope) => of(scope).flatMap((measure) => measure.rows),
+      coverage: async (_snapshot, scope) => of(scope).flatMap((measure) => measure.coverage),
+    },
+  };
+}
+
+const ADOPTED_CURRENT: ProjectionCoverageRow = {
+  state: "adopted",
+  reason_code: null,
+  freshness: "current",
+  count: 1,
+};
+
+describe("an empty scope is a reason, never a complete empty answer (INV05)", () => {
+  const projection = scopedProjection([
+    {
+      account: "fixture-a:main",
+      rows: [adopted()],
+      coverage: [ADOPTED_CURRENT],
+    },
+    // Measured and adopted, but no summable currency stock: a known nothing.
+    { account: "fixture-a:points", rows: [], coverage: [ADOPTED_CURRENT] },
+  ]);
+
+  test("holdings for an account the snapshot never measured is partial with a reason", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings", filters: { account: "fixture-a:unknown" } }),
+      reader(),
+      projection,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(validFinancialResult(outcome.result, anyData)).toBe(true);
+    if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(outcome.result.data.units).toEqual([]);
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps).toEqual([
+      { reasonCode: "no_measures_in_scope", scopeRef: null },
+    ]);
+  });
+
+  test("an account measured with no summable asset stays a complete answer with no unit", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings", filters: { account: "fixture-a:points" } }),
+      reader(),
+      projection,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(outcome.result.data.units).toEqual([]);
+    expect(outcome.result.completeness).toBe("complete");
+    expect(outcome.result.coverage.gaps).toEqual([]);
+  });
+
+  test("an empty snapshot is partial, not a complete answer with no unit", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      scopedProjection([]),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps.map((gap) => gap.reasonCode)).toEqual([
+      "no_measures_in_scope",
+    ]);
+  });
+
+  test("a listed account the snapshot never measured is named, and the measured one is summed", async () => {
+    const outcome = await run(
+      grant({ scopes: { sources: "*", accounts: ["fixture-a:main", "fixture-a:unknown"] } }),
+      request({ intent: "holdings" }),
+      reader(),
+      projection,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(outcome.result.data.units).toEqual([
+      { unitRef: "JPY", coefficient: "60000", scale: 0, adoptedCount: 1 },
+    ]);
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps).toEqual([
+      { reasonCode: "no_measures_in_scope", scopeRef: null },
+    ]);
+    // The other measured account is outside this grant and is never named.
+    expect(JSON.stringify(outcome.result)).not.toContain("fixture-a:points");
+  });
+
+  test("coverage for a source the store does not hold is partial with a reason", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "coverage", filters: { source: "fixture-unknown" } }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(validFinancialResult(outcome.result, anyData)).toBe(true);
+    expect(outcome.result.data).toMatchObject({
+      scopes: [],
+      sourceCount: 0,
+      artifactCount: 0,
+      collectionRunCount: 0,
+    });
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps).toEqual([
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-unknown" },
+    ]);
+  });
+
+  test("a listed grant gets the same reason for its own unheld source, and a denied one stays refused", async () => {
+    const narrow = grant({ scopes: { sources: ["fixture-a", "fixture-unknown"], accounts: "*" } });
+    const unheld = await run(
+      narrow,
+      request({ intent: "coverage", filters: { source: "fixture-unknown" } }),
+    );
+    expect(unheld.ok).toBe(true);
+    if (!unheld.ok) return;
+    expect(unheld.result.completeness).toBe("partial");
+    expect(unheld.result.coverage.gaps).toEqual([
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-unknown" },
+    ]);
+    const denied = await run(
+      narrow,
+      request({ intent: "coverage", filters: { source: "fixture-b" } }),
+    );
+    expect(denied.ok).toBe(false);
+    if (denied.ok) return;
+    expect(denied.error.code).toBe("evidence_restricted");
+  });
+
+  test("a listed grant's unheld sources are named without a filter too", async () => {
+    const unheldOnly = grant({ scopes: { sources: ["fixture-unknown"], accounts: "*" } });
+    const holdings = await run(unheldOnly, request({ intent: "holdings" }), reader(), projection);
+    expect(holdings.ok).toBe(true);
+    if (!holdings.ok) return;
+    if (holdings.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(holdings.result.data.units).toEqual([]);
+    expect(holdings.result.completeness).toBe("partial");
+    expect(holdings.result.coverage.gaps).toEqual([
+      { reasonCode: "no_measures_in_scope", scopeRef: null },
+    ]);
+    const mixed = grant({ scopes: { sources: ["fixture-a", "fixture-unknown"], accounts: "*" } });
+    const coverage = await run(mixed, request({ intent: "coverage" }));
+    expect(coverage.ok).toBe(true);
+    if (!coverage.ok) return;
+    if (coverage.result.data.intent !== "coverage") throw new Error("unreachable");
+    expect(coverage.result.data.scopes.map((scope) => scope.sourceRef)).toEqual(["fixture-a"]);
+    expect(coverage.result.completeness).toBe("partial");
+    expect(coverage.result.coverage.gaps).toEqual([
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-unknown" },
+    ]);
+    // Only the grant's own values are named: the held source outside it is not.
+    expect(JSON.stringify(coverage.result)).not.toContain("fixture-b");
+  });
+
+  test("an empty store is complete with no source under the whole-store grant, and names a listed grant's sources", async () => {
+    const empty: Overview = { ...OVERVIEW, sources: [], fetchRuns: [] };
+    const coverageOver = async (grantValue: Grant) => {
+      const body = request({ intent: "coverage" });
+      const opened = await openContext(grantValue, CONTEXT_INPUTS, { query: body });
+      return executeQuery({
+        grant: grantValue,
+        opened,
+        request: body,
+        reader: reader(),
+        overview: empty,
+      });
+    };
+    // The whole-store grant names no source, so nothing it covers is missing.
+    const whole = await coverageOver(grant());
+    expect(whole.ok).toBe(true);
+    if (!whole.ok) return;
+    expect(whole.result.data).toMatchObject({ scopes: [], sourceCount: 0 });
+    expect(whole.result.completeness).toBe("complete");
+    expect(whole.result.coverage.gaps).toEqual([]);
+    const listed = await coverageOver(
+      grant({ scopes: { sources: ["fixture-a", "fixture-unknown"], accounts: "*" } }),
+    );
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.result.completeness).toBe("partial");
+    expect(listed.result.coverage.gaps).toEqual([
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-a" },
+      { reasonCode: "no_artifacts_collected", scopeRef: "source:fixture-unknown" },
+    ]);
+  });
+
+  test("coverage filtered to a held source is unchanged", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "coverage", filters: { source: "fixture-a" } }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.completeness).toBe("complete");
+    expect(outcome.result.coverage.gaps).toEqual([]);
+  });
+});

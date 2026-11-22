@@ -79,7 +79,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb.ts":
       "eda9addc03cd8f2a1a2b83019f28073f3b2e27d0f86dac032c98b7308125e798",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
-      "d673e45c5160a6efbc56b930f9f69ca93cf8eb928e05cc8ca2646adbc9ac8fbb",
+      "188a01df68075f13eceba9737f0b148b813eb90b4fbb2caececf8c19774703a1",
     "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
       "aa24f5018ae32b1019713dfc675de63e137b1f9c16f2622e2d66c8fec4e6f861",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -101,7 +101,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
       "c9dbf90ce8e391a8880ec019bd346ca9647470a346403f1414a7636ca70fb064",
     "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts":
-      "b1b18a54e94ffc72b3e1e2d01592c35a887b1e193fcb7d532191904d235e1ba4",
+      "b0a450609406f8d17e30b3f82934d59d00997d10e5cde39865218cce9ea22cd9",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-balances.ts":
       "48daa4fbad4313fe321015128e20937d0d88c99f64db9471ed1f958e6f44d2e5",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-history.ts":
@@ -470,8 +470,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "paypay-csv": {
-      version: "0.2.3",
-      codeDigest: "ea3e4f114fd8484c840fa0e038f649d6159a461a5653a000f779d5e1ffc26889",
+      version: "0.2.4",
+      codeDigest: "3915331bc25ac2ae707cc8d456e6e89d422c758ee995e0dbb88e4d8ab384c0eb",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -552,11 +552,12 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-domestic-trade-records": {
-      version: "0.2.1",
-      codeDigest: "30015c6f427a2232e8ce8bd46ad63693b14b7e2360b583d1bc937cf754dae779",
+      version: "0.2.2",
+      codeDigest: "90d1636adcfd8f3de0a53b8c8d5fcb909958c609104c7c7108fa3a53321a3d60",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/time.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts",
         "poc/observation-pipeline/src/parsers/util.ts",

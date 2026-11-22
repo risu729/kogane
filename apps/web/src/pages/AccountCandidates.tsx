@@ -25,6 +25,7 @@ import {
   type UnreviewedAggregatorAccount,
 } from "../account-candidates-api.ts";
 import { AccountHistory } from "../AccountHistory.tsx";
+import { BusyButton } from "../busy-button.tsx";
 import { CodeList } from "../instrument-candidate-display.tsx";
 import { displayLabel } from "../labels.ts";
 import { Link, navigate } from "../router.tsx";
@@ -109,8 +110,9 @@ function DecisionActions({ candidate }: { candidate: AccountCandidate }): ReactN
       planAccountCandidateDecision(candidate, decision, reason),
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
-  const canPlan =
-    features.known && features.commands && reason.trim().length > 0 && !plan.isPending;
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
+  const canPlan = features.known && features.commands && reason.trim().length > 0;
   const id = `reason-${candidate.candidateId.replace(/[^A-Za-z0-9_-]/gu, "-").slice(-80)}`;
   return (
     <div className="settlement-decision">
@@ -128,26 +130,24 @@ function DecisionActions({ candidate }: { candidate: AccountCandidate }): ReactN
       </div>
       <div className="button-row">
         {candidate.commands.accept === null ? null : (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("accept")}
           >
             この連携に含まれる口座として採用する内容を確認
-          </button>
+          </BusyButton>
         )}
         {candidate.commands.reject === null ? null : (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("reject")}
           >
             {candidate.status === "accepted"
               ? "採用を取り消す内容を確認"
               : "含まれないものとして扱う内容を確認"}
-          </button>
+          </BusyButton>
         )}
       </div>
       {plan.isError ? (

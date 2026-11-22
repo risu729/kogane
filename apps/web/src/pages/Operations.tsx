@@ -12,7 +12,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError } from "../api.ts";
 import { AUDIT_ROUTE } from "../audit-api.ts";
-import { displayLabel } from "../labels.ts";
+import { displayLabel, ownEntry } from "../labels.ts";
 import {
   EXECUTION_REASON_LABELS,
   OPERATION_DISPATCH_LABELS,
@@ -29,7 +29,7 @@ import {
   type OperationListFilters,
   type OperationSummaryWire,
 } from "../operations-api.ts";
-import { Pagination } from "../pagination.tsx";
+import { CursorPager } from "../pagination.tsx";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Badge, EmptyState, Notice, Panel, QueryBoundary, type Tone } from "../ui.tsx";
 
@@ -118,7 +118,7 @@ function SummaryRow({ summary }: { summary: OperationSummaryWire }): ReactNode {
         {displayLabel(OPERATION_KIND_LABELS, summary.kind)} <Code value={summary.kind} />
       </td>
       <td>
-        <Badge tone={STATUS_TONES[summary.status] ?? "neutral"}>
+        <Badge tone={ownEntry(STATUS_TONES, summary.status) ?? "neutral"}>
           {displayLabel(OPERATION_STATUS_LABELS, summary.status)}
         </Badge>{" "}
         <Code value={summary.status} />
@@ -257,31 +257,19 @@ function Summaries({ filters }: { filters: OperationListFilters }): ReactNode {
               </table>
             </div>
           )}
-          <Pagination
+          <CursorPager
             label="依頼の一覧のページ"
-            status={page.nextCursor === null ? "最後のページです" : "続きがあります"}
-            previous={{
-              label: "前のページ",
-              disabled: query.isFetching || trail.length === 1,
-              onClick: () => setTrail(trail.slice(0, -1)),
+            fetching={query.isFetching}
+            canGoBack={trail.length > 1}
+            hasMore={page.nextCursor !== null}
+            onPrevious={() => setTrail(trail.slice(0, -1))}
+            onNext={() => {
+              if (page.nextCursor !== null) setTrail([...trail, page.nextCursor]);
             }}
-            next={{
-              label: "次のページ",
-              disabled: query.isFetching || page.nextCursor === null,
-              onClick: () => {
-                if (page.nextCursor !== null) setTrail([...trail, page.nextCursor]);
-              },
+            restart={{
+              label: "最新の依頼から読み直す",
+              onClick: () => (trail.length === 1 ? void query.refetch() : restart()),
             }}
-            actions={
-              <button
-                className="button"
-                type="button"
-                disabled={query.isFetching}
-                onClick={() => (trail.length === 1 ? void query.refetch() : restart())}
-              >
-                最新の依頼から読み直す
-              </button>
-            }
           />
         </Panel>
       )}

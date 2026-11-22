@@ -43,17 +43,31 @@ beforeAll(async () => {
       "INSERT INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES('evidence-test','evidence-test','myjcb')",
     ),
   ]);
+  // The second card's total is not a number: decimal-v1 records it `unparsed`.
+  await seedStatements([
+    ["myjcb:synthetic:root", 4000, "4000", "2099-01-10"],
+    ["myjcb:synthetic:unreadable", null, "unreadable", "2099-01-10"],
+  ]);
+  keys = await generateKeyPair("RS256", { extractable: true });
+  jwks = {
+    keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
+  };
+});
+/**
+ * One published MyJCB statement-total parse with a total per card: its
+ * source account, minor units, text and `_kogane.paymentDate` (none when
+ * undefined).
+ */
+async function seedStatements(
+  cards: readonly (readonly [string, number | null, string, string | undefined])[],
+) {
   const run = await seedRun({ source: "myjcb", count: 1 });
   const parse =
     await env.DB.prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
     VALUES(?,'myjcb-credit-statement-total','1','2099-01-12T00:00:00Z','ok','[]') RETURNING id`)
       .bind(run.artifacts[0]!.id)
       .first<{ id: number }>();
-  // The second card's total is not a number: decimal-v1 records it `unparsed`.
-  for (const [card, minor, text] of [
-    ["myjcb:synthetic:root", 4000, "4000"],
-    ["myjcb:synthetic:unreadable", null, "unreadable"],
-  ] as const)
+  for (const [card, minor, text, paymentDate] of cards)
     await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
     VALUES(?,?,'credit_statement_payment_amount',?,?,0,'JPY','2099-01-01','synthetic-total',?)`)
       .bind(
@@ -64,18 +78,15 @@ beforeAll(async () => {
         JSON.stringify({
           _kogane: {
             period: "2099-01",
-            paymentDate: "2099-01-10",
+            ...(paymentDate === undefined ? {} : { paymentDate }),
             snapshotSemantics: "provider-reported-monthly-payment-amount",
           },
         }),
       )
       .run();
   await publishParse(parse!.id);
-  keys = await generateKeyPair("RS256", { extractable: true });
-  jwks = {
-    keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
-  };
-});
+}
+
 beforeEach(() => {
   issuer = `https://card-debit-accounts-${++sequence}.cloudflareaccess.com`;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -437,5 +448,39 @@ describe("the upcoming view (次回の引落)", () => {
     expect(records).toEqual([
       { result: "read", diff_json: JSON.stringify({ kind: "read", rows: 2, truncated: false }) },
     ]);
+  });
+});
+
+// Last, so the cards it adds change no answer above.
+describe("a card whose due date is not answered", () => {
+  beforeAll(async () => {
+    await seedStatements([
+      ["myjcb:synthetic:undated", 4000, "4000", undefined],
+      ["myjcb:synthetic:misdated", 4000, "4000", "2099-02-30"],
+    ]);
+  });
+
+  it("says why on the route and through the tool alike, never a bare null (INV05)", async () => {
+    const overRoute = (await (await call(PATH)).json()) as Record<string, any>;
+    expect(validCardDebitAccountsReview(overRoute)).toBe(true);
+    const statements = Object.fromEntries(
+      overRoute["items"].map((item: Record<string, any>) => [
+        item["card"].sourceAccount,
+        item["latestStatement"],
+      ]),
+    );
+    expect(statements["myjcb:synthetic:misdated"]).toMatchObject({
+      paymentDate: null,
+      paymentDateReason: "payment_date_invalid",
+    });
+    expect(statements["myjcb:synthetic:undated"]).toMatchObject({
+      paymentDate: null,
+      paymentDateReason: "payment_date_absent",
+    });
+    // A dated statement carries no reason.
+    expect(statements["myjcb:synthetic:root"]).not.toHaveProperty("paymentDateReason");
+    const overMcp = await mcp({ method: "tools/call", params: { name: TOOL, arguments: {} } });
+    expect(overMcp["result"].isError).toBe(false);
+    expect(overMcp["result"].structuredContent).toEqual(overRoute);
   });
 });

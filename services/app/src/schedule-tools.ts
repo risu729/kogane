@@ -12,6 +12,7 @@ import {
   type MaintenanceRead,
   maintenanceReadSummary,
 } from "../../../packages/collection/src/schedule-model.ts";
+import { READ_DETAILS } from "../../../packages/domain/src/read-detail.ts";
 
 /** On `/mcp` and, as `schedules.maintenance.read`, on `/api/agent/v1/*`. */
 export const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
@@ -33,15 +34,9 @@ const scheduleReadSchema = z.strictObject({ source: sourceId.optional() });
  * Processor's read as it is, which takes no `offset`.
  */
 const maintenanceReadSchema = scheduleReadSchema.extend({
-  detail: z.enum(["summary", "full"]).optional(),
+  detail: z.enum(READ_DETAILS).optional(),
   offset: z.number().int().min(0).max(1000).optional(),
 });
-
-/** The published JSON Schema of one argument schema, without the meta key. */
-function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = mcpInputSchema(schema);
-  return generated;
-}
 
 export const SCHEDULE_MCP_TOOLS = [
   {
@@ -49,7 +44,7 @@ export const SCHEDULE_MCP_TOOLS = [
     title: "Read maintenance settings of the granted sources",
     description:
       "Public maintenance rules with their revision history (actor kind and closed reason), the registered maintenance reference, and per schedule the original next occurrence, the maintenance-adjusted due time, the actual alarm, whether the reservation is armed or pending, and the latest receipt's outcome. `detail: summary` (the default) answers per source its reference status (`confirmed`, `no-applicable-rule`, `not-found`) and scheduleCount and ruleCount; per job its id, kind, enabled, supported, revision, nextNominalAt, nextRunAt, reservation (`armed`, `pending`, `disabled`) and newest receipt (nominal time, status, closed failure code); per rule its current revision (revision, timezone, pattern, enabled, scope) with how many revisions are listed, their distinct actor kinds and change reasons, and how many the caller wrote; and the delegated write limits. It is paged by line, 16 jobs and rules a page (a source's lines can continue on the next page, where it is listed again): `offset` is the previous page's `coverage.nextOffset`; each page is a fresh read, so a `coverage.lines` that differs from the previous page's means the store changed and a line may repeat or be skipped. `detail: full` answers every listed revision with its reference URL, verification and creation times, the actual alarm and the receipt's start and finish, and takes no `offset`. Only sources in this grant's scheduleSources; no financial data.",
-    inputSchema: inputSchema(maintenanceReadSchema),
+    inputSchema: mcpInputSchema(maintenanceReadSchema),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
@@ -57,7 +52,7 @@ export const SCHEDULE_MCP_TOOLS = [
     title: "Read maintenance re-survey proposals of the granted sources",
     description:
       "The schedules page's re-survey section: whether the lane runs, each allowlisted page's freshness and last failure code, and the undecided proposals (id, source, kind, rule, baseRevision, whether it is still current, timezone, pattern, enabled, scope, status, closed reasons, page URL, fetch time and SHA-256). Never page text. Only sources in this grant's scheduleSources. truncated is true when the page's bound on shown proposals was reached. Decide a proposal with kogane.schedules.survey.decide.",
-    inputSchema: inputSchema(scheduleReadSchema),
+    inputSchema: mcpInputSchema(scheduleReadSchema),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
 ] as const;
@@ -183,7 +178,7 @@ export const LEASE_RELEASE_MCP_TOOLS = [
     title: "Release a stopped collection's lease (operator only)",
     description:
       "Refuses every call with operation_not_delegable. Releasing a collection lease asserts that the execution holding it stopped before the server can tell, so only the operator releases it early on the schedules page (risk class R3). The Processor frees a lease itself once its heartbeat has been silent for ten minutes. The call is recorded; nothing is released and the Processor is not contacted.",
-    inputSchema: inputSchema(leaseReleaseSchema),
+    inputSchema: mcpInputSchema(leaseReleaseSchema),
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   },
 ] as const;

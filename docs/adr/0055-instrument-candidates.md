@@ -1409,7 +1409,7 @@ plan's pins).
 
 ## Amendment 2026-11-19: the adoption re-checks `listed_as` when it writes
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1430](https://github.com/risu729/kogane/pull/1430))
 - Date: 2026-11-19
 - Carried by: `INSTRUMENT_AUTO_ADOPTION_SQL.adoptionGuard` and
   `adoptInstrument` in `services/processor/src/instrument-auto-adoption.ts`;
