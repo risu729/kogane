@@ -42,7 +42,7 @@ const COVERS_REASONS: Record<CoversUnknownReason, string> = {
   bill_not_exact: "請求額が確定していない請求があります。",
   balance_not_exact: "口座の残高が分かりません。",
   balance_before_previous_debit:
-    "残高は前回の引落より前に取得したもので、その引落を含まない可能性があります。",
+    "残高はカードの引落日の当日以前に取得したもので、その引落を含むかどうか分かりません。",
   cards_with_unknown_account:
     "引落口座が分からないカードの請求が、この口座から引き落とされる可能性があります。",
   cards_with_unknown_due_date:
