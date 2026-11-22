@@ -475,7 +475,8 @@ rolled back with its record), `services/processor/test/schedule-dispatch-marker.
 `retry_claimed` line names the revision the retry was fenced on, and a lost
 fence logs none), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
-idle, off and unaudited lanes, a failed tick, a record that cannot be written),
+idle, off and unaudited lanes, a lane named like a built-in property such as
+`constructor` taken as unaudited, a failed tick, a record that cannot be written),
 `services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a
 key range without table statistics; the proposal reads equal the shipped text),
 `services/processor/test/card-purchase-lane-audit.test.ts` (the deployed
