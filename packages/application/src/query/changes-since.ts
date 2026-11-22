@@ -54,7 +54,7 @@ import {
 } from "../../../domain/src/changes-since.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, grantAllows, wholeStoreReadRefusal } from "../grants.ts";
 
 const REQUEST_ID = "changes.since";
 
@@ -226,6 +226,15 @@ export type ChangesSinceOutcome =
 export interface ChangesSinceServed {
   /** The A10 event projection (`eventsV2Available`). */
   events: boolean;
+}
+
+/**
+ * The grant's refusal, or null when it may read: `records.read` over the
+ * whole store. Decided before the request is checked or anything is read, by
+ * the service and by an adapter that checks a body's form first.
+ */
+export function changesSinceGrantRefusal(grant: Grant): FinancialError | null {
+  return wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
 }
 
 /** The request as the route's query or the tool's body gives it; the service checks it. */
@@ -457,22 +466,19 @@ const bytes = (answer: ChangesSince): number =>
 export async function readChangesSince(input: {
   grant: Grant;
   sql: SqlExecutor;
-  served: ChangesSinceServed;
+  /** Or how to ask it, asked only once the grant and the request pass: a schema probe is a read. */
+  served: ChangesSinceServed | (() => Promise<ChangesSinceServed>);
   request: ChangesSinceRequest;
   /** An ISO instant; `since` may be at most `CHANGES_SINCE_MAX_DAYS` before it, never after. */
   now: string;
 }): Promise<ChangesSinceOutcome> {
-  const { grant, sql, served, request, now } = input;
+  const { grant, sql, request, now } = input;
   const fail = (code: FinancialErrorCode, refs: string[]): ChangesSinceOutcome => ({
     ok: false,
     error: financialError(code, REQUEST_ID, refs),
   });
-  if (!grantAllows(grant, "records.read")) return fail("unauthorized", ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = changesSinceGrantRefusal(grant);
+  if (refused) return { ok: false, error: refused };
   const instant = Date.parse(now);
   if (!Number.isFinite(instant)) throw new RangeError("now is not an instant");
   const checked = checkedSince(request.since, instant);
@@ -482,6 +488,7 @@ export async function readChangesSince(input: {
     return fail("invalid_query", ["after:format"]);
   const since = checked.since;
   const evidence = grantAllows(grant, CHANGES_SINCE_HANDLER_CAPABILITIES.runs);
+  const served = typeof input.served === "function" ? await input.served() : input.served;
 
   const sources = (
     await sql.all<SourceRow>(CHANGES_SINCE_SOURCES_SQL, [

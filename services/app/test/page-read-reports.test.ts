@@ -9,6 +9,10 @@ import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
+  ACCOUNT_SUMMARY_BYTES,
+  pageReadAnswerBytes,
+} from "../../../packages/observation-shared/src/collection-quality-contract";
+import {
   PAGE_READ_ROUTES,
   pageReadMcpTools,
   pageReadServed,
@@ -20,6 +24,12 @@ import { pageReadHarness, RECORDS_GRANT, tableCounts, withoutTables } from "./pa
 const REPORTS = "kogane.reports.read";
 const QUALITY = "kogane.collection-quality.read";
 const NOW = "2026-08-31T15:00:00.000Z";
+/**
+ * The synthetic account's stored label: multi-byte characters, a four-byte
+ * one and characters JSON escapes, so an answer's bytes differ from its
+ * characters (ADR 0123, amendment 2026-11-20).
+ */
+const QUALITY_LABEL = `合成口座「テスト」😀"\\\u0001${"長".repeat(40)}`;
 /** Records and evidence over the whole store: the collection quality page needs evidence.read. */
 const EVIDENCE_GRANT = { ...RECORDS_GRANT, capabilities: ["records.read", "evidence.read"] };
 const page = pageReadHarness("report-read");
@@ -131,8 +141,8 @@ beforeAll(async () => {
       "INSERT INTO source_accounts VALUES('synthetic-quality-ref','sony-bank','evidence-test','[\"synthetic-quality-ref\"]')",
     ),
     env.DB.prepare(
-      "INSERT INTO accounts VALUES('synthetic-quality-account','Synthetic quality account','synthetic-role','identified')",
-    ),
+      "INSERT INTO accounts VALUES('synthetic-quality-account',?,'synthetic-role','identified')",
+    ).bind(QUALITY_LABEL),
     env.DB.prepare(
       "INSERT INTO account_mappings VALUES('synthetic-quality-map','synthetic-quality-ref',1,'synthetic-quality-account','rule','synthetic_reason',1,'2026-09-11','Synthetic quality account','identified')",
     ),
@@ -329,6 +339,9 @@ describe("collection quality page reads", () => {
     const before = await tableCounts();
     for (const [query, args] of [
       ["/api/collection-quality", {}],
+      // The summary's source lines are paged too (ADR 0123, amendment 2026-11-21).
+      ["/api/collection-quality?offset=0", { offset: 0 }],
+      ["/api/collection-quality?detail=summary&offset=1", { detail: "summary", offset: 1 }],
       ["/api/collection-quality/sony-bank", { source: "sony-bank" }],
       ["/api/collection-quality/sony-bank", { source: "sony-bank", view: "cells" }],
       ["/api/collection-quality/sony-bank?offset=0", { source: "sony-bank", offset: 0 }],
@@ -337,6 +350,19 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
+      // The account view's summary pages its lines (ADR 0123, amendment 2026-11-20).
+      [
+        "/api/collection-quality/sony-bank/accounts?offset=0",
+        { source: "sony-bank", view: "accounts", offset: 0 },
+      ],
+      [
+        "/api/collection-quality/sony-bank/accounts?detail=summary&offset=1",
+        { source: "sony-bank", view: "accounts", detail: "summary", offset: 1 },
+      ],
+      [
+        "/api/collection-quality/sony-bank/accounts?detail=full",
+        { source: "sony-bank", view: "accounts", detail: "full" },
+      ],
       // The full answers the summaries are shaped from (ADR 0123).
       ["/api/collection-quality?detail=full", { detail: "full" }],
       ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
@@ -350,7 +376,33 @@ describe("collection quality page reads", () => {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
       expect(validApiResponse(query.split("?")[0]!, route.body), query).toBe(true);
-      if ("view" in args && args.view === "accounts") {
+      if (
+        "view" in args &&
+        args.view === "accounts" &&
+        !("detail" in args && args.detail === "full")
+      )
+        expect(route.body).toMatchObject({
+          apiVersion: 3,
+          detail: "summary",
+          dataTypesVersion: "provider-data-types-v1",
+          dataTypes: { collected: expect.arrayContaining(["cash_movement"]) },
+          accounts:
+            "offset" in args && args.offset === 1
+              ? []
+              : [
+                  expect.objectContaining({
+                    accountId: "synthetic-quality-account",
+                    providerTypes: ["cash_movement"],
+                    freshness: expect.objectContaining({ ageDays: expect.any(Number) }),
+                  }),
+                ],
+        });
+      if (
+        "view" in args &&
+        args.view === "accounts" &&
+        "detail" in args &&
+        args.detail === "full"
+      ) {
         expect(route.body).toMatchObject({
           apiVersion: 3,
           dataTypesVersion: "provider-data-types-v1",
@@ -390,9 +442,32 @@ describe("collection quality page reads", () => {
     expect(await tableCounts()).toEqual(before);
   });
 
-  it("refuse a summary with an offset, an unknown source, and a grant without evidence.read", async () => {
+  it("hold the account summary to the bytes /mcp writes as its text, multi-byte labels included (ADR 0123, amendment 2026-11-20)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const label = QUALITY_LABEL;
+    const args = { source: "sony-bank", view: "accounts" };
+    const route = await page.route("/api/collection-quality/sony-bank/accounts");
+    expect(route.body).toMatchObject({ accounts: [expect.objectContaining({ label })] });
+    const message = await page.mcpMessage({
+      method: "tools/call",
+      params: { name: QUALITY, arguments: args },
+    });
+    const text: string = message["result"].content[0].text;
+    const overHttp = await page.http(QUALITY, args);
+    expect(overHttp.body).toEqual({ schemaVersion: "kogane-page-read-v1", data: route.body });
+    expect(JSON.parse(text)).toEqual(overHttp.body);
+    // The measure the page is cut by is the text an MCP client receives.
+    expect(new TextEncoder().encode(text).length).toBe(pageReadAnswerBytes(route.body));
+    expect(pageReadAnswerBytes(route.body)).toBeLessThanOrEqual(ACCOUNT_SUMMARY_BYTES);
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(text.length);
+  });
+
+  it("refuse a full summary with an offset, an unknown source, and a grant without evidence.read", async () => {
     for (const [query, args, status] of [
-      ["/api/collection-quality?offset=0", { offset: 0 }, 400],
       ["/api/collection-quality/absent-source", { source: "absent-source" }, 404],
       [
         "/api/collection-quality/absent-source/accounts",
@@ -407,15 +482,31 @@ describe("collection quality page reads", () => {
       expect(overHttp, query).toEqual({ status, body: refusal });
       expect((await page.mcp(QUALITY, args)).body).toEqual(refusal);
     }
-    // The account view takes no query on its route; a tool argument outside
-    // its closed shape is refused before any read, as for every page read.
-    expect((await page.route("/api/collection-quality/sony-bank/accounts?offset=0")).status).toBe(
-      400,
-    );
+    // The account view's full answer is unpaged (ADR 0123, amendment
+    // 2026-11-20); a tool argument outside its closed shape is refused before
+    // any read, as for every page read.
+    for (const query of [
+      // So is the full summary's (ADR 0123, amendment 2026-11-21).
+      "/api/collection-quality?detail=full&offset=0",
+      "/api/collection-quality?offset=0&offset=1",
+      "/api/collection-quality?limit=10",
+      "/api/collection-quality/sony-bank/accounts?detail=full&offset=0",
+      "/api/collection-quality/sony-bank/accounts?detail=compact",
+      "/api/collection-quality/sony-bank/accounts?limit=10",
+      "/api/collection-quality/sony-bank/accounts?offset=0&offset=1",
+    ])
+      expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_query" });
+    for (const query of [
+      "/api/collection-quality?offset=-1",
+      "/api/collection-quality/sony-bank/accounts?offset=-1",
+    ])
+      expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_offset" });
     for (const args of [
+      { detail: "full", offset: 0 },
       { view: "accounts" },
       { view: "cells" },
-      { source: "sony-bank", view: "accounts", offset: 0 },
+      { source: "sony-bank", view: "accounts", detail: "full", offset: 0 },
+      { source: "sony-bank", view: "accounts", detail: "compact" },
       { source: "sony-bank", view: "unknown" },
       { source: "sony-bank/accounts" },
       // The status view is the summary's: it names no source and no page.

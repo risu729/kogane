@@ -1,6 +1,6 @@
 # ADR 0108: SBI delivered-document evidence and bounded continuation
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1281](https://github.com/risu729/kogane/pull/1281))
 - Date: 2026-11-11
 
 ## Context
@@ -109,6 +109,8 @@ Required workspace/root and repository checks validate the implementation;
 no provider collector execution or deployment is part of these checks.
 
 ## Amendment 2026-11-18: the current list is bounded by the terminal's unit capacity
+
+Status: accepted (merged 2026-11-19 in [#1397](https://github.com/risu729/kogane/pull/1397)).
 
 The mailbox terminal states one unit per listed row plus `mailbox-index`, and
 a terminal manifest holds at most 1,000 units (`packages/collection`). The

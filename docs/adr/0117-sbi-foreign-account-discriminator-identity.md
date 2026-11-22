@@ -1,6 +1,6 @@
 # ADR 0117: Scope an SBI Securities foreign row with no account discriminator to its fetch run under identity policy 3, keeping the foreign cash history's reference
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1416](https://github.com/risu729/kogane/pull/1416))
 - Date: 2026-11-18
 - Carried by:
   `packages/identity/src/sbi.ts` (`SBI_UNDISCRIMINATED_ACCOUNT_POLICY_VERSION`,

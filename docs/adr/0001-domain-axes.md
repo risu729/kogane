@@ -357,7 +357,7 @@ model. The suite fails when the ranking drops the decision precedence, the
 
 ## Amendment 2026-11-18: `same` is an equivalence in adoption
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1420](https://github.com/risu729/kogane/pull/1420))
 - Date: 2026-11-18
 - Carried by: `selectAdoptedSet` (step 4) in `packages/domain/src/scope.ts`,
   `SCOPE_RELATION_RELEASE` (`scope-relations-v3`) in

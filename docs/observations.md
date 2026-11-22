@@ -17,6 +17,119 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank WALLET: a currency outside the minor-unit table keeps its exact decimal (WALLET 1.0.8)
+
+2026-11-22. `sony-bank-wallet-history` 1.0.7 read the transaction amount
+(`お取引通貨 金額`) and any of the four fee cells that names a currency through
+one helper that required an exact minor-unit integer (a bare-decimal fee was
+already only checked as an exact decimal). The minor-unit table
+(`packages/parsers/src/money.ts`) names only JPY, USD and AUD, so a row whose
+currency was any other code the parser accepts (BRL, CAD, CHF, CNH, EUR, GBP,
+HKD, NZD, SEK, ZAR) refused the whole month as
+`WALLET transaction amount is not exact`, even when the amount was unsigned
+and would not have been published at all. The history parsers refused the same
+way until
+[1.0.5 and 1.0.6](sources/sony-bank.md#2026-11-19-currencies-outside-the-minor-unit-table).
+
+1.0.8 applies the history rule to WALLET: for a currency the table does not
+name, the amount and fees must still be exact decimals with valid digit
+grouping, and an explicitly signed amount is published as `amountText` and
+`amountScale` with no `amountMinor`; its direction comes from the sign of the
+decimal (`-0.00` is not an outflow, as `-0` JPY was not), the provider-sign rule
+WALLET already applies to JPY, USD and AUD; nothing about the currency is
+inferred. An unsigned amount is still omitted with the same warning. Fees are
+validated and not published, as before. JPY, USD and AUD keep their minor-unit
+check, so `USD 12.345` and a `JPY 1.5` fee are still refused, and every row in
+those currencies reads as before, identity included. A currency code outside
+Sony's list is still refused.
+
+`sony-bank.ts` holds all four Sony parsers, so `sony-bank-gross-balance` 1.0.6
+to 1.0.7, `sony-bank-history-json` 1.0.5 to 1.0.6 and `sony-bank-history-csv`
+1.0.6 to 1.0.7 are released with only their digests moved, because a parser name
+and version may not carry a second code digest
+(`packages/parsers/test/parser-digests.test.ts`, migration 0028); they read
+every artifact as before. **Deploying rewrites nothing**: stored runs and rows
+stay (evidence is append-only), the processor registers the releases and the
+repair lane re-parses stored Sony captures under them. No migration and no
+operator step: no snapshot policy row or reader pins these parsers by version.
+Limits: production was not read, so whether a stored WALLET month carries such a
+currency is not established, and a non-JPY WALLET amount such as `EUR 12.34` is
+the shape the parser's cell pattern and currency list already admitted (1.0.7
+then refused it for a currency outside the table), not an observed capture.
+Downstream, such a row takes the path non-table history rows take since 1.0.5:
+`amount_minor` is null and the exact text is kept; the WALLET `card-purchase`
+and `fx-exchange` families stay unsupported, so no event writer reads it. Tests:
+`packages/parsers/test/sony-bank-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
+## SBI Securities: a foreign cash schedule date that is not a date is no as_of (cash balances 0.2.2)
+
+2026-11-22. `sbi-foreign-cash-balances` 0.2.1 copied a schedule row's
+`businessDate` into `as_of` whenever it was a string, so `2026-02-30`, an
+empty string, `20260820` or `2026/08/20` became an `as_of` with no issue and
+the container still claimed complete. The latest balance ranks by
+`COALESCE(as_of, observed_at, '')` as text, so such a value could outrank the
+real schedule dates of the same metric and currency; a stated non-string
+(`null`, a number) gave no `as_of`, also without an issue, leaving the row's
+day (T+0, T+2, ...) unstated. 0.2.2 reads only a calendar `YYYY-MM-DD` date,
+the form the repository's fixtures state and the only form the read model
+orders correctly. Any other stated value leaves
+`as_of` empty on that row's balances and records one `row_unreadable` issue
+of severity `error` and impact `membership` at
+`<row>.businessDate`, so the container is partial; its message names the
+locator only, never the value, which stays in `extra.row`. A row that states
+no `businessDate` at all is read as in 0.2.1. The replay diagnostics
+(`services/processor/scripts/parser-rejection.ts`) name the new issue by its
+field, `businessDate`. Every valid date reads exactly as in 0.2.1, and no
+other parser's digest changed.
+
+| Parser                    | Previous | Release |
+| ------------------------- | -------- | ------- |
+| sbi-foreign-cash-balances | 0.2.1    | 0.2.2   |
+
+**Deploying rewrites nothing**: stored 0.2.1 runs stay as they are; the
+processor registers 0.2.2 itself and the repair lane re-parses stored
+captures under it. No migration: the dataset's snapshot policy row
+(`legacy-warning-compat-v1`) pins no parser version, and the new issue's
+warning text is not one of the two that policy treats as harmless, so a
+capture with an unreadable date is not a complete snapshot under either
+policy. Limits: production was not read for this release, so whether any
+stored capture states another form is not established. Tests:
+`packages/parsers/test/sbi-refusals.test.ts`,
+`services/processor/test/parser-rejection.test.ts`.
+
+## SBI Securities: a domestic trade date that is not a date is no as_of (trade records 0.2.2)
+
+2026-11-22. `sbi-domestic-trade-records` 0.2.1 copied a record's `tradeDate`
+into `as_of` whenever it was a string. The collector writes that field as
+`20YY-MM-DD` from the execution page's `YY/MM/DD` cell without a calendar check
+(`shortDate` in `services/collector-sbi-securities/src/main-site.ts`), so a
+cell such as `26/02/30` became the `as_of` `2026-02-30`, and any other string
+in a stored record passed through verbatim, with no warning. Transactions
+order by `as_of` as text, so such a value sorts among real dates. 0.2.2 reads
+only a calendar `YYYY-MM-DD` date. Any other stated value, or a stated
+non-string, leaves `as_of` empty and records
+`records[N]: tradeDate is not a calendar YYYY-MM-DD date; recorded without
+as_of`, which names the row and never the value; the value stays in `extra`.
+A record without `tradeDate` reads as in 0.2.1. Every valid date reads exactly
+as in 0.2.1, and no other parser's digest changed.
+
+| Parser                     | Previous | Release |
+| -------------------------- | -------- | ------- |
+| sbi-domestic-trade-records | 0.2.1    | 0.2.2   |
+
+**Deploying rewrites nothing**: stored 0.2.1 runs stay as they are; the
+processor registers 0.2.2 itself and the repair lane re-parses stored
+captures under it. No migration and no operator step: the only snapshot
+policy row naming this parser (migration 0100) is an eligibility row with
+`snapshot_selection = 0` and no `required_parser_version`, so it enrols the
+dataset in no snapshot and pins no version, and no snapshot rule reads this
+parser's warnings. Limits: production was not read for this release, so
+whether any stored record states an impossible date is not established; the
+collector still writes the unchecked form (the verbatim cell stays in
+`rawCells[0]`), and the parser is where it is caught. Tests:
+`packages/parsers/test/sbi-refusals.test.ts`.
+
 ## Vpass credit snapshots keep the card name (credit-snapshot 1.1.0)
 
 2026-11-20. Owner approval of the readable-label proposal, 2026-11-19 03:29
@@ -260,6 +373,66 @@ quoted rows, trailing text, multiline fields and logical row numbering.
 | v-point-pay-notification-event           | 1.0.0    | 1.0.1   |
 | v-point-smfg-point                       | 1.0.0    | 1.0.1   |
 | vpass-statement-page                     | 1.2.0    | 1.2.1   |
+
+## PayPay CSV: columns read by expected label first, separator-only rows skipped (parser 0.2.4)
+
+2026-11-21. 0.2.4 fixes two independent reading errors of `paypay-csv`
+0.2.3.
+
+**Column labels.** 0.2.3 placed each field on the first free header column
+whose label contained the field's substring, in documented field order.
+`出金` is part of both `出金金額（円）` and `海外出金金額`, so a header that
+listed the overseas amount before the yen outflow gave the outgoing JPY field
+the overseas column: a 12 USD purchase became a yen outflow of 12, the row's
+yen amount was dropped as an undocumented column, and a domestic row
+(overseas amount blank) got no amount at all. The only signs were the header
+warnings, and a header whose overseas column sat at the outgoing column's
+documented position gave no position warning either.
+
+0.2.4 places every column whose trimmed label is exactly the label the parser
+expects first, then matches the remaining fields by substring, and only then
+falls back to the documented position, so neither a substring nor a position
+can take a column an expected label names. The expected labels are the ones
+the synthetic fixtures use; [the source notes](sources/paypay.md#csv-granularity-and-omissions)
+list the 13 columns by meaning, and the current export's exact labels are
+unverified. Neither JPY amount field matches a label containing `海外` (the
+overseas amount is a foreign-currency figure, not yen); the position fallback
+does not read labels, so a JPY field no label matches still takes its
+documented column if no other field took it, whatever its label, with the
+fallback warning. A header with all 13 expected labels in the documented
+order is read exactly as in 0.2.3, with the same warnings. A header that reads differently is one whose overseas column
+precedes the yen outflow, whose labels differ from the expected ones, or that
+lacks a column: 0.2.3 let a field with no label take its documented position
+before later fields looked for their labels, so without `入金金額（円）` the
+incoming JPY field took the overseas amount in column 3, every later field
+took the column after its own (the transaction number was lost), and a
+yen outflow row was left without an amount as stating both. In 0.2.4 the yen
+amounts are the yen columns' and each labelled column keeps its field.
+
+**Rows of separators only.** The shared CSV reader drops an empty line, but a
+line of separators only (`,,,,,,,,,,,,`, as a spreadsheet saves a trailing
+blank row of the export) is a row of empty cells. 0.2.3 turned each such row
+into a transaction observation with no date, amount, external id,
+description or counterparty, and the warning `row N: neither an outgoing nor
+an incoming amount was stated`, so the transaction list showed an empty
+transaction for a line that states nothing.
+
+0.2.4 skips a row whose every cell is blank after trimming and records the
+closed warning `row N: blank row skipped`, which names no value. Row numbers
+and raw locators of every other row are unchanged, and every row with any
+non-blank cell reads exactly as in 0.2.3, including a row that states neither
+amount but does state something else.
+
+**Deploying rewrites nothing**: the processor registers 0.2.4 itself and the
+repair lane re-parses any stored PayPay CSV artifact under it. No migration
+and no operator step; earlier runs and their observations, including any
+empty observation a separators-only row produced, stay as recorded in those
+superseded runs. Limits: PayPay CSV has no production input (see
+[identity rollout](identity-rollout.md)), so no stored export is known to be
+affected by either change, and the parser still reads a header whose labels
+match none of the expected ones by position, with a warning. Tests:
+`packages/parsers/test/paypay-csv-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
 
 ## PayPay CSV: a signed amount in either amount column is left empty (parser 0.2.2)
 
@@ -2903,8 +3076,10 @@ Four exist in `packages/parsers/src/parsers/`, all at version
 dataset written by `services/collector-sbi-securities`, whose body is
 `{ records, hasMore }` with each record keeping the source table row in
 `rawCells`. Every record becomes one transaction observation in JPY, with
-`as_of` from `tradeDate`, `description` from `rawCells[1]` (falling back
-to `issueName`), and the whole record spread into `extra`. The amount is
+`as_of` from `tradeDate` when it is a calendar `YYYY-MM-DD` date (any other
+stated value is a warning and no `as_of`, 0.2.2), `description` from
+`rawCells[1]` (falling back to `issueName`), and the whole record spread
+into `extra`. The amount is
 accepted as a display string or as a JSON number, and the verbatim form is
 kept in `amount_text` even when it does not resolve to minor units. It
 does not decide the sign from the trade type, and it does not treat the
@@ -2956,8 +3131,9 @@ dataset, the `data` object of `GetForeignCashBalance`. It walks accounts
 provider metric per row — `buy_possible_amount`, `keep_cash`,
 `transfer_possible_amount`, `remaining_buy_possible_amount`,
 `amount_pay_value` — with `instrument` from `currencyCode`, `as_of` from
-`businessDate`, and the three-part `{ account, currencyEntry, row }`
-context in `extra`. It does not decide which of the five is "the" balance.
+`businessDate` when it is a calendar `YYYY-MM-DD` date (any other stated
+value is a membership issue and no `as_of`, 0.2.2), and the three-part
+`{ account, currencyEntry, row }` context in `extra`. It does not decide which of the five is "the" balance.
 All five coexist, which is what `docs/design.md` means by balances being
 measurements rather than columns. It is also the parser whose container
 handling is described above: malformed containers are warned about and
@@ -2965,15 +3141,24 @@ skipped, not turned into placeholder rows.
 
 **`paypay-csv`** consumes the official consumer CSV documented in
 `docs/sources/paypay.md`, ingested through the `ingest-file` path. Each
-data row becomes one transaction observation: outgoing amounts negative,
+data row becomes one transaction observation (a row of separators only is
+skipped with a warning, 0.2.4): outgoing amounts negative,
 incoming positive, and the overseas amount, currency, conversion rate, and
 country left decomposed in `extra`, never folded into the JPY figure — the
 same rule `smcc-meisai-scraper` already follows for foreign card use.
 
 Its column mapping is load-bearing and is not positional. Columns are
-located by matching a distinguishing substring of each header label
-(`取引日`, `出金`, `入金`, `海外`, `通貨`, `レート`, `利用国`, `取引内容`,
-`取引先`, `取引方法`, `支払い区分`/`支払区分`, `利用者`, `取引番号`).
+located in three passes (0.2.4): first every column whose trimmed label is
+exactly the one the parser expects (`取引日`, `出金金額（円）`, `入金金額（円）`,
+`海外出金金額`, `通貨`, `変換レート（円）`, `利用国`, `取引内容`, `取引先`,
+`取引方法`, `支払い区分`, `利用者`, `取引番号`); then, for a field still
+unplaced, the first free column whose label contains its distinguishing
+substring (`取引日`, `出金`, `入金`, `海外`, `通貨`, `レート`, `利用国`,
+`取引内容`, `取引先`, `取引方法`, `支払い区分`/`支払区分`, `利用者`,
+`取引番号`), where neither JPY amount column matches a label containing
+`海外`; and last the documented position. The expected labels are the ones the
+synthetic fixtures use; `docs/sources/paypay.md` lists the columns by meaning,
+not by exact label.
 Position is used only as a fallback, and every fallback is warned about,
 as is a column found at a position other than the documented one and any
 header column the documentation does not list. The parser throws outright

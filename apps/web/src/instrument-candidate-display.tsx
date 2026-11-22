@@ -4,7 +4,7 @@ import { InstrumentHistory } from "./InstrumentHistory.tsx";
 // shown as itself (`displayLabel`), never dropped. A gap is shown as what is
 // not known, never as agreement: missing is a reason, not a match.
 import type { ReactNode } from "react";
-import { displayLabel } from "./labels.ts";
+import { displayLabel, ownEntry } from "./labels.ts";
 import type { ResolutionIdentifier, ReviewCandidate } from "./instrument-candidates-api.ts";
 import { Badge, Kv, KvRow, type Tone } from "./ui.tsx";
 
@@ -65,7 +65,10 @@ export const IDENTIFIER_STATE_LABELS: Readonly<Record<string, string>> = {
 };
 
 export function CandidateStatus({ candidate }: { candidate: ReviewCandidate }): ReactNode {
-  const status = STATUS[candidate.status] ?? { label: candidate.status, tone: "warn" as const };
+  const status = ownEntry(STATUS, candidate.status) ?? {
+    label: candidate.status,
+    tone: "warn" as const,
+  };
   return (
     <>
       <Badge tone={status.tone}>{status.label}</Badge>
@@ -128,8 +131,11 @@ export function IdentifierSide({
         <strong>{identifier.label}</strong>
       </KvRow>
       <KvRow label="識別子">
+        {/* An empty scope is part of the key (`ric//<RIC>`), not a missing
+            value: it stays empty, as the identity list and a record's
+            organization panel print it. */}
         <code className="wrap-any">
-          {identifier.namespace} / {identifier.scope || "—"} / {identifier.value}
+          {identifier.namespace} / {identifier.scope} / {identifier.value}
         </code>
       </KvRow>
       <KvRow label="種別">{identifier.kind}</KvRow>

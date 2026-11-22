@@ -23,6 +23,7 @@ import { assertRedactedHtml } from "./redaction";
 import {
   CONNECTION_STOP_CODES,
   JPOINT_COLLECTION_CODES,
+  MAX_DETAIL_POSITION,
   SCHEDULE_PAGE_CODES,
   UNREAD_MONTH_CODES,
   type CollectionFailure,
@@ -230,7 +231,7 @@ function stopCode(value: string): ConnectionStopCode {
 
 /** A month position (`detailMonth`), or a refused plan. */
 function position(value: number): number {
-  if (!Number.isInteger(value) || value < 0 || value > 17) {
+  if (!Number.isInteger(value) || value < 0 || value > MAX_DETAIL_POSITION) {
     throw new Error("manifest_stop_position_invalid");
   }
   return value;

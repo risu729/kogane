@@ -49,8 +49,13 @@ export interface CollectionManifest {
   status: "success" | "partial" | "failed";
   asOfDateJst: string;
   capturedSessionAt?: string;
-  transactionCount: number;
-  pageCount: number;
+  /**
+   * Present only when the history walk finished. A run that stopped earlier
+   * never learned them, so they are absent, never 0 (INV05); its `failures`
+   * carry the reason.
+   */
+  transactionCount?: number;
+  pageCount?: number;
   complete: boolean;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];

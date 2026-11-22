@@ -75,11 +75,11 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
-      "994197d0fe383f841b92fb116a500a173711d3f30574b89f72d4aa13bbddd79d",
+      "138bf7a4e2e967ad9ce940edd92300a59eb24b314b73050bdce98dcb78cd4e8b",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "d13f9f54ff7de2cb99e3dbc15bb2297850474f6741f13e23621a08a382d51279",
+      "eda9addc03cd8f2a1a2b83019f28073f3b2e27d0f86dac032c98b7308125e798",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
-      "d673e45c5160a6efbc56b930f9f69ca93cf8eb928e05cc8ca2646adbc9ac8fbb",
+      "188a01df68075f13eceba9737f0b148b813eb90b4fbb2caececf8c19774703a1",
     "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
       "aa24f5018ae32b1019713dfc675de63e137b1f9c16f2622e2d66c8fec4e6f861",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -101,9 +101,9 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
       "c9dbf90ce8e391a8880ec019bd346ca9647470a346403f1414a7636ca70fb064",
     "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts":
-      "b1b18a54e94ffc72b3e1e2d01592c35a887b1e193fcb7d532191904d235e1ba4",
+      "b0a450609406f8d17e30b3f82934d59d00997d10e5cde39865218cce9ea22cd9",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-balances.ts":
-      "fd209ca769992b05d77a4c18b12b1626806e765f08bb7842314a20372c6ea9b8",
+      "48daa4fbad4313fe321015128e20937d0d88c99f64db9471ed1f958e6f44d2e5",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-history.ts":
       "22c8f2887025bddb85045c54f19433048ad3b668404cbb3c5f34b33055a19391",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-positions.ts":
@@ -151,7 +151,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts":
       "f27648c71d5b6b70045f5742c87c3778af6d5079ec3a515f644e980850a3892f",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
-      "e08364202cfa8bd83465cc2b3a35d7c2acd38af3d1e1bf57cba200618407d34c",
+      "97e663aeb07d8fb12056824f3c51b1111121d7a8de1fc19ffa27e6de693d4c74",
     "poc/observation-pipeline/src/parsers/sony-csv.ts":
       "0ba763384e89a0dbc0fbf5d436e70bf0173ca26e658b77c8ca985efa6c135141",
     "poc/observation-pipeline/src/parsers/sony-document-metadata.ts":
@@ -283,8 +283,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-canonical-evidence-boundary": {
-      version: "1.1.7",
-      codeDigest: "3f4f1ca32fbe9df3ee40a29683254e16c80c056280156b715fb8713c34a978fb",
+      version: "1.1.8",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -304,8 +304,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-ledger": {
-      version: "1.2.4",
-      codeDigest: "3f4f1ca32fbe9df3ee40a29683254e16c80c056280156b715fb8713c34a978fb",
+      version: "1.2.5",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -325,8 +325,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-past-month-balances": {
-      version: "1.1.7",
-      codeDigest: "3f4f1ca32fbe9df3ee40a29683254e16c80c056280156b715fb8713c34a978fb",
+      version: "1.1.8",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -346,8 +346,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-credit-statement-total": {
-      version: "1.4.2",
-      codeDigest: "3f4f1ca32fbe9df3ee40a29683254e16c80c056280156b715fb8713c34a978fb",
+      version: "1.4.3",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -438,8 +438,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-skip-payment-schedule": {
-      version: "0.1.3",
-      codeDigest: "4fa06fc81984ae43247c8cab688367587846e2631b676fcb2a1c62486e41f67e",
+      version: "0.1.4",
+      codeDigest: "6967bbe19b9977be67ae21878dbc8e81441a119c2c69ddb06a40e930878d9f77",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -470,8 +470,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "paypay-csv": {
-      version: "0.2.3",
-      codeDigest: "ea3e4f114fd8484c840fa0e038f649d6159a461a5653a000f779d5e1ffc26889",
+      version: "0.2.4",
+      codeDigest: "3915331bc25ac2ae707cc8d456e6e89d422c758ee995e0dbb88e4d8ab384c0eb",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -552,11 +552,12 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-domestic-trade-records": {
-      version: "0.2.1",
-      codeDigest: "30015c6f427a2232e8ce8bd46ad63693b14b7e2360b583d1bc937cf754dae779",
+      version: "0.2.2",
+      codeDigest: "90d1636adcfd8f3de0a53b8c8d5fcb909958c609104c7c7108fa3a53321a3d60",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/time.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
@@ -564,11 +565,12 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-foreign-cash-balances": {
-      version: "0.2.1",
-      codeDigest: "c33e22d6dd1bd2255f51016c819c828fc4d7b4864e43d47da2d3b467870a516d",
+      version: "0.2.2",
+      codeDigest: "71ff4764893635b07f9ea46c21ed745f69106e643712d52a71b9516e080f8e21",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/time.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-foreign-cash-balances.ts",
@@ -912,8 +914,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-gross-balance": {
-      version: "1.0.6",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.7",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -927,8 +929,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-csv": {
-      version: "1.0.6",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.7",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -942,8 +944,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-json": {
-      version: "1.0.5",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.6",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -971,8 +973,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-wallet-history": {
-      version: "1.0.7",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.8",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

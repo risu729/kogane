@@ -134,7 +134,12 @@ knowledge mode: `current` reads the parses `published_parse_runs` names now;
 `publication_events` row of the claim's artifact and parser at or before K
 adopted, so a later re-parse or a rollback is seen as it stood at K. K may
 carry at most three fractional digits, the precision SQLite compares at, and
-the domain re-checks each price's `recorded_at` against K exactly. One read
+an offset a zone uses, -12:00 to +14:00, and must not be after
+9999-12-31T23:59:59.999Z; any other K is refused as an invalid request
+(SQLite's `julianday` reads no offset of 15 hours or more and no later
+instant, so a K at `+15:00` would match no row and every key would read
+`missing`), and the domain re-checks each price's `recorded_at` against K
+exactly. One read
 (`selectPriceCandidates`, two SQL texts `PRICE_CANDIDATES_SQL` and
 `PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key every row in a coarse window
 around the freshness span, the rows of the newest instant before it and every
@@ -176,11 +181,16 @@ date built on it (§2), so no valuation cell, route or page uses them yet. No ma
 shipped, so a business-day rule refuses with `calendar_missing`. A price is
 keyed by the provider-scoped base reference, so another source's price for the
 same instrument is never used. Exclusion counts cover only the rows the read
-returns. The row that explains `stale` is the newest before the window
-whatever its rule, kind, basis or effective-time shape (a date-only row, or
-one the domain cannot read), so such a key reads `missing` rather than
-`stale`. In `known-at` mode a row whose `recorded_at` SQLite cannot read as a
-time is not read. Nothing fetches a price or rate from an external source.
+returns. Before the window the read returns only the rows of the newest
+instant (`before-window`), whatever their rule, kind, amount, basis or
+effective-time shape (a date-only row, or one the domain cannot read). When
+every one of them is excluded (by the policy, a non-positive amount, an
+unreadable effective time or, in `known-at` mode, a `recorded_at` after K) and
+no other row read is eligible, no older row is read, so a key whose older
+price would have been usable reads `missing` rather than `stale`, and the age
+of that price is not reported; no amount is taken as zero. In `known-at` mode
+a row whose `recorded_at` SQLite cannot read as a time is not read. Nothing
+fetches a price or rate from an external source.
 The candidate read reaches each key by index but reads that key's whole
 history (the window bounds what it returns, not what it reads): 13 currencies
 four times a day took about 90 ms over 1,000 boards and 360–500 ms over 4,380
@@ -359,6 +369,18 @@ no verified JP or AU rule package, so every request returns `needs-policy` with
 `taxConclusion: null` and the list of inputs it does not have (AT59). The
 provider's reported cost is stored beside our own numbers as
 `provider.<metric>` rows and is never promoted to the single truth (UC30/AT30).
+The report job writes one such row per `calculation_results` key (subject,
+scope, metric): an instrument held in two scopes (one security in two source
+accounts, such as a taxable and a tax-exempt account) keeps each scope's row,
+and only a second valuation of the same metric for the same holding is
+skipped. An earlier build kept only the first scope's row of an instrument;
+the runs it wrote are not rewritten. The report body holds no provider row,
+so report ids and bodies do not change with this (`REPORT_BUILD_RELEASE`
+names what can change a body), and nothing reads `calculation_results` today.
+Limit: the result insert skips any key conflict (`ON CONFLICT DO NOTHING`, so
+a retried run adds nothing), so two positions of one instrument in one scope
+in one report would share a key and the second holding's rows would be
+skipped without an error, while the body still lists both.
 
 ### Lots over a provisional input contract
 
@@ -468,6 +490,32 @@ Three operations are deliberately distinct:
 An agent therefore cannot rewrite a submission through one ambiguous
 "regenerate".
 
+The report job writes in this order: the `building` run, its results in one
+batch, the body and explanation node in R2, then one batch that marks the run
+`complete` and inserts the `report_artifacts` row and its `generated` event.
+A run is therefore never marked `complete` by this job before its artifact
+exists: a failure at any earlier step (an R2 write, a refused batch, an
+interrupted invocation) leaves the run `building` with no artifact, and the
+next sweep over the same inputs, whose run id is the same manifest digest,
+offers the same results again (`ON CONFLICT DO NOTHING`), rewrites the same
+content-addressed bytes and finishes it. If the inputs change first, that run
+stays `building` with its results and no artifact; no report names it, and
+nothing removes it. Before this order, the run was marked
+`complete` ahead of the R2 writes, so a failure between the two left a
+complete run no report named, and every later sweep over that manifest was
+refused by `calculation_results_run_building`, which fires before the conflict
+clause is considered. A run in that state is finished too: the job reads the
+run's status first and, when it is already `complete`, offers no results (the
+run already holds them, since they were written before it was marked) and
+writes only the artifact and its event; the run's status, `completed_at` and
+results are left as they are. The `generated` event is inserted only when
+the report has none, so two jobs that both found the same run unfinished
+write one artifact and one event. The Processor's tick is dispatched by the
+single `processor-tick` alarm, so two report jobs do not normally overlap;
+the status read and the results batch are separate statements, and a job
+whose results batch meets a run another job has just finished fails that
+tick and reuses the report on the next.
+
 ### Listing and the 評価レポート pages
 
 [ADR 0072](adr/0072-report-artifact-pages.md) adds the catalogue and the
@@ -484,7 +532,10 @@ The list returns catalogue columns only (id, context, purpose, schema,
 digest, creator, creation time), newest first by `created_at` then id, 50 per
 page with `nextCursor` and no total. It reads no body and derives no
 replayability; those come from re-displaying one report. Only one `offset`
-is accepted, and the route answers 404 where `report_artifacts` is absent.
+is accepted. Where `report_artifacts` is absent, every report path (the list,
+a report, its explanation and its export) answers 404 before it reads a
+parameter, as `reportArtifacts` on `/api/meta` is then false; it never queries
+the missing table (`readReportRoute` in `services/app/src/reports-api.ts`).
 
 The report job stores a report whose positions it cut at `maxRows` (500 by
 default; `coverage.truncated`) as `partial-verified-scope` even when every
@@ -512,8 +563,9 @@ says why it is not, and a missing cached node is shown as missing. A body
 whose digest no longer matches, or that is gone, is never shown as the
 report. The page has no recompute or share control. Amounts are formatted by
 the shared exact formatter; a decimal with more places than its unit's minor
-unit is shown as stored, never rounded. While the report's
-`capabilities.export` is true the page links to
+unit, or in a unit with no known minor unit, is shown with every place
+through `formatDecimal` (integer digits grouped in threes), never rounded.
+While the report's `capabilities.export` is true the page links to
 `/api/v2/reports/{id}/export` (the id encoded as one path segment) as a
 download; a restricted or unavailable report, which the reader would refuse,
 gets no link and a sentence saying why ([ADR 0072, amendment](adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06)).
@@ -568,6 +620,22 @@ id is the digest of that manifest, so:
   (this closes the limit the
   [amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)
   recorded).
+- the positions come from one cut of the current positions. The job reads
+  them in reader pages of 500, and a re-parse or a newer capture published
+  between two page reads brings holdings back under new ids, so one holding
+  could be read twice (INV06) or one skipped. After the last page,
+  `POSITION_CUT_SQL` checks that every id read is still current and that the
+  ids read are exactly the current rows up to the last one (and all of them
+  when the pages reached the end); when they are not, the job reads every
+  page again, and when the second read moved too it stores nothing and
+  returns `skipped: "snapshot_changed"`
+  ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21)).
+  A passing read is sorted back into the page order before `maxRows` applies,
+  so a truncated report keeps the cut's first rows even when a row arrived on
+  a later page than rows that sort behind it.
+  A read that was one cut names the same ids as before, so no release
+  changes. Decimals, prices and the knowledge boundary are read after the
+  check, as before.
 
 ## 6. Replayability and evidence-use restrictions
 
@@ -671,6 +739,13 @@ would discard later collection and later decisions (docs/operations.md).
   (`packages/read-model/test/dated-state.test.ts` for its quantity read).
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
+- `services/processor/test/report-job-retry.test.ts` — a failed R2 write
+  and a refused artifact batch each leave the run `building` with no
+  artifact, and the next run finishes it and is then reused; a batch D1
+  itself refuses part-way rolls the completion back; a complete run with its
+  results and no artifact, as the earlier order could leave, is finished
+  without a new result; two concurrent jobs over the same run write one
+  artifact and one `generated` event.
 - `services/processor/test/reports.test.ts` — migration 0034 on
   0017-0037, append-only triggers, retention-class seed, the flag, provider
   value beside own valuation (AT30), reuse, a corrected price giving a new
@@ -682,7 +757,19 @@ would discard later collection and later decisions (docs/operations.md).
   changed in turn giving a new report with no reuse while the earlier one
   keeps its id and body; `services/processor/test/report-job-truncated.test.ts`
   — a truncated report is `partial-verified-scope`, and the same kept
-  positions with and without positions past the bound give two reports.
+  positions with and without positions past the bound give two reports;
+  `services/processor/test/report-job-page.test.ts` — positions past the
+  first reader page, a row shifted onto the next page read once, a snapshot
+  republished between two page reads read again as one cut, a cut that
+  keeps moving refused as `snapshot_changed`, and a row read out of page
+  order kept in page order under the bound;
+  `services/processor/test/report-job-order.test.ts` — that sort against
+  SQLite's `ORDER BY` on 1000 seeded random sets of ASCII, Japanese,
+  combining-mark and astral-plane text with small and 52-bit ids, shuffled
+  and already in order;
+  `packages/read-model/test/position-cut.test.ts` — `POSITION_CUT_SQL`
+  against an oracle on seeded random stores, and its plan without
+  statistics.
 - `services/app/test/reports-api.test.ts` — re-display, Access and
   method gates, refusal of explanation and export under a restriction, the
   decimal policy selection contract, the list's order, paging and query

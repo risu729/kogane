@@ -153,9 +153,11 @@ describe("browser JSON transport", () => {
       detail: "summary",
       counts: [],
       sources: [],
+      sourcesOmitted: 0,
       fetchRuns: { byStatus: [], notSuccessful: [], notSuccessfulOmitted: [] },
       parseRuns: { byStatus: [], notOk: [], notOkOmitted: [] },
       coverage,
+      budget: { bytes: 8192, trimmed: false },
     };
     serve(Response.json(summary));
     expect((await errorFor("/api/overview?detail=full")).message).toContain("形式");
@@ -166,6 +168,27 @@ describe("browser JSON transport", () => {
     fetchSpy!.mockRestore();
     serve(Response.json(summary));
     expect(await getJson("/api/overview", signal())).toEqual(summary);
+  });
+  test("the balances page that asked for the full detail never renders a summary (ADR 0123)", async () => {
+    const coverage = { limit: 500, truncated: false, nextOffset: null, latestNextOffset: null };
+    const full = { latest: [], history: [], coverage };
+    const summary = {
+      detail: "summary",
+      accounts: [],
+      metrics: [],
+      latest: [],
+      history: [],
+      coverage: { ...coverage, limit: 10, next: null },
+    };
+    serve(Response.json(summary));
+    expect((await errorFor("/api/balances?view=balances&detail=full")).message).toContain("形式");
+    fetchSpy!.mockRestore();
+    serve(Response.json(full));
+    expect(await getJson("/api/balances?detail=full", signal())).toEqual(full);
+    // Without a detail named, either shape is a balance list.
+    fetchSpy!.mockRestore();
+    serve(Response.json(summary));
+    expect(await getJson("/api/balances", signal())).toEqual(summary);
   });
   test("preserves empty results and exact large minor-unit strings", async () => {
     const body = { transactions: [transaction] };

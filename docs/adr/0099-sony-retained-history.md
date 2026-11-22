@@ -1,6 +1,6 @@
 # ADR 0099: Sony Bank scheduled collection includes all retained deposit history
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1271](https://github.com/risu729/kogane/pull/1271))
 - Date: 2026-11-10
 - Issue: [1231](https://github.com/risu729/kogane/issues/1231)
 
@@ -108,7 +108,7 @@ day's final transaction. Unrelated sources keep their existing ordering.
 
 ## Amendment 2026-11-18: a mid-core failure keeps the finished steps as a partial run
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1425](https://github.com/risu729/kogane/pull/1425))
 - Date: 2026-11-18
 - Amends: this ADR's consequence "Failure still persists no fetched artifacts",
   and the matching consequence of

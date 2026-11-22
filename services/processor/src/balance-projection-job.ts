@@ -244,16 +244,19 @@ interface OriginRow {
   parse_run_id: number;
   fetch_artifact_id: number;
   dataset: string | null;
+  /** The artifact's fetch unit key; '' when the artifact has no fetch unit. */
+  unit: string;
 }
 
-/** Parse, artifact and dataset of each candidate, straight from Layer B. */
+/** Parse, artifact, dataset and fetch unit of each candidate, straight from Layer B. */
 async function readOrigins(db: D1Like, ids: readonly number[]): Promise<Map<number, OriginRow>> {
   const found = new Map<number, OriginRow>();
   for (let start = 0; start < ids.length; start += ORGANIZATION_CHUNK) {
     const page = ids.slice(start, start + ORGANIZATION_CHUNK);
     const result = await db
       .prepare(
-        `SELECT b.id AS observation_id, b.parse_run_id, p.fetch_artifact_id, fa.dataset
+        `SELECT b.id AS observation_id, b.parse_run_id, p.fetch_artifact_id, fa.dataset,
+           coalesce(fa.fetch_unit_key,'') AS unit
          FROM balance_observations b
          JOIN parse_runs p ON p.id = b.parse_run_id
          JOIN observation_fetch_artifacts fa ON fa.id = p.fetch_artifact_id
@@ -288,6 +291,11 @@ async function readDecimals(
     }
   }
   return found;
+}
+
+/** The coverage group of one (source, dataset, fetch unit); '' stands for an absent part. */
+function coverageGroupKey(sourceId: string, dataset: string, unit: string): string {
+  return JSON.stringify([sourceId, dataset, unit]);
 }
 
 interface CoverageFacts {
@@ -348,7 +356,7 @@ async function readCoverage(db: D1Like): Promise<CoverageFacts> {
       absenceMeaning: row.absence_meaning,
     };
     const eligibility = snapshotEligibility(claim);
-    const key = `${row.source_id} ${row.dataset} ${row.unit}`;
+    const key = coverageGroupKey(row.source_id, row.dataset, row.unit);
     const current = groups.get(key);
     if (!current || row.parse_run_id > current.parseRunId)
       groups.set(key, {
@@ -492,8 +500,13 @@ async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
     const dataset = origin?.dataset ?? null;
     const parseRunId = origin?.parse_run_id ?? 0;
     const claim = coverage.byParseRun.get(parseRunId);
-    const groupKey = `${row.source_id} ${dataset ?? ""} `;
-    const newest = [...coverage.groups.entries()].find(([key]) => key.startsWith(groupKey))?.[1];
+    // The newest attempt over this candidate's own fetch unit: a unit of
+    // the same dataset is another connection or card, whose attempts can
+    // neither re-observe this scope nor fail to (the latest-balance query
+    // keys a measurement by its unit for the same reason).
+    const newest = coverage.groups.get(
+      coverageGroupKey(row.source_id, dataset ?? "", origin?.unit ?? ""),
+    );
     const stale =
       newest !== undefined && !newest.replacesPrevious && newest.parseRunId > parseRunId;
     candidates.push({

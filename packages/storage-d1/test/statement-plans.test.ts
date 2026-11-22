@@ -13,7 +13,7 @@ import type { Database } from "bun:sqlite";
 import { fullCoreDatabase } from "./sqlite.ts";
 import { createSqliteReadDatabase } from "./sqlite-read-database.ts";
 import { planOf, preparedStatements, tableScans } from "./plan-check.ts";
-import type { D1Like } from "../src/d1.ts";
+import type { D1Like, D1StatementLike } from "../src/d1.ts";
 import {
   insertRawObjectIfAbsent,
   readRawObjectLocation,
@@ -72,6 +72,10 @@ import {
 import { ingestRouteActive, sourceDeclared } from "../src/core/ingest-registry.ts";
 import * as readSql from "../src/read/sql.ts";
 import * as rewardSql from "../src/read/rewards.ts";
+import { abandonSnapshot, retireOldSnapshots } from "../src/read/writer.ts";
+import { projectionMeasureSql } from "../../read-model/src/balance-projection-sql.ts";
+import type { CollectionScope } from "../../read-model/src/scope.ts";
+import { writeRowChunk, writeScopeRelations } from "../src/read/writer.ts";
 
 beforeAll(() => {
   fullCoreDatabase().close();
@@ -179,4 +183,115 @@ describe("every exported READ statement, without table statistics", () => {
       expect(wholeTableReads(sqlite, sql, READ_SINGLETONS)).toEqual([]);
       sqlite.close();
     });
+});
+
+// The rows a chunk writes, in both READ writers, restate that the build is
+// still `building` under the chunk's lease. That condition names no column of
+// the row, so it is one search of the build by its key per statement, the same
+// search the chunk's checkpoint makes.
+describe("the READ chunk writes, without table statistics", () => {
+  test("every row and checkpoint finds its build by key", async () => {
+    const { db, prepared } = preparedStatements();
+    const context = { lease: "lease", fence: 1, now: "2026-01-01T00:00:00.000Z", rowsWritten: 0 };
+    // Nothing runs, so a row needs only what the writer reads off it.
+    const row = { row: { rowSeq: 0 } as never, digest: "digest" };
+    await writeRowChunk(db, "s", [row], context);
+    await writeScopeRelations(db, "s", [{ source: "decision" } as never], context);
+    await rewardSql.writeRewardEstimateChunk(db, "s", [row], context);
+    await rewardSql.writeRewardSimulationChunk(db, "s", [row], context);
+    const inserts = prepared.filter((sql) => /^\s*INSERT\b/iu.test(sql));
+    // A row statement and its checkpoint, per chunk.
+    expect(inserts.length).toBe(4 * 2);
+    const { sqlite } = createSqliteReadDatabase();
+    for (const sql of inserts) {
+      const plan = planOf(sqlite, sql);
+      expect(wholeTableReads(sqlite, sql, READ_SINGLETONS)).toEqual([]);
+      expect(
+        plan.some((step) =>
+          /^SEARCH s EXISTS USING INDEX sqlite_autoindex_\w+_snapshots_1 [(]snapshot_id=[?][)]$/u.test(
+            step,
+          ),
+        ),
+        plan.join("\n"),
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.includes("CORRELATED")),
+        plan.join("\n"),
+      ).toBe(false);
+    }
+    sqlite.close();
+  });
+});
+
+// The cash read's projection scan (`measureRows`, ADR 0123 amendment of
+// 2026-11-20): one fixed snapshot's latest rows, under every filter the route
+// takes, reached through an index that leads with the snapshot. No plan reads
+// the projection rows of every snapshot.
+describe("the projection measure read, without table statistics", () => {
+  const scopes: [string, CollectionScope][] = [
+    ["no filter", {}],
+    ["a source", { source: "s" }],
+    ["an account", { account: "a" }],
+    ["a unit", { instrument: "i" }],
+    ["a source, an account and a unit", { source: "s", account: "a", instrument: "i" }],
+  ];
+  for (const [name, scope] of scopes)
+    test(`${name}: searches one snapshot by key`, () => {
+      const { sqlite } = createSqliteReadDatabase();
+      const query = projectionMeasureSql("snapshot", scope);
+      const plan = planOf(sqlite, query.sql, query.args);
+      expect(wholeTableReads(sqlite, query.sql, READ_SINGLETONS)).toEqual([]);
+      expect(
+        plan.some(
+          (step) =>
+            step.startsWith("SEARCH current_balance_projection USING ") &&
+            step.includes("snapshot_id=?"),
+        ),
+        plan.join("\n"),
+      ).toBe(true);
+      sqlite.close();
+    });
+});
+
+// The retirement batch of both READ writers (`retireOldSnapshots`,
+// `abandonSnapshot` and their reward counterparts): the status update finds the
+// build by its key, and every delete reaches that build's rows by key. A
+// delete's "the build is retired" condition names no column of the row it
+// deletes, so it is one search of the build by its key, run once for the
+// statement rather than once per row.
+describe("the READ retirement batch, without table statistics", () => {
+  test("the update and every delete reach one build by key", async () => {
+    const { db: inner, prepared } = preparedStatements();
+    // The selection answers one old build, so the retirement batch is prepared.
+    const stale = (statement: D1StatementLike): D1StatementLike => ({
+      ...statement,
+      bind: () => stale(statement.bind()),
+      all: async <T>(): Promise<{ results: T[] }> => ({
+        results: [{ snapshot_id: "old" } as T],
+      }),
+    });
+    const db: D1Like = { prepare: (sql) => stale(inner.prepare(sql)), batch: inner.batch };
+    await retireOldSnapshots(db, "kept", "2026-01-01T00:00:00.000Z");
+    await abandonSnapshot(db, "unfinished");
+    await rewardSql.retireOldRewardSnapshots(db, "kept");
+    await rewardSql.abandonRewardSnapshot(db, "unfinished");
+    const writes = prepared.filter((sql) => /^\s*(UPDATE|DELETE)\b/iu.test(sql));
+    // Per writer: the old build's update and deletes, then the abandoned one's.
+    expect(writes.length).toBe(2 * (1 + 4) + 2 * (1 + 6));
+    const { sqlite } = createSqliteReadDatabase();
+    for (const sql of writes) {
+      const plan = planOf(sqlite, sql);
+      expect(wholeTableReads(sqlite, sql, READ_SINGLETONS)).toEqual([]);
+      const table = /^\s*(?:UPDATE|DELETE FROM)\s+(\w+)/iu.exec(sql)![1]!;
+      expect(
+        plan.some((step) => step.startsWith(`SEARCH ${table} `) && step.includes("snapshot_id=?")),
+        plan.join("\n"),
+      ).toBe(true);
+      expect(
+        plan.some((step) => step.includes("CORRELATED")),
+        plan.join("\n"),
+      ).toBe(false);
+    }
+    sqlite.close();
+  });
 });
