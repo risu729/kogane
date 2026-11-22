@@ -119,7 +119,8 @@ describe.if(runnable)("instrument candidate review", () => {
         }
         if (url.pathname === "/api/identity/instrument-history") {
           read.push(url);
-          if (historyDown) return Response.json({ error: "unavailable" }, { status: 503 });
+          // As the App answers a read that failed after its checks.
+          if (historyDown) return Response.json({ error: "internal_error" }, { status: 500 });
           const outcome = await readInstrumentHistoryForGrant({
             grant: GRANT,
             sql: store.sql,

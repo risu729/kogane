@@ -6,6 +6,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import type { ObservationDetail } from "../../../packages/observation-shared/src/api-contract.ts";
 import { economicReadinessFixture } from "../../../packages/observation-shared/test/economic-readiness-fixture.ts";
+import { ERROR_STATUS, financialError } from "../../../packages/application/src/errors.ts";
 import { auditView } from "./a11y-audit.ts";
 import { settledTest } from "./settle.ts";
 
@@ -91,7 +92,11 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
               { status: "unavailable", reason: "readiness_store_unavailable" },
               { status: 503 },
             );
-          if (mode === "refused") return Response.json({ error: "unauthorized" }, { status: 403 });
+          // The route answers a refusal as the service's `financial-error-v1`.
+          if (mode === "refused")
+            return Response.json(financialError("unauthorized", "economic-readiness.read"), {
+              status: ERROR_STATUS.unauthorized,
+            });
           if (mode === "malformed")
             return Response.json({ status: "ok", providerText: "private response" });
           const body = economicReadinessFixture(mode === "mismatch" ? id + 1 : id);

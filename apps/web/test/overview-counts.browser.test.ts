@@ -61,7 +61,8 @@ describe.if(runnable)("overview summary counts from the shared query service", (
             : Response.json({ error: "invalid_query" }, { status: 400 });
         if (url.pathname === "/api/v2/query") {
           await held;
-          return Response.json({ error: "unavailable" }, { status: 503 });
+          // As the App answers a query that failed after its checks.
+          return Response.json({ error: "internal_error" }, { status: 500 });
         }
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
