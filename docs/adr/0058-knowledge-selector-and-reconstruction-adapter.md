@@ -685,7 +685,7 @@ results are recorded in the implementing PR.
 
 ## Amendment 2026-11-18: a scope of several accounts
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1392](https://github.com/risu729/kogane/pull/1392))
 - Decided in: [ADR 0116](0116-reconstructed-state-account-scope.md)
 
 The query answers a scope of one to 20 accounts, not only one: the request

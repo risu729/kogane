@@ -326,6 +326,16 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
   if (!sourceScope.ok) return fail("evidence_restricted", ["scope:source"]);
   const accountScope = scopeAccounts(grant, request.filters.account);
   if (!accountScope.ok) return fail("evidence_restricted", ["scope:account"]);
+  // Sources a listed grant names that the store does not hold. Reads leave
+  // them out of the scope, so `holdings` and `coverage` name them as a gap:
+  // otherwise a grant whose sources the store holds none of answers a
+  // complete empty result (INV05). They are the grant's own values, so naming
+  // them says nothing about anything outside it (SC18).
+  const granted = grantedSources(grant);
+  const unheldGranted =
+    request.filters.source === undefined && granted !== null
+      ? granted.filter((id) => !visible.includes(id)).sort()
+      : [];
 
   const limit = requestedLimit(request);
   const digest = await querySpecDigest(opened.resolvedQuery);
@@ -403,6 +413,11 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     const gaps: { reasonCode: string; scopeRef: string | null }[] = [];
     let stale = false;
     let unresolved = false;
+    // A scope pair the snapshot holds no measurement of says nothing about
+    // that scope: an account the store never observed and one that holds no
+    // asset would otherwise both read as a complete answer with no unit
+    // (INV05). It is named as a gap and makes the answer partial.
+    let empty = false;
     if (servable.behind) gaps.push({ reasonCode: "snapshot:behind_published_evidence", scopeRef });
     for (const pair of holdingPairs) {
       const scope = {
@@ -414,11 +429,13 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
       };
       const rows = await projection.summableQuantities(snapshot.snapshot_id, scope, metricIds);
       if (rows === null) return fail("budget_exceeded", ["budget:subtotalRows"]);
+      let measured = false;
       for (const row of rows) {
         // The projection is read inside the grant, and every row is checked
         // again: a query never observes a scope the grant does not allow.
         if (!grantAllowsSource(grant, row.source_id)) continue;
         if (!grantAllowsAccount(grant, row.source_account)) continue;
+        measured = true;
         const key = subtotalCountKey(row);
         if (subjects.has(key)) return fail("incomplete_evidence", ["overlap"]);
         subjects.add(key);
@@ -430,12 +447,21 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         totals.set(row.unit_ref, { ...sum, adoptedCount: current.adoptedCount + 1 });
       }
       for (const row of await projection.coverage(snapshot.snapshot_id, scope)) {
+        measured = true;
         if (row.state === "adopted" && row.freshness === "current") continue;
         if (row.state === "stale" || row.freshness === "stale") stale = true;
         if (row.state === "unresolved" || row.state === "conflict") unresolved = true;
         if (row.reason_code !== null)
           gaps.push({ reasonCode: `${row.state}:${row.reason_code}`, scopeRef: null });
       }
+      if (!measured) {
+        empty = true;
+        gaps.push({ reasonCode: "no_measures_in_scope", scopeRef: null });
+      }
+    }
+    if (unheldGranted.length > 0) {
+      empty = true;
+      gaps.push({ reasonCode: "no_measures_in_scope", scopeRef: null });
     }
     const units: HoldingUnit[] = [...totals.entries()]
       .map(([unitRef, total]) => ({ unitRef, ...total }))
@@ -448,7 +474,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         schemaVersion: "financial-result-v1",
         contextId: opened.context.contextId,
         resolvedQuery: opened.resolvedQuery,
-        completeness: (unresolved || stale || servable.behind
+        completeness: (unresolved || stale || empty || servable.behind
           ? "partial"
           : "complete") satisfies CompletenessState,
         data: {
@@ -511,12 +537,24 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
       artifactCount: source.artifact_count,
       collectionRunCount: runsBySource.get(source.id) ?? 0,
     }));
-    const gaps = scopes
-      .filter((scope) => scope.artifactCount === 0)
-      .map((scope) => ({
-        reasonCode: "no_artifacts_collected",
-        scopeRef: `source:${scope.sourceRef}`,
-      }));
+    // A `source` filter the store holds no source for has collected nothing:
+    // it is the same gap as a source without artifacts, never an empty answer
+    // that reads complete (INV05). The filter is inside the grant already, so
+    // naming it tells the caller nothing it did not send. Without a filter, a
+    // listed grant's unheld sources are named the same way.
+    const unheld =
+      request.filters.source === undefined
+        ? unheldGranted
+        : inScope.length === 0
+          ? [request.filters.source]
+          : [];
+    const gaps = [
+      ...scopes.filter((scope) => scope.artifactCount === 0).map((scope) => scope.sourceRef),
+      ...unheld,
+    ].map((sourceRef) => ({
+      reasonCode: "no_artifacts_collected",
+      scopeRef: `source:${sourceRef}`,
+    }));
     const data: CoverageSummary = {
       intent: "coverage",
       scopes,

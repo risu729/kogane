@@ -31,9 +31,13 @@ The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
 reads the partial index `parse_runs_pending` (migration 0083,
 [ADR 0079](adr/0079-pending-parse-run-index.md)), which holds the pending
 parse runs only; before it, every sweep read every parse run. Every statement
-one scheduled tick prepares is explained without table statistics by
-`services/processor/test/tick-query-plan.test.ts`, which lists the whole reads
-a tick still makes and the document that accepts each. Two of them are open
+one scheduled tick prepares on a one-capture store is explained without table
+statistics by `services/processor/test/tick-query-plan.test.ts`, which lists
+the whole scans a tick still makes and the document that accepts each; a
+statement that store does not reach, such as the Vpass binding insert of the
+identity sweep's empty-parse batch, is measured by
+`services/processor/test/tick-rows-read.test.ts` instead
+([read model: rows read by the latest-state reads](read-model.md#rows-read-by-the-latest-state-reads)). Two of the whole reads are open
 limits recorded only here, not changed: the identity sweep's candidate page
 (`identitySweepCandidatesSql`, `identity_page`) orders every successful parse
 run by publication before its `LIMIT`, and the reward claim sweep's candidate
@@ -369,7 +373,7 @@ run…"):
 | 9   | `reward_claims_sweep`      | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                                                                                              |
 | 10  | `reward_read_projection`   | Only when `REWARD_READ_PROJECTION_ENABLED` is `"1"` or `"true"` (U16, `docs/rewards.md` §12).                                                                                                                                                                                                                                                                                                            |
 | 11  | `price_promotion`          | Always; no flag. Promotes provider prices to `price_observations` by the closed rule list of `packages/domain/src/price-sources.ts`, at most 500 claims a tick, one cursor per claim kind; logs `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending` and `written` (ADR 0020, ADR 0031, `docs/calculation-and-reports.md` §1).         |
-| 12  | `report_job`               | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                                                                                                                                                                                                                                                                                             |
+| 12  | `report_job`               | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`). Logs `skipped: "snapshot_changed"` and stores nothing when its position pages were not one cut on two reads (ADR 0072).                                                                                                                                                                                                     |
 | 13  | `maintenance_survey`       | Only when `MAINTENANCE_SURVEY_ENABLED` is `"1"` or `"true"`; not declared in `wrangler.jsonc`, so off. Re-reads allowed official maintenance pages and appends proposals only (ADR 0050, `docs/schedules.md`).                                                                                                                                                                                           |
 | 14  | `operation_dispatch`       | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                                                                                          |
 | 15  | `decision_outbox`          | Always, after every lane that changes what a projection reads: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                                                          |

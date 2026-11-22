@@ -339,6 +339,9 @@ describe("collection quality page reads", () => {
     const before = await tableCounts();
     for (const [query, args] of [
       ["/api/collection-quality", {}],
+      // The summary's source lines are paged too (ADR 0123, amendment 2026-11-21).
+      ["/api/collection-quality?offset=0", { offset: 0 }],
+      ["/api/collection-quality?detail=summary&offset=1", { detail: "summary", offset: 1 }],
       ["/api/collection-quality/sony-bank", { source: "sony-bank" }],
       ["/api/collection-quality/sony-bank", { source: "sony-bank", view: "cells" }],
       ["/api/collection-quality/sony-bank?offset=0", { source: "sony-bank", offset: 0 }],
@@ -463,9 +466,8 @@ describe("collection quality page reads", () => {
     expect(new TextEncoder().encode(text).length).toBeGreaterThan(text.length);
   });
 
-  it("refuse a summary with an offset, an unknown source, and a grant without evidence.read", async () => {
+  it("refuse a full summary with an offset, an unknown source, and a grant without evidence.read", async () => {
     for (const [query, args, status] of [
-      ["/api/collection-quality?offset=0", { offset: 0 }, 400],
       ["/api/collection-quality/absent-source", { source: "absent-source" }, 404],
       [
         "/api/collection-quality/absent-source/accounts",
@@ -484,16 +486,23 @@ describe("collection quality page reads", () => {
     // 2026-11-20); a tool argument outside its closed shape is refused before
     // any read, as for every page read.
     for (const query of [
+      // So is the full summary's (ADR 0123, amendment 2026-11-21).
+      "/api/collection-quality?detail=full&offset=0",
+      "/api/collection-quality?offset=0&offset=1",
+      "/api/collection-quality?limit=10",
       "/api/collection-quality/sony-bank/accounts?detail=full&offset=0",
       "/api/collection-quality/sony-bank/accounts?detail=compact",
       "/api/collection-quality/sony-bank/accounts?limit=10",
       "/api/collection-quality/sony-bank/accounts?offset=0&offset=1",
     ])
       expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_query" });
-    expect(
-      (await page.route("/api/collection-quality/sony-bank/accounts?offset=-1")).body,
-    ).toMatchObject({ error: "invalid_offset" });
+    for (const query of [
+      "/api/collection-quality?offset=-1",
+      "/api/collection-quality/sony-bank/accounts?offset=-1",
+    ])
+      expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_offset" });
     for (const args of [
+      { detail: "full", offset: 0 },
       { view: "accounts" },
       { view: "cells" },
       { source: "sony-bank", view: "accounts", detail: "full", offset: 0 },

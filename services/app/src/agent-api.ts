@@ -90,7 +90,7 @@ import {
   callDelegatedMaintenanceTool,
   delegatedMaintenanceTools,
 } from "./delegated-maintenance-tools";
-import { boundedRead, HttpError, json } from "./http";
+import { assertMethod, boundedRead, HttpError, json, WRITE_METHODS } from "./http";
 import { catalogue } from "./read";
 import { mcpDelegationCapabilities, resolveMcpDelegation } from "./delegation";
 
@@ -215,7 +215,7 @@ export async function agentApi(
 ): Promise<Response | null> {
   const path = url.pathname;
   if (!isAgentPath(path)) return null;
-  if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, WRITE_METHODS);
   if (url.search) throw new HttpError(400, "invalid_query");
   assertAgentTransport(request, url);
   const grant = agentGrant(env, caller);

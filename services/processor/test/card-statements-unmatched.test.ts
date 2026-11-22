@@ -288,6 +288,9 @@ test("each statement without a candidate carries its closed code and, where aske
   expect(items.get("2098-04")?.debitsInWindow).toBe(0);
   expect(items.get("2098-08")?.debitsInWindow).toBeNull();
   expect(items.get("2098-08")?.statement.paymentDate).toBeNull();
+  // Nothing recorded, on the complete schema: the reason says so (INV05).
+  expect(items.get("2098-08")?.statement.paymentDateReason).toBe("payment_date_absent");
+  expect(items.get("2098-03")?.statement).not.toHaveProperty("paymentDateReason");
   expect(page.items.every((item) => item.acceptable === false)).toBe(true);
   expect(page.manifest).toMatchObject({
     acceptance: "single-debit-candidates-only",

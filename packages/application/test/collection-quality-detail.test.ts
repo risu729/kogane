@@ -11,10 +11,16 @@ import {
   type AccountCoverage,
   type AccountCoverageSummary,
   CELL_REASONS,
+  COLLECTION_QUALITY_LINE_PAGE,
+  COLLECTION_QUALITY_SUMMARY_BYTES,
+  type CollectionQualityCellSummary,
+  type CollectionQualitySummary,
+  type CollectionQualitySummaryLines,
   OBSERVATION_KINDS,
   pageReadAnswerBytes,
   validCollectionQualityResponse,
   type CollectionQualityCell,
+  type CollectionQualityCells,
 } from "../../observation-shared/src/collection-quality-contract.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { QualityStore } from "../../read-model/test/collection-quality-fixture.ts";
@@ -524,5 +530,305 @@ describe("the account view's summary over random sources", () => {
         lines.slice(offset, offset + page.accounts.length + page.unattributed.length),
       );
     }
+  });
+});
+
+// ── Every summary page held to 8 KB (ADR 0123, amendment 2026-11-21) ──
+
+const SUMMARY_PATH = "/api/collection-quality";
+const CELLS_PATH = "/api/collection-quality/global-pass";
+
+/** The full summary of a store whose Vpass job failed with its terminals' closed codes. */
+async function failingSummary(): Promise<CollectionQualitySummary> {
+  const store = new QualityStore();
+  const run = store.run({
+    source: "vpass",
+    at: "2099-01-02T00:00:00Z",
+    artifacts: [{ key: "evidence.json", dataset: null }],
+  }).run;
+  store.occurrence("vpass", {
+    nominalAt: "2099-01-02T21:00:00.000Z",
+    status: "failed",
+    failureCode: "human_required",
+    runIds: ["run-a", "run-b"],
+  });
+  store.terminal({ source: "vpass", runId: "run-a", outcome: "success", fetchRun: run });
+  store.terminal({
+    source: "vpass",
+    runId: "run-b",
+    outcome: "failed",
+    coverage: "partial",
+    blockedCode: "registration_refused",
+    providerFailureCode: "login_rejected",
+  });
+  return queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
+}
+
+/**
+ * `sources` sources shaped like the failing Vpass one, each with `jobs` jobs
+ * that failed with their own closed codes and its own newest fetch run, so no
+ * two lines are equal and none is shared: every source with a collector
+ * failing at once, the moment an agent asks which sources are failing.
+ */
+function crowdedSummary(
+  base: CollectionQualitySummary,
+  sources: number,
+  jobs: number,
+): CollectionQualitySummary {
+  const template = base.sources.find((source) => source.sourceId === "vpass")!;
+  const job = template.schedules[0]!;
+  return {
+    ...base,
+    sources: Array.from({ length: sources }, (_, index) => {
+      const sourceId = `synthetic-source-${String(index).padStart(2, "0")}`;
+      return {
+        ...structuredClone(template),
+        sourceId,
+        latestFetchRun: { ...template.latestFetchRun!, id: 10_000 + index },
+        schedules: Array.from({ length: jobs }, (_, at) => ({
+          ...structuredClone(job),
+          id: `${sourceId}-job-${at}`,
+          latest: {
+            ...structuredClone(job.latest!),
+            failureCode: `synthetic_failure_${index}`,
+            terminals: job.latest!.terminals.map((terminal) => ({
+              ...terminal,
+              blockedCode: terminal.blockedCode && `synthetic_blocked_code_${index}_${at}`,
+              failureCode: terminal.failureCode && `synthetic_provider_failure_${index}_${at}`,
+            })),
+          },
+        })),
+      };
+    }),
+  };
+}
+
+/** Every page of the summary's source lines from offset 0, each checked against the wire contract. */
+function sourcePages(full: CollectionQualitySummary): CollectionQualitySummaryLines[] {
+  const pages: CollectionQualitySummaryLines[] = [];
+  for (let offset = 0; ;) {
+    const page = collectionQualitySummaryLines(full, offset);
+    expect(validCollectionQualityResponse(SUMMARY_PATH, page, "summary")).toBe(true);
+    expect(validCollectionQualityResponse(SUMMARY_PATH, page, "full")).toBe(false);
+    expect(pageReadAnswerBytes(page)).toBeLessThanOrEqual(COLLECTION_QUALITY_SUMMARY_BYTES);
+    expect(page.coverage.offset).toBe(offset);
+    expect(page.otherSchedules).toHaveLength(full.otherSchedules.length);
+    pages.push(page);
+    if (page.coverage.nextOffset === null) break;
+    expect(page.coverage.nextOffset).toBe(offset + page.sources.length);
+    offset = page.coverage.nextOffset;
+  }
+  return pages;
+}
+
+/** Every page of a source's cell summary from offset 0, each checked against the wire contract. */
+function cellPages(cells: CollectionQualityCells): CollectionQualityCellSummary[] {
+  const pages: CollectionQualityCellSummary[] = [];
+  for (let offset = 0; ;) {
+    const page = collectionQualityCellSummary([cells], offset);
+    expect(validCollectionQualityResponse(CELLS_PATH, page, "summary")).toBe(true);
+    expect(pageReadAnswerBytes(page)).toBeLessThanOrEqual(COLLECTION_QUALITY_SUMMARY_BYTES);
+    pages.push(page);
+    if (page.coverage.nextOffset === null) break;
+    expect(page.coverage.nextOffset).toBe(offset + page.lines.length);
+    offset = page.coverage.nextOffset;
+  }
+  return pages;
+}
+
+/** Global Pass's three cells, each with every reason, cloned into `units` units of `datasets` datasets. */
+async function crowdedCells(
+  units: number,
+  datasets: number,
+  name: (unit: number, dataset: number) => string,
+): Promise<CollectionQualityCells> {
+  const s = new QualityStore();
+  const run = s.run({
+    source: "global-pass",
+    at: "2099-02-01T00:00:00Z",
+    artifacts: [{ key: "activity-2099-01.html", dataset: "globalpass-activity" }],
+  });
+  s.parse(run.artifacts[0]!, "global-pass-activity", { kind: "failed", code: "parser_rejected" });
+  const page = (await queryCollectionQualityCells(executor(s), {
+    sourceId: "global-pass",
+    offset: 0,
+    asOf: AS_OF,
+  }))!;
+  const template = page.cells[0]!;
+  const cells: CollectionQualityCell[] = [];
+  for (let unit = 0; unit < units; unit++)
+    for (let dataset = 0; dataset < datasets; dataset++)
+      cells.push({
+        ...structuredClone(template),
+        dataset: name(unit, dataset),
+        unitKey: `synthetic-unit-${unit}`,
+        reasons: [...CELL_REASONS],
+      });
+  return { ...page, cells };
+}
+
+describe("the summary's source lines, paged under 8 KB", () => {
+  test("page every source with a failing collector, once each and in order, each page within 8 KB", async () => {
+    const base = await failingSummary();
+    // Today's registry (37 sources), every one with two failing jobs.
+    const full = crowdedSummary(base, base.sources.length, 2);
+    const pages = sourcePages(full);
+    // Unpaged, as the summary answered before this amendment, it passes what a client shows.
+    const { coverage: _coverage, ...head } = pages[0]!;
+    const everyLine = { ...head, sources: pages.flatMap((page) => page.sources) };
+    expect(pageReadAnswerBytes(everyLine)).toBeGreaterThan(4 * COLLECTION_QUALITY_SUMMARY_BYTES);
+    console.log(
+      `source summary, ${full.sources.length} failing sources: unpaged ${pageReadAnswerBytes(everyLine)} bytes; pages ${pages
+        .map((page) => `${pageReadAnswerBytes(page)} (${page.sources.length} lines)`)
+        .join(", ")}`,
+    );
+    expect(pages.length).toBeGreaterThan(2);
+    // The bytes, not the line limit, end every page but the last.
+    for (const page of pages.slice(0, -1))
+      expect(page.sources.length).toBeLessThan(COLLECTION_QUALITY_LINE_PAGE);
+    const lines = pages.flatMap((page) => page.sources);
+    expect(lines.flatMap((line) => line.sourceIds)).toEqual(
+      full.sources.map((source) => source.sourceId),
+    );
+    for (const [index, source] of full.sources.entries()) {
+      const line = lines[index]!;
+      expect(line.reasons).toEqual(source.reasons);
+      expect(line.schedules.map((entry) => entry.id)).toEqual(
+        source.schedules.map((entry) => entry.id),
+      );
+      for (const [at, job] of source.schedules.entries())
+        expect(line.schedules[at]!.latest).toEqual({
+          nominalAt: job.latest!.nominalAt,
+          status: job.latest!.status,
+          failureCode: job.latest!.failureCode,
+          terminalCodes: nonNull(
+            job.latest!.terminals.flatMap((terminal) => [
+              terminal.blockedCode,
+              terminal.failureCode,
+            ]),
+          ),
+        });
+    }
+    for (const page of pages)
+      expect(page.coverage).toMatchObject({
+        sources: full.sources.length,
+        lines: full.sources.length,
+        limit: COLLECTION_QUALITY_LINE_PAGE,
+      });
+    // A page from any offset lists the lines the walk from 0 has there.
+    for (const offset of [1, 7, lines.length - 1]) {
+      const page = collectionQualitySummaryLines(full, offset);
+      expect(page.sources).toEqual(lines.slice(offset, offset + page.sources.length));
+    }
+  });
+
+  test("keep today's synthetic summary on one page, and share equal lines as before", async () => {
+    const full = await failingSummary();
+    const [page, ...rest] = sourcePages(full);
+    expect(rest).toEqual([]);
+    expect(page!.coverage).toEqual({
+      sources: full.sources.length,
+      lines: page!.sources.length,
+      limit: COLLECTION_QUALITY_LINE_PAGE,
+      offset: 0,
+      truncated: false,
+      nextOffset: null,
+    });
+    // Sources no collector serves still share one line.
+    expect(page!.sources.length).toBeLessThan(full.sources.length);
+  });
+
+  test("answer an offset past the last line as an empty last page", async () => {
+    const full = await failingSummary();
+    const lines = collectionQualitySummaryLines(full).coverage.lines;
+    const page = collectionQualitySummaryLines(full, lines + 5);
+    expect(page.sources).toEqual([]);
+    expect(page.coverage).toMatchObject({ offset: lines + 5, truncated: false, nextOffset: null });
+    expect(validCollectionQualityResponse(SUMMARY_PATH, page, "summary")).toBe(true);
+  });
+
+  test("refuse a page whose jobs under no source alone pass 8 KB, never cutting it", async () => {
+    const base = await failingSummary();
+    const job = base.sources.find((source) => source.sourceId === "vpass")!.schedules[0]!;
+    const full = {
+      ...base,
+      otherSchedules: Array.from({ length: 60 }, (_, index) => ({
+        ...structuredClone(job),
+        id: `synthetic-processor-job-${index}`,
+      })),
+    };
+    expect(() => collectionQualitySummaryLines(full, 0)).toThrow(CollectionQualityLimitError);
+  });
+
+  test("fail the wire check when a page passes 8 KB, mispages or names a source twice", async () => {
+    const base = await failingSummary();
+    const full = crowdedSummary(base, base.sources.length, 2);
+    const [first, second] = sourcePages(full);
+    const valid = (value: unknown) =>
+      validCollectionQualityResponse(SUMMARY_PATH, value, "summary");
+    expect(valid(first)).toBe(true);
+    // Every line on one page: under the line limit's 20 but over 8 KB.
+    const crowded = collectionQualitySummaryLines(crowdedSummary(base, 20, 2), 0);
+    const all = Array.from({ length: 20 }, (_, index) =>
+      collectionQualitySummaryLines(crowdedSummary(base, 20, 2), index),
+    ).map((page) => page.sources[0]!);
+    expect(
+      valid({
+        ...crowded,
+        sources: all,
+        coverage: { ...crowded.coverage, truncated: false, nextOffset: null },
+      }),
+    ).toBe(false);
+    expect(valid({ ...first, coverage: { ...first!.coverage, nextOffset: 99 } })).toBe(false);
+    expect(
+      valid({ ...first, coverage: { ...first!.coverage, truncated: false, nextOffset: null } }),
+    ).toBe(false);
+    expect(valid({ ...first, sources: [...first!.sources.slice(0, -1), first!.sources[0]!] })).toBe(
+      false,
+    );
+    expect(valid({ ...second, coverage: { ...second!.coverage, offset: 0 } })).toBe(false);
+    const { coverage: _coverage, ...unpaged } = first!;
+    expect(valid(unpaged)).toBe(false);
+  });
+});
+
+describe("a source's cell summary, paged under 8 KB", () => {
+  test("ends each page before the line that would pass 8 KB, every line once and in order", async () => {
+    // Twelve units of four datasets, each line with every reason and an 80-character dataset.
+    const cells = await crowdedCells(12, 4, (unit, dataset) =>
+      `synthetic-dataset-${unit}-${dataset}-`.padEnd(80, "x"),
+    );
+    const pages = cellPages(cells);
+    const lines = pages.flatMap((page) => page.lines);
+    // At 20 lines a page, as before, the first page passed what a client shows.
+    const twenty = { ...pages[0]!, lines: lines.slice(0, COLLECTION_QUALITY_LINE_PAGE) };
+    console.log(
+      `cell summary, 48 lines with every reason: 20 lines ${pageReadAnswerBytes(twenty)} bytes; pages ${pages
+        .map((page) => `${pageReadAnswerBytes(page)} (${page.lines.length} lines)`)
+        .join(", ")}`,
+    );
+    expect(lines).toHaveLength(48);
+    expect(lines.map((line) => line.dataset)).toEqual(cells.cells.map((cell) => cell.dataset));
+    for (const line of lines) expect(line.reasons).toEqual([...CELL_REASONS]);
+    expect(pages[0]!.lines.length).toBeLessThan(COLLECTION_QUALITY_LINE_PAGE);
+    expect(pageReadAnswerBytes(twenty)).toBeGreaterThan(COLLECTION_QUALITY_SUMMARY_BYTES);
+    expect(validCollectionQualityResponse(CELLS_PATH, twenty, "summary")).toBe(false);
+  });
+
+  test("keeps short lines to the line limit", async () => {
+    const cells = await crowdedCells(10, 3, (unit, dataset) => `d-${unit}-${dataset}`);
+    for (const cell of cells.cells) cell.reasons = [];
+    const pages = cellPages(cells);
+    expect(pages.map((page) => page.lines.length)).toEqual([20, 10]);
+  });
+
+  test("refuses a page whose one line cannot fit, never cutting it", async () => {
+    const cells = await crowdedCells(1, 1, () => "長".repeat(512));
+    for (const cell of cells.cells) {
+      cell.unitKey = "テ".repeat(512);
+      cell.parser = "😀".repeat(256);
+      cell.period = { ...cell.period, value: "長".repeat(512) };
+    }
+    expect(() => collectionQualityCellSummary([cells], 0)).toThrow(CollectionQualityLimitError);
   });
 });
