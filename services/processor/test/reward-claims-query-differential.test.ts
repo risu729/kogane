@@ -415,6 +415,9 @@ function seed(db: Database, spec: Spec, id: number): Candidate {
 // Independent expected extension: public source/parser/measure, valid connection total,
 // sealed/published/not-excluded, plus whole-run success or its own successful unit.
 // It deliberately does not read PROMOTION_RULES, current SQL, or the generic SQL helper.
+// The promotion rule's own total account shape (`matches`), restated here so
+// the expectation never reads the job's regular expression or its SQL.
+const TOTAL_ACCOUNT = /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u;
 function expectedPoint(spec: Spec, policyEnabled: boolean): boolean {
   const whole =
     spec.outcome === "success" &&
@@ -433,7 +436,7 @@ function expectedPoint(spec: Spec, policyEnabled: boolean): boolean {
     spec.parser === "myjcb-jpoint-balance" &&
     spec.metric === "displayed_jpoint_total" &&
     spec.instrument === "J_POINT" &&
-    /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u.test(spec.account) &&
+    TOTAL_ACCOUNT.test(spec.account) &&
     spec.sealed &&
     spec.published &&
     !spec.excluded &&
@@ -523,6 +526,24 @@ for (const [name, specs] of [
           ...models.filter(({ spec }) => expectedPoint(spec, policyEnabled)).map(({ row }) => row),
         ].sort((a, b) => a.id - b.id);
         if (name === "scaled" && policyEnabled) expect(expected.length).toBeGreaterThan(500);
+        // Against the read e8f455ed9 shipped, which already filtered the total
+        // account, the current read drops only totals the rule refuses (one
+        // with text after a NUL) and moves nothing else.
+        const shippedRows = shipped(db, 5000);
+        expect(current(db, 5000)).toEqual(
+          shippedRows.filter(
+            (row) =>
+              row.parser_name !== "myjcb-jpoint-balance" || TOTAL_ACCOUNT.test(row.source_account),
+          ),
+        );
+        if (name === "scaled")
+          expect(
+            shippedRows.filter(
+              (row) =>
+                row.parser_name === "myjcb-jpoint-balance" &&
+                !TOTAL_ACCOUNT.test(row.source_account),
+            ).length,
+          ).toBeGreaterThan(0);
         expect(
           current(db, 5000).filter((row) => row.parser_name !== "myjcb-jpoint-balance"),
         ).toEqual(old);
