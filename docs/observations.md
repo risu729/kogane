@@ -17,6 +17,51 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank WALLET: a currency outside the minor-unit table keeps its exact decimal (WALLET 1.0.8)
+
+2026-11-22. `sony-bank-wallet-history` 1.0.7 read the transaction amount
+(`お取引通貨 金額`) and any of the four fee cells that names a currency through
+one helper that required an exact minor-unit integer (a bare-decimal fee was
+already only checked as an exact decimal). The minor-unit table
+(`packages/parsers/src/money.ts`) names only JPY, USD and AUD, so a row whose
+currency was any other code the parser accepts (BRL, CAD, CHF, CNH, EUR, GBP,
+HKD, NZD, SEK, ZAR) refused the whole month as
+`WALLET transaction amount is not exact`, even when the amount was unsigned
+and would not have been published at all. The history parsers refused the same
+way until
+[1.0.5 and 1.0.6](sources/sony-bank.md#2026-11-19-currencies-outside-the-minor-unit-table).
+
+1.0.8 applies the history rule to WALLET: for a currency the table does not
+name, the amount and fees must still be exact decimals with valid digit
+grouping, and an explicitly signed amount is published as `amountText` and
+`amountScale` with no `amountMinor`; its direction comes from the sign of the
+decimal (`-0.00` is not an outflow, as `-0` JPY was not), the provider-sign rule
+WALLET already applies to JPY, USD and AUD; nothing about the currency is
+inferred. An unsigned amount is still omitted with the same warning. Fees are
+validated and not published, as before. JPY, USD and AUD keep their minor-unit
+check, so `USD 12.345` and a `JPY 1.5` fee are still refused, and every row in
+those currencies reads as before, identity included. A currency code outside
+Sony's list is still refused.
+
+`sony-bank.ts` holds all four Sony parsers, so `sony-bank-gross-balance` 1.0.6
+to 1.0.7, `sony-bank-history-json` 1.0.5 to 1.0.6 and `sony-bank-history-csv`
+1.0.6 to 1.0.7 are released with only their digests moved, because a parser name
+and version may not carry a second code digest
+(`packages/parsers/test/parser-digests.test.ts`, migration 0028); they read
+every artifact as before. **Deploying rewrites nothing**: stored runs and rows
+stay (evidence is append-only), the processor registers the releases and the
+repair lane re-parses stored Sony captures under them. No migration and no
+operator step: no snapshot policy row or reader pins these parsers by version.
+Limits: production was not read, so whether a stored WALLET month carries such a
+currency is not established, and a non-JPY WALLET amount such as `EUR 12.34` is
+the shape the parser's cell pattern and currency list already admitted (1.0.7
+then refused it for a currency outside the table), not an observed capture.
+Downstream, such a row takes the path non-table history rows take since 1.0.5:
+`amount_minor` is null and the exact text is kept; the WALLET `card-purchase`
+and `fx-exchange` families stay unsupported, so no event writer reads it. Tests:
+`packages/parsers/test/sony-bank-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
 ## SBI Securities: a foreign cash schedule date that is not a date is no as_of (cash balances 0.2.2)
 
 2026-11-22. `sbi-foreign-cash-balances` 0.2.1 copied a schedule row's

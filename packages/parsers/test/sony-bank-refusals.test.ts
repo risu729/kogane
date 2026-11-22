@@ -372,6 +372,48 @@ describe("sony-bank WALLET monthly HTML", () => {
       identityOrigin: "date+description+usage-amount+occurrence",
     });
   });
+
+  test("a currency outside the minor-unit table keeps its exact decimal (1.0.8)", () => {
+    // 1.0.7 refused the whole month as "not exact": money.ts names no exponent
+    // for EUR, so no minor-unit integer could exist, as for history in 1.0.5.
+    const amount = (value: string, fee = "-") =>
+      parse(
+        replaced(
+          "<td>JPY 1200</td><td>-</td><td>-</td>",
+          `<td>${value}</td><td>${fee}</td><td>-</td>`,
+        ),
+      );
+    const unsigned = amount("EUR 12.34");
+    expect(unsigned.observations[0]).toMatchObject({ currency: "EUR", status: "posted" });
+    expect(unsigned.observations[0]).not.toHaveProperty("amountMinor");
+    expect(unsigned.observations[0]).not.toHaveProperty("amountText");
+    expect(unsigned.warnings).toEqual([
+      "html:table=0,row=0: WALLET amount has no explicit direction; signed amount omitted",
+    ]);
+    for (const [value, text, scale, direction] of [
+      ["EUR -1,234.56", "-1234.56", 2, "outflow"],
+      ["EUR ▲0.5", "-0.5", 1, "outflow"],
+      ["GBP +7.10", "7.10", 2, "inflow"],
+      ["EUR -0.00", "-0.00", 2, "inflow"],
+    ] as const) {
+      const signed = amount(value);
+      expect(signed.warnings).toEqual([]);
+      expect(signed.observations[0]).not.toHaveProperty("amountMinor");
+      expect(signed.observations[0]).toMatchObject({ amountText: text, amountScale: scale });
+      expect(signed.observations[0]?.extra["_kogane"]).toMatchObject({ direction });
+    }
+    expect(amount("EUR 12.34", "EUR 1.50").observations).toHaveLength(1);
+    // Exactness and grouping are still checked, and table currencies keep
+    // their minor-unit rule.
+    expect(() => amount("EUR 1,23.4")).toThrow(
+      "WALLET transaction amount must be an exact decimal",
+    );
+    expect(() => amount("EUR 12.34", "EUR 1,5")).toThrow(
+      "WALLET local fee must be an exact decimal",
+    );
+    expect(() => amount("USD 12.345")).toThrow("WALLET transaction amount is not exact");
+    expect(() => amount("JPY 1200", "JPY 1.5")).toThrow("WALLET local fee is not exact");
+  });
 });
 
 test("currencies outside the minor-unit table keep exact decimals in CSV and JSON (issue 1231)", () => {
