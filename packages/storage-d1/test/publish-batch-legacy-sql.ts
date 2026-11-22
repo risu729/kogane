@@ -1,10 +1,10 @@
 // The second statement of `publishBatch` (src/atomic/publication.ts),
 // "supersede older successes", exactly as it shipped before it carried the
-// live-lease fence the batch's other statements carry. Frozen as text so the
-// tests can prove the fenced statement answers exactly as this one did for a
-// writer that holds the lease, and see this one write for a writer that does
-// not. Verbatim, binds included; never edit it by hand, and never import it
-// outside tests.
+// live-lease fence the batch's first, third and fourth statements carry.
+// Frozen as text so the tests can prove the fenced statement answers exactly
+// as this one did for a writer that holds the lease, and see this one write
+// for a writer that does not. Verbatim, binds included; never edit it by
+// hand, and never import it outside tests.
 import type { D1Like, D1StatementLike } from "../src/d1.ts";
 
 export function legacySupersedeOlderSuccesses(

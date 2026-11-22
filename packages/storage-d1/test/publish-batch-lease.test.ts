@@ -1,8 +1,9 @@
-// `publishBatch` (src/atomic/publication.ts): every statement that writes is
-// fenced on the live lease, the second one ("supersede older successes")
-// included. A writer that no longer holds the lease — its lease expired, its
-// job was closed, or another attempt took the job over — must not supersede
-// anything, even for a run that is already `ok` and current.
+// `publishBatch` (src/atomic/publication.ts): the four statements before the
+// job close are each fenced on the live lease, the second one ("supersede
+// older successes") included. A writer that no longer holds the lease — its
+// lease expired, its job was closed, or another attempt took the job over —
+// must not supersede anything, even for a run that is already `ok` and
+// current.
 //
 // The fence is proven against the statement as it shipped without it
 // (./publish-batch-legacy-sql.ts): equal results for a writer that holds the
@@ -194,7 +195,7 @@ const DISPLACED: Record<string, Partial<JobSeed>> = {
 };
 
 for (const [why, job] of Object.entries(DISPLACED))
-  test(`a writer whose ${why.replace(/^its /u, "")} supersedes nothing (${why})`, async () => {
+  test(`a displaced writer supersedes nothing (${why})`, async () => {
     const { seed, target } = displacedStore(job);
     const before = state(store(seed));
     const shipped = await publish(seed, target, false);
