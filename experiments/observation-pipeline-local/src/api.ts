@@ -57,7 +57,10 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
   // if one were added carelessly later.
   app.use("*", async (c, next) => {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") {
-      return c.text("405 method not allowed: this browser is read-only\n", 405);
+      // RFC 9110 §15.5.6: a 405 names the methods the target serves.
+      return c.text("405 method not allowed: this browser is read-only\n", 405, {
+        allow: "GET, HEAD",
+      });
     }
     // Query parameters are accepted only when the shared schema grants them
     // for the capabilities this server advertises. This store implements none

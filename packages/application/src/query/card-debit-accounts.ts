@@ -58,7 +58,7 @@ import type { Quantity } from "../../../domain/src/values.ts";
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type Grant, grantAllows } from "../grants.ts";
+import { type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import { statementTotal, type StatementTotalRow } from "./card-statement-total.ts";
 import { pageBeyondBudget } from "./page-budget.ts";
 
@@ -413,17 +413,8 @@ export async function reviewCardDebitAccounts(input: {
   sql: SqlExecutor;
 }): Promise<CardDebitAccountsOutcome> {
   const { grant, sql } = input;
-  if (!grantAllows(grant, "records.read"))
-    return {
-      ok: false,
-      error: financialError("unauthorized", REQUEST_ID, ["capability:records.read"]),
-    };
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0)
-    return { ok: false, error: financialError("evidence_restricted", REQUEST_ID, narrowed) };
+  const refused = wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (pageBeyondBudget(0, CARD_DEBIT_ACCOUNTS_CARDS_MAX, grant))
     return {
       ok: false,

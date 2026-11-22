@@ -81,12 +81,12 @@ into `needs-rule-verification`.
 
 `family='none'` means that the terms have been verified to impose no expiry; it is distinct from unknown expiry. An unverified rule never returns "no expiry". Buckets without an established expiry stay in the deadline-sorted list as `deadline.kind='unknown'` rows.
 
-| state                     | Condition (ADR 0049)                                                                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `needs-rule-verification` | The rule version itself is unusable: unverified, no calculation family, evaluation day outside validity, or unresolved qualifying-activity definition |
-| `conflict`                | A bucket's displayed and computed expiry disagree                                                                                                     |
-| `partial`                 | Expiry is unestablished for a covered bucket kind (excluding verified no-expiry), or a consumed input is incomplete                                   |
-| `computed`                | None of the above                                                                                                                                     |
+| state                     | Condition (ADR 0049)                                                                                                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `needs-rule-verification` | The rule version itself is unusable: unverified, no calculation family, evaluation day outside validity, unresolved qualifying-activity definition, or unreadable deadline calendar |
+| `conflict`                | A bucket's displayed and computed expiry disagree                                                                                                                                   |
+| `partial`                 | Expiry is unestablished for a covered bucket kind (excluding verified no-expiry), or a consumed input is incomplete                                                                 |
+| `computed`                | None of the above                                                                                                                                                                   |
 
 <a id="21-表示期限と算定期限"></a>
 
@@ -95,15 +95,15 @@ into `needs-rule-verification`.
 Each bucket's `expiryBasis` has the following 3 parts. `validBucketExpiryBasis` validates exact keys.
 
 - `displayed` — The expiry the provider displayed (observed). It retains the promoted claim value unchanged; unreadable text remains `unknown` (such as `provider_expiry_unparsed`). It includes the claim's `observedAt` and source-fact references. With no display it is `null`.
-- `computed` — A derivation under 1 rule version, carrying `EXPIRY_DERIVATION_RELEASE` (`reward-expiry-v2`).
+- `computed` — A derivation under 1 rule version, carrying `EXPIRY_DERIVATION_RELEASE` (`reward-expiry-v3`).
   - `status`: `date` (a civil date on the rule's deadline calendar), `no-expiry` (only for verified, unbounded `family='none'`; for a tier-dependent rule, only with a required-tier claim covering the evaluation day), or `unavailable` (exactly 1 reason code).
-  - `rule`: rule reference, version, family, verification state, version validity `validPeriod`, terms evidence (`evidenceRefs`, records in `docs/sources`), qualifying-activity policy reference and deadline calendar.
+  - `rule`: rule reference, version, family, verification state, version validity `validPeriod`, terms evidence (`evidenceRefs`, records in `docs/sources`), qualifying-activity policy reference and deadline calendar (`null` when the stored calendar reference could not be read; see §3).
   - `activity`: the history window, completeness, oldest observed day and starting activity (reference/date) consumed by an inactivity rule.
   - `membership`: the required tier and this holding's applicable claims consumed by a tier-dependent rule. Claims are ordered by tier code points (the same order as `MEMBERSHIP_SQL`'s `ORDER BY tier`), then by canonical claim JSON within a tier, independent of input order.
   - `uncertaintyCodes`: qualifications that limit rather than prevent derivation: assumed time zone, missing older history or a self-reported tier.
 - `agreement` — `agree` / `disagree` / `not-comparable`. Only civil dates are comparable. Unreadable displays, unavailable derivations and zone mismatches are `not-comparable`. Verified no-expiry alongside a displayed deadline is `disagree`. Any `disagree` makes the estimate `conflict` and returns both.
 
-A computed expiry is a date only when the rule is verified, has a supported calculation family and applies on the evaluation day; the bucket kind is covered; an inactivity rule has no qualifying activity with an unknown date, at least 1 observed qualifying activity and history completeness other than `unknown` (`partial` lacks only older history, so derivation proceeds with `history_incomplete`); a tier-dependent rule has a tier claim covering the starting day; and both the starting day and derived deadline lie within that version's validity. No treatment across rule versions is inferred where the terms do not record it. Otherwise the result is `unavailable` with exactly 1 reason from the closed `COMPUTED_EXPIRY_REASONS` list.
+A computed expiry is a date only when the rule is verified, has a supported calculation family and a readable deadline calendar (§3), and applies on the evaluation day; the bucket kind is covered; an inactivity rule has no qualifying activity with an unknown date, at least 1 observed qualifying activity and history completeness other than `unknown` (`partial` lacks only older history, so derivation proceeds with `history_incomplete`); a tier-dependent rule has a tier claim covering the starting day; and both the starting day and derived deadline lie within that version's validity. No treatment across rule versions is inferred where the terms do not record it. Otherwise the result is `unavailable` with exactly 1 reason from the closed `COMPUTED_EXPIRY_REASONS` list.
 
 | reasonCode                           | Meaning                                                                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -115,6 +115,7 @@ A computed expiry is a date only when the rule is verified, has a supported calc
 | `bucket_kind_unclassified`           | The provider quantity is retained, but its bucket kind is unconfirmed                                                     |
 | `fixed_deadline_not_derivable`       | Each lot has its own deadline, with no evidence beyond the provider display                                               |
 | `qualifying_activity_policy_missing` | The inactivity rule's qualifying-activity definition cannot be resolved                                                   |
+| `deadline_calendar_unreadable`       | The rule's stored deadline calendar reference cannot be read (§3); no family's answer, a date or "no expiry", is derived  |
 | `membership_out_of_scope`            | This holding lacks the tier claim required by a tier-dependent rule                                                       |
 | `membership_not_retroactive`         | The required-tier claim does not cover the starting day (the evaluation day for `family='none'`)                          |
 | `activity_date_unknown`              | A qualifying activity has an unreadable date (including a missing usage date under `member-used`) and could be the newest |
@@ -139,6 +140,8 @@ Migration 0033 seeds these rules:
 | `rule:mobile-suica-sf:validity`     | `unsupported` | needs-rule-verification | `docs/sources/mobile-suica.md` records balance/history capture paths but quotes no expiry terms                                                                                                                                                                        |
 
 **The time zone is separate.** The quoted terms do not state the deadline's reference time zone, so `deadline_calendar_ref` is `Asia/Tokyo:end-of-day:assumed`, and every derivation carries `deadline_zone_assumed`. The UI display zone is separate from the program's deadline zone (addendum 06 §2).
+
+`deadline_calendar_ref` is read strictly as `zone:dayBoundary:zoneBasis` (`deadlineCalendar` in `packages/read-model/src/rewards.ts`): exactly 3 parts, a zone the runtime's time-zone data knows (`canonicalZone`; the stored spelling is kept), a day boundary of `end-of-day` or `start-of-day`, and a zone basis of `documented` or `assumed`. Any other reference (empty, a missing zone, an unknown zone, day boundary or basis, or extra parts) gives the rule a `null` calendar, never a UTC, `end-of-day` or `assumed` default (ADR 0004). Such a rule computes nothing for any bucket: the computed side is `unavailable` / `deadline_calendar_unreadable`, the estimate is `needs-rule-verification` with `rule_family_unsupported` (as for an unresolved qualifying-activity definition), and `deadline_zone_assumed` is not raised for a zone that was never given. A provider display is still returned as an observation. The day boundary is recorded and checked but not yet consumed: a computed deadline is a civil date, not an instant (a limit). Every seeded reference reads as before.
 
 No `conversion_offers` rows are seeded. The candidate named by the review (a JRE POINT-to-Suica top-up) has search-excerpt evidence only [W13], can only be stored as `needs-rule-verification`, and cannot be simulation input. ANA, JAL and `楽天` (Rakuten) mileage/point rules are likewise not created until `docs/sources` records a terms quotation [W09] [W10] [W11] [W12] [W14].
 

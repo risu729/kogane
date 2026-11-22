@@ -579,6 +579,76 @@ command or catalogue operation is added.
   shows the bills, lines and reasons, offers no action, passes the
   accessibility audit, and refuses a `covers` its figures do not carry.
 
+## Amendment 2026-11-21: bills in two units are `unit_mismatch`, not `bill_not_exact`
+
+This amendment changes the 2026-11-19 `upcoming` amendment directly above, so
+it sits next to it rather than at the end of the file.
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. It adds a code to the closed
+  `covers` reasons that `kogane.card-settlements.debit-accounts` with
+  `view: "upcoming"` publishes, and a change to a published tool's answer is
+  the owner's to approve (the 2026-11-18 amendment above).
+
+### Context
+
+Decision 3 of the `upcoming` amendment sums a line's bills with
+`sumQuantities`, and any failure of the sum was reported as
+`bill_not_exact`. `sumQuantities` also refuses bills in more than one unit
+(`unit_mismatch`, INV03), for example a card billed in yen and another in
+dollars debited from one account. Such a line said a bill was not exact when
+every bill was exact. `covers` was `unknown`, so no wrong figure was shown,
+but the reason did not say what happened.
+
+### Options considered
+
+1. **Keep `bill_not_exact` and widen its words.** Rejected: one code for two
+   causes, and a reader cannot tell which holds.
+2. **Use the code `sumQuantities` refuses mixed units with, `unit_mismatch`.**
+   Chosen. It is the existing closed code for this cause in `values.ts` (and
+   in `scope.ts`, `rewards.ts` and `lots.ts`), so the line says the same as
+   the sum.
+3. **A new code of this view, such as `bills_unit_mismatch`.** Not chosen: a
+   second spelling of an existing cause.
+
+### Decision
+
+`COVERS_UNKNOWN_REASONS` gains `unit_mismatch`, between
+`debit_account_unknown` and `bill_not_exact`: the bills a line counts are in
+more than one unit (the line's first bill's unit and another). Each reason
+that holds is named, so a line with bills in two units and a bill that is not
+exact lists both. `cardBills` stays `missing` in the line's first bill's
+unit, with the reason `unit_mismatch` when the units differ, else
+`bill_not_exact`. Which lines are `unknown` does not change, only their
+reasons; the rule and schema versions stay (the view is computed on each
+read and stores nothing, and the 2026-11-18 amendment likewise kept its
+schema version). The page labels the code, and the tool description lists
+it.
+
+### Consequences
+
+- A reader of a line in two units sees `unit_mismatch` and not a claim that a
+  bill is not exact.
+- The closed list grows by one code. The wire check
+  (`packages/observation-shared/src/card-upcoming-bills-contract.ts`) reads
+  the domain list and the page's words for every code are a typed record, so
+  the page built with this change accepts and labels it. A page loaded
+  before the deploy refuses an answer with the code (its wire check knows
+  only the old list) until it is reloaded, and an MCP client that pinned the
+  old list sees a code it did not know.
+- Bills in two units are still never converted or added (INV03).
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: a yen and a dollar bill
+  on one account make the later line `unit_mismatch` (fails before the
+  change: `bill_not_exact`), the earlier yen-only line still compares, and a
+  line with two units and a bill that is not exact lists both reasons.
+- `services/app/test/ui-mcp-parity.test.ts`: the published description names
+  every code of `COVERS_UNKNOWN_REASONS`; `services/app/test/mcp-client.test.ts`:
+  it stays within 2,048 characters.
+
 ## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
 
 - Status: proposed
@@ -667,3 +737,63 @@ before; only the `proposed` filter changes.
   scaled store without statistics, the same equality (the store draws no
   such proposal, so the shipped rows too), and a plan whose only whole read of
   a base table is the one candidate scan.
+
+## Amendment 2026-11-21: a balance captured on a bill's own due date is not compared with it
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. No field, code or type changes, but
+  on a bill's due date the published answer of
+  `kogane.card-settlements.debit-accounts` with `view: "upcoming"` can read
+  `unknown` with `balance_before_previous_debit` where it read `yes` or `no`
+  (the 2026-11-18 amendment above: a change to a published tool's answer is
+  the owner's to approve).
+
+### Context
+
+The 2026-11-19 amendment counts a statement due on the date itself as a bill
+and adds it to its account's lines. Its `balance_before_previous_debit`
+looked only at debits already due before the date (and accepted settlement
+debits), so on a bill's own due date a balance captured that day was
+compared with the bill. The bank may have taken the bill before the capture:
+the balance then already shows the debit, the line subtracts it a second
+time, and `covers` could read `no` for a bill the account had paid (INV06).
+
+### Options considered
+
+1. **Leave it.** Rejected: a confident `no` (or `yes`) built on a debit
+   counted twice.
+2. **Treat a bill due on the date as a previous debit.** Rejected: every
+   capture on or before the date is then refused, including yesterday's,
+   which cannot show today's debit and is exactly the balance to compare.
+3. **A capture on the due date of a bill the line counts is `unknown`.**
+   Chosen. Captures are never later than the date, so only a bill due on the
+   date itself can share its capture's day.
+4. **A new reason code for it.** Not chosen here: it would change the closed
+   list the wire contract, the page and the tool description carry. The
+   existing code's words already cover a capture "on or before" a debit's
+   date; an own code is an owner item.
+
+### Decision
+
+`balance_before_previous_debit` also holds when the balance's Asia/Tokyo
+capture date is the due date of a bill the line counts. Nothing else
+changes: the rule version, the reasons' order and the wire contract stay.
+The page's words for the code now say the balance was captured on or before
+a card debit's day, so whether it shows the debit is unknown.
+
+### Consequences
+
+- On a bill's due date, its account's lines read `unknown` when the balance
+  was captured that day; a capture of the day before is compared as before.
+- A bank that debits later than the due date (a holiday) is still not
+  modelled (docs/card-settlements.md, Limits).
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: a capture on the bill's
+  own day makes both of the account's lines `unknown`; one of the evening
+  before is compared (fails before the change).
+- `packages/application/test/card-upcoming-bills.test.ts`: on card-002's due
+  date, bank B captured that day reads `unknown`, captured the day before
+  reads `no` (fails before the change).

@@ -3,7 +3,7 @@
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { grantAllows, type Grant } from "../grants.ts";
+import { wholeStoreReadRefusal, type Grant } from "../grants.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "./instrument-candidates-review.ts";
 import { queryInstrumentHistory, type HistoryEntry } from "./instrument-resolution.ts";
 
@@ -36,12 +36,8 @@ export async function readInstrumentHistoryForGrant(input: {
     ok: false,
     error: financialError(code, "instruments.history", refs),
   });
-  if (!grantAllows(grant, "records.read")) return fail("unauthorized", ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, "records.read", "instruments.history");
+  if (refused) return { ok: false, error: refused };
   if (typeof identifierId !== "string" || !INSTRUMENT_IDENTIFIER_ID.test(identifierId))
     return fail("invalid_query", ["identifierId"]);
   if (

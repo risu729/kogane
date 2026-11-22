@@ -15,7 +15,7 @@
 //   * a Processor that cannot be reached makes the App report `degraded` with
 //     503, so a release fails instead of passing on a half-deployed pair;
 //   * it does not depend on `OPS_API_ENABLED`, and it takes no query string,
-//     no body and no verb but GET.
+//     no body and no verb but GET (and HEAD, the same answer without its body).
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";

@@ -343,6 +343,19 @@ describe.if(runnable)("card settlement review", () => {
   let detailRevision = 0;
   let planRevision = 0;
   let action = "accept";
+  /**
+   * Set once a commit is answered: as the server does, the candidate then
+   * reads accepted at the next revision, and a simulate of the plan is
+   * refused (`stale_context`: the candidate is no longer proposed).
+   */
+  let committed = false;
+  /** The receipt status the commit answers with. */
+  let receiptStatus: "accepted" | "failed" = "accepted";
+  /**
+   * When set, the next commit writes its decision and its answer is lost (a
+   * gateway fault); a resend of the same operation id answers with the receipt.
+   */
+  let commitLost = false;
   let older: ReturnType<typeof settlementReview>[] = [];
   let leadSearch = "not_searched";
   /** A second statement's candidates, newest first; empty serves one statement. */
@@ -366,6 +379,9 @@ describe.if(runnable)("card settlement review", () => {
     detailRevision = 0;
     planRevision = 0;
     action = "accept";
+    committed = false;
+    receiptStatus = "accepted";
+    commitLost = false;
     older = [];
     leadSearch = "not_searched";
     second = [];
@@ -465,10 +481,12 @@ describe.if(runnable)("card settlement review", () => {
         if (url.pathname === "/api/v2/reconciliation/card-settlements")
           return Response.json({
             items: [
-              {
-                ...review,
-                revision: url.searchParams.has("proposalId") ? detailRevision : review.revision,
-              },
+              committed
+                ? { ...review, revision: planRevision + 1, status: "accepted" }
+                : {
+                    ...review,
+                    revision: url.searchParams.has("proposalId") ? detailRevision : review.revision,
+                  },
             ],
             nextOffset: null,
             nextPage: "none",
@@ -529,6 +547,8 @@ describe.if(runnable)("card settlement review", () => {
             status: "planned",
           };
           if (operation === "plan") return Response.json({ plan });
+          if (operation === "simulate" && committed)
+            return Response.json({ error: "stale_context" }, { status: 409 });
           if (operation === "simulate")
             return Response.json({
               report: {
@@ -549,12 +569,17 @@ describe.if(runnable)("card settlement review", () => {
                 usesRemaining: 1,
               },
             });
+          committed = true;
+          if (commitLost) {
+            commitLost = false;
+            return Response.json({ error: "bad_gateway" }, { status: 502 });
+          }
           return Response.json({
             receipt: {
               operationId: "op-synthetic",
               operationKind: simulation.kind,
               planId: PLAN,
-              status: "accepted",
+              status: receiptStatus,
               acceptedAt: "2026-09-11T00:00:00Z",
               publishedAt: null,
               decisionRevisionId: "decision-synthetic",
@@ -1120,6 +1145,67 @@ describe.if(runnable)("card settlement review", () => {
       .filter({ hasText: "読み取りモデルへの反映はまだ完了" })
       .waitFor();
     expect(posted.map((row) => row.operation)).toContain("commit");
+    // The candidate is read again after the commit and shows the decision;
+    // the revision the commit itself wrote is not reported as a change made
+    // since planning, and the plan, not simulated again (the server would
+    // refuse it), reads as committed.
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    const after = await page.locator("main").innerText();
+    expect(after).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(after).not.toContain("この候補では計画した操作を実行できません");
+    expect(after).not.toContain("古い承認は適用されません");
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
+    await page.close();
+  });
+
+  test("a commit whose answer is lost stays resendable when the candidate, read again, shows the decision it may have written", async () => {
+    commitLost = true;
+    const page = await open(`/confirm/${PLAN}`);
+    await page.getByRole("button", { name: "承認する", exact: true }).click();
+    await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
+    await page.getByRole("button", { name: "確定する", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "時間をおいて再試行" }).waitFor();
+    // A refocused window reads the candidate again; the commit landed, so it
+    // reads accepted at a revision newer than the plan pinned.
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    const lost = await page.locator("main").innerText();
+    expect(lost).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(lost).not.toContain("この候補では計画した操作を実行できません");
+    // The warnings are silent, so the screen says the outcome is unknown and
+    // that the resend is the same operation.
+    expect(lost).toContain("判断が保存されたかどうか分かりません");
+    expect(lost).toContain("同じ操作IDで送るため二重には保存されず");
+    const resend = page.getByRole("button", { name: "確定する", exact: true });
+    expect(await resend.isDisabled()).toBe(false);
+    await resend.click();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    const commits = posted.filter((row) => row.operation === "commit");
+    expect(commits).toHaveLength(2);
+    expect(commits[1]!.body.operationId).toBe(commits[0]!.body.operationId);
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
+    await page.close();
+  });
+
+  test("a failed receipt says the decision was saved and does not report its own revision as a change since planning", async () => {
+    receiptStatus = "failed";
+    const page = await open(`/confirm/${PLAN}`);
+    await page.getByRole("button", { name: "承認する", exact: true }).click();
+    await page.getByRole("button", { name: "承認済み", exact: true }).waitFor();
+    await page.getByRole("button", { name: "確定する", exact: true }).click();
+    const evidence = page.getByRole("region", { name: "請求・銀行原本と金額の確認", exact: true });
+    await evidence.getByText("採用済み", { exact: true }).waitFor();
+    await page.getByText("操作の記録を確認してください", { exact: true }).waitFor();
+    const after = await page.locator("main").innerText();
+    expect(after).toContain("この計画の判断は保存されましたが、操作は失敗として記録されています");
+    expect(after).not.toContain("確定済み");
+    expect(after).not.toContain("候補の判断が計画作成後に更新されています");
+    expect(after).not.toContain("この候補では計画した操作を実行できません");
+    expect(posted.filter((row) => row.operation === "simulate")).toHaveLength(1);
     await page.close();
   });
 

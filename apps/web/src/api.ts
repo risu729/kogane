@@ -263,7 +263,10 @@ export function useBalances(
 ): UseQueryResult<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }, Error> {
   // The view parameter is sent only when the server advertises that view;
   // the schema builder drops it otherwise, and the page filters client-side.
-  const request = useListRequest("/api/balances", view ? { view } : {});
+  // The page shows every row; the route's default is the summary (ADR 0123,
+  // amendment 2026-11-20). A store without the summary (the local store) is
+  // sent no `detail` and answers in full.
+  const request = useListRequest("/api/balances", { ...(view ? { view } : {}), detail: "full" });
   return useQuery({
     queryKey: ["balances", request.suffix],
     enabled: request.enabled,

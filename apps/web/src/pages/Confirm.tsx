@@ -96,6 +96,22 @@ function PurchaseLinkPins({
   );
 }
 
+/**
+ * Whether a commit's failure is the server's answer that it wrote nothing: a
+ * closed refusal (a client error other than a timeout), or `commit_failed`,
+ * whose batch rolled back whole. Any other failure (no answer, a timeout, a
+ * server fault, an answer that could not be read) can follow a commit that
+ * landed; sending the same operation id again answers with its receipt
+ * (addendum 10 §6), so the plan is not read again in the meantime.
+ */
+function commitRefused(error: unknown): boolean {
+  return (
+    error instanceof CommandError &&
+    ((error.status >= 400 && error.status < 500 && error.status !== 408) ||
+      error.code === "commit_failed")
+  );
+}
+
 function targetLabel(value: string | null): ReactNode {
   return value === null ? (
     <Nullable value={null} placeholder="未定（方針が決定）" />
@@ -113,9 +129,19 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   // One operation id per approval: a resend of the same confirmation is the
   // same operation, so a lost response never commits twice (addendum 10 §6).
   const [operationId, setOperationId] = useState<string | null>(null);
+  // Set from the moment a commit is sent until the server refuses it: a
+  // re-read the server answers after the commit landed would be the stale
+  // answer below.
+  const [commitSent, setCommitSent] = useState(false);
 
+  // A committed plan is not simulated again: its own commit moved the
+  // revisions it pinned, so the server would answer it stale, or refuse it
+  // (a card settlement no longer proposed), and either answer would read as a
+  // refused approval. The screen keeps the plan it confirmed, labelled as read
+  // before the commit; the receipt below says what the commit did.
   const report = useQuery({
     queryKey: ["command", "simulate", planId],
+    enabled: receipt === null && !commitSent,
     queryFn: ({ signal }) =>
       postCommand<{ report: SimulationReportView }>("simulate", { planId }, signal).then(
         (value) => value.report,
@@ -270,9 +296,24 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       );
       return value.receipt;
     },
+    onMutate: () => {
+      setCommitSent(true);
+      // A re-read already in flight (a refocused window) could be answered
+      // after the commit lands, and would show that stale answer.
+      void client.cancelQueries({ queryKey: ["command", "simulate", planId] });
+    },
+    // A refused commit changed nothing; the plan is read again as before. A
+    // commit whose answer was lost may have landed: the plan stays as read,
+    // and the same confirmation can be sent again.
+    onError: (error) => {
+      if (commitRefused(error)) setCommitSent(false);
+    },
     onSuccess: (value) => {
       setReceipt(value);
-      void client.invalidateQueries({ queryKey: ["command", "simulate", planId] });
+      // Read the item the plan reviewed again, so its panel shows it after
+      // the decision rather than the answer read before it.
+      for (const queryKey of [["card-settlements"], ["card-ownership"], ["card-purchases"]])
+        void client.invalidateQueries({ queryKey });
     },
   });
 
@@ -301,15 +342,30 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       .finally(() => setCheckingReceipt(false));
   }, [operationId]);
 
+  // A committed plan's own decision moves the revisions it pinned, so the
+  // reviewed item, read again after the commit, no longer matches the plan's
+  // pins or offers its action. The checks below guard approval and commit;
+  // once the receipt is on screen they are done, and their warnings would
+  // misstate the commit as refused. Every receipt is written in the batch
+  // that writes its decision, so the warnings drop for any receipt; only an
+  // accepted or published one reads as committed, and any other status
+  // (`failed`) says so and points to the receipt panel.
+  const decided = receipt !== null;
+  const committed = receipt?.status === "accepted" || receipt?.status === "published";
+  // A commit sent and not refused may have landed, so its decision may be what
+  // the reviewed item, read again (a refocused window, a reconnect), now
+  // shows. Its warnings would misstate that decision as a change since
+  // planning, and its checks would block the resend of the same operation id,
+  // which answers with the receipt if it landed and is checked against every
+  // pinned revision again by the server if it did not (addendum 10 §6).
+  const checksDone = decided || commitSent;
   const stale = report.data?.stale === true;
   const canAct =
     report.data !== undefined &&
     features.known &&
     features.commands &&
     !stale &&
-    settlementReady &&
-    ownershipReady &&
-    purchaseLinkReady;
+    (commitSent || (settlementReady && ownershipReady && purchaseLinkReady));
 
   return (
     <>
@@ -331,7 +387,15 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   : undefined
               }
             >
-              {data.stale ? (
+              {committed ? (
+                <Notice role="status">
+                  この計画は確定しました。この画面の計画の内容は確定前に読んだものです。確定の結果は下の操作の記録で確認してください。
+                </Notice>
+              ) : decided ? (
+                <Notice tone="bad" role="status">
+                  この計画の判断は保存されましたが、操作は失敗として記録されています。この画面の計画の内容は確定前に読んだものです。下の操作の記録を確認してください。
+                </Notice>
+              ) : data.stale ? (
                 <Notice tone="bad" role="alert">
                   この計画が読み取った版から対象が変わりました。古い承認は適用されません。再試算した計画で
                   確認し直してください。
@@ -343,13 +407,17 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     <code>{data.planId}</code>
                   </KvRow>
                   <KvRow label="状態">
-                    {data.stale ? (
+                    {committed ? (
+                      <Badge tone="ok">確定済み</Badge>
+                    ) : decided ? (
+                      <Badge tone="bad">操作の記録を確認してください</Badge>
+                    ) : data.stale ? (
                       <Badge tone="bad">対象が変更されています</Badge>
                     ) : (
                       <Badge tone="ok">確認した内容のまま</Badge>
                     )}
                   </KvRow>
-                  {data.stale ? (
+                  {data.stale && !decided ? (
                     <KvRow label="再試算後の計画ID">
                       <code>{data.resimulatedPlanId}</code>
                     </KvRow>
@@ -404,7 +472,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!ownershipReady && ownership.isSuccess ? (
+                  {!checksDone && !ownershipReady && ownership.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       口座または保有者の記録が計画作成後に変わっています。新しい計画で確認し直してください。
                     </Notice>
@@ -441,12 +509,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {!settlementRevisionMatches && settlement.isSuccess ? (
+                  {!checksDone && !settlementRevisionMatches && settlement.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       候補の判断が計画作成後に更新されています。新しい計画で確認し直してください。
                     </Notice>
                   ) : null}
-                  {!settlementActionAllowed && settlement.isSuccess ? (
+                  {!checksDone && !settlementActionAllowed && settlement.isSuccess ? (
                     <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。条件と根拠を一覧で確認し直してください。
                     </Notice>
@@ -520,12 +588,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       }
                     </QueryBoundary>
                   )}
-                  {receipt === null && linkCandidate !== undefined && !linkPinsMatch ? (
+                  {!checksDone && linkCandidate !== undefined && !linkPinsMatch ? (
                     <Notice tone="bad" inline role="alert">
                       候補の判断または利用の記録が計画作成後に変わっています。新しい計画で確認し直してください。
                     </Notice>
                   ) : null}
-                  {receipt === null && linkCandidate !== undefined && !linkActionAllowed ? (
+                  {!checksDone && linkCandidate !== undefined && !linkActionAllowed ? (
                     <Notice tone="bad" inline role="alert">
                       この候補では計画した操作を実行できません。カード利用の画面で条件と根拠を確認し直してください。
                     </Notice>
@@ -550,7 +618,11 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
               ) : (
                 <div className="table-scroll" role="region" aria-label="変更の対象" tabIndex={0}>
                   <table className="settlement-targets">
-                    <caption>対象ごとの版と対応先。版は計画時とサーバーの現在の値です。</caption>
+                    <caption>
+                      {checksDone
+                        ? "対象ごとの版と対応先。版は計画時と、確定前に読んだサーバーの値です。"
+                        : "対象ごとの版と対応先。版は計画時とサーバーの現在の値です。"}
+                    </caption>
                     <thead>
                       <tr>
                         <th scope="col">対象</th>
@@ -570,7 +642,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                           <td>
                             <Nullable
                               value={data.currentRevisions[row.subjectRef]}
-                              placeholder="—"
+                              placeholder="現在の版の報告なし"
                             />
                           </td>
                           <td>{targetLabel(row.currentTargetRef)}</td>
@@ -606,7 +678,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   <KvRow label="再処理対象の解析実行">{data.simulation.affectedParseRuns} 件</KvRow>
                   <KvRow label="影響する取得元">
                     {data.simulation.affectedScopes.length === 0 ? (
-                      <Nullable value={null} placeholder="—" />
+                      <Nullable value={null} placeholder="なし" />
                     ) : (
                       data.simulation.affectedScopes.join("、")
                     )}
@@ -672,9 +744,14 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                 ) : null}
                 {commitMutation.isError ? (
                   <Notice tone="bad" inline role="alert">
-                    {commitMutation.error instanceof CommandError
-                      ? commitMutation.error.message
-                      : "確定できませんでした。"}
+                    {!commitRefused(commitMutation.error)
+                      ? // No refusal came back, so the commit may have landed
+                        // and the item checks above stay silent: say so, and
+                        // that the resend is the same operation (addendum 10 §6).
+                        "確定の応答を受け取れなかったため、判断が保存されたかどうか分かりません。時間をおいて再試行してください。「確定する」は同じ操作IDで送るため二重には保存されず、保存済みならその操作の記録を表示します。"
+                      : commitMutation.error instanceof CommandError
+                        ? commitMutation.error.message
+                        : "確定できませんでした。"}
                   </Notice>
                 ) : null}
                 <p className="footnote">
