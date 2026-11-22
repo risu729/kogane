@@ -59,6 +59,8 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
       // Served wherever this Worker runs (ADR 0126); each line that needs a
       // table or flag the deployment lacks says `not_served` in the answer.
       pendingDecisions: true,
+      // Served wherever this Worker runs (ADR 0127): the ホーム page's 最近の変化.
+      changesSince: true,
       // The operations API follows its own flag (02 §4, docs/ops-api.md). It is
       // advertised, never assumed: with the flag off the paths do not exist.
       opsApi: opsApiEnabled(env),

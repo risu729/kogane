@@ -24,7 +24,8 @@ export function EvidenceBoundary<T>({
   );
 }
 
-const OUTCOMES: Record<EvidenceOutcome, string> = {
+/** A sealed fetch run's outcome, as the evidence pages name it. */
+export const OUTCOMES: Record<EvidenceOutcome, string> = {
   success: "収集成功",
   partial: "一部取得",
   failed: "収集失敗",

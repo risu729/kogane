@@ -1027,9 +1027,11 @@ table statistics.
 source, in one answer under 8 KB ([ADR 0127](adr/0127-changes-since-digest.md)).
 It is the service of `GET /api/v2/changes?since=…[&after=…]`
 (`readChangesSince`), which any signed-in subject reads under the reader
-authority of the evidence browser's GET routes; no screen reads it yet, so the
-parity guard lists the tool among the tools without a UI route. It is listed
-on `/mcp` only to a grant holding `records.read` over the whole store.
+authority of the evidence browser's GET routes. The ホーム page's 最近の変化
+panel reads that route ([ADR 0127, amendment of
+2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)),
+so the parity guard maps it to the tool. It is listed on `/mcp` only to a
+grant holding `records.read` over the whole store.
 
 Input: `since`, an ISO 8601 instant with a zone (`Z` or an offset), at most
 31 days before the call and not after it; `after`, optionally, a source id.
@@ -2898,7 +2900,7 @@ owner's agreement.
    `kogane.card-settlements.statements` with the grouped `/statements` route. Every other published tool that is
    not a `ui` operation is listed with its reason (`kogane.capabilities`,
    `kogane.explain`, `kogane.reconcile.propose`,
-   `kogane.events.read`, `kogane.audit.get`, `kogane.changes.since`),
+   `kogane.events.read`, `kogane.audit.get`),
    so a new read tool is mapped to its route and that route leaves the gaps.
 
    | UI read route                                                                                                                              | MCP read                                                                                                                                                       |
@@ -2914,6 +2916,7 @@ owner's agreement.
    | `/api/v2/reported-state`                                                                                                                   | `kogane.reported-state.read`                                                                                                                                   |
    | `/api/v2/reconstructed-state`                                                                                                              | `kogane.reconstructed-state.read`                                                                                                                              |
    | `/api/v2/audit`                                                                                                                            | `kogane.audit.search`                                                                                                                                          |
+   | `/api/v2/changes`                                                                                                                          | `kogane.changes.since` (the ホーム page's 最近の変化 panel)                                                                                                    |
    | `/api/v2/reconciliation/card-statements-unmatched`                                                                                         | `kogane.card-settlements.unmatched`                                                                                                                            |
    | `/api/v2/reconciliation/card-debit-accounts`                                                                                               | `kogane.card-settlements.debit-accounts`                                                                                                                       |
    | `/api/v2/decisions/pending`                                                                                                                | `kogane.decisions.pending`                                                                                                                                     |
