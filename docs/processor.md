@@ -272,8 +272,10 @@ the manifest validator.
 
 A block is write-once, which is why a missing ingest route is retryable
 instead: the block would outlive the operator's fix. A retryable stage row is
-appended only when the state or the code changes, so an append-only table does
-not fill with one row per tick.
+appended when the state or the code changes, and otherwise at most once per
+retry interval (`RETRYABLE_RETRY_INTERVAL_MS`, 24 hours, measured from the
+newest row), so an append-only table does not fill with one row per tick or per
+queue redelivery.
 
 ### 3.3 Operation budget and staged registration (issue #87)
 
