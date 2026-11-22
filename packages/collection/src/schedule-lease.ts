@@ -64,7 +64,7 @@ export class CollectionLeaseAbort extends Error {
 }
 
 /** The lease timestamp format, `YYYY-MM-DDTHH:MM:SS.sssZ`, taken on D1's clock. */
-export const D1_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+const D1_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 const RELEASE_OWN =
   "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND lease_ref=?";
