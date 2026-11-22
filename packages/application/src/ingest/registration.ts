@@ -106,7 +106,6 @@ export async function addRunReport(
 ): Promise<{ reportId: number }> {
   await loadRun(env, clientId, runId);
   const { reportKey, reportKind, ...report } = parseAddRunReportRequest(body);
-  // Key order matches the INSERT column list of `insertRunReportIfAbsent`.
   const fields: RunReportFields = {
     producer_version: report.producerVersion,
     producer_revision: report.producerRevision,
