@@ -12,7 +12,7 @@ import {
   d1CommandStore,
   ERROR_STATUS,
   auditPageFilters,
-  financialError,
+  wholeStoreReadRefusal,
   readEconomicRowReadinessForGrant,
   readCardSettlementsForGrant,
   readCardSettlementStatementsForGrant,
@@ -288,22 +288,8 @@ async function readTool(
       case "kogane.reported-state.read": {
         // The grant first, before the body is validated: records.read over the
         // whole store (plan D5, ADR 0063 decision 10).
-        if (!grantAllows(grant, "records.read"))
-          return {
-            status: ERROR_STATUS.unauthorized,
-            body: financialError("unauthorized", "reported-state.read", [
-              "capability:records.read",
-            ]),
-          };
-        const narrowed = [
-          ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-          ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-        ];
-        if (narrowed.length > 0)
-          return {
-            status: ERROR_STATUS.evidence_restricted,
-            body: financialError("evidence_restricted", "reported-state.read", narrowed),
-          };
+        const refused = wholeStoreReadRefusal(grant, "records.read", "reported-state.read");
+        if (refused) return { status: ERROR_STATUS[refused.code], body: refused };
         // The route's own service decides the body: its request rules, its
         // reader and its refusal codes, once for both transports.
         const state = await readReportedState(env, body ?? {});

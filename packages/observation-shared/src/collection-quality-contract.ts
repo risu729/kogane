@@ -27,6 +27,7 @@ import {
   consistentFreshness,
   tokyoDate,
 } from "../../domain/src/collection-freshness.ts";
+import { READ_DETAILS } from "../../domain/src/read-detail.ts";
 import { validInstantText } from "../../domain/src/time.ts";
 
 export const COLLECTION_QUALITY_PATH = "/api/collection-quality";
@@ -957,7 +958,7 @@ export function validCollectionQualityResponse(
  * view (ADR 0088) takes the same two details (ADR 0123, amendment
  * 2026-11-20); the status view has one, its own answer.
  */
-export const COLLECTION_QUALITY_DETAILS = ["summary", "full"] as const;
+export const COLLECTION_QUALITY_DETAILS = READ_DETAILS;
 export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number];
 /** Summary lines per page: of the sources, and of one source's cells. */
 export const COLLECTION_QUALITY_LINE_PAGE = 20;
