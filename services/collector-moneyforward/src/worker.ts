@@ -5,7 +5,7 @@ import {
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
 import { logEvent, logFailure, logStage, type Stage } from "./diagnostics";
-import { collectMoneyForward } from "./moneyforward";
+import { collectMoneyForward, type MoneyForwardCollection } from "./moneyforward";
 import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
 import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types";
 import { parseCredential } from "./webauthn";
@@ -38,8 +38,13 @@ export default {
 interface SharedResult {
   readonly runId: string;
   readonly status: CollectionManifest["status"];
-  readonly accountDetailCount: number;
-  readonly monthlyFragmentCount: number;
+  /**
+   * Present only when the collection finished. A run that stopped earlier
+   * never learned them, so they are absent, never 0 (INV05); its failure is
+   * the reason.
+   */
+  readonly accountDetailCount?: number;
+  readonly monthlyFragmentCount?: number;
   readonly artifactCount: number;
   readonly failureCount: number;
   readonly persistence: string;
@@ -66,8 +71,9 @@ export async function runSharedCollection(env: Env): Promise<SharedResult> {
     const runId = crypto.randomUUID();
     const failures: CollectionFailure[] = [];
     let artifacts: readonly RawArtifact[] = [];
-    let accountDetailCount = 0;
-    let monthlyFragmentCount = 0;
+    // Unknown until the collection returns: a run that stops earlier reports
+    // no counts rather than zeros (INV05).
+    let counts: CollectionCounts | undefined;
     let stage: Stage = "credential-load";
     const onStage = (next: Stage) => {
       stage = next;
@@ -82,8 +88,10 @@ export async function runSharedCollection(env: Env): Promise<SharedResult> {
           requiredSecret(env.MONEYFORWARD_CREDENTIAL_JSON, "MONEYFORWARD_CREDENTIAL_JSON"),
         ),
       });
-      accountDetailCount = collection.accountDetailCount;
-      monthlyFragmentCount = collection.monthlyFragmentCount;
+      counts = {
+        accountDetailCount: collection.accountDetailCount,
+        monthlyFragmentCount: collection.monthlyFragmentCount,
+      };
       artifacts = collection.artifacts;
     } catch (error) {
       failures.push(failure("collect", error, runId, stage));
@@ -97,8 +105,7 @@ export async function runSharedCollection(env: Env): Promise<SharedResult> {
       startedAt,
       completedAt,
       status,
-      accountDetailCount,
-      monthlyFragmentCount,
+      ...counts,
       artifacts,
       failures,
     } as const;
@@ -107,8 +114,7 @@ export async function runSharedCollection(env: Env): Promise<SharedResult> {
     return {
       runId,
       status,
-      accountDetailCount,
-      monthlyFragmentCount,
+      ...counts,
       artifactCount: outcome.artifactCount,
       failureCount: failures.length,
       persistence: outcome.result.outcome,
@@ -116,6 +122,7 @@ export async function runSharedCollection(env: Env): Promise<SharedResult> {
     };
   });
 }
+type CollectionCounts = Pick<MoneyForwardCollection, "accountDetailCount" | "monthlyFragmentCount">;
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;

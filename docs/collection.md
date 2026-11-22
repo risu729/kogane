@@ -558,6 +558,21 @@ themselves. The parsers also accept the importer's `moneyforward-account-v1-`
 identities, which are a different account from the v2 identity of the same
 service ([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
 
+Run result: `runSharedCollection` returns the run's id, status, artifact and
+failure counts, persistence outcome and terminal key. `accountDetailCount` and
+`monthlyFragmentCount` are in that result and in the collector's
+`manifest.json` only when the collection finished; a finished run with no
+account reports a known 0 for both. A run that stopped earlier (no credential,
+a refused sign-in, a refused account or month page) never learned them, so
+they are absent, not 0 (INV05); its failure code is the reason. Such a run is
+`failed` and keeps no artifact, so it writes no `manifest.json` at all. A
+`success` input that carries no `accountDetailCount` cannot be checked against
+its identities, so its units stay positional (`identity_incomplete`;
+[ADR 0027, amendment 2026-11-21](adr/0027-moneyforward-collector-account-identity.md#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)). Until
+2026-11-21 a stopped run reported both counts as 0 in its result. Verified
+with a synthetic passkey provider behind a mocked `fetch` in
+`services/collector-moneyforward/test/diagnostics.test.ts`.
+
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
 G1-02, G1-08, G1-09, G1-15, G3-07, G3-08) and
@@ -1070,6 +1085,18 @@ When the month window is unknown — a run that failed before the balance
 response — the scope is `unspecified` and no range is stated rather than a
 guessed one.
 
+Run outcome and log: the Durable Object's `runCollection` returns the run's
+manifest, and the `vpoint-pay-collection-persisted` log line carries its
+status, month bounds, counts and closed codes (artifact and failure counts,
+terminal outcome, key and digest). `transactionMonthCount` and
+`transactionCount` are in both only when the collection finished; a finished
+run whose months hold no transaction reports a known 0. A run that stopped
+earlier (no credential, a refused token, balance or month request) never
+learned them, so they are absent, not 0 (INV05); its failure codes are the
+reason. Until 2026-11-21 such a run reported both as 0. Verified with a mocked
+`fetch` and a stub Durable Object storage in
+`services/collector-vpoint-pay/test/state.test.ts`.
+
 This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
 answer 410, there is no cron, and the notification mail this source is actually
 observed through is collected by `services/collector-vpoint` as
@@ -1112,6 +1139,20 @@ collector proved it reached the end of the history; an unproven boundary is
 The media type in the terminal is `text/html`: `terminal-v1` media types carry
 no parameters, and `text/html` is what the central descriptor already declares
 for this artifact, with the CP932 charset a constant of the source.
+
+Run log: the `mobile-suica-collection-persisted` line carries the run's
+status, counts and closed codes (artifact and failure counts, terminal
+outcome, key and digest, and `reasonCode` when the terminal was not written).
+`transactionCount` and `pageCount` are in it, and in the run's returned
+manifest, only when the history walk finished; a finished walk over an empty
+history reports a known 0 transactions on its one page. A run that stopped
+earlier (no credential, a failed browser bootstrap, a refused or invalid
+history page) never learned them, so they are absent, not 0 (INV05); its
+failure code is the reason. The pages a stopped walk kept are counted in
+`artifactCount`, not as its `pageCount`. Until 2026-11-21 a stopped run
+reported a transaction count of 0 and its kept pages as its page count.
+Verified with a stubbed browser bootstrap and a mocked `fetch` in
+`services/collector-mobile-suica/test/run-counts.test.ts`.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
