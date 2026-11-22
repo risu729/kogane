@@ -308,8 +308,12 @@ check it was, as a closed category:
   `sbi-yen-detail-history` and `global-pass-activity` jobs at the release
   the parser registry of the checkout declares
   (`scripts/diagnose-selection.ts`), so a parser version bump moves the
-  selection with it; to look at another release, run it from a checkout of
-  that release.
+  selection with it. Every selected artifact is replayed through each parser
+  of the checkout that accepts it, so selection and replay are always the
+  same release. It takes no other release: a release the processor has not
+  run yet has no jobs to select, and the script cannot replay the
+  deployed release's failures through a newer parser; for GLOBAL PASS,
+  `diagnose-global-pass.ts --parser-version` does that.
 
 `services/processor/scripts/diagnose-global-pass.ts` replays every artifact
 with a failed `global-pass-activity` job at one release, the registry's

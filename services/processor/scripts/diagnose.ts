@@ -5,9 +5,11 @@
 // `--remaining` replays the newest failed job, and `--remaining-all` every
 // failed job, of `sbi-yen-detail-history` and `global-pass-activity` at the
 // release the parser registry of this checkout declares
-// (`remainingJobsPredicate`); to look at another release, run the script from
-// a checkout of that release. `--newest-sbi` replays the newest SBI Securities
-// cash-position and yen-history artifacts.
+// (`remainingJobsPredicate`). Replay uses the parsers of the same checkout, so
+// selection and replay are always one release: there is no way to select the
+// deployed release's failures and replay them through a newer parser here.
+// `--newest-sbi` replays the newest SBI Securities cash-position and
+// yen-history artifacts.
 import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";

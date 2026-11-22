@@ -50,10 +50,13 @@ describe("diagnostic parser releases follow the registry", () => {
   });
 
   test("neither script states a parser release itself", () => {
+    // Whatever the operator (`=`, `IN`, `LIKE`) or quoting (', ", `): the
+    // scripts leave every parser_version predicate to the helper and carry no
+    // version-shaped text at all.
     for (const name of ["diagnose.ts", "diagnose-global-pass.ts"]) {
       const source = script(name);
-      expect(source).not.toMatch(/parser_version\s*=\s*'/u);
-      expect(source).not.toMatch(/['"]\d{1,4}\.\d{1,4}\.\d{1,4}['"]/u);
+      expect(source).not.toMatch(/parser_version/u);
+      expect(source).not.toMatch(/\d+\.\d+\.\d+/u);
     }
     expect(script("diagnose.ts")).toContain("${remainingJobsPredicate()}");
     expect(script("diagnose-global-pass.ts")).toContain("globalPassFailedJobsSql(parserVersion)");
