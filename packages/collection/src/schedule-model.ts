@@ -499,6 +499,50 @@ function at(date: number, time: string, timezone: string): number | null {
   // A missing DST wall time is skipped; the earlier repeated wall time is used once.
   return candidates.length ? Math.min(...candidates) : null;
 }
+/** The wall time an instant shows in `timezone`, as a UTC instant, to the minute. */
+function wallClock(ms: number, timezone: string): number {
+  const [y, mo, d, hh, mm] = parts(ms, timezone);
+  return Date.UTC(y!, mo! - 1, d!, hh!, mm!);
+}
+/**
+ * A recurring maintenance window's start or end: `at`, except that a wall
+ * time the zone skips (the hour clocks move forward over) is never dropped,
+ * because a window dropped there would let collection run inside it. A
+ * skipped start opens the window at the first minute whose wall time reaches
+ * it, the clock change itself for a whole-hour change; a skipped end is read
+ * on the clock before the change (02:30 in a skipped 02:00–03:00 is 03:30
+ * summer time). Either way the window covers every minute whose wall time
+ * lies within it, and from a start that exists it keeps its stated length. A
+ * repeated wall time keeps `at`'s first occurrence. A scheduled run's nominal
+ * time keeps `at`, which skips such a day.
+ */
+function windowAt(
+  date: number,
+  time: string,
+  timezone: string,
+  edge: "start" | "end",
+): number | null {
+  const exact = at(date, time, timezone);
+  if (exact !== null) return exact;
+  const [h, m] = time.split(":").map(Number);
+  const target = date + h! * 3_600_000 + m! * 60_000;
+  // The offsets a day before and a day after are those either side of the change.
+  const before = wallClock(target - DAY, timezone) - (target - DAY),
+    after = wallClock(target + DAY, timezone) - (target + DAY);
+  // `late` shows a wall time past `target` (the target read on the earlier
+  // clock); `early` shows one before it (read on the later clock).
+  let early = target - after,
+    late = target - before;
+  if (!(early < late) || wallClock(early, timezone) >= target || wallClock(late, timezone) < target)
+    return null;
+  if (edge === "end") return late;
+  while (late - early > 60_000) {
+    const mid = early + Math.floor((late - early) / 120_000) * 60_000;
+    if (wallClock(mid, timezone) >= target) late = mid;
+    else early = mid;
+  }
+  return late;
+}
 /** The local date of an instant in `timezone`, as the UTC midnight of that date. */
 export function localCalendarDate(ms: number, timezone: string): number {
   return localDate(ms, timezone);
@@ -548,8 +592,8 @@ function windowEnd(t: number, rule: MaintenanceRule): number | null {
   for (let back = 0; back <= 7; back++) {
     const startDate = date - back * DAY;
     if (!startsOn(p, startDate)) continue;
-    const start = at(startDate, p.start, rule.timezone),
-      end = at(startDate + (p.end < p.start ? DAY : 0), p.end, rule.timezone);
+    const start = windowAt(startDate, p.start, rule.timezone, "start"),
+      end = windowAt(startDate + (p.end < p.start ? DAY : 0), p.end, rule.timezone, "end");
     if (start !== null && end !== null && t >= start && t < end) return end;
   }
   return null;
@@ -599,7 +643,7 @@ function* joinedDeferrals(
     // One day before `from` covers a window that starts on the previous local date.
     for (let date = localDate(from, rule.timezone) - DAY; date <= from + horizon; date += DAY) {
       if (!startsOn(p, date)) continue;
-      const start = at(date, p.start, rule.timezone);
+      const start = windowAt(date, p.start, rule.timezone, "start");
       if (start !== null && start > from && start < from + horizon) starts.add(start);
     }
   }
