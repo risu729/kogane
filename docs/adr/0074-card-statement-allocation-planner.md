@@ -452,3 +452,21 @@ only.
 - `apps/web/test/card-settlement.browser.test.ts`: the section shows
   `不明（stored:unparsed） · JPY` and refuses a `null` total before it
   renders.
+
+## Amendment 2026-11-21: a null due date carries its reason
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge, with the change it belongs to.
+
+The context, options, decision, consequences and verification are recorded
+once, in
+[ADR 0114's 2026-11-21 amendment](0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason),
+because the same domain function (`statementDueDate`) reads the due date of
+each card's debit account and of this list. For this list: a statement's
+`paymentDate` that is null carries `paymentDateReason`,
+`payment_date_absent` or `payment_date_invalid`, and only then; the wire
+contract refuses a null without it; the code (`statement_not_comparable`),
+the window read and the planner are unchanged; and
+`kogane.card-settlements.unmatched`'s description names the field and both
+codes.

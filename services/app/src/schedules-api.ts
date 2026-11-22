@@ -28,6 +28,7 @@ import {
   parseSubjectList,
   principalCan,
 } from "../../../packages/application/src/index";
+import { READ_DETAILS } from "../../../packages/domain/src/read-detail.ts";
 export const SCHEDULES_PATH = "/api/ops/v1/schedules";
 type ScheduleEnv = Env & { SCHEDULES_ENABLED?: string; DEPLOYMENT_SCHEDULE_TOKENS?: string };
 function enabled(env: ScheduleEnv) {
@@ -98,7 +99,7 @@ export async function scheduleSnapshotResponse(
 }
 
 /** The details the schedules page's GET answers; absent is `summary` (ADR 0123). */
-const SCHEDULE_READ_DETAILS = ["summary", "full"] as const;
+const SCHEDULE_READ_DETAILS = READ_DETAILS;
 type ScheduleReadDetail = (typeof SCHEDULE_READ_DETAILS)[number];
 
 /** The page GET's one query parameter, `detail`; anything else is `invalid_query`. */

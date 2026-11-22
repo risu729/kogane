@@ -6,6 +6,7 @@
 // shown, and how many pieces of evidence back them (addendum 11 section 4).
 // A measurement with two witnesses is one balance and two pieces of evidence,
 // and this page never calls the second number a balance.
+import { displayLabel } from "../labels.ts";
 import { useState, type ReactNode } from "react";
 import {
   useLatestBalances,
@@ -16,7 +17,7 @@ import {
 import type { MeasureView } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { Amount, Badge, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import { formatDecimal } from "../money.ts";
-import { Pagination } from "../pagination.tsx";
+import { CursorPager } from "../pagination.tsx";
 import { OrganizedSourceAccount } from "../organization.tsx";
 import { balanceMeaning } from "../balance-display.tsx";
 
@@ -93,7 +94,7 @@ const REASON_LABELS: Record<string, string> = {
 };
 
 const reasonText = (code: string | null): string | null =>
-  code === null ? null : (REASON_LABELS[code] ?? code);
+  code === null ? null : displayLabel(REASON_LABELS, code);
 
 export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }): ReactNode {
   // The cursor is opaque and belongs to one snapshot; clearing it is the
@@ -108,6 +109,7 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
         <LatestBody
           page={page}
           copy={copy}
+          fetching={query.isFetching}
           canGoBack={trail.length > 0}
           onNext={() => {
             if (page.page.nextCursor === null) return;
@@ -137,6 +139,7 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
 function LatestBody({
   page,
   copy,
+  fetching,
   canGoBack,
   onNext,
   onBack,
@@ -144,6 +147,8 @@ function LatestBody({
 }: {
   page: LatestBalancePage;
   copy: (typeof VIEW_COPY)[MeasureView];
+  /** A read of this snapshot is in flight; the pager waits for it. */
+  fetching: boolean;
   canGoBack: boolean;
   onNext: () => void;
   onBack: () => void;
@@ -224,16 +229,14 @@ function LatestBody({
             </tbody>
           </table>
         </div>
-        <Pagination
+        <CursorPager
           label={`${copy.title}のページ`}
-          status={page.page.hasMore ? "続きがあります" : "最後のページです"}
-          previous={{ label: "前へ", disabled: !canGoBack, onClick: onBack }}
-          next={{ label: "次へ", disabled: !page.page.hasMore, onClick: onNext }}
-          actions={
-            <button className="button" type="button" onClick={onRefresh}>
-              最新の状態に更新
-            </button>
-          }
+          fetching={fetching}
+          canGoBack={canGoBack}
+          hasMore={page.page.hasMore}
+          onPrevious={onBack}
+          onNext={onNext}
+          restart={{ label: "最新の状態に更新", onClick: onRefresh }}
         />
       </Panel>
     </>

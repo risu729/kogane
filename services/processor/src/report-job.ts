@@ -628,11 +628,20 @@ export async function runReportJob(
           },
     );
     // Provider-reported values and costs are kept beside the own calculation,
-    // never promoted to the single truth (UC30/AT30).
+    // never promoted to the single truth (UC30/AT30). One row per
+    // `calculation_results` key (subject, scope, metric): one instrument held
+    // in two scopes keeps each scope's row, and only a repeat within one
+    // scope is skipped, before the insert's `ON CONFLICT DO NOTHING` could
+    // drop it unseen.
     for (const valuation of entry.valuations) {
       if (valuation.currency !== options.unitRef) continue;
       const metric = `provider.${valuation.metric}`.slice(0, 128);
-      if (providerRows.some((row) => row.subjectRef === ref && row.metric === metric)) continue;
+      if (
+        providerRows.some(
+          (row) => row.subjectRef === ref && row.scopeRef === scopeRef && row.metric === metric,
+        )
+      )
+        continue;
       providerRows.push({
         subjectRef: ref,
         scopeRef,

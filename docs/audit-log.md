@@ -328,9 +328,14 @@ provider text or body.
   stores them sorted). A page outside them is an error, never a partial
   table. The shared package may not import the application layer, so the
   lists are restated there and a test pins them to the builder's.
-- **Refusals.** A non-operator (`403 operator_required`) is told that the log
-  is shown to the operator only, and no record is shown; a deployment
-  without the route (`404`) says the log is not provided.
+- **Refusals.** A non-operator (`403 operator_required`) and a caller Access
+  did not verify (`401 authentication_required`, answered before any route)
+  are told that the log is shown to the operator only, as the 依頼の一覧 and
+  依頼の経過 pages tell them, and no record is shown; a deployment without the
+  route (`404`) says the log is not provided; a cursor the route no longer
+  honours (`409`) says this page's continuation cannot be read
+  (このページの続きを読み込めません, the 依頼の一覧 page's words for its own
+  stale cursor) and offers to read again from the newest record.
 
 A record whose target is an operations request (`op_<id>`) links to that
 request's read-only 依頼の経過 page (`/operations/op_<id>`,
@@ -470,7 +475,8 @@ rolled back with its record), `services/processor/test/schedule-dispatch-marker.
 `retry_claimed` line names the revision the retry was fenced on, and a lost
 fence logs none), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
-idle, off and unaudited lanes, a failed tick, a record that cannot be written),
+idle, off and unaudited lanes, a lane named like a built-in property such as
+`constructor` taken as unaudited, a failed tick, a record that cannot be written),
 `services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a
 key range without table statistics; the proposal reads equal the shipped text),
 `services/processor/test/card-purchase-lane-audit.test.ts` (the deployed

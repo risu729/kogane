@@ -10,6 +10,7 @@ import {
   CARD_STATEMENT_ALLOCATION_LISTED_MAX,
   CARD_STATEMENT_ALLOCATION_SIZE_MAX,
 } from "../../domain/src/card-settlement-allocation.ts";
+import { STATEMENT_DUE_DATE_REASONS } from "../../domain/src/card-settlement.ts";
 import { UNMATCHED_STATEMENT_CODES } from "../../domain/src/card-settlement-unmatched.ts";
 import { validSourceFactRef } from "../../domain/src/events.ts";
 import { validTemporalValue } from "../../domain/src/time.ts";
@@ -122,6 +123,10 @@ export function validUnmatchedCardStatementsReview(value: unknown): boolean {
       // A total that is not exact carries its status and reason (INV05).
       validQuantity(statement.amount) &&
       (statement.paymentDate === null || validTemporalValue(statement.paymentDate)) &&
+      // A null due date carries its reason, and only a null one has one (INV05).
+      (statement.paymentDate === null
+        ? oneOf(STATEMENT_DUE_DATE_REASONS, statement.paymentDateReason)
+        : !Object.hasOwn(statement, "paymentDateReason")) &&
       oneOf(UNMATCHED_STATEMENT_CODES, item.code) &&
       (item.debitsInWindow === null || count(item.debitsInWindow)) &&
       item.acceptable === false &&

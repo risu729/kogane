@@ -1,3 +1,4 @@
+import { displayLabel } from "../labels.ts";
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type {
@@ -64,7 +65,7 @@ const fmt = (value: string | null) =>
         timeStyle: "short",
       }).format(new Date(value))
     : "未設定";
-const name = (id: string) => NAMES[id] ?? id;
+const name = (id: string) => displayLabel(NAMES, id);
 async function request<T>(suffix = "", body?: unknown): Promise<T> {
   const response = await fetch(`${PATH}${suffix}`, {
     credentials: "same-origin",

@@ -6,6 +6,7 @@
 // route only where `/api/meta` advertises it (`pendingDecisions`), so a store
 // without it (the local evidence browser) is never probed. The route is the
 // operator's; for anyone else the panel is not shown.
+import { ownEntry } from "./labels.ts";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getJson, useFeatures } from "./api.ts";
@@ -60,7 +61,8 @@ function Line({ line }: { line: PendingDecisionLine }): ReactNode {
   if (line.state === "unavailable")
     return (
       <li>
-        {label}: <Badge tone="warn">{UNAVAILABLE[line.reason ?? ""] ?? line.reason}</Badge>
+        {label}:{" "}
+        <Badge tone="warn">{ownEntry(UNAVAILABLE, line.reason ?? "") ?? line.reason}</Badge>
       </li>
     );
   const count = line.count ?? 0;

@@ -86,6 +86,7 @@ function inspectFailure(error: unknown): SafeFailure {
         "premature-end",
         "page-limit",
         "invalid-total",
+        "rows-exceed-total",
       ]).has(reason)
     )
       result.reasonCode = reason;
