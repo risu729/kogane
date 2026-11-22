@@ -585,8 +585,9 @@ the kind has no identity run, so no resolved account.
    or another row is a new `contextId` (INV09). The wire contract checks the
    new shapes, that the manifest pins exactly the listed pages and payments,
    and that nothing is listed under `not_listed_account_filter`.
-6. The state the holdings change, the reconstructed state and the valuation
-   on a date build on (`includeStatementsBeforeWindow: false`, the
+6. The state the holdings change, the reconstructed state, the valuation on
+   a date and the upcoming bills view of the card debit-account read
+   (ADR 0114) build on (`includeStatementsBeforeWindow: false`, the
    statements-before-window amendment's decision 6) skips this read as it
    skips the count: it has no `scheduledPayments`, no
    `coverage.scheduledPayments` and no manifest keys for them.
@@ -603,9 +604,15 @@ change, the valuation on a date and the reconstructed state pin, since their
 manifest names the schema version, although they read nothing new. Nothing
 stores them, so nothing is rebuilt. A stale client that validates
 `reported-state-v3` refuses a v4 body. The upcoming bills view of the card
-debit-account read (ADR 0114) builds on the full reported state for its
-balances, so it runs this read too; it uses only the accounts and pins no
-reported-state context id, so its answer is unchanged. The read scans the
+debit-account read (ADR 0114) uses only the state's accounts and pins no
+reported-state context id, so it reads the state without the count and
+without this read (decision 6), and its answer is the one the full state
+gives: `packages/application/test/card-upcoming-bills.test.ts` compares the
+two byte for byte on a synthetic store and on random stores. The one
+difference is a store where the count or this read alone passes
+`DATED_STATE_ROW_BOUND`: the full state is refused there, which left every
+balance of the view `missing` with `reported_state_limit_exceeded`, and the
+view now reads them. The read scans the
 publication pointers (`published_parse_runs`) filtered by parser name and
 reaches each page's artifact by primary key and its rows through
 `idx_sched_pay_obs_parse_run`: on workerd, D1's own plan without statistics is

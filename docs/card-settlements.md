@@ -440,7 +440,10 @@ rule `card-upcoming-bills-v1` in `packages/domain/src/card-upcoming-bills.ts`)
 answers, for today in Asia/Tokyo, each card's next bill, the account it is
 debited from and whether that account's reported balance covers it. It reads
 the per-card answer above and the [reported state](reported-state.md) for the
-date, and nothing else but the account entities' labels.
+date, and nothing else but the account entities' labels. It uses only the
+state's accounts and pins no reported-state context id, so it reads the state
+with `includeStatementsBeforeWindow: false`: neither the count of the
+statements before the payable window nor the scheduled payments is read.
 
 - A bill is a card's newest current statement whose provider due date is on
   or after the date and whose total is not an exact zero or below. Any other
@@ -1310,14 +1313,19 @@ each one (`allocation_available` is 0), and the scale test on the scaled
 store, which draws none, so the two texts agree there. Not timed on the
 scale store or on D1.
 
-Upcoming bills cost that read, the reported state for the date (its six
-reads: positions, balances, snapshots, statements, the statements before the
-window and the scheduled payments, each bounded by `DATED_STATE_ROW_BOUND`,
-and its settlement read), and
-`ACCOUNT_LABELS_SQL`, one primary-key lookup per account entity named.
-`packages/application/test/card-upcoming-bills.test.ts` checks that the view
-issues only those reads and, without table statistics, that labels are
-reached by `accounts`' key. Not measured on the scale store or on D1.
+Upcoming bills cost that read, the reported state for the date without the
+count and the scheduled payments (four reads: positions, balances and
+statements, each bounded by `DATED_STATE_ROW_BOUND`, the snapshots, one row
+per perimeter container and chosen snapshot and not bounded, and its
+settlement read), and `ACCOUNT_LABELS_SQL`, one primary-key lookup per
+account entity named. `packages/application/test/card-upcoming-bills.test.ts` checks that the
+view issues only those reads, never `DATED_STATEMENTS_BEFORE_WINDOW_SQL` or
+`DATED_SCHEDULED_PAYMENTS_SQL`; that its answer is byte-identical to the one
+over the full state, on a synthetic store where both skipped reads find rows
+and on random stores; that scheduled payments past the row bound, which
+refused the full state and left every balance `missing`, no longer do; and,
+without table statistics, that labels are reached by `accounts`' key. Not
+measured on the scale store or on D1.
 
 ### Readiness
 

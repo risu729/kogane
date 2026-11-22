@@ -194,15 +194,20 @@ A perimeter container with no snapshot before the cutoff is listed in
 `queryDatedState` counts the statements before the window and lists the
 scheduled payments unless it is called with
 `includeStatementsBeforeWindow: false`. The holdings change below, the
-[reconstructed state](reconstructed-state.md) and the
-[valuation on a date](calculation-and-reports.md#valuation-on-a-date) pass
-`false`: they run neither `DATED_STATEMENTS_BEFORE_WINDOW_SQL` nor
+[reconstructed state](reconstructed-state.md), the
+[valuation on a date](calculation-and-reports.md#valuation-on-a-date) and the
+[upcoming card bills](card-settlements.md#upcoming-bills) pass `false`: they
+run neither `DATED_STATEMENTS_BEFORE_WINDOW_SQL` nor
 `DATED_SCHEDULED_PAYMENTS_SQL`, and the state they build on has no
 `statementsBeforeWindow` or `scheduledPayments` in its body, coverage or
-manifest and names every liability gap. The reported context ids they pin are
-the digests of that manifest without them: they record no input they did not
-read, and they differ from the `/state` answer's `contextId` for the same date
-and filters. The context amendment of 2026-11-19 (`reported-state-v2`) changed
+manifest and names every liability gap. Upcoming bills use only its accounts
+and pin no context id, so their answer is the one the full state gives, except
+on a store where one of the two skipped reads alone passes
+`DATED_STATE_ROW_BOUND`: the full state is refused there, and upcoming bills
+now read the balances instead of answering each `missing`. The reported
+context ids the other three pin are the digests of that manifest without
+them: they record no input they did not read, and they differ from the
+`/state` answer's `contextId` for the same date and filters. The context amendment of 2026-11-19 (`reported-state-v2`) changed
 them once, as it changed every reported-state context id, and
 `reported-state-v3` and `reported-state-v4` each changed them once more: their
 manifest gains nothing but names the schema version, so those ids, and the
