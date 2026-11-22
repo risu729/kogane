@@ -252,6 +252,78 @@ test("assign protects the subject; release-override appends, supersedes, and let
   ).toEqual({ ok: false, error: "no_active_override" });
 }, 30_000);
 
+test("a release takes effect only when a parse that uses the reference is next identified; a run-scoped reference has none", async () => {
+  // The sweep identifies parses that have no sealed run at their required
+  // policy; a release changes no parse, so the sweep alone appends nothing.
+  // The rule's revision comes with the next identified parse that plans the
+  // same reference (a later capture). A run-scoped reference is never planned
+  // again, so after a release its manual mapping stays current.
+  const source = "release-probe";
+  const runScoped: IdentityResolver = (input) => {
+    const plan = labelled("run-scoped rule")(input);
+    return {
+      ...plan,
+      account: {
+        ...plan.account,
+        key: [input.sourceAccount, "fetch-run", String(input.fetchRunId)],
+        status: "unresolved",
+      },
+    };
+  };
+  await db
+    .prepare(
+      "INSERT INTO accounts VALUES('release-probe-target','手動確認済み口座','deposit','identified')",
+    )
+    .run();
+  const cases = [
+    { name: "durable", resolver: labelled("durable rule"), first: 150, next: 151 },
+    { name: "run-scoped", resolver: runScoped, first: 152, next: 153 },
+  ];
+  for (const { name, resolver, first, next } of cases) {
+    const parse = await seedParse(first, source, `${source}:${name}`);
+    expect(await identifyParse(db, parse, resolver)).toBe(1);
+    const ref = (await currentMapping(first)).source_account_id;
+    expect(
+      await run(
+        command({
+          operationId: `op-release-probe-assign-${name}`,
+          referenceId: ref,
+          targetId: "release-probe-target",
+        }),
+      ),
+    ).toMatchObject({ ok: true, receipt: { revision: 2 } });
+    expect(
+      await run(
+        command({
+          operationId: `op-release-probe-release-${name}`,
+          action: "release-override",
+          referenceId: ref,
+          expectedRevision: 2,
+          targetId: null,
+        }),
+      ),
+    ).toMatchObject({ ok: true, receipt: { revision: 2 } });
+    expect(await count("protected_mapping_subjects", "subject_ref=?", ref)).toBe(0);
+    // Every parse of the source is sealed: the sweep has nothing to do, and
+    // the released manual mapping is still the current one.
+    expect(await identitySweep(db, resolver, 8, source)).toMatchObject({ processedRuns: 0 });
+    expect(await currentMapping(first)).toMatchObject({ revision: 2, method: "manual" });
+    // The next capture of the reference is identified by the sweep.
+    await seedParse(next, source, `${source}:${name}`);
+    expect(await identitySweep(db, resolver, 8, source)).toMatchObject({ identifiedRuns: 1 });
+    const after = await db
+      .prepare("SELECT revision,method FROM current_account_mappings WHERE source_account_id=?")
+      .bind(ref)
+      .first<{ revision: number; method: string }>();
+    expect(after).toEqual(
+      name === "durable"
+        ? { revision: 3, method: "rule" }
+        : // The later capture planned its own run-scoped reference.
+          { revision: 2, method: "manual" },
+    );
+  }
+}, 30_000);
+
 test("a resend with the same operation id and payload replays the result without a second revision", async () => {
   const parse = await seedParse(110, "sony-bank", "sony-bank:deposit:JPY");
   await identifyParse(db, parse, labelled("sony rule"));

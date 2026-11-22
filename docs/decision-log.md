@@ -87,7 +87,11 @@ interface IdentityCommand {
   citation bound or the revision bound alone stops it, and both are kept as
   defense in depth.
   It does not delete or replace the manual mapping row: the manual mapping
-  stays current until automatic policy appends the next rule revision. It also
+  stays current until automatic policy appends the next rule revision, which
+  happens only when a parse whose plan names the same reference is next
+  identified (the sweep re-identifies no sealed parse). A run-scoped reference
+  (a key with `fetch-run`) is never planned again, so its manual mapping stays
+  current after a release. It also
   releases a manual row no decision describes (one written by an older build):
   the decision then supersedes nothing and records `previous_revision` null.
 - All writes of one command are one `D1Database.batch` (one transaction). The
@@ -162,7 +166,7 @@ the subject is not in `protected_mapping_subjects` and the current mapping is
 not already a rule decision of an equal or newer policy version. Protection
 therefore follows the latest effective decision: a manual `assign` protects
 until a `release-override`, after which the rule applies again and appends a
-new revision. `identity-decisions.test.ts` compares this guard with the former
+new revision when a parse that plans the reference is next identified. `identity-decisions.test.ts` compares this guard with the former
 one (`method='manual' OR policy_version>=?`) over synthetic histories: they
 agree everywhere except after a release, which is the intended change. A rule
 revision written after a release has an id qualified by its revision
