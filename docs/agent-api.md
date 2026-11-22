@@ -2048,10 +2048,23 @@ the intent, perimeter, bases and filters but not the page size or the
 effective time, so a client cannot change the answer by resizing a page. A
 cursor from a context with other pinned inputs (a later publication, another
 perimeter) or another query is `stale_context`; it is never quietly restarted
-from the newest rows. Limit: the publication high-water is the highest visible
-parse run id, so a release activation onto older candidate runs or a rollback
-need not move it, and a cursor resumed across one can repeat or skip rows
-([ADR 0091: consequences](adr/0091-query-cursor-paging-basis.md#consequences)).
+from the newest rows. The publication marker (`publicationRef`,
+`financial-context-v2`) is
+`published-parse-runs@<id>+publication-events@<id>+exclusions@<n>+snapshot-policies@<digest>`
+over the grant's sources: the highest visible parse run, the newest
+`publication_events` row, the number of runs excluded from financial views and
+a digest of the `dataset_snapshot_policies` columns the lists read. A release
+activation onto older candidate runs, a rollback, an exclusion and an
+operator's policy update (a dataset named for the `unit` eligibility scope)
+change the rows a page reads without a newer parse run, and each moves the
+marker, so a cursor across one is `stale_context` and, at one clock, the
+`contextId` differs
+([ADR 0091 amendment](adr/0091-query-cursor-paging-basis.md#amendment-2026-11-21-a-publication-marker-that-moves-with-every-publication-change);
+`services/app/test/query-paging-basis.test.ts`). Limits: the marker is read
+before the rows, in separate statements, so a change that lands between them
+is answered under the earlier marker, and a cursor checked against that
+marker resumes over the changed rows; and a deploy that changes the read SQL
+between two pages keeps the basis.
 
 `resultRef` is the digest of `{contextId, resolvedQuery, data}`. It, together
 with `contextId` and a proposal's `proposalId`, is what a page and an agent
