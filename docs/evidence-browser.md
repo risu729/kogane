@@ -224,6 +224,12 @@ succeeded.
 A balance is a measurement, so each metric an institution reports is its
 own row; nothing is collapsed into one number per account.
 
+On the central store the route's default is a summary of both lists (the
+first lines of each, under 8 KB a page), so the page asks for
+`/api/balances?detail=full`; the local store takes no `detail` and answers
+in full ([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment
+of 2026-11-20).
+
 ### Positions — `/positions`
 
 Each current position with its quantity as a decimal string and an
@@ -856,10 +862,10 @@ tables. Every answer is checked by `validApiResponse` against
 are answered by one reader, `readCollectionQuality`
 (`services/app/src/collection-quality-api.ts`), which
 `kogane.collection-quality.read` also calls
-([agent API](agent-api.md#ui-read-pages)). The summary and the cells take
-`detail`: absent or `summary` answers them as short lines derived from the
-answers below, and `detail=full` answers them as described here, which the
-collection quality page asks for
+([agent API](agent-api.md#ui-read-pages)). The summary, the cells and the
+accounts take `detail`: absent or `summary` answers them as short lines
+derived from the answers below, and `detail=full` answers them as described
+here, which the collection quality page asks for
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
 [agent API](agent-api.md#ui-read-pages)).
 
@@ -896,8 +902,11 @@ collection quality page asks for
   `coverage_incomplete`, `newer_capture_not_current`, `period_unplaced`,
   `query_rule_not_composed`, `not_in_latest_run`, ...). 500 cells a page with
   `coverage.nextOffset`; an unknown or invisible source is 404.
-- **Accounts** (`/api/collection-quality/<sourceId>/accounts`, no query at
-  all; [ADR 0088](adr/0088-collection-quality-per-account.md)): every cell of
+- **Accounts** (`/api/collection-quality/<sourceId>/accounts?detail=full`,
+  no other parameter; [ADR 0088](adr/0088-collection-quality-per-account.md);
+  its summary, one line per account and per unit of unattributed cells paged
+  by `offset` within 8 KB a page, is the default:
+  [ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)): every cell of
   the source, unpaged, regrouped by the accounts the observations of its
   newest or current capture name (through the newest sealed identity runs and
   the current account mappings, never through a unit key): per account its

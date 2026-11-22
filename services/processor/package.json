@@ -13,7 +13,7 @@
     "cf": "1.0.0-rc.0",
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
-    "undici": "8.12.4",
+    "undici": "8.13.1",
     "wrangler": "4.163.0"
   }
 }

@@ -990,11 +990,12 @@ where the projection is absent. `handlers` name the read that lists each
 count's items: `kogane.evidence.read` for runs (`page: runs`, `source`) and
 captures (`page: artifacts`, `runId`), `kogane.observations.get` for the newest
 parse's artifact, `kogane.observations.list` for observations,
-`kogane.events.read` for events and `kogane.collection-quality.read` for why a
-source is unchanged. `kogane.evidence.read` shows only the configured
+`kogane.events.read` for events (`collection: activity`, with the answer's
+`since` in `sinceArgument`, `since`) and `kogane.collection-quality.read` for
+why a source is unchanged. `kogane.evidence.read` shows only the configured
 source's runs, so for any other source the runs and captures handlers answer
-`404 not_found`. Counts, closed codes, times and ids only: no amount,
-label or provider text.
+`404 not_found`. Counts, closed codes, times and ids only: no amount, label or
+provider text.
 
 Bounds: the newest 500 fetch runs per source, 5,000 parse runs and 2,000
 event revisions are read, newest first in recording order, and at most 20,000
@@ -1005,9 +1006,11 @@ events line's `complete: false`. The answer is cut between sources before
 8,192 bytes; `next.after` is the `after` that continues it. `after` is a
 place in source id order (an id no source has continues from where it sorts),
 and each answer is a fresh read of the sources after it. More than 200
-visible sources is `413 budget_exceeded`. The events line counts revisions,
-but `kogane.events.read` does not filter by date yet (the next slice in the
-ADR).
+visible sources is `413 budget_exceeded`. The events line counts every
+revision recorded since, of every kind; its handler lists only the current
+ones, one basis a call (`kogane.events.read` with `since`, below), so a
+revision superseded since, or one with no leg on the basis asked, is counted
+and not listed.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; both decided before the request is
@@ -1139,7 +1142,7 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 | `kogane.store.read`                    | `GET /api/meta`, `/api/overview`, `/api/filter-options`                                                                                                                          | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.observations.list`             | `GET /api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                                                                                     | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.observations.get`              | `GET /api/observations/{kind}/{id}`, `/api/artifacts/{id}`                                                                                                                       | `records.read` on `"*"` sources and accounts                                                    |
-| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                                                                                        | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`; `/api/v2/balances/cash` (no screen reads it)                                                                          | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                                                                         | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                                                                                    | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.reports.read`                  | `GET /api/v2/reports`, `/api/v2/reports/{id}`, `/api/v2/reports/{id}/explanation`, while `reportArtifacts` is served; never `/export`                                            | `records.read` on `"*"` sources and accounts                                                    |
@@ -1161,13 +1164,15 @@ the reader is the route's status with `{ error, refs? }`, as the Worker
 answers it, without the request id. A store read that fails is
 `503 catalogue_read_failed`, as on the route.
 
-Four reads answer one short line per row by default
+Five reads answer one short line per row by default
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
 the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
-`kogane.collection-quality.read` (its summary and `view: "cells"`) and
-`kogane.store.read` with `page: "overview"` take `detail`, `summary` (the
-default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19,
-unchanged; the web UI asks for it. A `summary` is derived from that same
+`kogane.collection-quality.read` (its summary, `view: "cells"` and
+`view: "accounts"`),
+`kogane.store.read` with `page: "overview"` and `kogane.observations.list`
+with `kind: "balances"` take `detail`, `summary` (the
+default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19
+(the balance list: before 2026-11-20), unchanged; the web UI asks for it. A `summary` is derived from that same
 answer by one function in `packages/application` or
 `packages/collection`, so the route and the tool give the same summary, and
 it keeps every id that reads a row in full (`observationId`, a job id, a
@@ -1196,21 +1201,102 @@ page's. A cursor is bound to neither `detail` nor `limit`
 is `400 cursor_mismatch` with `mustMatch`, the argument names that must
 repeat (`collection`, `source`, `account`, `instrument`, `metric`,
 `view`, `identityRead` on `kogane.balances.read`; `collection`, `program`,
-`from` and `before` on `kogane.rewards.read`'s expiry), on the route and the
-tool alike.
+`from` and `before` on `kogane.rewards.read`'s expiry; `collection`, `basis`,
+`since`, `before`, `account` and `source` on `kogane.events.read`'s filtered
+activity), on the route and the tool alike.
 `test/mcp-answer-size.test.ts` measures every read tool's default answer on
 a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
 and keeps the summaries under the 8 KB a client shows, with the overview
 and the maintenance read (below) also at their realistic worst (the
-overview under 7 KB there) and the overview at its bound.
+overview under 7 KB there), the overview at its bound, and the overview
+past today's names, where its byte budget trims it.
+
+**Cash per account.** `kogane.balances.read` `{collection: "cash"}` and `GET /api/v2/balances/cash`
+answer "how much cash do I have, per account and per bank" in one call
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+2026-11-20). Both call `cashPerAccountPage` (`services/app/src/balances-v2.ts`),
+which reads the published snapshot the other two balance routes serve, under
+their refusals (`503 read_model_unavailable` and the snapshot refusals), and
+shapes it with `cashPerAccount`
+(`packages/application/src/query/cash-per-account.ts`). The page is
+`{ schemaVersion, collection: "cash", policyRelease, lines, subtotals,
+leftOut, liabilitiesCoverage: "unknown", dataCoverage, page }`:
+
+- **What is cash.** The metrics of the known-assets subtotal
+  (`known-assets-subtotal-v1`): `deposit.balance` (SBI Shinsei, SMBC and
+  Mizuho deposits), `broker.foreign-cash-deposit` (SBI Securities foreign
+  cash, per currency) and `exchange.cash-balance` (SBI VC Trade cash)
+  (`CASH_METRIC_IDS`, pinned to `knownAssetMetricIds()`).
+- **`lines`.** One line per account entity: `account` (the 64-hex entity)
+  and `label` (its readable label, [ADR 0120](adr/0120-readable-account-labels.md)),
+  both null when the organization is unavailable (the line is then one
+  projection subject), and `references`, one per provider reference that
+  reaches the account (`source`, `sourceAccount`, the key the `account`
+  filter takes), each with its `amounts`: `observationId`, `metric`, `unit`,
+  `value` and `scale` (none when the value is not exact), `status`,
+  `adoption`, `counted`, `asOf` and `reasons` (`adoption:<code>`,
+  `freshness:<code>`, `cash:account_reported_twice`; an amount not counted
+  always has one). Lines are ordered by source, then label.
+- **`subtotals`.** `byUnit` and `bySource` (per source and unit), over the
+  whole filter scope on every page: `value` and `scale` are the exact sum
+  (`sumQuantities`) of the counted amounts, null when nothing is counted,
+  never a zero; `counted`, `notCounted`, `status` (`partial` when an amount
+  is not counted for a reason other than adoption's `excluded`) and the
+  not-counted amounts' `reasons`. No two units are added.
+- **What is counted (INV06).** An adopted exact amount, as the projection
+  adopted it for the known-assets subtotal and `financial.query` `holdings`,
+  and only when it is the only adopted amount of its unit on its account
+  line and on its provider reference. Two adopted amounts of one unit on
+  one account (two references of one account entity, or one reference
+  twice) are both left uncounted with `cash:account_reported_twice`, and
+  the subtotal and the coverage say so.
+- **`leftOut`.** The scope's other latest measurements, per closed reason
+  (`metric_unknown`, `not_currency`, `not_a_stock`, `not_asset_positive`,
+  `overlaps_another_measure`, `restates_a_balance`, `not_summable`, decided
+  from the registry definition in that order) with the row count, up to
+  three metric ids with the most rows and `moreMetrics`. A Sony Bank or
+  Mobile Suica balance (`restates_a_balance`) and a PRESTIA term deposit
+  (`overlaps_another_measure`) are left out here, as from every known-assets
+  subtotal.
+- **Paging.** A page holds whole lines up to `limit` measurements (10 by
+  default; 10, 25, 50, 100, 200 or 500), a line with more being a page
+  alone, and fewer when the next line would carry the tool's answer past
+  8,192 bytes as `/mcp` writes it (UTF-8, cursor included); a page that
+  cannot hold its first line is `413 result_limit_exceeded`, never cut,
+  with no hint (no `retryWith`: the read has no other `detail`). The
+  subtotals and `leftOut` repeat on every page, so a scope of about 50
+  source and unit pairs leaves no room for a line; `source` or
+  `instrument` narrows them. `page.lines` counts the scope's lines. The cursor is the v2 balance
+  cursor: bound to the snapshot, the route, `source`, `account`,
+  `instrument` and `identityRead`, continued at any offered `limit`
+  ([ADR 0119](adr/0119-cursor-page-size.md)), `400 cursor_mismatch` with
+  `mustMatch` otherwise, and `410 context_expired` when an identity
+  decision between two pages changed the grouping of the scope's lines
+  anywhere (merged, split, relabelled or reordered them). It carries a
+  digest of every line's key, label and references' observations, never an
+  account key or label.
+- **Filters.** `source`, `account`, `instrument` (the unit), `identityRead`,
+  `limit`, `cursor`; `metric`, `view` and `detail` are `400 invalid_query`.
+  A scope of more than 5,000 latest rows is `413 result_limit_exceeded`,
+  never a partial answer.
+
+It reads one fixed snapshot's latest rows of the scope in compact columns
+(`measureRows`, `projectionMeasureSql`: a search of
+`current_balance_projection_order` by snapshot, checked without table
+statistics in `packages/storage-d1/test/statement-plans.test.ts`) and
+organizes only the cash rows. `test/cash-per-account-api.test.ts` pins the
+route, `/api/agent/v1/balances.read` and `/mcp` answering the same page on a
+synthetic store of 30 cash accounts in four units over five sources, each
+page under 8 KB.
 
 The overview summary (`GET /api/overview`, `kogane.store.read`
-`{page: "overview"}`; ADR 0123, amendment of 2026-11-19) is
-`{ detail: "summary", counts, sources, fetchRuns, parseRuns, unitUpdates?,
-unitUpdatesOmitted?, coverage }`, shaped by `overviewSummary`
-(`packages/application/src/query/overview-detail.ts`): the counts and the
-coverage as the full page has them; the sources as `{ sourceIds, artifacts }`,
-sources with the same artifact count sharing a line; `fetchRuns.byStatus`
+`{page: "overview"}`; ADR 0123, amendments of 2026-11-19 and 2026-11-20) is
+`{ detail: "summary", counts, sources, sourcesOmitted, fetchRuns, parseRuns,
+unitUpdates?, unitUpdatesOmitted?, coverage, budget }`, shaped by
+`overviewSummary` (`packages/application/src/query/overview-detail.ts`): the
+counts and the coverage as the full page has them; the sources as
+`{ sourceIds, artifacts }` in the full page's order (by id), sources with the
+same artifact count sharing a line; `fetchRuns.byStatus`
 and `parseRuns.byStatus`, one line per status of the newest-500 window
 (`success`, `partial`; `ok`, `pending`, `error`) with its run count, its
 source or parser count, the parse lines' superseded, warning and
@@ -1225,10 +1311,67 @@ those three lists holds the five lines with the newest runs
 (`OVERVIEW_SUMMARY_LINES`); the lines left out are counted per status, with
 their runs, in `notSuccessfulOmitted`, `notOkOmitted` and
 `unitUpdatesOmitted`, and listed by `detail: "full"`. It drops
-provider names, producers, session ids, parser versions and warnings. `detail` on `meta` or `filter-options` is the route's
+provider names, producers, session ids, parser versions and warnings.
+
+The tool's answer, `{ schemaVersion, data }` as the tool serializes it, is
+at most 8,192 bytes (`OVERVIEW_SUMMARY_BYTES`; the route's `data` alone is
+47 bytes shorter). When the capped summary is over, it leaves out, one at a
+time and in this order until the answer fits: sources, the last by id first,
+counted in `sourcesOmitted`; then per-line failure codes, the oldest listed
+`notOk` line's oldest first, counted in its `moreFailureCodes`; then lines,
+the oldest of the list holding the most first (on a tie `unitUpdates`, then
+`notSuccessful`, then `notOk`), counted in the omitted entries. `budget` is
+`{ bytes: 8192, trimmed }`; `trimmed` is true exactly when the summary shows
+what only the budget trims (a list leaving lines out while holding fewer than
+five, a line counting codes while listing fewer than three, or
+`sourcesOmitted` above 0). `counts`, `coverage` and the `byStatus` lines,
+each with every failure code of its status, are never trimmed: when they
+alone pass the budget (parser names of about 1,800 characters on each status
+line, none today), the read is `413 result_limit_exceeded` with
+`retryWith: { detail: "full" }`. At today's names the bound is 8,140 bytes
+and untrimmed; at the schema's 100-character source ids and 200-character
+datasets it leaves every source out and keeps every failing line.
+
+`detail` on `meta` or `filter-options` is the route's
 `400 invalid_query`, and another value `400 invalid_detail` (the tool's
 schema: `400 invalid_request`). The parameter exists where a store advertises
 `sharedQuery`; the local store answers its full overview alone.
+
+The v1 grouped balance list (`GET /api/balances`,
+`kogane.observations.list` `{kind: "balances"}`; ADR 0123, amendment of
+2026-11-20) takes the same `detail`, `summary` the default, and the web
+balances page asks for `full`. The summary, shaped by `balanceListSummary`
+(`packages/application/src/query/read-detail.ts`, the line builder of the v2
+balance summaries), is `{ detail: "summary", accounts, metrics, latest,
+history, coverage }`: the first rows of each list of the full answer, latest
+and history taken in turn, at most 10 of each
+(`BALANCE_LIST_SUMMARY_LINES`), stopping before the line that would take the
+page past 7,680 bytes of JSON in UTF-8 (`BALANCE_LIST_SUMMARY_BYTES`; the
+tool's text adds the 47-byte page read envelope). When the first line alone
+passes it, the read is `413 result_limit_exceeded` with
+`retryWith: { detail: "full" }`, never a page over 8 KB. A line is `{ observationId, account, metric, amount: {
+value, unit, status, scale }, asOf, reasons }`; a latest line adds
+`duplicates`, the ids of the other observations its group folded in, and
+its reason is `interpretation:conflict` when its witnesses disagreed; a
+history line's reasons are `parse:superseded`, `parse:pending` and
+`parse:error`, as on the v2 history. `accounts` are the v2 summary's
+entries, and a `metrics` entry is `{ source, providerMetric, kind,
+measurementKind, assetClass, timeBasis }`, the closed codes of the row's
+interpretation, one entry per distinct entry, so a line never resolves to a
+classification its row does not carry. Both lists share one set of refs.
+`coverage` has the full answer's keys for this page: `limit` is 10,
+`nextOffset` and `latestNextOffset` are the `offset` and `latestOffset` of
+each list's next summary page (null when nothing is left), and `truncated`
+says either list has more. `coverage.next` is the one hint to follow:
+`{ offset, latestOffset }` of the next page, an ended list at its end (where
+it answers no line), null when neither list has more; passing both with the
+same filters until it is null reads every line once. Dropped: the interpretation's label and reason
+text and policy release, each row's provider amount text, parser,
+`observed_at`, instrument organization and product claim, and
+`interpretationContext`. `detail` on the other lists is the route's
+`400 invalid_query`, another value `400 invalid_detail`, and the parameter
+exists where a store advertises `sharedQuery`. The adopted balances of the
+published snapshot are `kogane.balances.read`'s.
 
 Authorization, in order, after the Access check and the grant lookup: the
 tool's capability, else `403 unauthorized` (`capability:<name>`); then sources
@@ -1355,8 +1498,7 @@ beside the stored `body`, the partition the page shows: a body stored
 without `source` the summary (which takes no `offset` and no `view`), with it
 that source's cells (`view: "cells"`, the default; `offset` pages them) or the
 same cells regrouped by the accounts their captures' observations name
-(`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`, unpaged,
-so `offset` or `detail` with it is `400 invalid_request`;
+(`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`;
 [ADR 0088](adr/0088-collection-quality-per-account.md)). With `detail:
 "summary"` (the default; ADR 0123) the summary is one line per source (sources
 whose lines would be equal share one, naming each in `sourceIds`): freshness,
@@ -1368,9 +1510,26 @@ source's cells are read whole (refused past 2,000 cells with
 `413 result_limit_exceeded`, never cut) and answered as one line per dataset,
 parser and fetch unit, collapsed over periods, with the union of the cells'
 reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
-(`offset` then counts lines, and `coverage` gives the cell and line counts). The account view
-carries each account's stored label, under `data` like every page read, and
-its audit record counts the cells it read, never an account.
+(`offset` then counts lines, and `coverage` gives the cell and line counts).
+The account view's summary
+([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20);
+proposed, needs the owner's approval) is one line per account, in id order:
+its id (which `detail: "full"` and the identity reads take), stored label,
+mapping statuses, freshness, observation kinds, number of data types, provider
+data types, periods (count, first and last named), the periods counted by
+standing and by cell state, newest capture and the union of the periods'
+reasons; then one line per dataset, parser and fetch unit of the cells no
+observation attributes to an account (cells counted by state, first and last
+period, reasons); and the source's catalogue as each provider data type under
+its status. Lines are paged by `offset`: up to 20 a page, fewer when the next
+would carry the tool's answer past 8,192 bytes (`coverage.nextOffset` is where
+the next page starts), so every page fits what a client shows; a page whose
+first line alone would pass that is `413 result_limit_exceeded`, never cut.
+`detail: "full"` is the unpaged answer of ADR 0088, which the collection
+quality page asks for; `offset` with it is `400 invalid_request`. The account
+view carries each account's stored label, under `data` like every page read,
+and its audit record counts the cells it read, never an account (a summary
+page is truncated while more lines follow).
 `view: "status"` takes no `source`, no `offset` and no `detail`, being
 compact already (any of them is `400 invalid_request`) and answers `GET /api/collection-quality?view=status`:
 whether anything is stuck, in about 5 KB, one line per configured job with
@@ -1413,6 +1572,37 @@ routes, it exists only where the events projection (CORE 0032) does: else it
 is neither listed nor callable. It is how an agent reads an accepted card
 settlement's debit: one `card_settlement` event on the `cash-movement` basis,
 gone from the list once withdrawn (its current revision has no leg).
+
+The activity list takes filters, each optional
+([ADR 0081, amendment of 2026-11-20](adr/0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20)):
+`since` (inclusive) and `before` (exclusive), ISO 8601 instants with a zone,
+on when a revision was recorded (`created_at`, compared as
+`kogane.changes.since` compares it); `account`, an account id or
+`account:<id>`, which a leg of the revision names in either stored form;
+`source`, a source id, from whose capture a parse run the revision's
+evidence cites (`parse_run:<id>`) was read. Obligations take none. Without a
+filter the list is the shipped one: the same fields, `offset` paging and the
+next offset as `nextCursor`. With one, the same list in the same order is
+narrowed, and the answer adds `filters` (each in its compared form, null
+when not given) and `walk` (`bound`, `walked`): each call walks at most
+5,000 current revisions, so a page lists at most 200 and may be short or
+empty while `nextCursor` still continues it. The answer also carries ADR
+0128's paging surface (proposed): `next` (`{ arguments: { cursor } }`, or
+null at the end) and `paging` (`limit` 200, `returned`, `hasMore`,
+`stoppedBy`: `limit` for a full page, `walk` for a page the walk bound
+ended first, null at the end). That cursor is the `cursor` of
+the next call with the same `basis` and filters (spelled any way that
+compares equal); another basis or filter, or no filter, is `400
+cursor_mismatch` with `mustMatch` (above), a cursor it did not issue is `400
+invalid_cursor`, and an `offset` beside a filter or a cursor is `400
+invalid_query` with `refs: ["offset"]`. A malformed filter is `400
+invalid_query` naming each one refused (`since:format`, `before:format`,
+`account:format`, `source:format`), and `since` at or after `before` is
+`window:empty`. The filters decide nothing on a value: there is no filter on
+the event's own date (`effectiveTime`) yet. The pages are not a snapshot:
+each call walks the revisions live when it runs, after its cursor, so a
+revision recorded between calls is listed only if it sorts after the cursor,
+and one that replaces a revision already listed may be listed again.
 
 `kogane.evidence.read` takes `{ page, source?, runId?, artifactId?, cursor? }`.
 `page` picks the route: `meta`; `runs`, which needs `source`; `artifacts`,
@@ -1782,6 +1972,30 @@ hand to each other: the receiver reads them back under its own authority
 instead of trusting the sender's figures (addendum 11 §8). The Overview page
 shows both under a disclosure for exactly that purpose.
 
+### Explain and the identity read
+
+`kogane.explain` takes `ref` and `depth` and nothing else: any other key,
+`identityRead` included, is `400 unsupported_semantics` with that key as a ref
+(`parseExplainRequest`, `packages/application/src/explain.ts`), on the route
+and the tool alike. Its context is always opened under the latest identity
+(`contextInputs`, `services/app/src/agent-service.ts`), so its `contextId`
+pins the identity release (`identity:latest:current-mappings-v1`) and the
+evaluation clock, which the Worker cuts to whole seconds
+(`services/app/src/agent-api.ts`), and no mapping revision: a mapping
+corrected between two calls in the same second leaves the `contextId` as it
+was. A graph's `account_mapping:<referenceId>@<revision>` and
+`instrument_mapping:<referenceId>@<revision>` refs (and the
+`identity-decision:` ref under the account one) are written from the
+organization on the observation detail the reader returned, so they name the
+revision that was read, which the `contextId` does not pin.
+
+Limit: the reader the Worker passes is the evidence reader, whose
+`getObservation` returns no organization
+(`packages/read-model/src/observation-reader.ts`). A graph served today
+therefore holds no `adopted-claim` or `identity-decision` node and reads no
+mapping; those levels are exercised only with a test reader
+(`packages/application/test/explain-propose.test.ts`).
+
 ## Result contract
 
 Every successful query returns
@@ -1861,9 +2075,11 @@ Converting them to JSON does not make them instructions.
 - No tool accepts a free-form URL, host, table name, ordering or SQL. Every
   input schema is closed (`additionalProperties: false`) and every string is
   an enum or a bounded identifier pattern; the test asserts that too.
-- `explain` returns identifiers only — `account_mapping:`, `parse_run:`,
-  `fetch_artifact:`, `raw:<sha256>`. The provider URL an artifact was fetched
-  from is never in a graph, at any capability.
+- `explain` returns identifiers only — `account_mapping:` (where its reader
+  supplies an organization, which the served one does not:
+  [explain and the identity read](#explain-and-the-identity-read)),
+  `parse_run:`, `fetch_artifact:`, `raw:<sha256>`. The provider URL an
+  artifact was fetched from is never in a graph, at any capability.
 - Errors carry a code, a fixed remedy sentence and safe refs. No provider
   content, token, SQL text or raw exception string reaches a caller.
 - Bank credentials, sessions and keys are never in a response, and no Access

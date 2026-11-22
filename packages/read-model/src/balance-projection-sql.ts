@@ -246,6 +246,51 @@ export function projectionSubtotalSql(
 }
 
 /**
+ * One latest measurement of the projection, in the columns the cash read
+ * (`/api/v2/balances/cash`) groups by account: its subject, its metric and
+ * unit, its stored decimal-v1 value, its adoption and freshness, and the
+ * provider coordinates the organization reads. No evidence list, no temporal
+ * record and no amount text: the cash read names the observation instead.
+ */
+export interface ProjectionMeasureRow {
+  subject_scope_key: string;
+  row_seq: number;
+  observation_id: number;
+  source_id: string;
+  source_account: string;
+  metric_id: string;
+  unit_ref: string;
+  value_status: ProjectionPageRow["value_status"];
+  quantity_coefficient: string | null;
+  quantity_scale: number | null;
+  state: string;
+  reason_code: string | null;
+  freshness: string;
+  freshness_reason: string | null;
+  as_of: string | null;
+}
+
+/**
+ * Every latest measurement of the filter scope, in the projection's order,
+ * one row over `SUBTOTAL_ROW_BOUND` so an oversized scope is refused instead
+ * of answered in part (INV05). The same scope and view predicates as the
+ * subtotal, so the cash read and the known-assets subtotal read one set of
+ * rows. Nothing is added up in SQL.
+ */
+export function projectionMeasureSql(snapshotId: string, scope: CollectionScope): PageSql {
+  const { where, args } = projectionPredicates(scope);
+  return {
+    sql: `SELECT subject_scope_key, row_seq, observation_id, source_id, source_account,
+        metric_id, unit_ref, value_status, quantity_coefficient, quantity_scale,
+        state, reason_code, freshness, freshness_reason, as_of
+      FROM current_balance_projection
+      WHERE snapshot_id = ?1 AND (${where})${viewPredicate(scope)}
+      ORDER BY row_seq LIMIT ${SUBTOTAL_ROW_BOUND + 1}`,
+    args: [snapshotId, ...args],
+  };
+}
+
+/**
  * Balance history as a keyset page. History is not a projection: it is the
  * append-only record of visible parse results, and it is pinned to the
  * snapshot's published high-water parse run so a publication that lands
