@@ -207,9 +207,9 @@ const ZONE_OFFSET_MINUTES = { min: -12 * 60, max: 14 * 60 } as const;
  * An instant whose UTC offset is one a time zone uses, from -12:00 to +14:00
  * (the span of the IANA fixed-offset zones `Etc/GMT+12` to `Etc/GMT-14`).
  * `parseInstant` reads offsets up to ±18:59; a reader that names the offset's
- * zone, or that hands the instant to SQLite's `julianday` (which reads no
- * offset past 14 hours and returns NULL), refuses one outside this span
- * rather than name a zone that does not exist or compare against nothing.
+ * zone, or that hands the instant to SQLite's `julianday` (which reads offsets
+ * up to ±14:59 and returns NULL for any larger one), refuses one outside this
+ * span rather than name a zone that does not exist or compare against nothing.
  */
 export function validZoneOffsetInstantText(value: unknown): value is string {
   if (!validInstantText(value)) return false;
