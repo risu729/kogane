@@ -12,7 +12,7 @@ import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history
 import { collectCashHistory, readCashHistoryResponse } from "./cash-history";
 import { collectIncomeHistory, incomeHistoryUrl } from "./income-history";
 import { collectMailbox, type MailboxUnit } from "./mailbox";
-import { MailboxHttp } from "./mailbox-http";
+import { MailboxHttp, mailboxMainLink } from "./mailbox-http";
 import type { MailboxError } from "./mailbox-bootstrap";
 import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
 import {
@@ -120,13 +120,30 @@ export async function collectMainSiteArtifacts(options: {
     options.onArtifact?.(artifact);
   };
 
-  const collectReports = (startIdentity: string | null) =>
-    collectMailbox({
+  // The report link lives on the classic site, which the assets session alone
+  // does not sign in to: it answers 301 to the login host (2026-11-22). Sign
+  // in there the way the history pages do, then open the link on that host.
+  const collectReports = async (startIdentity: string | null) => {
+    const classic = await signInClassicSite(options.session, auth).catch(() => {
+      console.log(
+        JSON.stringify({
+          event: "sbi-mailbox-refused",
+          code: "sbi_mailbox_transport_failed",
+          step: "session",
+        }),
+      );
+      return undefined;
+    });
+    return collectMailbox({
       client: new MailboxHttp(
-        auth.cookies,
+        // Only SBI cookies go to the mailbox client, which refuses any other domain.
+        (classic?.cookies ?? auth.cookies).filter(
+          (cookie) => cookie.domain === "sbisec.co.jp" || cookie.domain.endsWith(".sbisec.co.jp"),
+        ),
         fetch,
         options.mailboxDeadline ?? Date.now(),
         options.mailboxSignal,
+        mailboxMainLink(classic?.url),
       ),
       retain: options.onMailboxArtifact ?? retain,
       deadline: options.mailboxDeadline ?? Date.now(),
@@ -139,6 +156,7 @@ export async function collectMainSiteArtifacts(options: {
         options.onMailboxError(error);
       },
     });
+  };
   options.deferMailbox?.(collectReports);
 
   const assets = await fetchAssets(auth);
@@ -711,6 +729,27 @@ async function fetchMainSiteAuthenticatedPage(
   cookieHeader: string;
   cookies: ScopedCookie[];
 }> {
+  const {
+    cookies,
+    html: authenticatedHtml,
+    url: authenticatedUrl,
+  } = await signInClassicSite(session, auth, true);
+  const requestUrl =
+    typeof entry === "function" ? entry(authenticatedHtml ?? "", authenticatedUrl) : entry;
+  const result = await followRedirects(requestUrl, auth.assetsUrl, cookies);
+  return {
+    response: result.response,
+    cookieHeader: cookieHeader(cookies, result.url),
+    cookies,
+  };
+}
+
+/** The classic-site sign-in shared by the history pages and the report mailbox. */
+async function signInClassicSite(
+  session: DomesticSession,
+  auth: MainSiteAuth,
+  keepHtml = false,
+): Promise<{ cookies: ScopedCookie[]; url: URL; html?: string }> {
   const cookies = auth.cookies.map((cookie) => ({ ...cookie }));
   const siteLinkParam = await fetchMainSiteLinkParam(session);
   const loginUrl = new URL("/ETGate/", auth.baseUrl);
@@ -758,14 +797,12 @@ async function fetchMainSiteAuthenticatedPage(
   }
 
   const authenticated = await followRedirects(requestUrl, referer, cookies);
-  const authenticatedHtml = decodeShiftJis(await authenticated.response.arrayBuffer());
-  requestUrl = typeof entry === "function" ? entry(authenticatedHtml, authenticated.url) : entry;
-  const result = await followRedirects(requestUrl, auth.assetsUrl, cookies);
-  return {
-    response: result.response,
-    cookieHeader: cookieHeader(cookies, result.url),
-    cookies,
-  };
+  if (!keepHtml) {
+    await authenticated.response.body?.cancel();
+    return { cookies, url: authenticated.url };
+  }
+  const html = decodeShiftJis(await authenticated.response.arrayBuffer());
+  return { cookies, url: authenticated.url, html };
 }
 
 async function followRedirects(

@@ -15,6 +15,22 @@ import {
 export const MAILBOX_MAIN_LINK =
   "https://site4.sbisec.co.jp/ETGate/?_ControlID=WPLETsmR001Control&_DataStoreID=DSWPLETsmR001Control&sw_page=Edeliv&cat1=home&cat2=none&getFlg=on";
 const MOBILE_LANDING = "https://m.sbisec.co.jp/switchnaviMain";
+const CLASSIC_HOST = /^site\d{1,2}\.sbisec\.co\.jp$/u;
+/**
+ * The delivered-report link on the signed-in classic host the session landed
+ * on (`site<n>`, 2026-11-22). Any other host keeps the observed `site4` link.
+ */
+export function mailboxMainLink(landing: URL | undefined): string {
+  if (
+    landing === undefined ||
+    landing.protocol !== "https:" ||
+    !CLASSIC_HOST.test(landing.hostname)
+  )
+    return MAILBOX_MAIN_LINK;
+  const link = new URL(MAILBOX_MAIN_LINK);
+  link.hostname = landing.hostname;
+  return link.href;
+}
 /**
  * The main-site report link redirects through the mobile site's one-time
  * `switchnavi?page=Edeliv&parm=...` hand-off before the landing (2026-11-20,
@@ -64,7 +80,7 @@ interface MailboxDiagnosis {
   hop: number;
   status?: number;
   contentType?: (typeof MEDIA_TYPES)[number] | "other";
-  refusedHost?: (typeof KNOWN_HOSTS)[number] | "other";
+  refusedHost?: (typeof KNOWN_HOSTS)[number] | "classic" | "other";
   refusedRoute?: string;
 }
 const MEDIA_TYPES = ["text/html", "application/json", "application/pdf", "text/plain"] as const;
@@ -89,7 +105,9 @@ export class MailboxHttp {
     fetcher: Fetcher = fetch,
     private readonly deadline = Number.POSITIVE_INFINITY,
     private readonly leaseSignal = new AbortController().signal,
+    private readonly mainLink = MAILBOX_MAIN_LINK,
   ) {
+    if (mailboxMainLink(new URL(mainLink)) !== mainLink) fail();
     // Called as `this.fetcher(...)`, the Workers runtime's `fetch` throws
     // "Illegal invocation" before any request leaves, so call it unbound.
     this.fetcher = (input, init) => fetcher(input, init);
@@ -136,10 +154,10 @@ export class MailboxHttp {
   private async opening(): Promise<void> {
     this.at("landing");
     const landing = await this.navigation(
-      MAILBOX_MAIN_LINK,
+      this.mainLink,
       "GET",
       undefined,
-      MAILBOX_MAIN_LINK,
+      this.mainLink,
       new Set([MOBILE_LANDING]),
       mobileHandoff,
     );
@@ -493,8 +511,11 @@ function matches(cookie: MailboxCookie, url: URL): boolean {
     (!cookie.secure || url.protocol === "https:")
   );
 }
-function knownHost(url: URL): (typeof KNOWN_HOSTS)[number] | "other" {
-  return KNOWN_HOSTS.find((host) => host === url.hostname) ?? "other";
+function knownHost(url: URL): (typeof KNOWN_HOSTS)[number] | "classic" | "other" {
+  return (
+    KNOWN_HOSTS.find((host) => host === url.hostname) ??
+    (CLASSIC_HOST.test(url.hostname) ? "classic" : "other")
+  );
 }
 /** The flow's own routes by name; any other origin and path is `other`. */
 const KNOWN_ROUTES: ReadonlyArray<readonly [string, string]> = [
@@ -514,6 +535,8 @@ const KNOWN_ROUTES: ReadonlyArray<readonly [string, string]> = [
   return [name, `${url.origin}${url.pathname}`] as const;
 });
 function knownRoute(url: URL): string {
+  if (url.protocol === "https:" && CLASSIC_HOST.test(url.hostname) && url.pathname === "/ETGate/")
+    return "main-link";
   const route = `${url.origin}${url.pathname}`;
   return KNOWN_ROUTES.find(([, known]) => known === route)?.[0] ?? "other";
 }

@@ -274,3 +274,74 @@ test("supplement transport failures retain their cash and income kinds through m
     "core-history",
   ]);
 });
+
+test("the deferred mailbox signs in to the classic site and opens the report link on its host", async () => {
+  const header = Buffer.alloc(70, " ");
+  header.write("F1132", 34);
+  header.write("000000", 45);
+  let etGateCalls = 0;
+  const mailbox: Array<{ url: string; cookie: string | null }> = [];
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.origin === "https://mts.invalid")
+      return new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")]));
+    if (url.origin === "https://main.invalid" && url.pathname === "/ETGate/") {
+      etGateCalls += 1;
+      // The first sign-in is the assets session; the second is the classic one.
+      return etGateCalls === 1
+        ? new Response('<form action="/switch"><input name="synthetic" value="fixture"></form>')
+        : new Response(null, {
+            status: 302,
+            headers: { location: "https://site2.sbisec.co.jp/ETGate/" },
+          });
+    }
+    if (url.href === "https://main.invalid/switch")
+      return new Response(null, { status: 302, headers: { location: "https://site.invalid/sso" } });
+    if (url.href === "https://site.invalid/sso")
+      return new Response(null, { status: 302, headers: { location: "/account/assets" } });
+    if (url.href === "https://site.invalid/account/assets") return new Response("<html></html>");
+    if (url.pathname === "/account/api/assets/valuations/current") return Response.json({});
+    if (url.href === "https://site2.sbisec.co.jp/ETGate/")
+      return new Response("<html></html>", {
+        headers: { "set-cookie": "classic=synthetic; Domain=sbisec.co.jp; Path=/; Secure" },
+      });
+    if (url.searchParams.get("sw_page") === "Edeliv") {
+      mailbox.push({ url: url.href, cookie: new Headers(init?.headers).get("cookie") });
+      return new Response(null, { status: 503 });
+    }
+    return new Response(null, { status: 503 });
+  }) as unknown as typeof fetch;
+  let collect: ((startIdentity: string | null) => Promise<void>) | undefined;
+  const mailboxErrors: string[] = [];
+  await collectMainSiteArtifacts({
+    session: {
+      sessionId: "synthetic",
+      branchCode: "001",
+      accountNumber: "1234567",
+      accountHash: "synthetic",
+      mtsBaseUrl: "https://mts.invalid",
+    },
+    mainSiteBaseUrl: "https://main.invalid",
+    from: "2026-01-01",
+    to: "2026-01-01",
+    onAssetHistoryError: () => {},
+    onIncomeHistoryError: () => {},
+    onCashHistoryError: () => {},
+    onHistoryError: () => {},
+    onMailboxError: (error) => mailboxErrors.push(error.code),
+    mailboxDeadline: Date.now() + 60_000,
+    deferMailbox: (run) => {
+      collect = run;
+    },
+  });
+  const before = etGateCalls;
+  await collect!(null);
+  expect(etGateCalls).toBe(before + 1);
+  expect(mailbox).toEqual([
+    {
+      url: "https://site2.sbisec.co.jp/ETGate/?_ControlID=WPLETsmR001Control&_DataStoreID=DSWPLETsmR001Control&sw_page=Edeliv&cat1=home&cat2=none&getFlg=on",
+      cookie: "classic=synthetic",
+    },
+  ]);
+  expect(mailboxErrors).toEqual(["sbi_mailbox_transport_failed"]);
+});
