@@ -25,7 +25,7 @@ env:
   KOGANE_TEST_COVERAGE: "true"
   COVERAGE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   COVERAGE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-  # Public ubuntu-24.04 runners have four CPUs; avoid eight native tasks competing.
+  # Public GitHub-hosted Linux runners have four CPUs; avoid eight native tasks competing.
   MISE_JOBS: "4"
 jobs:
   checks:
