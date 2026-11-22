@@ -228,6 +228,38 @@ for (const holder of ["its id", "its schedule and nominal under another id"])
     expect(await claimRecords(occurrenceId)).toBe(0);
   });
 
+test("a claim_conflict leaves another attempt's started row as it is", async () => {
+  const nominal = (await scheduleNominal())!;
+  const occurrenceId = `scheduled:mizuho-bank:${Date.parse(nominal)}`;
+  // A new-protocol attempt that claimed this occurrence and has not marked a
+  // dispatch yet: its own alarm, or the hourly abandonment scan, closes it.
+  await db
+    .prepare(
+      "INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status,dispatch_protocol,attempt_ref) VALUES(?,'mizuho-bank',?,?,'started',1,'synthetic-other-attempt')",
+    )
+    .bind(occurrenceId, nominal, nominal)
+    .run();
+  const outcome = await claimOnce();
+  expect(outcome.calls).toBe(0);
+  expect(outcome.lines.filter((line) => line["event"] === "schedule_alarm")).toEqual([
+    expect.objectContaining({ outcome: "claim_conflict", occurrenceId }),
+  ]);
+  expect(
+    await db
+      .prepare(
+        "SELECT status,failure_code,finished_at,attempt_ref,dispatched_at FROM collection_schedule_occurrences WHERE id=?",
+      )
+      .bind(occurrenceId)
+      .first(),
+  ).toEqual({
+    status: "started",
+    failure_code: null,
+    finished_at: null,
+    attempt_ref: "synthetic-other-attempt",
+    dispatched_at: null,
+  });
+});
+
 test("a claim the schema refuses rolls back with the schedule move and is retried, never a claim_conflict", async () => {
   const nominal = (await scheduleNominal())!;
   const occurrenceId = `scheduled:mizuho-bank:${Date.parse(nominal)}`;

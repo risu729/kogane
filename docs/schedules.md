@@ -34,6 +34,22 @@ an operator's edit or an operator's or delegated acceptance of a re-survey propo
 ([below](#official-site-re-survey)). The page flags provenance older than
 thirty days.
 
+Times are wall times in the job's or rule's zone. On the day a zone moves its
+clocks forward (Sydney, the first Sunday of October), a daily job time in the
+skipped hour has no run that day. A weekly or monthly maintenance window whose
+start or end falls in that hour still defers collection
+(`packages/collection/src/schedule-model.ts`, `windowAt`): a skipped start
+opens the window at the first minute whose wall time reaches it (the clock
+change itself), and a skipped end is read on the clock before the change, so
+`02:30` ends the window at 03:30 summer time. Before 2026-11-22 such a window
+was dropped for that day, and collection could run inside it
+([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-maintenance-window-is-never-dropped-at-a-clock-change-2026-11-22)).
+A window wholly inside the skipped hour defers from the change only if its
+end is skipped too (`02:15`–`02:45` defers 03:00–03:45; `02:30`–`03:00` is
+empty). On the day clocks move back, a repeated wall time is read at its first
+occurrence, so a window ending in the repeated hour ends at its first pass and
+collection may run in the second.
+
 **When a refresh fails.** The page reads its snapshot through the shared
 `QueryBoundary` ([frontend](frontend.md#shared-primitives)). The first read
 failing shows `収集スケジュールを読み込めませんでした` ("the collection schedules
@@ -280,7 +296,9 @@ before calling the cutover complete.
 
 Scheduling/storage failures reserve a one-minute bookkeeping wakeup rather than
 exhausting only native alarm retries. Receipts still in `started` after one hour
-are reported as uncertain; this neither expires leases nor repeats collection.
+are closed as `uncertain`, or as `not_dispatched` when a new-protocol claim never
+marked its dispatch; the scan frees no lease, and only a collection job's
+`not_dispatched` occurrence is tried again, once (above).
 
 Claiming an occurrence of a `collection`-kind job also appends one `alarm`
 audit record (`alarm.occurrence.claim`, principal `alarm:<job id>`) as the
@@ -320,20 +338,32 @@ and counts only:
   schedule revision its UPDATE was fenced on, written only when that UPDATE
   claimed the row; no audit record), or `claim_conflict` (with
   `scheduleRevision`, the revision the claim's INSERT required; it inserted
-  no occurrence row; a `started` row already there for that occurrence is
-  marked `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
+  no occurrence row and nothing is dispatched. A row already there for that
+  occurrence belongs to another attempt and is left as it is: a `started` one
+  is closed by that attempt's own receipt update or, after an hour still
+  `started`, by the abandonment scan as `uncertain` or `not_dispatched`
+  ([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-durable-pre-rpc-dispatch-marker-2026-11-08)).
+  Until 2026-11-09 the conflict marked such a row `uncertain` at once. The
+  same outcome, with no row there, follows a claim whose schedule changed
+  revision, enabled flag or next nominal after the alarm read it).
 - `schedule_dispatch_start`, written just before the collector call, with the
   target workspace.
 - `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
-  `durationMs`; when the call threw, also the error's `errorName` and a closed
+  `durationMs`; when the call threw, also a closed `errorName` and a closed
   `errorKind` (`network_lost`, `object_reset`, `timeout`, `limit_exceeded`,
   `overloaded`, `d1`, `other`). The error message itself is never logged,
-  because a collector's error may carry provider text.
+  because a collector's error may carry provider text, and neither is a name
+  outside the closed set: `errorName` is the runtime's own error name
+  (`Error`, `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError`,
+  `EvalError`, `URIError`, `AggregateError`, `AbortError`, `TimeoutError`,
+  `DataCloneError`) or `CollectionLeaseAbort`,
+  `non_error` for a thrown value that is not an `Error`, and `other` for any
+  other name (`LOGGED_ERROR_NAMES`, `packages/collection/src/error-name.ts`).
 - `schedule_bookkeeping_retry` now also names the `jobId`, the
   `occurrenceId` once claimed, the `phase` that threw (`load`, `plan`,
   `claim`, `dispatch`, `record`), `errorName` and `errorKind`.
 
-So an occurrence that ends `uncertain` with no `finished_at` (the hourly
+So an occurrence that ends `uncertain` with no `finished_at` (the one-hour
 abandonment rule above) can be placed: a `claimed` line with no
 `schedule_dispatch_start` stopped between the claim and the call, a start
 with no result stopped while the call was open, and a result with no later
@@ -351,7 +381,7 @@ reference (the one the operator's release names), its `started_at` and
 `heartbeat_at` on D1's).
 The read that describes the holder is best-effort; the refusal never depends
 on it. A claim statement that throws logs `collection_lease_claim_failed` with
-the error's name. Vpass also logs the answer it returns to the Processor as
+the same closed `errorName`. Vpass also logs the answer it returns to the Processor as
 `vpass-scheduled-result` (`nominalAt`, `status`, `failureCode`, `runCount`,
 `durationMs`).
 Workers Logs keep seven days.

@@ -201,6 +201,7 @@ export interface ApiCapabilities {
    * route is the operator's and refuses anyone else.
    */
   readonly pendingDecisions?: boolean;
+  readonly changesSince?: boolean;
   /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
@@ -240,6 +241,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   reconstructedStateOnDate: false,
   reportArtifacts: false,
   pendingDecisions: false,
+  changesSince: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -278,6 +280,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   reconstructedStateOnDate: false,
   reportArtifacts: false,
   pendingDecisions: false,
+  changesSince: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 

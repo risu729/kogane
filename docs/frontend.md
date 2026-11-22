@@ -168,6 +168,46 @@ empty, never a dash.
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.
 
+### Plan refusals
+
+A review page plans a decision with `postCommand("plan")` and shows a
+refusal in the item that asked for it (`PlanRefusal`). A refusal that says the
+item changed since the page read it (`planRefusedAsStale` in
+`command-api.ts`) makes the page read that item again: the server's
+`stale_context` (409: the candidate is no longer in the state the plan needs,
+a pinned revision moved, or another holder claimed the debit) and
+`target_missing` (400: the candidate is gone), the two codes the plan route
+answers about its target, and the page's own `StalePlanError` (the candidate
+read again before planning differs from the one shown, or the plan pinned
+another revision than the one shown). The page's `PlanRefreshScope`
+invalidates exactly the reads that show the reviewed items, so the ones on
+screen are fetched again:
+
+| Page                                                    | Reads again                                                                                                                                                       |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `カード照合` and one candidate (`/reconciliation/<id>`) | `card-settlements` statements, one statement's candidates, one candidate, its competitors; not the debit accounts, the upcoming bills or the unmatched statements |
+| `口座の保有者を確認`                                    | that candidate's `card-ownership` read                                                                                                                            |
+| `カード利用の説明`                                      | every `card-purchases` read: a pending-to-posted candidate shows on both its purchases and on the list                                                            |
+| `口座の対応候補`, `銘柄の同一性の候補`                  | every view and page of that candidate list                                                                                                                        |
+
+Every other refusal (a missing grant, an invalid payload, evidence or scope
+that is not ready, unsupported semantics, a budget) reads nothing again: it
+says nothing about whether the page is current. `plan_not_open` and the other
+lifecycle codes are answers to simulate, approve and commit on the
+confirmation screen, not to plan. A read again that fails keeps the earlier
+answer under `QueryBoundary`'s warning, as any read does.
+
+The refusal stays visible. While the item read again still shows it, it
+stays in the item. When the item no longer does (it left the list or view,
+its form started over for a new revision, it offers no decision any more, or
+it sits in a disclosure that closed when its status changed), the page shows
+the refusal once below its head (`PlanRefreshNotice`) until the next plan is
+sent. Focus stays where it is, on the pressed button while that button is
+still there; only when the page read again removed or hid the focused
+element does focus move, to wherever the refusal is shown. The review pages'
+browser tests check each page's reads, the refusals that read nothing, and
+where the refusal and focus end up.
+
 ## API metadata and capabilities
 
 `/api/meta` describes the connection. Its `source.kind` (`local-store`,

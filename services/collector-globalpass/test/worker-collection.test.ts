@@ -59,6 +59,7 @@ async function run(
     httpStatus?: number;
     teardownError?: boolean;
     loggerThrows?: boolean;
+    startError?: unknown;
   } = {},
 ) {
   const logs: string[] = [];
@@ -75,7 +76,9 @@ async function run(
   let manifest: CollectionManifest | undefined;
   const data = new FakeR2Bucket();
   container = {
-    async startAndWaitForPorts() {},
+    async startAndWaitForPorts() {
+      if (Object.hasOwn(options, "startError")) throw options.startError;
+    },
     async fetch(request) {
       sentBody = await request.json();
       return new Response(records.map((record) => JSON.stringify(record)).join("\n") + "\n", {
@@ -323,6 +326,42 @@ describe("GLOBAL PASS container failure codes", () => {
     expect(terminalLine).toMatchObject({ outcome: "failed" });
     expect(terminalLine).not.toHaveProperty("errorType");
     expect(terminalLine).not.toHaveProperty("category");
+  });
+  test("a container error name outside the closed set is stored as UnknownError", async () => {
+    const r = await run([
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "PrivateProviderName",
+        errorCode: "globalpass_login_rejected",
+        stage: "login-submit",
+      },
+    ]);
+    expect(r.manifest?.failures[0]).toMatchObject({
+      errorType: "UnknownError",
+      errorCode: "globalpass_login_rejected",
+    });
+    expect(JSON.stringify(r.manifest) + r.logs.join("\n")).not.toContain("Private");
+  });
+  test.each([
+    ["a custom name", Object.assign(new Error("private-message"), { name: "PrivateProviderName" })],
+    ["a non-Error value", "private-provider-text"],
+    [
+      "a throwing name getter",
+      Object.defineProperty(new Error("private-message"), "name", {
+        get() {
+          throw new Error("private-getter");
+        },
+      }),
+    ],
+  ])("a Worker-side failure with %s is stored as UnknownError", async (_label, startError) => {
+    const r = await run([], { startError });
+    expect(r.manifest?.failures[0]).toMatchObject({
+      operation: "browser-collection",
+      errorType: "UnknownError",
+      errorCode: "browser_collection_failed",
+    });
+    expect(JSON.stringify(r.manifest) + r.logs.join("\n")).not.toMatch(/private|Private/u);
   });
   test("a code outside the closed list is a contract failure, not a stored code", async () => {
     const r = await run([

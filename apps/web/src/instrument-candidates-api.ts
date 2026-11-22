@@ -6,7 +6,7 @@
 // payload of its own or decides whether a candidate may be adopted.
 import { useQuery } from "@tanstack/react-query";
 import { getJson, useFeatures } from "./api.ts";
-import { postCommand, type ChangePlanView } from "./command-api.ts";
+import { postCommand, StalePlanError, type ChangePlanView } from "./command-api.ts";
 import type {
   InstrumentCandidateReview,
   InstrumentCandidateView,
@@ -50,7 +50,7 @@ export function isSeparated(item: ReviewItem): item is ReviewSeparated {
 
 export type CandidateDecision = "adopt" | "keepApart";
 
-const STALE = "候補が更新されています。一覧を更新して、内容を確認し直してください。";
+const STALE = "候補が更新されています。一覧を読み直すので、内容を確認し直してください。";
 
 /**
  * The candidate as the server answers it now, read through the subject's own
@@ -114,7 +114,7 @@ export async function planCandidateDecision(
       shown.anchor.mappingRevision ||
     revisionOf(current.identifiers, candidate.subjectIdentifierId) !== shown.subject.mappingRevision
   )
-    throw new Error(STALE);
+    throw new StalePlanError(STALE);
   const response = await postCommand<{ plan: ChangePlanView }>(
     "plan",
     {
@@ -131,6 +131,6 @@ export async function planCandidateDecision(
       response.plan.expectedRevisions[`instrument_mapping:${candidate.anchorIdentifierId}`] !==
         shown.anchor.mappingRevision)
   )
-    throw new Error(STALE);
+    throw new StalePlanError(STALE);
   return response.plan;
 }

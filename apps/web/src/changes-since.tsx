@@ -8,7 +8,7 @@
 // route refuses, and a deployment without the route, see no panel.
 import { useState, type ReactNode } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ApiError, getJson, type Overview } from "./api.ts";
+import { ApiError, getJson, type Overview, useFeatures } from "./api.ts";
 import {
   CHANGES_SINCE_NOT_COVERED,
   CHANGES_SINCE_OBSERVATION_KINDS,
@@ -78,9 +78,12 @@ type ChangesPageParam = { since: string; after: string } | null;
  * (`since:too_old`); a continuation asks with its first page's `since`, so
  * the pages of one answer never mix two instants.
  */
-function useChangesSince(key: WindowKey, hours: number) {
+function useChangesSince(key: WindowKey, hours: number, advertised: boolean) {
   return useInfiniteQuery({
     queryKey: ["changes-since", key],
+    // Read only where `/api/meta` advertises the route (`changesSince`), so a
+    // store without it (the local one) is never asked and logs no 404.
+    enabled: advertised,
     initialPageParam: null as ChangesPageParam,
     // getJson checks the shape (`validChangesSince`) before anything renders.
     queryFn: ({ pageParam, signal }) =>
@@ -412,7 +415,8 @@ const continuationErrors = new WeakSet<Error>();
 export function ChangesSincePanel({ sources }: { sources: Overview["sources"] }): ReactNode {
   const [chosen, setChosen] = useState<WindowKey>("day");
   const span = WINDOWS.find((entry) => entry.key === chosen)!;
-  const query = useChangesSince(span.key, span.hours);
+  const features = useFeatures();
+  const query = useChangesSince(span.key, span.hours, features.changesSince);
   // `isFetchNextPageError` reads the running fetch's direction, so a reread
   // started after a failed continuation (its retry, a refocused tab, a return
   // to the window, a remount) clears it while the continuation's error is
@@ -430,7 +434,10 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
     continuationErrors.has(query.error);
   // A caller the route refuses (it is the reader's), or a deployment without
   // the route (the local store): the panel is not shown.
-  if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
+  if (
+    !features.changesSince ||
+    (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
+  )
     return null;
   const providers = new Map(sources.map((source) => [source.id, source.provider]));
   const pages = query.data?.pages;

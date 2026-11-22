@@ -198,7 +198,7 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
           return Response.json({
             apiVersion: 1,
             source: { kind: "central-store", classification: "financial" },
-            capabilities: CENTRAL_STORE_CAPABILITIES,
+            capabilities: { ...CENTRAL_STORE_CAPABILITIES, changesSince: true },
           });
         if (url.pathname === "/api/overview") return Response.json(overview);
         if (url.pathname === CHANGES_SINCE_PATH) {

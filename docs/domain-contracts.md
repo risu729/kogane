@@ -113,7 +113,9 @@ policy it applies; none has a default.
   validators reject unknown keys, empty or duplicated lists, bad day counts,
   zones the runtime does not know or spells differently, a bound that is not
   exactly the end of its date in the policy zone, and a known-at instant finer
-  than a millisecond (`validKnownAtInstant`). A policy's digest is its
+  than a millisecond, with an offset outside -12:00 to +14:00, or after
+  9999-12-31T23:59:59.999Z (`validKnownAtInstant`,
+  `validZoneOffsetInstantText`). A policy's digest is its
   `canonicalDigest`.
 - `selectPrice(key, candidates, bound, policy, calendar)` runs six checks in
   order and returns one selected price (with its age and corroborating ids)
