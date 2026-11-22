@@ -1092,7 +1092,8 @@ is cut or the events walk is incomplete.
 `kogane.reported-state.read` is `GET /api/v2/reported-state` for an agent
 (plan D5, [ADR 0019](adr/0019-dated-reported-state.md#agent-read-amendment--2026-11-06)):
 what each provider last reported on a date, per account, beside the card
-statements due around it ([reported state](reported-state.md)). It is not the
+statements due around it and the payments MyJCB's skip-payment page still
+scheduled ([reported state](reported-state.md)). It is not the
 `reported-state` intent of `kogane.financial.query`, which reads the latest
 balances and positions. Route and tool are adapters over one service,
 `readReportedStateRequest` in

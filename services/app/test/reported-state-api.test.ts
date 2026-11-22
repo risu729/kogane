@@ -165,7 +165,7 @@ describe("reported state on a date", () => {
     expect(validApiResponse(PATH, body)).toBe(true);
     expect(body).toMatchObject({
       apiVersion: 2,
-      schemaVersion: "reported-state-v3",
+      schemaVersion: "reported-state-v4",
       date: today,
       zone: "Asia/Tokyo",
       accounts: [
@@ -188,11 +188,13 @@ describe("reported state on a date", () => {
         },
       ],
       payables: [],
+      scheduledPayments: [],
       // No statement is stored, so none is left out and the gap is not named.
       coverage: {
         liabilitiesCoverage: "partial",
         liabilitiesMissing: ["unbilled_card_usage", "installment_remaining", "loan_balances"],
         statementsBeforeWindow: [],
+        scheduledPayments: "listed",
         netAssets: "not-computed",
       },
     });
