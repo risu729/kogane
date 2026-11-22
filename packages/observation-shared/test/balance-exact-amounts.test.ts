@@ -15,6 +15,7 @@ import type {
   LatestBalanceSummaryPage,
   SummaryAmount,
 } from "../src/api-contract.ts";
+import { decimalToString } from "../../domain/src/values.ts";
 import { validApiResponse } from "../src/api-validation.ts";
 
 const LATEST = "/api/v2/balances/latest";
@@ -102,6 +103,26 @@ describe("a summary line's exact amount", () => {
       ["-0.005", 3],
     ] as const)
       expect(validApiResponse(LATEST, latestSummary(exact(value, scale)), "summary")).toBe(true);
+  });
+
+  test("accepts the longest text decimal-v1 writes, and refuses a longer coefficient", () => {
+    for (const decimal of [
+      { coefficient: "-1", scale: 4096 },
+      { coefficient: `-${"9".repeat(4096)}`, scale: 4096 },
+      { coefficient: `-${"9".repeat(4096)}`, scale: 0 },
+    ])
+      expect(
+        validApiResponse(
+          LATEST,
+          latestSummary(exact(decimalToString(decimal), decimal.scale)),
+          "summary",
+        ),
+      ).toBe(true);
+    for (const [value, scale] of [
+      [`-${"9".repeat(4097)}`, 0],
+      [`-0.${"0".repeat(4096)}1`, 4097],
+    ] as const)
+      expect(validApiResponse(LATEST, latestSummary(exact(value, scale)), "summary")).toBe(false);
   });
 
   test("refuses text that is not a decimal, or whose fraction is not its scale", () => {

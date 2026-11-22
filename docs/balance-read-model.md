@@ -282,7 +282,7 @@ leaves both references unresolved (`account_entity_shared`), so neither is
 added here and the cash read below counts neither.
 
 The response validator also refuses a subtotal `coefficient` that is not an
-integer at its `scale` (INV03), and a `knownAssetsSubtotal` that is `null`
+integer, or that is zero at a `scale` other than 0 (INV03), and a `knownAssetsSubtotal` that is `null`
 without a `reasonCode` or a list beside one (INV05). On the summary and cash
 pages an exact `value` must be decimal text with exactly `scale` fraction
 digits, as `decimalToString` writes it; other text is refused, never shown as

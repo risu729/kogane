@@ -226,7 +226,8 @@ function exactCoefficient(coefficient: unknown, scale: unknown): boolean {
  * shown as one (INV03).
  */
 function exactText(value: unknown, scale: unknown): boolean {
-  if (typeof value !== "string" || value.length > DECIMAL_DIGITS + 2 || !identifier(scale))
+  // A sign, a leading `0`, the point and DECIMAL_DIGITS fraction digits at most.
+  if (typeof value !== "string" || value.length > DECIMAL_DIGITS + 3 || !identifier(scale))
     return false;
   const match = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/u.exec(value);
   if (match === null || (match[3] ?? "").length !== scale) return false;
