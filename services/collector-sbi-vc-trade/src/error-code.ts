@@ -133,7 +133,9 @@ const HTTP_STATUS_CODE = /^(?:collector|passkey)_http_[1-5]\d{2}$/u;
  * The closed code of a thrown error. One of the collector's own codes is kept
  * (hyphens folded to underscores, as the pagination prefixes are hyphenated);
  * otherwise only the error's class decides: `json_parse_failed`, a
- * `crypto_*` code, `type_error`, or `unexpected_error`. No other text leaves.
+ * `crypto_*` code, `type_error`, or `unexpected_error`. No other text leaves,
+ * and nothing is thrown: a `message` or `name` getter or a prototype read (a
+ * Proxy's `getPrototypeOf` trap) that throws only takes that step away.
  */
 export function classifyError(error: unknown): string {
   try {
@@ -145,15 +147,38 @@ export function classifyError(error: unknown): string {
   } catch {
     // A throwing accessor cannot carry text past the closed set.
   }
-  if (error instanceof SyntaxError) return "json_parse_failed";
-  if (error instanceof DOMException) return classifyCryptoError(error);
-  if (error instanceof TypeError) return "type_error";
+  try {
+    if (error instanceof SyntaxError) return "json_parse_failed";
+    if (error instanceof DOMException) return classifyCryptoError(error);
+    if (error instanceof TypeError) return "type_error";
+  } catch {
+    // A prototype read that throws leaves no class to go by.
+  }
   return "unexpected_error";
 }
 
+/**
+ * The closed code of a Web Crypto failure: `session_encrypt_failed` for a
+ * value that is not a `DOMException`, else its `name` mapped to a `crypto_*`
+ * code. Never throws: a prototype read that throws counts as not a
+ * `DOMException`, and a `name` getter that throws (as the built-in one does
+ * on a Proxy) gives `crypto_error`.
+ */
 export function classifyCryptoError(error: unknown): string {
-  if (!(error instanceof DOMException)) return "session_encrypt_failed";
-  switch (error.name) {
+  let isDomException = false;
+  try {
+    isDomException = error instanceof DOMException;
+  } catch {
+    // A prototype read that throws leaves no class to go by.
+  }
+  if (!isDomException) return "session_encrypt_failed";
+  let name: unknown;
+  try {
+    name = (error as DOMException).name;
+  } catch {
+    // A throwing `name` getter is an unknown name.
+  }
+  switch (name) {
     case "DataError":
       return "crypto_data_error";
     case "InvalidAccessError":

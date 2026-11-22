@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { classifyError, SBI_VC_ERROR_CODES } from "../src/error-code";
+import { classifyCryptoError, classifyError, SBI_VC_ERROR_CODES } from "../src/error-code";
 
 const SRC = join(import.meta.dir, "..", "src");
 
@@ -54,6 +54,26 @@ describe("classifyError keeps only the collector's own closed codes", () => {
     expect(classifyError(errorWithThrowingMessage())).toBe("unexpected_error");
   });
 
+  test("a throwing prototype read or name getter is never thrown on", () => {
+    const leak = () => {
+      throw new Error("synthetic private text");
+    };
+    const prototypeThrows = new Proxy(new Error("missing_session_seed"), { getPrototypeOf: leak });
+    expect(classifyError(prototypeThrows)).toBe("unexpected_error");
+    expect(classifyCryptoError(prototypeThrows)).toBe("session_encrypt_failed");
+    // The built-in `name` getter refuses a Proxy receiver.
+    const proxiedCrypto = new Proxy(new DOMException("synthetic", "OperationError"), {});
+    expect(classifyError(proxiedCrypto)).toBe("crypto_error");
+    expect(classifyCryptoError(proxiedCrypto)).toBe("crypto_error");
+    class NameThrows extends DOMException {
+      override get name(): string {
+        return leak();
+      }
+    }
+    expect(classifyError(new NameThrows("synthetic"))).toBe("crypto_error");
+    expect(classifyCryptoError(new NameThrows("synthetic"))).toBe("crypto_error");
+  });
+
   test.each([
     "missing_session_seed",
     "missing_passkey_credential",
@@ -97,6 +117,23 @@ describe("the closed set covers every code the collector throws", () => {
   const sources = readdirSync(SRC)
     .filter((name) => name.endsWith(".ts"))
     .map((name) => ({ name, text: readFileSync(join(SRC, name), "utf8") }));
+
+  test("every error the sources construct takes a whole literal, a template or a classified code", () => {
+    // Anything else (a variable, a concatenation, no argument) would pass the
+    // two scans below unseen, so each construction must be one of them.
+    const unreviewed = sources.flatMap(({ name, text }) =>
+      [...text.matchAll(/new [A-Za-z]*Error\(\s*([^\n]*)/gu)]
+        .map((match) => match[1]!)
+        .filter(
+          (argument) =>
+            !/^"[^"]*"\s*[),]/u.test(argument) &&
+            !/^`[^`]*`\s*[),]/u.test(argument) &&
+            !(name === "worker.ts" && argument.startsWith("classifyCryptoError(error))")),
+        )
+        .map((argument) => `${name}: ${argument}`),
+    );
+    expect(unreviewed).toEqual([]);
+  });
 
   test("every literal thrown message is a closed code that classifyError keeps", () => {
     const literals = sources.flatMap(({ text }) =>

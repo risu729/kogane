@@ -1626,19 +1626,27 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
 - Failure codes: a thrown error becomes a code through `classifyError`
-  (`src/error-code.ts`), for the manifest's failures and units (so the
-  terminal's `safeErrorCode`), the session health record's `lastErrorCode`
-  (prefixed with the keepalive stage) and `lastReauthErrorCode`, and the
-  `sbi_vc_keepalive` and `sbi_vc_reauth` log lines. It keeps a message only
-  when it is one of the collector's own codes (`SBI_VC_ERROR_CODES`, hyphens
-  folded to underscores) or `collector_http_<status>` /
-  `passkey_http_<status>` with a three-digit status from 100 to 599; any
-  other message, however code-shaped, gives `json_parse_failed`, a `crypto_*`
-  code, `type_error` or `unexpected_error` by the error's class.
-  `test/error-code.test.ts` checks that every literal message the
-  collector's sources throw is in the set and that every message template
-  is one it covers. Until 2026-11-22 any lowercase code-shaped
-  message was kept as it was; records written before then are not rewritten.
+  (`src/error-code.ts`) for the manifest's failure of the session load and
+  list reads and its `account` and `full-cashflows` units, and for the
+  `reports` failure and `report-year-range` unit when the report step throws
+  as a whole (so the terminal's `safeErrorCode`); for the session health
+  record's
+  `lastErrorCode` (prefixed with the keepalive stage) and
+  `lastReauthErrorCode`; and for the `sbi_vc_keepalive` and `sbi_vc_reauth`
+  log lines. The per-report and leverage units keep their own closed sets,
+  else `report_collection_failed` / `leverage_execution_collection_failed`.
+  `classifyError` keeps a message only when it is one of the collector's own
+  codes (`SBI_VC_ERROR_CODES`, hyphens folded to underscores) or
+  `collector_http_<status>` / `passkey_http_<status>` with a three-digit
+  status from 100 to 599; any other message, however code-shaped, gives
+  `json_parse_failed`, a `crypto_*` code, `type_error` or `unexpected_error`
+  by the error's class. It never throws: a `message` or `name` getter or a
+  prototype read that throws only takes that step away.
+  `test/error-code.test.ts` checks that every error the collector's sources
+  construct takes a whole literal in the set, one of the reviewed message
+  templates the set covers, or the classified crypto code. Until 2026-11-22
+  any lowercase code-shaped message was kept as it was; records written
+  before then are not rewritten.
 - `transformations`: one `redacted` step per JSON dataset
   (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
   is not retained. Each PDF/ZIP document states an `extracted` step instead.
