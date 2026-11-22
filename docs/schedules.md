@@ -279,8 +279,8 @@ before calling the cutover complete.
 Scheduling/storage failures reserve a one-minute bookkeeping wakeup rather than
 exhausting only native alarm retries. Receipts still in `started` after one hour
 are closed as `uncertain`, or as `not_dispatched` when a new-protocol claim never
-marked its dispatch; the scan frees no lease, and only a `not_dispatched`
-occurrence is tried again, once (above).
+marked its dispatch; the scan frees no lease, and only a collection job's
+`not_dispatched` occurrence is tried again, once (above).
 
 Claiming an occurrence of a `collection`-kind job also appends one `alarm`
 audit record (`alarm.occurrence.claim`, principal `alarm:<job id>`) as the
@@ -320,11 +320,14 @@ and counts only:
   schedule revision its UPDATE was fenced on, written only when that UPDATE
   claimed the row; no audit record), or `claim_conflict` (with
   `scheduleRevision`, the revision the claim's INSERT required; it inserted
-  no occurrence row and nothing is dispatched; the row already there belongs
-  to another attempt and is left as it is: a `started` one is closed by that
-  attempt or by the hourly abandonment scan, as `uncertain` or
-  `not_dispatched` ([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-durable-pre-rpc-dispatch-marker-2026-11-08)).
-  Until 2026-11-09 the conflict marked such a row `uncertain` at once).
+  no occurrence row and nothing is dispatched. A row already there for that
+  occurrence belongs to another attempt and is left as it is: a `started` one
+  is closed by that attempt's own receipt update or, after an hour still
+  `started`, by the abandonment scan as `uncertain` or `not_dispatched`
+  ([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-durable-pre-rpc-dispatch-marker-2026-11-08)).
+  Until 2026-11-09 the conflict marked such a row `uncertain` at once. The
+  same outcome, with no row there, follows a claim whose schedule changed
+  revision, enabled flag or next nominal after the alarm read it).
 - `schedule_dispatch_start`, written just before the collector call, with the
   target workspace.
 - `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
@@ -336,7 +339,7 @@ and counts only:
   `occurrenceId` once claimed, the `phase` that threw (`load`, `plan`,
   `claim`, `dispatch`, `record`), `errorName` and `errorKind`.
 
-So an occurrence that ends `uncertain` with no `finished_at` (the hourly
+So an occurrence that ends `uncertain` with no `finished_at` (the one-hour
 abandonment rule above) can be placed: a `claimed` line with no
 `schedule_dispatch_start` stopped between the claim and the call, a start
 with no result stopped while the call was open, and a result with no later
