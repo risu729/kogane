@@ -1,6 +1,6 @@
 # ADR 0020: Prices are provider observations promoted by a closed rule list
 
-- Status: accepted (merged 2026-09-27 in #268)
+- Status: accepted (merged 2026-09-26 in #268)
 - Date: 2026-09-26
 - Implemented by: #268
 - Carried by: [calculation and reports §1](../calculation-and-reports.md#price-sources-provider-claims-promoted-by-rule),

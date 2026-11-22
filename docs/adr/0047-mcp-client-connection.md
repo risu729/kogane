@@ -409,7 +409,7 @@ counts as evidence are in
 
 ## Amendment: enable the approved MCP reader configuration
 
-- Status: accepted (merged 2026-10-10 in #640)
+- Status: accepted (merged 2026-10-09 in #640)
 - Date: 2026-10-10
 
 The owner authorized actual MCP setup and a connection trial in a fresh

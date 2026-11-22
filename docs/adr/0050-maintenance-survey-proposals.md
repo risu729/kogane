@@ -265,7 +265,7 @@ acceptance was in flight rolls the revision back.
 
 Status: accepted ([ADR 0046](0046-agent-maintenance-windows.md), slice S4 of
 the [AI operation path plan](../plans/2026-10-ai-operation-path.md), merged
-2026-10-10 in #564).
+2026-10-09 in #564).
 
 The Decision's "The writer" paragraph and the first Consequences bullet above
 describe the time before #560 merged; with it they no longer hold:

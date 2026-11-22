@@ -1,6 +1,6 @@
 # ADR 0042: PRESTIA bank snapshots and non-additive provider measures
 
-- Status: accepted (merged 2026-10-05 in #437)
+- Status: accepted (merged 2026-10-04 in #437)
 - Date: 2026-10-05
 
 ## Context

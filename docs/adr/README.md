@@ -7,6 +7,10 @@ and an update to the maintained reference. Conditional "accepted upon merge"
 status means acceptance follows that record's merge, not that all later
 verification/open risks are complete.
 
+A merge date in a status (such as `merged DATE in #N`) is the UTC date of that
+pull request's commit on `main`, unless marked otherwise (ADR 0046 marks its
+#564 date `JST`).
+
 Use [current status](../current-status.md), [design](../design.md),
 [rollout controls](../rollout.md) and the [documentation index](../README.md)
 for current behavior.

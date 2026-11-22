@@ -1,6 +1,6 @@
 # ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review
 
-- Status: accepted (merged 2026-09-27 in #264)
+- Status: accepted (merged 2026-09-26 in #264)
 - Date: 2026-09-26
 - Implemented by: P1-5 of the [next-milestone plan](../plans/2026-09-next-milestone.md),
   branch `claude/sbi-shinsei-settlement-adapter-wr8pj4`

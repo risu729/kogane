@@ -1,6 +1,6 @@
 # ADR 0022: Give registered shared-R2 artifacts their parser dataset
 
-- Status: accepted (merged 2026-09-27 in #269); the Vpass withholding ended by
+- Status: accepted (merged 2026-09-26 in #269); the Vpass withholding ended by
   [ADR 0083](0083-release-vpass-collector-statement-pages.md) (2026-11-07)
 - Date: 2026-09-26
 - Carried by:

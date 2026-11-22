@@ -980,7 +980,7 @@ closed codes only, never an interval's free-text reason or provider facts.
 
 ## Amendment 2026-10-09: pure temporal selector
 
-- Status: accepted (merged 2026-10-10 in #637).
+- Status: accepted (merged 2026-10-09 in #637).
 - Date: 2026-10-09.
 - Issue: part of #546; the issue remains incomplete.
 
