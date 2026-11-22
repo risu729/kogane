@@ -239,3 +239,48 @@ completion is lost, an exhausted retry, a delayed original racing a retry and
 the next alarm through the real lease, old-build claims, and an upgrade of an
 existing started receipt. Shared-contract tests verify the distinct closed
 reason with no fabricated terminal or provider payload.
+
+## Amendment: a maintenance window is never dropped at a clock change (2026-11-22)
+
+Status: proposed
+Date: 2026-11-22
+
+### Context
+
+Schedule and maintenance times are wall times in a configured zone; Sydney
+moves its clocks forward from 02:00 to 03:00 on the first Sunday of October.
+The model placed every wall time with one helper that answers nothing for a
+time the zone skips. For a daily run that skips that day's run, as the
+verification above states. For a weekly or monthly maintenance window it
+dropped the whole window that day whenever its start or end fell in the
+skipped hour: a window stated as 02:30–04:00 did not defer collection at 03:30
+summer time, the alarm and the operations dispatch ran inside it, and the
+joined-deferral bound did not see it.
+
+### Options considered
+
+- Keep dropping the window: collection runs during announced maintenance once
+  a year for any Sydney-zone rule with an endpoint in 02:00–02:59.
+- Read a skipped time on the clock after the change (02:30 is 02:30 summer
+  time, an hour earlier as an instant): shortens a skipped end below what the
+  stated wall time can mean.
+- Read a skipped start as the first minute whose wall time reaches it, and a
+  skipped end on the clock before the change (02:30 is 03:30 summer time).
+
+### Decision
+
+The third option, for maintenance windows only (`windowAt` in
+`packages/collection/src/schedule-model.ts`, used by `afterMaintenance` and the
+joined-deferral measure). A window is never shorter than its wall times say.
+A daily run's nominal time keeps the existing rule and has no run that day,
+and the re-survey keeps refusing a dated time the zone skips. Times that exist
+are placed exactly as before, so no Japan-time or UTC rule changes.
+
+### Consequences and verification
+
+A Sydney-zone rule with a start or end in the skipped hour now defers
+collection on that day, and its deferral counts toward a delegated revision's
+bound. No stored rule, schedule or occurrence changes; the next reservation
+repair applies it. Model tests cover a skipped start, a skipped end, a window
+from the skipped hour to just after it, the week after, and the joined
+deferral measure.

@@ -72,6 +72,61 @@ test("nonexistent Sydney wall time skips one day; repeated time executes once", 
   expect(first).toBe(ms("2026-04-04T15:30:00.000Z"));
   expect(nextNominal(daily, "Australia/Sydney", first)).toBe(ms("2026-04-05T16:30:00.000Z"));
 });
+// Sydney moves its clocks from 02:00 standard time to 03:00 summer time on
+// Sunday 2026-10-04 (2026-10-03T16:00:00Z); 02:00–02:59 does not exist that day.
+function sydney(pattern: MaintenanceRule["pattern"]): MaintenanceRule {
+  return { ...rule(pattern), timezone: "Australia/Sydney" };
+}
+test("a maintenance window starting in the skipped hour still defers, from the clock change", () => {
+  const rules = [sydney({ kind: "weekly", weekdays: [0], start: "02:30", end: "04:00" })];
+  // 02:30 is never shown; the window opens at the change, 03:00 summer time,
+  // the first minute whose wall time reaches it, and ends at 04:00.
+  expect(afterMaintenance(ms("2026-10-03T16:00:00.000Z"), rules)).toBe(
+    ms("2026-10-03T17:00:00.000Z"),
+  );
+  expect(afterMaintenance(ms("2026-10-03T16:30:00.000Z"), rules)).toBe(
+    ms("2026-10-03T17:00:00.000Z"),
+  );
+  // Not earlier: 01:59 standard time is outside it.
+  expect(afterMaintenance(ms("2026-10-03T15:59:00.000Z"), rules)).toBe(
+    ms("2026-10-03T15:59:00.000Z"),
+  );
+  // The same window a week later, with no clock change, opens at 02:30.
+  expect(afterMaintenance(ms("2026-10-10T15:00:00.000Z"), rules)).toBe(
+    ms("2026-10-10T15:00:00.000Z"),
+  );
+  expect(afterMaintenance(ms("2026-10-10T15:30:00.000Z"), rules)).toBe(
+    ms("2026-10-10T17:00:00.000Z"),
+  );
+});
+test("a window from the skipped hour to just after it keeps the part the clock shows", () => {
+  const rules = [sydney({ kind: "weekly", weekdays: [0], start: "02:30", end: "03:15" })];
+  // 03:00–03:15 summer time is inside the stated 02:30–03:15.
+  expect(afterMaintenance(ms("2026-10-03T16:05:00.000Z"), rules)).toBe(
+    ms("2026-10-03T16:15:00.000Z"),
+  );
+});
+test("a maintenance window ending in the skipped hour still defers, to the same wall time before the change", () => {
+  const rules = [sydney({ kind: "weekly", weekdays: [0], start: "01:00", end: "02:30" })];
+  // 01:30 standard time is inside it. 02:30 is read on the clock before the
+  // change (+10:00), which is 03:30 summer time: the later, conservative end.
+  expect(afterMaintenance(ms("2026-10-03T15:30:00.000Z"), rules)).toBe(
+    ms("2026-10-03T16:30:00.000Z"),
+  );
+  expect(afterMaintenance(ms("2026-10-03T16:15:00.000Z"), rules)).toBe(
+    ms("2026-10-03T16:30:00.000Z"),
+  );
+});
+test("joined deferrals count a window whose start or end is in the skipped hour", () => {
+  const rules = [sydney({ kind: "weekly", weekdays: [0], start: "02:30", end: "05:00" })];
+  // It opens at the change (03:00 summer time) and ends at 05:00 summer time.
+  expect(deferralUnions(rules, ms("2026-10-03T00:00:00.000Z"), 86_400_000, 86_400_000)).toEqual([
+    { start: ms("2026-10-03T16:00:00.000Z"), end: ms("2026-10-03T18:00:00.000Z") },
+  ]);
+  expect(longestDeferral(rules, ms("2026-10-03T00:00:00.000Z"), 86_400_000, 86_400_000)).toBe(
+    120 * 60_000,
+  );
+});
 test("nested VPoint manifests retain failed status and exact safe run reference", () => {
   expect(
     scheduledResult({

@@ -32,6 +32,19 @@ an operator's edit or an operator's or delegated acceptance of a re-survey propo
 ([below](#official-site-re-survey)). The page flags provenance older than
 thirty days.
 
+Times are wall times in the job's or rule's zone. On the day a zone moves its
+clocks forward (Sydney, the first Sunday of October), a daily job time in the
+skipped hour has no run that day. A weekly or monthly maintenance window whose
+start or end falls in that hour still defers collection
+(`packages/collection/src/schedule-model.ts`, `windowAt`): a skipped start
+opens the window at the first minute whose wall time reaches it (the clock
+change itself), and a skipped end is read on the clock before the change, so
+`02:30` ends the window at 03:30 summer time. Before 2026-11-22 such a window
+was dropped for that day, and collection could run inside it
+([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-maintenance-window-is-never-dropped-at-a-clock-change-2026-11-22)).
+On the day clocks move back, a repeated wall time is read at its first
+occurrence.
+
 **When a refresh fails.** The page reads its snapshot through the shared
 `QueryBoundary` ([frontend](frontend.md#shared-primitives)). The first read
 failing shows `収集スケジュールを読み込めませんでした` ("the collection schedules
