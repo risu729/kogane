@@ -252,12 +252,13 @@ test("assign protects the subject; release-override appends, supersedes, and let
   ).toEqual({ ok: false, error: "no_active_override" });
 }, 30_000);
 
-test("a release takes effect only when a parse that uses the reference is next identified; a run-scoped reference has none", async () => {
+test("a release takes effect only when a parse that uses the reference is next identified; a run-scoped reference gets none from a later capture", async () => {
   // The sweep identifies parses that have no sealed run at their required
   // policy; a release changes no parse, so the sweep alone appends nothing.
   // The rule's revision comes with the next identified parse that plans the
-  // same reference (a later capture). A run-scoped reference is never planned
-  // again, so after a release its manual mapping stays current.
+  // same reference (a later capture). A run-scoped reference is planned by no
+  // later capture, so after a release its manual mapping stays current until
+  // a reparse of its own fetch run's artifact plans the key again.
   const source = "release-probe";
   const runScoped: IdentityResolver = (input) => {
     const plan = labelled("run-scoped rule")(input);
@@ -322,6 +323,28 @@ test("a release takes effect only when a parse that uses the reference is next i
           { revision: 2, method: "manual" },
     );
   }
+  // A reparse of the run-scoped reference's own artifact (a new parser
+  // version, same fetch run) plans the same key, so the rule applies again.
+  const runScopedRef = (await currentMapping(152)).source_account_id;
+  await db.batch([
+    db.prepare(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(154,152,'synthetic','2','2026-01-02','pending','[]')",
+    ),
+    db
+      .prepare(
+        "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(154,?,'synthetic_balance','JPY','synthetic:0','{}')",
+      )
+      .bind(`${source}:run-scoped`),
+    db.prepare("UPDATE parse_runs SET status='ok' WHERE id=154"),
+  ]);
+  await publishParse(db, 154);
+  expect(await identitySweep(db, runScoped, 8, source)).toMatchObject({ identifiedRuns: 1 });
+  expect(
+    await db
+      .prepare("SELECT revision,method FROM current_account_mappings WHERE source_account_id=?")
+      .bind(runScopedRef)
+      .first(),
+  ).toEqual({ revision: 3, method: "rule" });
 }, 30_000);
 
 test("a resend with the same operation id and payload replays the result without a second revision", async () => {

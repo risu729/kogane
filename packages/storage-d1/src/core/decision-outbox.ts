@@ -101,7 +101,11 @@ export const blockedOutcome = (code: string): ProcessorOutcome => ({ status: "bl
 export type OutboxProcessor = (db: D1Like, row: OutboxRow) => Promise<ProcessorOutcome>;
 
 /**
- * Re-runs the identity projection for the parse runs the decision affects. The
+ * Runs one bounded identity sweep. It identifies parse runs with no sealed
+ * identity run at their required policy, whichever decision queued the row;
+ * it does not re-identify the decision's own parse runs, so after a
+ * release-override, which changes no parse, it appends nothing
+ * (docs/identity-operations.md#corrections). The
  * sweep only creates identity runs that are missing and seals them once, so
  * running it twice for the same decision changes nothing. The evidence is the
  * number of runs it sealed, which is what a reader can check against
