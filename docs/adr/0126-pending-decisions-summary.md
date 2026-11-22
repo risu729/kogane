@@ -78,7 +78,9 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
    browser) is never probed. The answer carries no total;
    the panel's header sums the counted lines and says `以上` when a line is
    cut at its bound or is `unavailable` for any reason but `not_served`, so
-   it never reads as complete when it is not (INV05).
+   it never reads as complete when it is not (INV05). A read that fails
+   after an earlier answer shows the failure and no total, never the
+   earlier answer's total beside it.
 2. **A line.** `count`, `complete` (false when the count reached
    `countBound`, 1,000: at least that many), the first `ids` (at most 5 and
    640 bytes), `oldestAt` with `timeBasis` (`created`, or `not_recorded` for
@@ -183,4 +185,6 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
   accessibility audit, and is absent for a caller the route refuses; its total
   is exact with every line complete or `not_served`, and says `以上` for a cut
   line, a `budget_exceeded` line and an `unauthorized` line, each on its own;
-  the wire contract refuses lines the summary cannot produce.
+  a read that fails after an answer leaves the header without a total until
+  a read succeeds again; the wire contract refuses lines the summary cannot
+  produce.

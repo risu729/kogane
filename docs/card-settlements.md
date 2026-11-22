@@ -444,7 +444,9 @@ date, and nothing else but the account entities' labels.
   with no reason; otherwise `unknown` with `debit_account_unknown`,
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
-  due by the date), `cards_with_unknown_account` (a bill with no known
+  due by the date, so it may not show it; or on the due date of a bill the
+  line counts, so it may already show it, and comparing it with that bill
+  would count the debit twice), `cards_with_unknown_account` (a bill with no known
   account is due by the line's date) or `cards_with_unknown_due_date` (a card
   of this account, or of an unknown one, has a newest statement with no
   readable due date that no accepted settlement pays, so its total may be

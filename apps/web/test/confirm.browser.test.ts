@@ -94,6 +94,9 @@ describe.if(runnable)("change confirmation screen", () => {
    * lost. Used once; a resend is answered as the server does.
    */
   let commitFailure: { status: number; error: string; written: boolean } | null = null;
+  // The server reports no current revision for the subject (it reads one only
+  // for a pinned subject, 0 when none exists) and the plan reaches no source.
+  let vanished = false;
   const posted: string[] = [];
   /**
    * A pending-to-posted review plan: its kind, its pins, the proposal status
@@ -116,6 +119,7 @@ describe.if(runnable)("change confirmation screen", () => {
     commitHeld = null;
     receiptStatus = null;
     commitFailure = null;
+    vanished = false;
     link = null;
     purchaseAdvertised = true;
     purchaseReads.length = 0;
@@ -190,9 +194,9 @@ describe.if(runnable)("change confirmation screen", () => {
               report: {
                 planId: PLAN_ID,
                 planDigest: PLAN_ID,
-                simulation,
+                simulation: vanished ? { ...simulation, affectedScopes: [] } : simulation,
                 expectedRevisions: { [SUBJECT]: 7 },
-                currentRevisions: { [SUBJECT]: stale || committed ? 8 : 7 },
+                currentRevisions: vanished ? {} : { [SUBJECT]: stale || committed ? 8 : 7 },
                 stale: stale || committed,
                 resimulatedPlanId: stale || committed ? "b".repeat(64) : PLAN_ID,
               },
@@ -266,6 +270,25 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(await page.getByRole("button", { name: "承認する" }).isDisabled()).toBe(true);
     expect(await page.getByRole("button", { name: "確定する" }).isDisabled()).toBe(true);
     expect(main).toContain("この接続先では確認操作が有効ではないため、承認・確定は行えません。");
+    await page.close();
+  }, 30_000);
+
+  test("names an absent current revision and an empty source list in words, never a dash (INV05)", async () => {
+    commands = false;
+    stale = false;
+    vanished = true;
+    const page = await open();
+    const targets = page
+      .getByRole("region", { name: "変更の対象", exact: true })
+      .locator("tbody tr");
+    expect(await targets.count()).toBe(1);
+    expect(await targets.first().locator("td").nth(1).innerText()).toBe("現在の版の報告なし");
+    const diff = await page
+      .getByRole("region", { name: "サーバーが計算した差分", exact: true })
+      .innerText();
+    expect(diff).toMatch(/影響する取得元\s+なし/u);
+    expect(diff).not.toContain("—");
+    expect(await targets.first().innerText()).not.toContain("—");
     await page.close();
   }, 30_000);
 

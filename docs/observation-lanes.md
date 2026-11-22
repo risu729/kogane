@@ -31,9 +31,13 @@ The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
 reads the partial index `parse_runs_pending` (migration 0083,
 [ADR 0079](adr/0079-pending-parse-run-index.md)), which holds the pending
 parse runs only; before it, every sweep read every parse run. Every statement
-one scheduled tick prepares is explained without table statistics by
-`services/processor/test/tick-query-plan.test.ts`, which lists the whole reads
-a tick still makes and the document that accepts each. Two of them are open
+one scheduled tick prepares on a one-capture store is explained without table
+statistics by `services/processor/test/tick-query-plan.test.ts`, which lists
+the whole scans a tick still makes and the document that accepts each; a
+statement that store does not reach, such as the Vpass binding insert of the
+identity sweep's empty-parse batch, is measured by
+`services/processor/test/tick-rows-read.test.ts` instead
+([read model: rows read by the latest-state reads](read-model.md#rows-read-by-the-latest-state-reads)). Two of the whole reads are open
 limits recorded only here, not changed: the identity sweep's candidate page
 (`identitySweepCandidatesSql`, `identity_page`) orders every successful parse
 run by publication before its `LIMIT`, and the reward claim sweep's candidate
