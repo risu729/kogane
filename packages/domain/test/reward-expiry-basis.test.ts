@@ -8,6 +8,7 @@ import {
   estimateExpiry,
   EXPIRY_DERIVATION_RELEASE,
   validBucketExpiryBasis,
+  validExpiryRule,
   type ActivityHistory,
   type BucketKind,
   type ComputedExpiryReason,
@@ -428,6 +429,11 @@ describe("every unavailable computed expiry carries exactly one closed reason", 
       rule: { ...inactivity, qualifyingActivity: null },
       state: "needs-rule-verification",
     },
+    {
+      reason: "deadline_calendar_unreadable",
+      rule: { ...inactivity, deadlineCalendar: null },
+      state: "needs-rule-verification",
+    },
     { reason: "membership_out_of_scope", rule: tiered, state: "partial" },
     {
       reason: "membership_not_retroactive",
@@ -493,6 +499,50 @@ describe("every unavailable computed expiry carries exactly one closed reason", 
       expect(estimate.state).toBe(entry.state);
       expect(validBucketExpiryBasis(row.expiryBasis)).toBe(true);
     });
+});
+
+describe("a rule whose deadline calendar could not be read", () => {
+  // The read model leaves the calendar null for a malformed stored reference;
+  // no family's answer is then the rule's own (ADR 0004, INV05).
+  for (const rule of [inactivity, fixedLot, noExpiry])
+    test(`${rule.family}: unavailable, never a date or "no expiry", and no assumed zone`, () => {
+      const unreadable: ExpiryRule = { ...rule, deadlineCalendar: null };
+      const { estimate, row } = only(unreadable, bucket("bucket:subject", "regular"));
+      expect(estimate.state).toBe("needs-rule-verification");
+      expect(estimate.uncertaintyCodes).toContain("rule_family_unsupported");
+      expect(estimate.uncertaintyCodes).not.toContain("deadline_zone_assumed");
+      expect(row.expiryBasis.computed).toMatchObject({
+        status: "unavailable",
+        value: null,
+        reasonCode: "deadline_calendar_unreadable",
+        activity: null,
+        membership: null,
+        uncertaintyCodes: [],
+      });
+      expect(row.expiryBasis.computed.rule.deadlineCalendar).toBeNull();
+      expect(row.reasonCodes).toContain("deadline_calendar_unreadable");
+      expect(row.reasonCodes).not.toContain("no_expiry_under_verified_terms");
+      expect(validBucketExpiryBasis(row.expiryBasis)).toBe(true);
+    });
+
+  test("a provider display stays an observation beside the refusal", () => {
+    const shown = bucket("bucket:shown", "regular", { observedExpiry: day("2027-03-31") });
+    const { row } = only({ ...inactivity, deadlineCalendar: null }, shown);
+    expect(row.deadline).toEqual(day("2027-03-31"));
+    expect(row.basis).toBe("provider-observed");
+    expect(row.reasonCodes).toEqual(["deadline_calendar_unreadable", "provider_expiry_only"]);
+    expect(row.expiryBasis.agreement).toBe("not-comparable");
+  });
+
+  test("the rule validator admits the unreadable calendar only as null", () => {
+    expect(validExpiryRule({ ...inactivity, deadlineCalendar: null })).toBe(true);
+    expect(
+      validExpiryRule({
+        ...inactivity,
+        deadlineCalendar: { zone: "", dayBoundary: "end-of-day", zoneBasis: "assumed" },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("rule versions across an applicable-period boundary", () => {

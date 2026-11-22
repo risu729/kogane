@@ -15,6 +15,7 @@ import {
   type BucketKind,
   BUCKET_KINDS,
   type ConversionOffer,
+  type DeadlineCalendar,
   type ExpiryFamily,
   EXPIRY_FAMILIES,
   type ExpiryRule,
@@ -28,6 +29,7 @@ import {
   RULE_VERIFICATIONS,
   validOfferValidity,
 } from "../../domain/src/rewards";
+import { canonicalZone } from "../../domain/src/civil-date";
 import { validTemporalValue, type TemporalValue } from "../../domain/src/time";
 import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/values";
 import type { SqlExecutor } from "./reader";
@@ -349,6 +351,24 @@ export const QUALIFYING_ACTIVITY_POLICIES: Readonly<
   },
 };
 
+/**
+ * A stored `zone:dayBoundary:zoneBasis` reference, read strictly: exactly three
+ * parts, a zone the runtime's time-zone data knows (`canonicalZone`), and a
+ * day boundary and zone basis from their closed lists. Anything else is
+ * `null`, never a UTC, end-of-day or assumed default: a calendar nobody
+ * recorded is not guessed (ADR 0004), and the rule computes no deadline
+ * (`deadline_calendar_unreadable`, INV05).
+ */
+export function deadlineCalendar(ref: string): DeadlineCalendar | null {
+  const parts = ref.split(":");
+  if (parts.length !== 3) return null;
+  const [zone, dayBoundary, zoneBasis] = parts as [string, string, string];
+  if (canonicalZone(zone) === null) return null;
+  if (dayBoundary !== "end-of-day" && dayBoundary !== "start-of-day") return null;
+  if (zoneBasis !== "documented" && zoneBasis !== "assumed") return null;
+  return { zone, dayBoundary, zoneBasis };
+}
+
 export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
   let applicability: ExpiryRule["applicability"] = {
     bucketKinds: [],
@@ -385,8 +405,6 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
   } catch {
     /* An unreadable applicability leaves the rule scoped to nothing. */
   }
-  // `zone:dayBoundary:zoneBasis`, kept separate from any display zone.
-  const [zone, dayBoundary, zoneBasis] = row.deadline_calendar_ref.split(":");
   const family = (EXPIRY_FAMILIES as readonly string[]).includes(row.family)
     ? (row.family as ExpiryFamily)
     : "unsupported";
@@ -409,11 +427,8 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
       Object.hasOwn(QUALIFYING_ACTIVITY_POLICIES, row.qualifying_activity_policy_ref)
         ? QUALIFYING_ACTIVITY_POLICIES[row.qualifying_activity_policy_ref]!
         : null,
-    deadlineCalendar: {
-      zone: zone && zone.length > 0 ? zone : "UTC",
-      dayBoundary: dayBoundary === "start-of-day" ? "start-of-day" : "end-of-day",
-      zoneBasis: zoneBasis === "documented" ? "documented" : "assumed",
-    },
+    // `zone:dayBoundary:zoneBasis`, kept separate from any display zone.
+    deadlineCalendar: deadlineCalendar(row.deadline_calendar_ref),
     priorityPolicyRef: row.priority_policy_ref,
     evidenceRefs: refs(row.evidence_refs_json),
     verification,
