@@ -125,11 +125,16 @@ writer fencing and captured CORE references; the contract is in
 | `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                    |
 | `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
 | `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                      |
-| `stale`      | The newest published attempt over the same source and dataset did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                        |
+| `stale`      | The newest published attempt over the same source, dataset and fetch unit did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                            |
 
 Freshness is recorded separately (`current` / `stale` / `unknown`) with the
 `snapshotEligibility` reason code of the failing claim, so "we could not
-observe" is never rendered as "the balance is gone".
+observe" is never rendered as "the balance is gone". The attempt compared is
+the newest published coverage claim of the candidate's own fetch unit (an
+artifact with no unit is its own group), as the latest-balance query keys a
+measurement by its unit: another card or connection of the same dataset can
+neither re-observe the scope nor fail to, so its newer attempt neither marks
+the row stale nor hides the failure of the row's own unit.
 
 ### Build budgets
 
@@ -195,7 +200,11 @@ Each latest item carries:
   evidence count is the number of witnesses of one measurement, which is not
   the number of balances shown (addendum 11 §4);
 - `temporal` — a `TemporalReference`: a date stays a date, an instant keeps its
-  offset, and anything else is `unknown` with a reason;
+  offset, and anything else is `unknown` with a reason. An instant is named
+  by its fixed-offset zone (`+09:00` is `Etc/GMT-9`) only for a whole-hour
+  offset a zone uses, -12:00 to +14:00; any other offset, `+15:00` say,
+  which the domain parses but no zone uses, is `unknown` with
+  `offset_zone_unsupported`;
 - `freshness` — `{ state, reasonCode }`.
 
 The latest page also carries `subtotals`:
@@ -294,6 +303,22 @@ publication landing between two pages cannot insert a row into a page already
 read. Its `dataCoverage.completeness` is always `unknown`: a history window is
 not a membership claim. It is not bounded by the 5,000 candidate limit, so it
 routinely holds more rows than the latest list.
+
+The pin is a parse run id, not a moment: `balanceHistoryKeysetSql` keeps the
+rows of the parse runs visible now (`recordedParses`) whose id is at most the
+high-water mark, and visibility is read again on every page. A parse run with
+an id at most the mark that becomes visible after the snapshot was built can
+therefore still add rows between two pages (a snapshot that is behind stays
+pageable): a release activation publishes its candidate runs, a rollback
+publishes the run the activation replaced, and a run still `pending` when the
+snapshot was built that is later marked `error` (an interrupted parse) is
+visible with the observations it had already written. A row that sorts after
+the cursor then appears on a later page, and one that sorts before it is not
+shown on that walk. The run an activation or a rollback moves the pointer
+away from is no longer published, and neither path sets its
+`superseded_by_parse_run_id`, so unless it was already marked superseded it
+stops being visible and its rows drop out of the later pages. That is an open
+limit; dropping the cursor reads the history again from the first page.
 
 ## Capabilities and the v1 route
 

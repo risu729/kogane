@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, useFeatures } from "../api.ts";
 import {
+  CARD_PURCHASE_READS,
   purchaseLinkAction,
   purchaseLinkPinsMatch,
   purchaseLinkPlanRequest,
@@ -12,7 +13,13 @@ import {
   type CardPurchaseView,
   type PendingPostedAction,
 } from "../card-purchases-api.ts";
-import { postCommand, type ChangePlanView } from "../command-api.ts";
+import { postCommand, StalePlanError, type ChangePlanView } from "../command-api.ts";
+import {
+  PlanRefreshNotice,
+  PlanRefreshScope,
+  PlanRefusal,
+  usePlanRefresh,
+} from "../plan-refresh.tsx";
 import { Pagination } from "../pagination.tsx";
 import {
   CANDIDATE_ACTION_LABELS,
@@ -124,7 +131,9 @@ function OpenCandidates({ items }: { items: CardPurchaseView[] }): ReactNode {
 function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }): ReactNode {
   const features = useFeatures();
   const [reason, setReason] = useState("");
+  const refresh = usePlanRefresh();
   const plan = useMutation({
+    ...refresh,
     mutationFn: async (action: PendingPostedAction) => {
       const response = await postCommand<{ plan: ChangePlanView }>(
         "plan",
@@ -141,8 +150,8 @@ function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }):
           candidate.proposalId,
         ) !== action
       )
-        throw new Error(
-          "候補または利用の記録が更新されています。表示を更新して、内容を確認し直してください。",
+        throw new StalePlanError(
+          "候補または利用の記録が更新されています。表示を読み直すので、内容を確認し直してください。",
         );
       return response.plan;
     },
@@ -187,11 +196,7 @@ function CandidateDecision({ candidate }: { candidate: CardPurchaseCandidate }):
           </BusyButton>
         ))}
       </div>
-      {plan.isError ? (
-        <Notice tone="bad" inline role="alert">
-          {plan.error.message}
-        </Notice>
-      ) : null}
+      <PlanRefusal error={plan.error} />
       <ul className="plain-list">
         {candidate.actions.map((action) => (
           <li key={action}>
@@ -485,7 +490,7 @@ export function PurchasePage({ eventId }: { eventId: string }): ReactNode {
   const query = useCardPurchase(eventId);
   if (!features.known) return <Loading label="カード利用の説明" />;
   return (
-    <>
+    <PlanRefreshScope queryKeys={CARD_PURCHASE_READS}>
       <div className="page-head">
         <div className="breadcrumb">
           <Link to="/purchases">カード利用の一覧に戻る</Link>
@@ -493,6 +498,7 @@ export function PurchasePage({ eventId }: { eventId: string }): ReactNode {
         <h1>カード利用の説明</h1>
         <p className="lede">この利用を、カード会社の請求と銀行の引落までたどります。</p>
       </div>
+      <PlanRefreshNotice />
       {!features.cardPurchaseRecognition ? (
         <UnavailableNotice />
       ) : (
@@ -548,6 +554,6 @@ export function PurchasePage({ eventId }: { eventId: string }): ReactNode {
           }}
         </QueryBoundary>
       )}
-    </>
+    </PlanRefreshScope>
   );
 }
