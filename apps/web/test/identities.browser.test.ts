@@ -86,6 +86,19 @@ const ACCOUNT_LIST: IdentityAccountListRow[] = [
     connection: "unresolved",
     lastFetchedAt: "2099-01-02T03:04:05.000Z",
   },
+  {
+    // No connection record and no fetch: both are named, never a dash (INV05).
+    account: "synthetic-account-2",
+    label: "合成口座B",
+    labelOrigin: "mapping",
+    role: "deposit",
+    status: "unresolved",
+    sources: ["synthetic-bank"],
+    references: 1,
+    observedCount: 0,
+    connection: null,
+    lastFetchedAt: null,
+  },
 ];
 const INSTRUMENTS: IdentityInstrumentRow[] = [
   {
@@ -120,11 +133,15 @@ describe.if(runnable)("identity coverage page", () => {
   let origin: string;
   // Which inconsistency the coverage answer carries, if any.
   let broken: "sum" | "excess" | null = null;
+  // The account list offers a second page that comes back empty, as it does
+  // when the list shrank after the first page was read.
+  let shrunk = false;
   const requests: { method: string; url: URL }[] = [];
   const bodies: Record<string, unknown> = {};
 
   beforeEach(() => {
     broken = null;
+    shrunk = false;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -163,6 +180,13 @@ describe.if(runnable)("identity coverage page", () => {
                   : { ...row, organized: 8, unresolved: 5 };
             if (broken) return Response.json(page(rows.map(bad)));
             return Response.json(page(rows));
+          }
+          if (shrunk && url.pathname === "/api/identity/account-list") {
+            const later = url.searchParams.get("offset") !== "0";
+            return Response.json({
+              rows: later ? [] : ACCOUNT_LIST,
+              coverage: { limit: 100, nextOffset: later ? null : 100, truncated: false },
+            });
           }
           const body = bodies[url.pathname];
           return body
@@ -212,6 +236,8 @@ describe.if(runnable)("identity coverage page", () => {
     // No row adds sources together.
     expect(await coverageRegion(tab).locator("tfoot").count()).toBe(0);
     expect(await coverageRegion(tab).innerText()).not.toContain("10");
+    // The offset pager names the rows shown, as the カード利用 pager does; no total is read.
+    await tab.getByText("整理状況のページ：1–2件", { exact: true }).waitFor();
     const note = await tab.getByRole("region", { name: "整理状況", exact: true }).innerText();
     expect(note).toContain("銘柄の照合率ではありません");
     // Every request is a GET of an identity read; nothing else is asked.
@@ -229,6 +255,7 @@ describe.if(runnable)("identity coverage page", () => {
     expect(await accounts.count()).toBe(2);
     expect(await accounts.nth(0).innerText()).toContain("識別済み");
     expect(await accounts.nth(1).innerText()).toContain("要確認");
+    await tab.getByText("一覧のページ：1–2件", { exact: true }).waitFor();
     await tab.getByRole("button", { name: "通貨・銘柄", exact: true }).click();
     await tab.getByRole("heading", { name: "整理済みの通貨・銘柄", exact: true }).waitFor();
     const instrument = tab
@@ -240,13 +267,13 @@ describe.if(runnable)("identity coverage page", () => {
     await tab.close();
   }, 30_000);
 
-  test("the account list shows one line per account with its name and where the name came from", async () => {
+  test("the account list shows one line per account with its name and where the name came from, and names what it lacks", async () => {
     const tab = await open();
     await tab.getByRole("button", { name: "口座一覧", exact: true }).click();
     await tab.getByRole("heading", { name: "口座一覧", exact: true }).waitFor();
     const rows = tab.getByRole("region", { name: "口座一覧の表", exact: true }).locator("tbody tr");
     await rows.first().waitFor();
-    expect(await rows.count()).toBe(1);
+    expect(await rows.count()).toBe(2);
     const text = await rows.first().innerText();
     for (const part of [
       "合成銀行（MoneyForward連携）（個別口座未確定）",
@@ -256,10 +283,33 @@ describe.if(runnable)("identity coverage page", () => {
       "2099-01-02T03:04:05.000Z",
     ])
       expect(text).toContain(part);
+    const cells = rows.nth(1).locator("td");
+    expect(await cells.nth(7).innerText()).toBe("接続先の確認記録なし");
+    expect(await cells.nth(8).innerText()).toBe("取得の記録なし");
+    expect(await rows.nth(1).innerText()).not.toContain("—");
     expect(requests.some((entry) => entry.url.pathname === "/api/identity/account-list")).toBe(
       true,
     );
     await tab.close();
+  }, 30_000);
+
+  test("an emptied later page says this page is empty, never that the list is", async () => {
+    shrunk = true;
+    const tab = await open();
+    try {
+      await tab.getByRole("button", { name: "口座一覧", exact: true }).click();
+      const pager = tab.getByRole("group", { name: "一覧のページ", exact: true });
+      await tab.getByText(`一覧のページ：1–${ACCOUNT_LIST.length}件`, { exact: true }).waitFor();
+      await pager.getByRole("button", { name: "次の100件", exact: true }).click();
+      await tab.getByText("一覧のページ：表示なし", { exact: true }).waitFor();
+      await tab.getByText("このページに表示する項目はありません。", { exact: false }).waitFor();
+      expect(await tab.locator("main").innerText()).not.toContain("整理済みの口座がありません。");
+      // The pager stays, so the owner can step back to rows that exist.
+      await pager.getByRole("button", { name: "前の100件", exact: true }).click();
+      await tab.getByText(`一覧のページ：1–${ACCOUNT_LIST.length}件`, { exact: true }).waitFor();
+    } finally {
+      await tab.close();
+    }
   }, 30_000);
 
   test("filtering by source narrows the coverage read and the list", async () => {

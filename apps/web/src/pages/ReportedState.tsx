@@ -83,10 +83,18 @@ function UnavailableNotice(): ReactNode {
   return <EmptyState>この接続先は基準日の保有状況を提供していません。</EmptyState>;
 }
 
-function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
+function SnapshotLine({
+  snapshot,
+  withSource = false,
+}: {
+  snapshot: ReportedSnapshot;
+  /** Name the source first, for a capture shown outside its account's card. */
+  withSource?: boolean;
+}): ReactNode {
   const freshness = FRESHNESS[snapshot.freshness];
   return (
     <li>
+      {withSource ? <>{snapshot.sourceId}: </> : null}
       取得日時 <time dateTime={snapshot.capturedAt}>{snapshot.capturedAt}</time>{" "}
       <span className="dim">（日本時間 {snapshot.captureDate}）</span>{" "}
       <Badge tone={freshness.tone} title={`基準日の${snapshot.ageDays}日前`}>
@@ -263,7 +271,10 @@ function PayableTable({ payables }: { payables: ReportedPayable[] }): ReactNode 
                   <Nullable value={payable.period} />
                 </td>
                 <td>
-                  <Nullable value={payable.paymentDate} placeholder="不明" />
+                  {/* Null only when no `_kogane.paymentDate` is recorded: a value
+                      that is not a civil date is shown as stored, and the
+                      status says the due date is unknown either way. */}
+                  <Nullable value={payable.paymentDate} placeholder="引落予定日未記録" />
                 </td>
                 <td className="num">
                   <Link to={`/observations/balance/${idOf(payable.ref)}`}>
@@ -360,6 +371,56 @@ function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
   );
 }
 
+/**
+ * The chosen captures no listed account came from. Each is complete, yet
+ * nothing in it is a position or a balance this page lists per account: the
+ * provider listed nothing, or only rows the coverage counts as excluded, or
+ * only rows the answer never lists per account (the perimeter's exchange-rate,
+ * income and realised-gains containers hold valuations only). The page cannot
+ * tell these apart, so it names each capture and says all three. Without an
+ * account filter every chosen capture is a capture of the whole answer, so one
+ * no account names is shown here rather than left out. Two parsers can read
+ * one artifact, so a capture is its ref and parser.
+ */
+function unlistedSnapshots(state: ReportedState): ReportedSnapshot[] {
+  if (state.filters.account !== null) return [];
+  const listed = new Set(
+    state.accounts.flatMap((account) =>
+      account.snapshots.map((snapshot) => JSON.stringify([snapshot.ref, snapshot.parserName])),
+    ),
+  );
+  return state.snapshots.filter(
+    (snapshot) => !listed.has(JSON.stringify([snapshot.ref, snapshot.parserName])),
+  );
+}
+
+function UnlistedCaptures({ state }: { state: ReportedState }): ReactNode {
+  const snapshots = unlistedSnapshots(state);
+  if (snapshots.length === 0) return null;
+  return (
+    <Panel
+      id="reported-state-unlisted-captures"
+      title="表示する記載のない取得結果"
+      count={`${snapshots.length}件`}
+    >
+      <div className="panel-body">
+        <p>
+          完全な取得結果ですが、口座ごとに表示する保有や残高の記載はありません。取得元が何も記載していないか、記載がこの一覧に載せないものだけです（取引ごとの残高やポイント、または為替レート・受取額・実現損益のように保有や残高ではないもの）。
+        </p>
+        <ul className="plain-list" aria-label="表示する記載のない取得結果">
+          {snapshots.map((snapshot) => (
+            <SnapshotLine
+              key={`${snapshot.ref}/${snapshot.parserName}`}
+              snapshot={snapshot}
+              withSource
+            />
+          ))}
+        </ul>
+      </div>
+    </Panel>
+  );
+}
+
 export function ReportedStatePage(): ReactNode {
   const features = useFeatures();
   const today = tokyoToday();
@@ -439,8 +500,16 @@ export function ReportedStatePage(): ReactNode {
                   <CoverageNotes state={state} />
                   {state.accounts.length === 0 ? (
                     <EmptyState>
-                      <p>この基準日までに完全な取得結果のある口座はありません。</p>
-                      <p>保有がないという意味ではありません。</p>
+                      {unlistedSnapshots(state).length === 0 ? (
+                        <>
+                          <p>この基準日までに完全な取得結果のある口座はありません。</p>
+                          <p>保有がないという意味ではありません。</p>
+                        </>
+                      ) : (
+                        <p>
+                          この基準日までの完全な取得結果に、口座ごとに表示する記載はありません。取得結果は下に挙げます。
+                        </p>
+                      )}
                     </EmptyState>
                   ) : (
                     state.accounts.map((account, index) => (
@@ -462,6 +531,7 @@ export function ReportedStatePage(): ReactNode {
                       />
                     ))
                   )}
+                  <UnlistedCaptures state={state} />
                   <Panel
                     id="reported-state-payables"
                     title="カードの請求"

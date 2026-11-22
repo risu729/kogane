@@ -27,7 +27,7 @@ import type { FinancialError, FinancialErrorCode } from "../../../domain/src/res
 import { readIdentityObservationCount } from "../../../read-model/src/instrument-resolution.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import { CURRENT_IDENTITY_OBSERVATION_BOUND } from "./instrument-candidates-review.ts";
 import {
   type InstrumentResolution,
@@ -120,13 +120,8 @@ export async function readInstrumentCoverage(input: {
     ok: false,
     error: financialError(code, REQUEST_ID, refs),
   });
-  if (!grantAllows(grant, INSTRUMENT_COVERAGE_CAPABILITY))
-    return fail("unauthorized", [`capability:${INSTRUMENT_COVERAGE_CAPABILITY}`]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, INSTRUMENT_COVERAGE_CAPABILITY, REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (source !== null && !validSource(source)) return fail("invalid_query", ["source"]);
   const wanted = source as string | null;
 

@@ -26,8 +26,8 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
 - [2026-11 everyday questions over MCP, in one or two calls](2026-11-mcp-everyday-questions.md):
   proposed on 2026-11-19 for #1414; an audit of 22 everyday questions against the
   published tools, which gaps the in-flight units A–F close, and the remaining gaps
-  ranked. Gaps G1 (per-card spending, ADR 0125) and G2 (compact purchase lines, its
-  amendment) are implemented and await the owner's approval of the tool changes.
+  ranked. Gaps G1 (per-card spending, ADR 0125), G2 (compact purchase lines, its
+  amendment), G3 (without an event-date filter), G4, G5, G6 and G9 are merged; G7 and G8 remain proposals.
 
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production
@@ -60,7 +60,9 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   implemented, merged in #658.
 
 - [2026-10 collector admin bearer retirement](2026-10-collector-admin-retirement.md):
-  in progress; the first slice (13 of 15 registrations) is merged (#665).
+  done in code; the first slice (13 of 15 registrations) merged in #665 and the last
+  two on 2026-11-08. Removing the two remaining secret registrations from the deployed
+  Workers is the only open step.
 
 - [2026-10 SBI Shinsei first history acquisition slice](2026-10-sbi-shinsei-history-first-slice.md):
   in progress; offline validation and evidence adapters merged, acquisition

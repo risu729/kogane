@@ -35,13 +35,14 @@ import {
   type HoldingsChange,
   type HoldingsChangeContainer,
 } from "./holdings-change.ts";
+import { READ_DETAILS } from "./read-detail.ts";
 import { decodeKeysetCursor, encodeKeysetCursor } from "./paging.ts";
 import type { REPORTED_STATE_ZONE } from "./reported-state.ts";
 import { decimalToString, isZeroDecimal, type ValueStatus } from "./values.ts";
 
 export const HOLDINGS_CHANGE_SUMMARY_SCHEMA = "reported-holdings-change-summary-v1";
 /** `summary` (the default) lists changed lines only; `full` is the comparison as it is. */
-export const HOLDINGS_CHANGE_DETAILS = ["summary", "full"] as const;
+export const HOLDINGS_CHANGE_DETAILS = READ_DETAILS;
 /** The page sizes a summary offers; any other is refused. */
 export const HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES = [10, 25, 50, 100] as const;
 /** Ten lines: under 8 KB with every line at the longest key shape (25 such lines are not). */

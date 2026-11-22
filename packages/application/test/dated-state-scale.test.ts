@@ -22,6 +22,11 @@ import {
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { explain, type PlanStep } from "../../read-model/test/card-usage-plan.ts";
 import {
+  LEGACY_DATED_BALANCES_SQL,
+  LEGACY_DATED_POSITIONS_SQL,
+  LEGACY_DATED_SNAPSHOTS_SQL,
+} from "../../read-model/test/dated-state-legacy-sql.ts";
+import {
   STATEMENT_CI_SCALE,
   STATEMENT_SCALE,
   type ScaledStore,
@@ -228,6 +233,33 @@ describe("reported state on a scaled store without statistics", () => {
       // The scope's settlement read names every account's statements in one key list.
       const keys = JSON.stringify(accounts.map((account) => [account, "vpass", "2026-09"]));
       expect(unboundedScans(explain(db, SETTLEMENT_SQL, [keys]))).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "on the scaled store each read is the frozen text's without the moneyforward-me rows",
+    () => {
+      // The store holds no MoneyForward capture, but migration 0091's policy
+      // row put the container in the frozen perimeter, without a snapshot.
+      for (const date of [OPTIONS.today, middle()]) {
+        const cutoff = reportedStateCutoff(date);
+        for (const [shipped, legacy, key] of [
+          [DATED_POSITIONS_SQL, LEGACY_DATED_POSITIONS_SQL, "source_id"],
+          [DATED_BALANCES_SQL, LEGACY_DATED_BALANCES_SQL, "source_id"],
+          [DATED_SNAPSHOTS_SQL, LEGACY_DATED_SNAPSHOTS_SQL, "perimeter_source_id"],
+        ] as const) {
+          const frozen = db.query(legacy).all(cutoff) as Record<string, unknown>[];
+          expect(db.query(shipped).all(cutoff)).toEqual(
+            frozen.filter((row) => row[key] !== "moneyforward-me"),
+          );
+        }
+        expect(
+          (db.query(LEGACY_DATED_SNAPSHOTS_SQL).all(cutoff) as Record<string, unknown>[]).filter(
+            (row) => row["perimeter_source_id"] === "moneyforward-me",
+          ),
+        ).toHaveLength(1);
+      }
     },
     TIMEOUT,
   );

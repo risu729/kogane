@@ -239,7 +239,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
                         <summary>実行 #{run.id}</summary>
                         <p>{run.tool}</p>
                         <p>
-                          <Nullable value={run.external_run_id} placeholder="外部の実行IDなし" />
+                          <Nullable value={run.external_run_id} placeholder="外部実行番号未記録" />
                         </p>
                       </details>
                     </td>

@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { auditView } from "./a11y-audit.ts";
 import jobs from "../../../config/alarm-jobs.json";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
-import type { ScheduleSnapshot } from "../../../packages/collection/src/schedule-model";
+import type {
+  MaintenanceRule,
+  ScheduleSnapshot,
+} from "../../../packages/collection/src/schedule-model";
 import { settledTest } from "./settle.ts";
 const client = join(import.meta.dir, "../dist-production"),
   executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -23,7 +26,13 @@ describe.if(runnable)("operator schedule administration", () => {
     snapshotStatus = 200,
     leaseResponse: (() => Promise<Response>) | null = null,
     readAfterWrite: (() => Promise<void>) | null = null,
-    collectionResponse: (() => Promise<Response>) | null = null;
+    collectionResponse: (() => Promise<Response>) | null = null,
+    // A settings write's answer, replaced: `before` answers instead of the
+    // write and stores nothing; `after` answers once the write is stored, as
+    // a relay that lost the Processor's answer does (`503
+    // scheduling_unavailable`). `reservation` is what a stored write answers.
+    writeAnswer: { before?: () => Response; after?: () => Response } | null = null,
+    reservation: "armed" | "pending" = "armed";
   let collections: { body: Record<string, unknown>; origin: string | null; type: string | null }[] =
     [];
   let writes: {
@@ -40,6 +49,8 @@ describe.if(runnable)("operator schedule administration", () => {
     snapshotStatus = 200;
     leaseResponse = null;
     readAfterWrite = null;
+    writeAnswer = null;
+    reservation = "armed";
     snapshot = {
       schedules: jobs.map((job) => ({
         ...job,
@@ -100,7 +111,7 @@ describe.if(runnable)("operator schedule administration", () => {
           snapshotReads++;
           if (writes.length && readAfterWrite) await readAfterWrite();
           if (snapshotStatus !== 200)
-            return Response.json({ error: "unavailable" }, { status: snapshotStatus });
+            return Response.json({ error: "scheduling_unavailable" }, { status: snapshotStatus });
           return Response.json(snapshot);
         }
         if (url.pathname === "/api/ops/v1/collections" && request.method === "POST") {
@@ -125,12 +136,10 @@ describe.if(runnable)("operator schedule administration", () => {
           });
           if (url.pathname.startsWith("/api/ops/v1/schedules/leases/") && leaseResponse)
             return leaseResponse();
-          const id = url.pathname.split("/").at(-1);
-          const row = snapshot.schedules.find((s) => s.id === id);
-          if (row) {
-            Object.assign(row, { ...body, revision: row.revision + 1 });
-          }
-          return Response.json({ saved: true, reservation: "armed" });
+          const refused = writeAnswer?.before?.();
+          if (refused) return refused;
+          const stored = settingsWrite(url.pathname.slice("/api/ops/v1/schedules".length), body);
+          return stored.ok && writeAnswer?.after ? writeAnswer.after() : stored;
         }
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -144,6 +153,82 @@ describe.if(runnable)("operator schedule administration", () => {
     await browser?.close();
     server?.stop(true);
   });
+  /**
+   * One settings write as the Processor answers it (services/processor
+   * schedule-store.ts and maintenance-survey/decisions.ts): each write is
+   * checked against the revision it names and refused with `409` when that
+   * moved; a stored write answers what the real route answers.
+   */
+  function settingsWrite(path: string, body: Record<string, unknown>): Response {
+    const refuse = (error: string, status: number) => Response.json({ error }, { status });
+    const lease = /^\/leases\/([a-z0-9-]+)$/u.exec(path);
+    if (lease) {
+      const held = snapshot.leases.find((l) => l.source === lease[1]);
+      if (held && held.leaseRef !== body["leaseRef"]) return refuse("lease_conflict", 409);
+      snapshot.leases = snapshot.leases.filter((l) => l.source !== lease[1]);
+      return Response.json({ released: true });
+    }
+    if (path === "/maintenance") {
+      const current = snapshot.maintenance.find((r) => r.id === body["id"]);
+      if ((current?.revision ?? 0) !== body["revision"]) return refuse("revision_conflict", 409);
+      const { revision, ...fields } = body as unknown as MaintenanceRule;
+      snapshot.maintenance = [
+        ...snapshot.maintenance.filter((r) => r.id !== fields.id),
+        { ...fields, revision: revision + 1 },
+      ];
+      return Response.json({ saved: true, revision: revision + 1, reservation });
+    }
+    const decision = /^\/proposals\/([0-9]+)$/u.exec(path);
+    if (decision) {
+      const survey = snapshot.survey!;
+      const proposal = survey.proposals.find((p) => p.id === Number(decision[1]));
+      if (!proposal) return refuse("proposal_already_decided", 409);
+      if (body["decision"] === "accept") {
+        const ruleId = proposal.ruleId ?? `${proposal.source}-survey-${proposal.id}`;
+        const current = snapshot.maintenance.find((r) => r.id === ruleId);
+        if ((current?.revision ?? 0) !== proposal.baseRevision)
+          return refuse("revision_conflict", 409);
+        snapshot.maintenance = [
+          ...snapshot.maintenance.filter((r) => r.id !== ruleId),
+          {
+            id: ruleId,
+            source: proposal.source,
+            timezone: proposal.timezone,
+            pattern: proposal.pattern,
+            enabled: proposal.enabled,
+            scope: proposal.scope,
+            referenceUrl: proposal.referenceUrl,
+            verifiedAt: proposal.fetchedAt,
+            revision: proposal.baseRevision + 1,
+          },
+        ];
+      }
+      survey.proposals = survey.proposals.filter((p) => p !== proposal);
+      survey.attention = survey.proposals.length;
+      return body["decision"] === "accept"
+        ? Response.json({
+            decided: "accepted",
+            ruleId: proposal.ruleId ?? `${proposal.source}-survey-${proposal.id}`,
+            revision: proposal.baseRevision + 1,
+            reservation,
+          })
+        : Response.json({ decided: "rejected" });
+    }
+    const row = snapshot.schedules.find((s) => `/${s.id}` === path);
+    if (!row) return refuse("not_found", 404);
+    if (body["revision"] !== row.revision) return refuse("revision_conflict", 409);
+    const { revision: _from, ...change } = body;
+    Object.assign(row, change, {
+      revision: row.revision + 1,
+      reservation: reservation === "pending" ? "pending" : body["enabled"] ? "armed" : "disabled",
+    });
+    return Response.json({
+      saved: true,
+      reservation: row.reservation,
+      actualAlarmAt: row.actualAlarmAt,
+      revision: row.revision,
+    });
+  }
   function stoppedLease(leaseRef = "12345678-1234-4234-8234-123456789abc") {
     snapshot.leases = [{ source: "vpass", leaseRef, startedAt: "2026-10-01T00:00:00.000Z" }];
   }
@@ -491,6 +576,8 @@ describe.if(runnable)("operator schedule administration", () => {
       .getByLabel("公式案内を確認した日時（日本時間）", { exact: true })
       .fill("2026-10-04T23:00");
     await form.getByRole("button", { name: "停止時間を保存", exact: true }).click();
+    await form.getByRole("status").getByText("停止時間を保存しました。", { exact: true }).waitFor();
+    await form.getByRole("button", { name: "閉じる", exact: true }).click();
     await form.waitFor({ state: "detached" });
     expect(writes).toHaveLength(1);
     expect(writes[0]?.body).toMatchObject({
@@ -568,7 +655,7 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "設定を保存", exact: true }).click();
       await page
         .getByRole("alert")
-        .getByText("設定を確認できません。表示を更新して保存状態を確認してください。", {
+        .getByText("更新できませんでした。前回読み込んだ収集スケジュールを表示しています。", {
           exact: true,
         })
         .waitFor();
@@ -634,7 +721,10 @@ describe.if(runnable)("operator schedule administration", () => {
       await current.getByRole("button", { name: "変更", exact: true }).click();
       expect(await form.getByLabel("開始時刻", { exact: true }).inputValue()).toBe("02:00");
       await form.getByRole("button", { name: "停止時間を保存", exact: true }).click();
-      await form.waitFor({ state: "detached" });
+      await form
+        .getByRole("status")
+        .getByText("停止時間を保存しました。", { exact: true })
+        .waitFor();
       expect(writes).toHaveLength(1);
       expect(writes[0]?.body).toMatchObject({
         id: "synthetic-weekly",
@@ -731,6 +821,21 @@ describe.if(runnable)("operator schedule administration", () => {
         },
       ],
     };
+    // The rule proposal 1 revises, at the revision it was read against: the
+    // Processor refuses an acceptance whose base revision moved.
+    snapshot.maintenance = [
+      {
+        id: "synthetic-weekly",
+        source: "sony-bank",
+        timezone: "Asia/Tokyo",
+        pattern: { kind: "weekly", weekdays: [0], start: "00:30", end: "03:00" },
+        enabled: true,
+        referenceUrl: "https://example.test/sony-maintenance",
+        verifiedAt: "2026-10-01T00:00:00.000Z",
+        scope: "collection",
+        revision: 1,
+      },
+    ];
     const page = await browser.newPage();
     page.on("dialog", (dialog) => void dialog.accept());
     await page.goto(`${origin}/schedules`);
@@ -761,11 +866,334 @@ describe.if(runnable)("operator schedule administration", () => {
     const accepted = decided(1);
     await current.getByRole("button", { name: "採用", exact: true }).click();
     await accepted;
+    // The decided proposals leave the list; the section says what was decided.
+    await section
+      .getByRole("status")
+      .getByText("ソニー銀行の停止時間の変更：採用し、メンテナンス時間に反映しました。", {
+        exact: true,
+      })
+      .waitFor();
     expect(writes.map((w) => [w.path, w.body, w.marker])).toEqual([
       ["/api/ops/v1/schedules/proposals/2", { decision: "reject" }, "1"],
       ["/api/ops/v1/schedules/proposals/1", { decision: "accept" }, "1"],
     ]);
     await page.close();
+  }, 30000);
+
+  // A write whose answer does not say what is stored (no answer, an
+  // unreadable 2xx, a 5xx) or a 409 is read back, and the page says how the
+  // stored state compares with the change (docs/schedules.md).
+  const sonyCard = (page: Page) =>
+    page
+      .locator(".schedule-card")
+      .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+  const lost = () => Response.json({ error: "scheduling_unavailable" }, { status: 503 });
+  const focusedStatus = (page: Page) =>
+    page.waitForFunction(() =>
+      document.activeElement?.getAttribute("role") === "status"
+        ? document.activeElement.textContent
+        : null,
+    );
+  test("a save whose answer is lost after it was stored reads the job back and says it is saved", async () => {
+    const page = await browser.newPage();
+    try {
+      // The server stores the write; the browser never receives its answer.
+      await page.route("**/api/ops/v1/schedules/sony-bank", async (route) => {
+        await route.fetch();
+        await route.abort("failed");
+      });
+      await page.goto(`${origin}/schedules`);
+      const card = sonyCard(page);
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+      const reads = snapshotReads;
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card
+        .getByRole("status")
+        .getByText(
+          "応答を受け取れませんでしたが、読み直した設定はこの変更と同じで、保存されています。",
+          { exact: true },
+        )
+        .waitFor();
+      expect(snapshotReads).toBeGreaterThan(reads);
+      expect(writes.map((w) => w.body["revision"])).toEqual([1]);
+      // The card now edits the stored revision: the next save is not refused.
+      await page.unroute("**/api/ops/v1/schedules/sony-bank");
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:50");
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByRole("status").getByText("保存しました。", { exact: true }).waitFor();
+      expect(writes.map((w) => w.body["revision"])).toEqual([1, 2]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a save refused with 409 because this very change is stored says so, not that another change won", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = sonyCard(page);
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+      // An earlier attempt of the same change was stored after this page read revision 1.
+      const row = snapshot.schedules.find((schedule) => schedule.id === "sony-bank")!;
+      Object.assign(row, { revision: 2, pattern: { ...row.pattern, time: "06:40" } });
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card
+        .getByRole("status")
+        .getByText("この変更はすでに保存されています。読み直した設定はこの変更と同じです。", {
+          exact: true,
+        })
+        .waitFor();
+      expect(writes.map((w) => w.body["revision"])).toEqual([1]);
+      // A different stored change is still another change that came first,
+      // and the card shows it.
+      Object.assign(row, { revision: 3, pattern: { ...row.pattern, time: "07:15" } });
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:50");
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card
+        .getByRole("status")
+        .getByText(
+          "他の変更が先に保存されました。読み直した設定を表示しています。必要なら再度変更してください。",
+          { exact: true },
+        )
+        .waitFor();
+      expect(await card.getByLabel("ソニー銀行の実行時刻").inputValue()).toBe("07:15");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a save answered 503 before anything was stored keeps the edit and says it can be saved again", async () => {
+    writeAnswer = { before: lost };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = sonyCard(page);
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card
+        .getByRole("status")
+        .getByText("読み直した時点では保存されていません。もう一度保存できます。", { exact: true })
+        .waitFor();
+      expect(await card.getByLabel("ソニー銀行の実行時刻").inputValue()).toBe("06:40");
+      writeAnswer = null;
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByRole("status").getByText("保存しました。", { exact: true }).waitFor();
+      expect(writes.map((w) => w.body["revision"])).toEqual([1, 1]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  async function addOutage(page: Page) {
+    await page.goto(`${origin}/schedules`);
+    await page.getByRole("button", { name: "停止時間を追加", exact: true }).click();
+    const form = page.locator(".maintenance-editor");
+    await form.getByLabel("設定名（半角英数字・ハイフン）").fill("synthetic-outage");
+    await form.getByLabel("取得元", { exact: true }).selectOption("sony-bank");
+    await form.getByLabel("開始（日本時間）", { exact: true }).fill("2026-10-06T01:00");
+    await form.getByLabel("終了（日本時間）", { exact: true }).fill("2026-10-06T05:00");
+    await form
+      .getByLabel("公式案内のURL", { exact: true })
+      .fill("https://example.test/maintenance");
+    await form
+      .getByLabel("公式案内を確認した日時（日本時間）", { exact: true })
+      .fill("2026-10-04T23:00");
+    await form.getByRole("button", { name: "停止時間を保存", exact: true }).click();
+    return form;
+  }
+  test("a maintenance save says it is saved, with a pending reservation, and moves focus to that result", async () => {
+    reservation = "pending";
+    const page = await browser.newPage();
+    try {
+      const form = await addOutage(page);
+      expect(await focusedStatus(page).then((text) => text.jsonValue())).toBe(
+        "停止時間を保存しました。実行予約の反映を待っています。",
+      );
+      await form.getByRole("button", { name: "閉じる", exact: true }).click();
+      await form.waitFor({ state: "detached" });
+      expect(writes).toHaveLength(1);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a maintenance save whose 2xx cannot be read reads the rule back and says it is saved", async () => {
+    writeAnswer = {
+      after: () => new Response("<html>", { headers: { "content-type": "text/html" } }),
+    };
+    const page = await browser.newPage();
+    try {
+      await addOutage(page);
+      expect(await focusedStatus(page).then((text) => text.jsonValue())).toBe(
+        "応答を受け取れませんでしたが、読み直した設定はこの変更と同じで、保存されています。",
+      );
+      expect(snapshot.maintenance.map((r) => [r.id, r.revision])).toEqual([
+        ["synthetic-outage", 1],
+      ]);
+      expect(writes).toHaveLength(1);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  /** One undecided proposal revising a stored rule at the revision it was read against. */
+  function oneProposal() {
+    snapshot.maintenance = [
+      {
+        id: "synthetic-weekly",
+        source: "sony-bank",
+        timezone: "Asia/Tokyo",
+        pattern: { kind: "weekly", weekdays: [0], start: "00:30", end: "03:00" },
+        enabled: true,
+        referenceUrl: "https://example.test/sony-maintenance",
+        verifiedAt: "2026-10-01T00:00:00.000Z",
+        scope: "collection",
+        revision: 1,
+      },
+    ];
+    snapshot.survey = {
+      enabled: true,
+      attention: 1,
+      targets: [],
+      proposals: [
+        {
+          id: 1,
+          targetId: "sony-bank",
+          source: "sony-bank",
+          kind: "changed",
+          ruleId: "synthetic-weekly",
+          baseRevision: 1,
+          current: true,
+          timezone: "Asia/Tokyo",
+          pattern: { kind: "weekly", weekdays: [0], start: "01:00", end: "04:00" },
+          enabled: true,
+          scope: "collection",
+          status: "proposed",
+          reasons: [],
+          referenceUrl: "https://example.test/sony-maintenance",
+          fetchedAt: "2026-10-05T00:00:00.000Z",
+          sha256: "a".repeat(64),
+          createdAt: "2026-10-05T00:00:00.000Z",
+        },
+      ],
+    };
+  }
+  test("a survey decision whose answer is lost is read back: undecided stays offered, accepted is said", async () => {
+    oneProposal();
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      const section = page.locator('section[aria-labelledby="maintenance-survey"]');
+      const proposal = section.locator("li").filter({ hasText: "停止時間の変更" });
+      // Refused before anything was stored: the read back still lists it.
+      writeAnswer = { before: lost };
+      await proposal.getByRole("button", { name: "却下", exact: true }).click();
+      await proposal
+        .getByRole("alert")
+        .getByText("読み直した時点では決定されていません。もう一度選べます。", { exact: true })
+        .waitFor();
+      // Stored, and the answer lost: the read back shows the accepted revision.
+      writeAnswer = { after: lost };
+      await proposal.getByRole("button", { name: "採用", exact: true }).click();
+      expect(await focusedStatus(page).then((text) => text.jsonValue())).toBe(
+        "ソニー銀行の停止時間の変更：この提案は採用済みで、メンテナンス時間に反映されています。",
+      );
+      await proposal.waitFor({ state: "detached" });
+      expect(writes.map((w) => w.body)).toEqual([{ decision: "reject" }, { decision: "accept" }]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a decision the read back cannot place, past the shown bound, says so in the section", async () => {
+    oneProposal();
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      const section = page.locator('section[aria-labelledby="maintenance-survey"]');
+      const proposal = section.locator("li").filter({ hasText: "停止時間の変更" });
+      // Stored, the answer lost, and the read back shows none of the
+      // undecided proposals it still counts: this one may be among them.
+      writeAnswer = { after: lost };
+      readAfterWrite = async () => {
+        snapshot.survey!.attention = 250;
+      };
+      await proposal.getByRole("button", { name: "採用", exact: true }).click();
+      expect(await focusedStatus(page).then((text) => text.jsonValue())).toBe(
+        "ソニー銀行の停止時間の変更：決定されたか確認できません。表示を更新して確認してください。",
+      );
+      await proposal.waitFor({ state: "detached" });
+      expect(writes.map((w) => w.body)).toEqual([{ decision: "accept" }]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a new proposal read back is accepted only when its own <source>-survey-<id> rule holds it", async () => {
+    // Synthetic: an earlier proposal's rule holds the same fields at revision 1.
+    const fetchedAt = "2026-10-05T00:00:00.000Z";
+    const fields = () => ({
+      source: "sony-bank",
+      timezone: "Asia/Tokyo",
+      pattern: { kind: "weekly" as const, weekdays: [0], start: "01:00", end: "04:00" },
+      enabled: true,
+      scope: "collection" as const,
+      referenceUrl: "https://example.test/sony-maintenance",
+    });
+    snapshot.maintenance = [
+      { ...fields(), id: "sony-bank-survey-1", verifiedAt: fetchedAt, revision: 1 },
+    ];
+    const proposal = (id: number) => ({
+      ...fields(),
+      id,
+      targetId: "sony-bank",
+      kind: "new" as const,
+      ruleId: null,
+      baseRevision: 0,
+      current: true,
+      status: "proposed" as const,
+      reasons: [],
+      fetchedAt,
+      sha256: "d".repeat(64),
+      createdAt: fetchedAt,
+    });
+    snapshot.survey = {
+      enabled: true,
+      attention: 2,
+      targets: [],
+      proposals: [proposal(2), proposal(3)],
+    };
+    const focused = (page: Page, text: string) =>
+      page.waitForFunction(
+        (expected) =>
+          document.activeElement?.getAttribute("role") === "status" &&
+          document.activeElement.textContent === expected,
+        text,
+      );
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      const rows = page
+        .locator('section[aria-labelledby="maintenance-survey"] li')
+        .filter({ hasText: "新しい停止時間" });
+      await rows.nth(1).waitFor();
+      writeAnswer = { after: lost };
+      // Rejected, the answer lost: the earlier proposal's rule does not make it accepted.
+      await rows.first().getByRole("button", { name: "却下", exact: true }).click();
+      await focused(
+        page,
+        "ソニー銀行の新しい停止時間：この提案は決定済みで、確認待ちの一覧から外れました。採用・却下のどちらになったかは、メンテナンス時間の一覧で確認してください。",
+      );
+      // Accepted, the answer lost: its own rule holds the change.
+      await rows.first().getByRole("button", { name: "採用", exact: true }).click();
+      await focused(
+        page,
+        "ソニー銀行の新しい停止時間：この提案は採用済みで、メンテナンス時間に反映されています。",
+      );
+      expect(snapshot.maintenance.map((r) => r.id).sort()).toEqual([
+        "sony-bank-survey-1",
+        "sony-bank-survey-3",
+      ]);
+      expect(writes.map((w) => w.body)).toEqual([{ decision: "reject" }, { decision: "accept" }]);
+    } finally {
+      await page.close();
+    }
   }, 30000);
 
   test("収集を依頼 shows the history first and posts one stored request only after confirmation", async () => {
@@ -818,7 +1246,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"b".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -854,7 +1282,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -884,6 +1312,162 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("やめる after an unknown answer keeps the request: the next confirmation re-sends it", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "internal_error" }, { status: 500 })
+        : Response.json(
+            { operationId: `op_${"d".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.clock.setFixedTime(new Date("2026-11-08T14:59:00Z"));
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      // Backing out does not withdraw a request that may be stored, and the
+      // section keeps saying so.
+      await card.getByRole("button", { name: "やめる", exact: true }).click();
+      await card
+        .locator(".schedule-request")
+        .getByRole("status")
+        .getByText("やめても取り消されず実行されます", { exact: false })
+        .waitFor();
+      // The key lives in the page's state only, and the notice says so.
+      expect(
+        await card
+          .locator(".schedule-request")
+          .getByRole("status")
+          .getByText("ページを離れるか再読み込みすると、次の依頼は新しい依頼になります", {
+            exact: false,
+          })
+          .count(),
+      ).toBe(1);
+      // A new confirmation after JST midnight is still that request: the same
+      // key and window, so the server answers with the stored one if any.
+      await page.clock.setFixedTime(new Date("2026-11-08T15:01:00Z"));
+      fail = false;
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      const confirm = card.getByRole("group", { name: "ソニー銀行の収集依頼の確認" });
+      await confirm.getByText("同じ依頼として送ります", { exact: false }).waitFor();
+      await confirm.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"d".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[1]!.body).toEqual(collections[0]!.body);
+      // Once the server answered, the next confirmation is a new request.
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      expect(await confirm.getByText("同じ依頼として送ります", { exact: false }).count()).toBe(0);
+      await confirm.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await page.waitForFunction(() => document.body.textContent?.includes("依頼ID"));
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).waitFor();
+      expect(collections).toHaveLength(3);
+      expect(collections[2]!.body["idempotencyKey"]).not.toBe(
+        collections[0]!.body["idempotencyKey"],
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("やめる after a refusal starts over: nothing was stored under that key", async () => {
+    let refuse = true;
+    collectionResponse = async () =>
+      refuse
+        ? Response.json({ error: "invalid_request" }, { status: 400 })
+        : Response.json(
+            { operationId: `op_${"e".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("保存されていません（invalid_request）", { exact: false }).waitFor();
+      await card.getByRole("button", { name: "やめる", exact: true }).click();
+      expect(await card.locator(".schedule-request").getByRole("status").count()).toBe(0);
+      refuse = false;
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"e".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections[1]!.body["idempotencyKey"]).not.toBe(
+        collections[0]!.body["idempotencyKey"],
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused re-send keeps an earlier unknown send unresolved", async () => {
+    const answers = [
+      () => Response.json({ error: "internal_error" }, { status: 500 }),
+      () => Response.json({ error: "approval_required" }, { status: 403 }),
+      () =>
+        Response.json({ operationId: `op_${"9".repeat(64)}`, status: "running" }, { status: 202 }),
+    ];
+    collectionResponse = async () => answers[collections.length - 1]!();
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("管理者のログインが必要です。", { exact: true }).waitFor();
+      // The refusal stored nothing, but says nothing about the first send.
+      await card.getByRole("button", { name: "やめる", exact: true }).click();
+      await card
+        .locator(".schedule-request")
+        .getByRole("status")
+        .getByText("やめても取り消されず実行されます", { exact: false })
+        .waitFor();
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("状態は「進行中」", { exact: false }).waitFor();
+      expect(collections).toHaveLength(3);
+      expect(collections[2]!.body).toEqual(collections[0]!.body);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a re-send answered with the stored request's later status names it, not a new start", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "internal_error" }, { status: 500 })
+        : Response.json(
+            { operationId: `op_${"f".repeat(64)}`, status: "completed" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      const result = card.locator(".schedule-request").getByRole("status");
+      await result.getByText(`依頼ID op_${"f".repeat(64)}`, { exact: false }).waitFor();
+      const text = (await result.textContent()) ?? "";
+      expect(text).toContain("状態は「完了」");
+      expect(text).not.toContain("収集を始めます");
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).getAttribute("href")).toBe(
+        `/operations/op_${"f".repeat(64)}`,
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("a refused request says it was not stored instead of offering a retry", async () => {
     collectionResponse = async () =>
       Response.json({ error: "method_not_allowed" }, { status: 405 });
@@ -904,7 +1488,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -984,6 +1568,129 @@ describe.if(runnable)("operator schedule administration", () => {
         .waitFor();
       expect(writes).toEqual([]);
       expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a failed refresh labels the earlier answer, holds the decisions read from it, and clears on recovery", async () => {
+    // Synthetic: an invented page, proposal and lease; no provider page is read.
+    stoppedLease();
+    snapshot.survey = {
+      enabled: true,
+      attention: 1,
+      targets: [],
+      proposals: [
+        {
+          id: 7,
+          targetId: "sony-bank",
+          source: "sony-bank",
+          kind: "new",
+          ruleId: null,
+          baseRevision: 0,
+          current: true,
+          timezone: "Asia/Tokyo",
+          pattern: { kind: "weekly", weekdays: [0], start: "01:00", end: "04:00" },
+          enabled: true,
+          scope: "collection",
+          status: "proposed",
+          reasons: [],
+          referenceUrl: "https://example.test/sony-maintenance",
+          fetchedAt: "2026-10-05T00:00:00.000Z",
+          sha256: "c".repeat(64),
+          createdAt: "2026-10-05T00:00:00.000Z",
+        },
+      ],
+    };
+    const warning = "更新できませんでした。前回読み込んだ収集スケジュールを表示しています。";
+    const requestHeld = "前回読み込んだ状態です。更新できるまで依頼は送信できません。";
+    const decisionHeld = "前回読み込んだ提案です。更新できるまで採用・却下はできません。";
+    const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+    try {
+      await page.goto(`${origin}/schedules`);
+      await page.getByText("1件の提案を確認してください。", { exact: false }).waitFor();
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      const send = card.getByRole("button", { name: "依頼を送信", exact: true });
+      const section = page.locator('section[aria-labelledby="maintenance-survey"]');
+      const accept = section.getByRole("button", { name: "採用", exact: true });
+      const reject = section.getByRole("button", { name: "却下", exact: true });
+      const release = page.getByRole("button", { name: "停止した実行を解除", exact: true });
+      const save = card.getByRole("button", { name: "設定を保存", exact: true });
+      expect(await send.isEnabled()).toBe(true);
+      expect(await accept.isEnabled()).toBe(true);
+      expect(await page.getByText(warning, { exact: true }).count()).toBe(0);
+
+      // Every read now fails; a refocus refetches, and the earlier answer stays.
+      snapshotStatus = 503;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await page.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+      // The earlier answer, its proposal count included, is shown only under the warning.
+      expect(
+        await page.evaluate(
+          ([text, count]) => {
+            const nodes = [...document.querySelectorAll("main *")];
+            const label = nodes.find((node) => node.textContent === text);
+            const shown = nodes.find(
+              (node) => node.children.length === 0 && node.textContent?.includes(count!),
+            );
+            return (
+              label !== undefined &&
+              shown !== undefined &&
+              (label.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+            );
+          },
+          [warning, "件の提案を確認してください。"],
+        ),
+      ).toBe(true);
+      expect(await page.getByText("1件の提案を確認してください。", { exact: false }).count()).toBe(
+        1,
+      );
+      // Decisions read from the earlier answer are held, each saying why.
+      expect(await send.isDisabled()).toBe(true);
+      expect(await card.getByText(requestHeld, { exact: true }).count()).toBe(1);
+      expect(await accept.isDisabled()).toBe(true);
+      expect(await reject.isDisabled()).toBe(true);
+      expect(await section.getByText(decisionHeld, { exact: true }).count()).toBe(1);
+      // Writes the server checks against the revision or lease shown stay available.
+      expect(await save.isEnabled()).toBe(true);
+      expect(await release.isEnabled()).toBe(true);
+      expect(await auditView(page)).toEqual([]);
+      expect(writes).toEqual([]);
+      expect(collections).toEqual([]);
+
+      // Reads recover: the warning and the holds go, and the actions return.
+      snapshotStatus = 200;
+      const reads = snapshotReads;
+      await page.getByRole("button", { name: "収集スケジュールを再試行", exact: true }).click();
+      await page.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+      expect(snapshotReads).toBeGreaterThan(reads);
+      expect(await send.isEnabled()).toBe(true);
+      expect(await accept.isEnabled()).toBe(true);
+      expect(await reject.isEnabled()).toBe(true);
+      expect(await page.getByText(requestHeld, { exact: true }).count()).toBe(0);
+      expect(await page.getByText(decisionHeld, { exact: true }).count()).toBe(0);
+      expect(writes).toEqual([]);
+      expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test("a first read that fails shows a fixed load error and no schedules", async () => {
+    snapshotStatus = 503;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const alert = page
+        .getByRole("alert")
+        .filter({ hasText: "収集スケジュールを読み込めませんでした" });
+      await alert.waitFor();
+      expect(await alert.innerText()).toContain(
+        "設定を確認できません。表示を更新して保存状態を確認してください。",
+      );
+      expect(await page.locator(".schedule-card").count()).toBe(0);
+      expect(await page.getByText("schedule_request_failed").count()).toBe(0);
     } finally {
       await page.close();
     }

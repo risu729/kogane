@@ -2,11 +2,13 @@
 //
 // Two rules are enforced here rather than in each page:
 //
-//   * An amount is only ever rendered by <Amount>, which delegates to
-//     formatAmount/amountSign from src/money.ts. No component multiplies,
-//     divides, sums or parses an amount, and Intl.NumberFormat appears
-//     nowhere in this client — it takes a Number, so every figure would
-//     round-trip through a double on its way to the screen.
+//   * An amount is only ever formatted by src/money.ts: <Amount> delegates to
+//     formatAmount/amountSign, and an exact decimal goes through
+//     formatDecimal (digits grouped in threes, every fraction digit kept).
+//     No component multiplies, divides, sums or parses an amount, and
+//     Intl.NumberFormat and toLocaleString appear nowhere in this client —
+//     they take a Number, so every figure would round-trip through a double
+//     on its way to the screen. Counts are printed as plain digits.
 //   * Timestamps are printed exactly as stored. `as_of` and `observed_at`
 //     mean different things and reformatting either would be a claim the
 //     store does not make.

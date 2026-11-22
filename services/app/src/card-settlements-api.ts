@@ -21,7 +21,7 @@ import {
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
 import { principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 
 export const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
 export const CARD_OWNERSHIP_PATH = `${CARD_SETTLEMENT_PATH}/ownership`;
@@ -69,8 +69,7 @@ export async function cardSettlementsApi(
   const ownership = url.pathname === CARD_OWNERSHIP_PATH;
   const grouped = url.pathname === CARD_SETTLEMENT_STATEMENTS_PATH;
   if (url.pathname !== CARD_SETTLEMENT_PATH && !ownership && !grouped) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (!(await cardSettlementsAvailable(env))) throw new HttpError(404, "not_found");
   const principal = principalFor(env, subject);
   if (principal.kind !== "human" || !principal.capabilities.includes("interpretation.accept"))

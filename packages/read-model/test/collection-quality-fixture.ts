@@ -49,11 +49,17 @@ export interface ClaimSpec {
 }
 
 export class QualityStore {
-  readonly db: Database = fullCoreSchema();
-  private next = 5_000;
+  readonly db: Database;
+  private next: number;
   private readonly routes = new Set<string>();
 
-  constructor() {
+  /**
+   * A fresh store, or, with `db`, more runs written into a store another
+   * fixture built, with ids from `firstId` up so they never meet its own.
+   */
+  constructor(options: { db?: Database; firstId?: number } = {}) {
+    this.db = options.db ?? fullCoreSchema();
+    this.next = options.firstId ?? 5_000;
     this.exec("INSERT INTO ingest_clients(id,display_name,active) VALUES(?,'Quality client',1)", [
       CLIENT,
     ]);
