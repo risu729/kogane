@@ -12,8 +12,10 @@
 //     sighting is blocked and nothing is overwritten (G1-06);
 //   * a referenced object that is missing or the wrong size records a failed
 //     `registered` stage with the reason and never seals (G1-14);
-//   * a terminal that cannot be read at all is recorded as a blocked run, so
-//     the scan can move on instead of stopping on it (G1-13);
+//   * a terminal that is not a valid canonical manifest is recorded as a
+//     blocked run, so the scan can move on instead of stopping on it (G1-13);
+//     a terminal whose bytes R2 failed to return this time is not judged at
+//     all: the call throws, as it does when R2 is unavailable;
 //   * a run CORE's seal trigger refuses (`run_inventory_incomplete`: the
 //     declared counts and the catalogue disagree) is blocked with that code,
 //     and the blocked stage names the fetch run left unsealed (ADR 0024,
@@ -219,6 +221,9 @@ export type RegisterTerminalOutcome =
  */
 const RETRYABLE_INGEST_CODES = new Set(["inactive_ingest_client", "inactive_ingest_route"]);
 
+/** The reader's code for a terminal body R2 failed to return: an R2 failure, not a verdict. */
+const UNREADABLE_TERMINAL = "terminal_unreadable";
+
 /** What one call works with once its bindings are metered. */
 interface Registration {
   input: RegisterTerminalInput;
@@ -270,7 +275,15 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
   const { input, env, now } = context;
   const read = await readTerminal(context.bucket, input.source, input.runId);
   if (read.outcome === "missing") return { outcome: "missing" };
-  if (read.outcome === "blocked") return recordBlockedTerminal(context, read, now());
+  if (read.outcome === "blocked") {
+    // A body whose read failed says nothing about the terminal: R2 failed,
+    // exactly as when `get` itself throws. Recording it would block the run
+    // for good, and under the digest of whatever bytes the second read below
+    // returns, which for a valid terminal is the terminal's own identity. It
+    // throws instead: nothing is recorded and the next attempt reads again.
+    if (read.reasonCode === UNREADABLE_TERMINAL) throw new Error(UNREADABLE_TERMINAL);
+    return recordBlockedTerminal(context, read, now());
+  }
 
   const manifest = read.manifest;
   const identity = {

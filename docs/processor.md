@@ -93,7 +93,7 @@ nothing:
 
 Such an answer costs three operations of the invocation's budget (the
 terminal read, the conditional insert and the row read) for a registered or
-blocked run, four for an unreadable terminal already recorded (it reads the
+blocked run, four for a corrupt terminal already recorded (it reads the
 bytes twice), and five for a retryable run within its interval (two stage
 reads more); it writes nothing. A page of 25 such terminals costs at most 125
 of the 500, plus the scan's own four (the list, the pending read, the state
@@ -167,7 +167,8 @@ the terminal already is, so one capture is never parsed twice (§3.4).
 | Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
 | Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
 | Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)            | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
-| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
+| Terminal too large, not JSON, not a valid manifest, of another identity or not canonical                                 | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
+| Terminal whose bytes R2 failed to return (`terminal_unreadable` from the reader)                                         | not judged: the call throws, like an R2 failure    | nothing; the scan counts it in `failed` and the next attempt reads it again (§2)                  |
 | Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
 | Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
 | Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
@@ -389,7 +390,7 @@ continued in its place. The same holds for any continuation CORE answers from
 its row (`already_registered`, for a run the queue registered between the
 pending read and the continuation). Such runs share the 25 pending runs read
 with the missing ones above. An answer from a row costs at most five
-operations (§2: four for an unreadable terminal already recorded, five
+operations (§2: four for a corrupt terminal already recorded, five
 for a retryable refusal within its interval), so the continuations answered
 from rows cost at most 125 of the 500 per tick, as a listed page of 25 judged
 terminals does; 25 digest conflicts measure 75 (50 D1 statements, 25 R2
