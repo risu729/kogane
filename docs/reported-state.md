@@ -65,13 +65,24 @@ table with `snapshot_selection = 1` and the artifact containers
 (`ARTIFACT_SNAPSHOT_CONTAINERS`), except the two aggregates and the MoneyForward
 source below. Not listed, and named in `coverage.excluded`:
 
-| Scope                                    | Why                                                                                                                                                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MoneyForward                             | An aggregator: it restates accounts the direct sources list (source `moneyforward-me`, left out by `DATED_STATE_EXCLUDED_SOURCES` although its detail container has a selecting policy row) |
-| `sbi-account-assets-current`             | A provider total over the accounts the other SBI containers list                                                                                                                            |
-| `sony-bank-gross-balance`                | A provider total (assets and loans) over the Sony accounts                                                                                                                                  |
-| Balances restated after each transaction | Registry `timeBasis: event-reported`; counted in `excludedRows`                                                                                                                             |
-| Reward units                             | Registry `unitDimension: reward`; counted in `excludedRows`                                                                                                                                 |
+| Scope                                    | Why                                                              |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| MoneyForward                             | An aggregator: it restates accounts the direct sources list      |
+| `sbi-account-assets-current`             | A provider total over the accounts the other SBI containers list |
+| `sony-bank-gross-balance`                | A provider total (assets and loans) over the Sony accounts       |
+| Balances restated after each transaction | Registry `timeBasis: event-reported`; counted in `excludedRows`  |
+| Reward units                             | Registry `unitDimension: reward`; counted in `excludedRows`      |
+
+MoneyForward is left out by source (`moneyforward-me`,
+`DATED_STATE_EXCLUDED_SOURCES`), not by the policy table: migration 0091 gave
+its detail container (`moneyforward-detail-balances`) a selecting policy row.
+Until the source exclusion, every answer on a store with that row listed the
+connection's provider totals beside the direct accounts, or named the
+container in `containersWithoutSnapshot`; the scope name in
+`coverage.excluded` stays `source:moneyforward`. On such a store the
+context id changes once, as the snapshots, rows and containers it pins do; the
+answer's keys and `reported-state-v3` are unchanged, and nothing stores a
+reported context id.
 
 A perimeter container with no snapshot before the cutoff is listed in
 `coverage.containersWithoutSnapshot` with `no_complete_snapshot_before_cutoff`.
@@ -374,6 +385,12 @@ no migration. `packages/application/test/dated-state-scale.test.ts` builds the
 smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
+`packages/read-model/test/dated-state-differential.test.ts` holds the
+positions, balances and snapshots reads to their text before the MoneyForward
+source exclusion (`dated-state-legacy-sql.ts`): on random synthetic stores
+only the `moneyforward-me` rows differ, and without table statistics the
+shipped plans scan no table the frozen ones do not. The scale test compares
+the rows of both texts on `STATEMENT_CI_SCALE` too.
 
 A holdings change between two dates is two of these answers (run
 concurrently through the executor) plus two keyed reads: the position
