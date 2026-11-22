@@ -55,7 +55,7 @@ import {
 } from "../../../domain/src/changes-since.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, grantAllows, wholeStoreReadRefusal } from "../grants.ts";
 
 const REQUEST_ID = "changes.since";
 
@@ -232,13 +232,7 @@ export interface ChangesSinceServed {
  * the service and by an adapter that checks a body's form first.
  */
 export function changesSinceGrantRefusal(grant: Grant): FinancialError | null {
-  if (!grantAllows(grant, "records.read"))
-    return financialError("unauthorized", REQUEST_ID, ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  return narrowed.length > 0 ? financialError("evidence_restricted", REQUEST_ID, narrowed) : null;
+  return wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
 }
 
 /** The request as the route's query or the tool's body gives it; the service checks it. */

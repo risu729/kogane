@@ -633,6 +633,7 @@ describe("untrusted provider content (AT71)", () => {
         properties: [
           "account",
           "cursor",
+          "detail",
           "from",
           "identityRead",
           "instrument",

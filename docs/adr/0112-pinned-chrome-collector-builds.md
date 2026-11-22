@@ -151,6 +151,8 @@ an image test, so the tests exercise the same proxy implementation.
 
 ## Amendment: Stable 158 payload update (2026-11-19 UTC)
 
+Status: accepted (merged 2026-11-19 in [#1429](https://github.com/risu729/kogane/pull/1429)).
+
 The pin moved to `158.0.8127.36-1` through the maintenance procedure. Google's
 signed `Release` (dated 2026-11-18 18:08:05 UTC) verified under the same primary
 fingerprint and signing subkey, and the downloaded key equals the committed one.

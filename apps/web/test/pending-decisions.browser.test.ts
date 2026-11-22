@@ -1,7 +1,8 @@
 // The ホーム page's 判断待ち panel (ADR 0126) against a synthetic server: one
 // line per kind with its count, a link to the page that decides the first
-// item, the reason of a line that cannot be counted, and no panel for a
-// caller the route refuses or on a store that does not advertise the route.
+// item, the reason of a line that cannot be counted, no total from an earlier
+// answer once a later read fails, and no panel for a caller the route refuses
+// or on a store that does not advertise the route.
 // Every id is synthetic.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -125,9 +126,12 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let refuse = false;
+  let unavailable = false;
   let advertised = true;
   let requested = 0;
   let current: unknown = answer;
+  // While set, a read of the route waits for it before it answers.
+  let held: Promise<void> | null = null;
   beforeAll(async () => {
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -142,10 +146,13 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
           });
         if (url.pathname === "/api/overview") return Response.json(overview);
         if (url.pathname === PENDING_DECISIONS_PATH) requested += 1;
+        if (url.pathname === PENDING_DECISIONS_PATH && held !== null) await held;
         if (url.pathname === PENDING_DECISIONS_PATH)
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
-            : Response.json(current);
+            : unavailable
+              ? Response.json({ error: "unavailable" }, { status: 503 })
+              : Response.json(current);
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
         return new Response(
@@ -235,6 +242,57 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       current = answer;
     }
   }, 60_000);
+
+  test("a read that fails after an answer shows no total from the earlier answer", async () => {
+    refuse = false;
+    // The answer once the read recovers: one more statement waits.
+    const recovered = {
+      ...answer,
+      kinds: lines.map((line) =>
+        line.kind === "card-settlement.statement" ? { ...line, count: 4 } : line,
+      ),
+    };
+    expect(validPendingDecisions(recovered)).toBe(true);
+    let release = (): void => {};
+    const page = await browser.newPage();
+    const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+    const total = panel.locator(".panel-head .count");
+    const failed = panel.getByText("判断待ちの件数を読み込めませんでした。");
+    try {
+      await page.goto(`${origin}/`);
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(await total.textContent()).toBe(`${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
+      // The next read fails (the panel does not retry it): the body says the
+      // count could not be read, so the heading must not keep the earlier
+      // answer's total beside it as if it were current (INV05).
+      unavailable = true;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await failed.waitFor();
+      expect(await total.count()).toBe(0);
+      // A read after the failure, still in flight: the failure stands, and
+      // there is still no total.
+      unavailable = false;
+      current = recovered;
+      held = new Promise((resolve) => (release = resolve));
+      const before = requested;
+      const asked = (): boolean => requested > before;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      while (!asked()) await Bun.sleep(10);
+      expect(await failed.count()).toBe(1);
+      expect(await total.count()).toBe(0);
+      // The read succeeds: the heading shows its total, not the earlier one.
+      release();
+      held = null;
+      await failed.waitFor({ state: "detached" });
+      expect(await total.textContent()).toBe(`${String(4 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
+    } finally {
+      release();
+      held = null;
+      unavailable = false;
+      current = answer;
+      await page.close();
+    }
+  }, 30_000);
 
   test("a caller the route refuses sees no panel", async () => {
     refuse = true;

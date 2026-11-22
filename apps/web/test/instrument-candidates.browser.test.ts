@@ -51,6 +51,8 @@ describe.if(runnable)("instrument candidate review", () => {
   let store: World;
   let commands = true;
   let stale = false;
+  /** The history route answers 503 while set, as an unavailable read would. */
+  let historyDown = false;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
   /** Rewrites the served page, when a test needs a shape the world does not hold. */
@@ -74,6 +76,7 @@ describe.if(runnable)("instrument candidate review", () => {
     store = main;
     commands = true;
     stale = false;
+    historyDown = false;
     posted.length = 0;
     read.length = 0;
     reshape = null;
@@ -116,6 +119,7 @@ describe.if(runnable)("instrument candidate review", () => {
         }
         if (url.pathname === "/api/identity/instrument-history") {
           read.push(url);
+          if (historyDown) return Response.json({ error: "unavailable" }, { status: 503 });
           const outcome = await readInstrumentHistoryForGrant({
             grant: GRANT,
             sql: store.sql,
@@ -295,10 +299,15 @@ describe.if(runnable)("instrument candidate review", () => {
     );
     const card = tab.locator(".identity-card").nth(expected.items.indexOf(candidate));
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await card
-      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
-      .click();
+    const button = card.getByRole("button", {
+      name: "同じ銘柄として採用する内容を確認",
+      exact: true,
+    });
+    await button.focus();
+    await tab.keyboard.press("Enter");
     await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    // The refusal leaves a keyboard user on the button they pressed.
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
     // The candidate was read again before planning, and no plan was created.
     expect(read.some((url) => url.searchParams.get("identifierId") === id.broker9001)).toBe(true);
     expect(posted).toEqual([]);
@@ -317,6 +326,34 @@ describe.if(runnable)("instrument candidate review", () => {
     expect(posted).toEqual([]);
     await tab.close();
   });
+
+  test("a history read again that fails keeps the earlier entries only under the warning", async () => {
+    const tab = await open();
+    const card = tab.locator(".identity-card").first();
+    const toggle = card.getByRole("button", { name: "訂正履歴を見る", exact: true }).first();
+    await toggle.click();
+    await card
+      .getByText("記録順の履歴です。有効期間ごとの対応付けは未対応です。", { exact: true })
+      .waitFor();
+    const entries = await card.locator("ol.warning-list li").count();
+    expect(entries).toBeGreaterThan(0);
+    const warning = "更新できませんでした。前回読み込んだ訂正履歴を表示しています。";
+    expect(await card.getByText(warning, { exact: true }).count()).toBe(0);
+    // Closing and reopening reads the history again; that read fails.
+    await card.getByRole("button", { name: "訂正履歴を閉じる", exact: true }).click();
+    historyDown = true;
+    await card.getByRole("button", { name: "訂正履歴を見る", exact: true }).first().click();
+    await card.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+    expect(await card.locator("ol.warning-list li").count()).toBe(entries);
+    expect(await auditView(tab)).toEqual([]);
+    // The read recovers on retry, and the warning goes.
+    historyDown = false;
+    await card.getByRole("button", { name: "訂正履歴を再試行", exact: true }).click();
+    await card.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+    expect(await card.locator("ol.warning-list li").count()).toBe(entries);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
 
   test("history renders persisted delegated origin without an actor or an approval request", async () => {
     store = await world();

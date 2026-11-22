@@ -1,6 +1,6 @@
 # ADR 0125: Answer card spending per card in one compact read (`view: cards`)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1449](https://github.com/risu729/kogane/pull/1449))
 - Date: 2026-11-19
 - Issue: [#1414](https://github.com/risu729/kogane/issues/1414) (everyday questions in one or two MCP calls, each answer under 8 KB)
 - Plan: [MCP everyday questions](../plans/2026-11-mcp-everyday-questions.md) (gap G1)
@@ -8,8 +8,8 @@
   [ADR 0081](0081-ui-parity-through-mcp.md) (one service for the route and the tool),
   [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (every MCP client holds the whole-store grant)
 - Amends: `kogane.purchases.explain` and `GET /api/v2/card-purchases` with a `view` argument and, for the new
-  view only, a `usageMonth` filter. **This is a published MCP tool change: it needs the owner's approval before
-  merge.**
+  view only, a `usageMonth` filter. This is a published MCP tool change: it needed the owner's approval before
+  merge.
 
 ## Context
 
@@ -134,7 +134,7 @@ history, last amounts and candidates of 50 events, which the question does not n
 
 ## Amendment: compact purchase lines (`view: lines`, 2026-11-19)
 
-- Status: proposed. **A published MCP tool change: it needs the owner's approval before merge**, like the decision
+- Status: accepted (merged 2026-11-20 in [#1455](https://github.com/risu729/kogane/pull/1455)). A published MCP tool change: it needed the owner's approval before merge, like the decision
   above.
 - Plan: [MCP everyday questions](../plans/2026-11-mcp-everyday-questions.md), gap G2 (questions Q5 "on what" and
   Q21).

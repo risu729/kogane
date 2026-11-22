@@ -1,15 +1,15 @@
 # ADR 0127: What was recorded since a time, per source, as `kogane.changes.since`
 
-- Status: proposed. A new published MCP tool (`kogane.changes.since`), a new
-  catalogue operation (`changes.since`) and a new read route: **the owner's
-  approval is needed before merge**, as for every published tool change
+- Status: accepted (merged 2026-11-20 in [#1469](https://github.com/risu729/kogane/pull/1469)). A new published MCP tool (`kogane.changes.since`), a new
+  catalogue operation (`changes.since`) and a new read route: the owner's
+  approval was required before merge, as for every published tool change
   (AGENTS.md, merging: an agent or MCP operation added to `catalogue.ts`).
   The owner allowed new tools where needed for issue #1414 (2026-11-19, "you
   may add new tools if needed"); that allows the proposal, not this tool.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap G3
-  of the MCP everyday-questions audit (`docs/plans/2026-11-mcp-everyday-questions.md`,
-  proposed in its own pull request; question Q15, "what changed since
+  of the MCP everyday-questions audit ([its plan](../plans/2026-11-mcp-everyday-questions.md),
+  merged in [#1449](https://github.com/risu729/kogane/pull/1449); question Q15, "what changed since
   yesterday?")
 - Related: [ADR 0081](0081-ui-parity-through-mcp.md) (UI/MCP parity, one
   service), [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (MCP
@@ -242,8 +242,8 @@ tool off the parity guard's list of tools without a UI route.
 
 ## Amendment: the events handler names `since` (2026-11-20)
 
-- Status: proposed. The digest's `handlers` are part of its published answer:
-  **the owner's approval is needed before merge**.
+- Status: accepted (merged 2026-11-21 in [#1493](https://github.com/risu729/kogane/pull/1493)). The digest's `handlers` are part of its published answer:
+  the owner's approval was required before merge.
 - Date: 2026-11-20
 
 ### Context

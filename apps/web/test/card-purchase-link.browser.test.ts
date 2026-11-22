@@ -234,7 +234,7 @@ describe.if(runnable)("pending-to-posted link review", () => {
     const entries = section.getByRole("list", { name: "確認待ちの対応候補" }).getByRole("listitem");
     expect(await entries.count()).toBe(1);
     const text = (await entries.first().innerText()).replace(/\s+/gu, " ");
-    for (const expected of ["未確定", "2026-08-03", "-800 JPY", "確定", "2026-08-15", "-1234 JPY"])
+    for (const expected of ["未確定", "2026-08-03", "-800 JPY", "確定", "2026-08-15", "-1,234 JPY"])
       expect(text).toContain(expected);
     expect(text).toContain("金額・日付などからの候補");
     expect(
@@ -278,7 +278,7 @@ describe.if(runnable)("pending-to-posted link review", () => {
       "-800 JPY",
       "状態不明（合計に含めていません）",
       "2026-08-15",
-      "-1234 JPY",
+      "-1,234 JPY",
       // Rationale codes and rejection conditions, as words.
       "未確定の明細と確定の明細の組",
       "同じ請求月",
@@ -424,11 +424,15 @@ describe.if(runnable)("pending-to-posted link review", () => {
     pinDrift = 1;
     const page = await openDetail();
     await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
-    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+    const button = page.getByRole("button", { name: "同一の利用として統合", exact: true });
+    await button.focus();
+    await page.keyboard.press("Enter");
     await page
       .getByRole("alert")
       .filter({ hasText: "候補または利用の記録が更新されています" })
       .waitFor();
+    // The refusal leaves a keyboard user on the button they pressed.
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
     expect(new URL(page.url()).pathname).toBe(`/purchases/${POSTED_EVENT}`);
     expect(posted.map((row) => row.operation)).toEqual(["plan"]);
     await page.close();

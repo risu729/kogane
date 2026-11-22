@@ -71,6 +71,10 @@ import {
   STATED_ABSENT_REASONS,
 } from "../../../packages/domain/src/card-debit-account-answer";
 import {
+  SETTLEMENT_DEBIT_DATE_REASONS,
+  STATEMENT_DUE_DATE_REASONS,
+} from "../../../packages/domain/src/card-settlement";
+import {
   COVERS_UNKNOWN_REASONS,
   NOT_LISTED_REASONS,
   UPCOMING_BILL_NOTES,
@@ -342,6 +346,11 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       ...COVERS_UNKNOWN_REASONS,
       ...NOT_LISTED_REASONS,
       ...UPCOMING_BILL_NOTES,
+      // A null date's reason, and the field that carries it (INV05).
+      ...STATEMENT_DUE_DATE_REASONS,
+      ...SETTLEMENT_DEBIT_DATE_REASONS,
+      "paymentDateReason",
+      "debitDateReason",
     ])
       expect(published.description, code).toContain(code);
   });
@@ -360,6 +369,22 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       "dataTypesVersion",
       "providerTypes",
       "provider-data-types-v1",
+    ])
+      expect(tool.description).toContain(term);
+  });
+  it("names the overview summary's byte budget, what it trims, and its refusal", async () => {
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.store.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "8,192 bytes",
+      "`sourcesOmitted`",
+      "`moreFailureCodes`",
+      "`budget.trimmed`",
+      "every status keeps every code",
+      "413 result_limit_exceeded",
+      "`retryWith",
     ])
       expect(tool.description).toContain(term);
   });

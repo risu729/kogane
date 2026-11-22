@@ -464,6 +464,27 @@ application, whose summary (`DPAW010501030`) and list (`DPAW010501010`)
 answered 200. The application also posts `DPAW010601020`, which the collector
 does not need.
 
+The first scheduled run with that change (2026-11-20 21:00 UTC) still ended
+its mailbox with `sbi_mailbox_transport_failed`, so another step refuses too.
+Every refusal collapses into that one closed code, so the client now logs one
+`sbi-mailbox-refused` line per refusal with closed values only: the step
+(`landing`, `entry`, `connect`, `sso`, `application` or `api` with the API
+name), the redirect hop, the last HTTP status, the media type when it is one
+of the flow's own (else `other`), and for a refused redirect its host when it
+is one of the flow's hosts and its route by name (`main-link`, `handoff`,
+`landing`, `entry`, `connect`, `sso`, `bootstrap`, `application`, `api-<name>`),
+else `other`. It never logs provider text: no path, query, cookie, form field
+or body.
+
+The next run (2026-11-21 21:00 UTC) logged the refusal at step `landing`, hop
+0, with no HTTP status: the first request never left. The client called the
+runtime's `fetch` as a method of itself, which the Workers runtime refuses
+with "Illegal invocation" before sending anything; local tests pass any
+function and could not see it. Every mailbox attempt since the archive shipped
+probably ended there, so the hand-off above was never reached in production.
+The client now calls the fetcher unbound, as the Sony Bank client already
+does, and a test fetcher that refuses a receiver pins it.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
@@ -1140,3 +1161,12 @@ null is still refused. The parsers move to 0.1.3, and migration 0103 moves the
 two snapshot-policy pins from 0.1.2 to 0.1.3 so their parses can become current. The
 parser already publishes US payments in USD from the `Lc` fields, so nothing
 it emits changes. Tracked under #1236.
+
+## 2026-11-22: domestic trade dates are read only as calendar dates
+
+No provider data was read for this entry. The collector turns the execution
+page's `YY/MM/DD` cell into `20YY-MM-DD` without checking the calendar.
+Parser `sbi-domestic-trade-records` 0.2.2 reads only a calendar `YYYY-MM-DD`
+date as a record's `as_of`; any other stated value is a warning and no `as_of`,
+the value staying in the record's `extra`
+([release note](../observations.md#sbi-securities-a-domestic-trade-date-that-is-not-a-date-is-no-as_of-trade-records-022)).
