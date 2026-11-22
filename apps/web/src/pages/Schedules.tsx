@@ -137,10 +137,10 @@ const DISPATCH_OFF = {
     "この接続は依頼による収集がまだ有効ではありません。送った依頼は実行されず24時間後に期限切れになるため、送信できません。",
 };
 /**
- * A refusal the server answers before it looks anything up or stores
- * anything (every 4xx but 408 and 429, sign-in refusals included): this send
- * stored nothing, but it says nothing about an earlier send under the key.
- * Any other failure may follow a stored request.
+ * A refusal the server answers before it looks the key up (every 4xx but 408
+ * and 429: sign-in, grant, origin, schema and declared-source refusals): this
+ * send stored nothing, but it says nothing about an earlier send under the
+ * key. Any other failure may follow a stored request.
  */
 const refusedBeforeStore = (error: unknown): boolean =>
   error instanceof CollectionRequestError &&
@@ -194,7 +194,7 @@ const IDLE: RequestState = {
 };
 /** What the section keeps saying after やめる while a send's outcome is unknown. */
 const UNRESOLVED_CANCEL =
-  "送信した依頼が保存されたかは確認できていません。保存されていれば、やめても取り消されず実行されます。もう一度「収集を依頼」から送ると同じ依頼として扱われ、二重には保存されません。";
+  "送信した依頼が保存されたかは確認できていません。保存されていれば、やめても取り消されず実行されます。このページを開いたまま、もう一度「収集を依頼」から送ると同じ依頼として扱われ、二重には保存されません。ページを離れるか再読み込みすると、次の依頼は新しい依頼になります。";
 /**
  * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
  * makes. The confirmation shows what the caller should read first — the last

@@ -818,7 +818,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"b".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -854,7 +854,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -888,7 +888,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "scheduling_unavailable" }, { status: 503 })
+        ? Response.json({ error: "internal_error" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"d".repeat(64)}`, status: "accepted" },
             { status: 202 },
@@ -909,6 +909,16 @@ describe.if(runnable)("operator schedule administration", () => {
         .getByRole("status")
         .getByText("やめても取り消されず実行されます", { exact: false })
         .waitFor();
+      // The key lives in the page's state only, and the notice says so.
+      expect(
+        await card
+          .locator(".schedule-request")
+          .getByRole("status")
+          .getByText("ページを離れるか再読み込みすると、次の依頼は新しい依頼になります", {
+            exact: false,
+          })
+          .count(),
+      ).toBe(1);
       // A new confirmation after JST midnight is still that request: the same
       // key and window, so the server answers with the stored one if any.
       await page.clock.setFixedTime(new Date("2026-11-08T15:01:00Z"));
@@ -967,8 +977,8 @@ describe.if(runnable)("operator schedule administration", () => {
 
   test("a refused re-send keeps an earlier unknown send unresolved", async () => {
     const answers = [
-      () => Response.json({ error: "scheduling_unavailable" }, { status: 503 }),
-      () => Response.json({ error: "operator_required" }, { status: 403 }),
+      () => Response.json({ error: "internal_error" }, { status: 500 }),
+      () => Response.json({ error: "approval_required" }, { status: 403 }),
       () =>
         Response.json({ operationId: `op_${"9".repeat(64)}`, status: "running" }, { status: 202 }),
     ];
@@ -1003,7 +1013,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "scheduling_unavailable" }, { status: 503 })
+        ? Response.json({ error: "internal_error" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"f".repeat(64)}`, status: "completed" },
             { status: 202 },
@@ -1050,7 +1060,7 @@ describe.if(runnable)("operator schedule administration", () => {
     let fail = true;
     collectionResponse = async () =>
       fail
-        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        ? Response.json({ error: "commit_failed" }, { status: 500 })
         : Response.json(
             { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
             { status: 202 },
