@@ -3,10 +3,17 @@
 // checked the connection's characters and the acquisition date's digits,
 // frozen as text so the tests can prove the narrowed read drops only rows the
 // promotion rule refuses and keeps its plan. Its scope bindings follow ?1
-// (release) and ?2 (limit). Verbatim; never edit it by hand, never derive it
-// from the current mapping or query, and never import it outside tests.
+// (release) and ?2 (limit). Verbatim; the one escape keeps the space after
+// `WITH` that ends a line of the shipped text, which the trailing-whitespace
+// fix would strip. The digest below pins the text: never edit it by hand,
+// never derive it from the current mapping or query, and never import it
+// outside tests.
+
+/** SHA-256 of `FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.sql`. */
+export const FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY_SHA256 =
+  "c942fa2d048edd818f86e26cdd5cc8d320f30c1a1daf4f39f1a2a2bdd6a0b8e1";
 export const FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY = Object.freeze({
-  sql: `WITH
+  sql: `WITH\u0020
 jpoint_totals AS (
  SELECT b.id AS total_fact_id,b.source_account AS holding_account,b.amount_text AS reported_total,
    fa.fetch_run_id,fa.fetched_at,

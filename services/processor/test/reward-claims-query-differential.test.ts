@@ -2,6 +2,7 @@
 // Full CORE migrations, real sealed observation/unit views, all triggers/foreign keys,
 // no ANALYZE. Provider values are synthetic. No Worker runtime is started.
 import { beforeAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import { myJcbJPointHistory } from "../../../packages/parsers/src/parsers/myjcb-jpoint-history.ts";
 import { syntheticJPointHistory } from "../../../packages/parsers/test/myjcb-jpoint-history-fixture.ts";
@@ -15,7 +16,10 @@ import {
   REWARD_PROMOTION_RELEASE,
 } from "../src/reward-claims-job.ts";
 import { FROZEN_REWARD_CANDIDATE_QUERY } from "./reward-claims-legacy-query.ts";
-import { FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY } from "./reward-claims-account-legacy-query.ts";
+import {
+  FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY,
+  FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY_SHA256,
+} from "./reward-claims-account-legacy-query.ts";
 const PRODUCER = "collector-r2-importer",
   CLIENT = "reward-query-fixture",
   SHA = "a".repeat(64);
@@ -164,6 +168,8 @@ const overrides: Partial<Spec>[] = [
   { account: `myjcb:${"a".repeat(65)}:j-point:total` },
   { account: `myjcb:${"a".repeat(64)}:j-point:total` },
   { account: "myjcb:a:j-point:total" },
+  // SQLite's `length`, `substr` and GLOB stop at a NUL; the rule reads it all.
+  { account: "myjcb:a:j-point:total\u0000x" },
 ];
 function fullSchema(): Database {
   const db = fromTemplate("reward-candidate-differential-full-core", () => {
@@ -917,8 +923,17 @@ const ACCOUNT_VARIANTS: readonly ((parsed: string) => string)[] = [
   (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:a:b:"),
   (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:あ:"),
   (parsed) => parsed.replace(/^myjcb:[^:]+:/u, `myjcb:${"a".repeat(65)}:`),
+  // Refused by the rule: text after a NUL, where SQLite's GLOB, `length` and
+  // `substr` stop.
+  (parsed) => `${parsed}\u0000x`,
 ];
-const SHIPPED_GLOB = /^myjcb:.*:j-point:acquired:.{4}-.{2}-.{2}$/su;
+// SQLite's GLOB stops at the first NUL, so the shipped read admits what follows it.
+const SHIPPED_GLOB = /^myjcb:.*:j-point:acquired:.{4}-.{2}-.{2}(?:\0.*)?$/su;
+test("the frozen J-POINT account read is the text e8f455ed9 shipped", () => {
+  expect(createHash("sha256").update(FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.sql).digest("hex")).toBe(
+    FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY_SHA256,
+  );
+});
 test("every account variant is one the shipped GLOB admits, and both kinds are drawn", () => {
   const parsed = "myjcb:synthetic-variant:j-point:acquired:2099-01-15";
   const accounts = ACCOUNT_VARIANTS.map((variant) => variant(parsed));
