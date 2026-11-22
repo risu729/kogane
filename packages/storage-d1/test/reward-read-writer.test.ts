@@ -367,7 +367,7 @@ describe("the reward build", () => {
   });
 
   test("a displaced writer writes nothing, seals nothing and publishes nothing", async () => {
-    const { db, instanceId } = await claimed();
+    const { db, sqlite, instanceId } = await claimed();
     const snapshotPlan = await plan();
     const started = await beginRewardSnapshot(db, instanceId, snapshotPlan, NOW);
     const projection = buildRewardProjection(rewardInput({ evaluatedAt: EVALUATED_AT }).content);
@@ -385,6 +385,24 @@ describe("the reward build", () => {
         rowsWritten: 0,
       }),
     ).toBe("lease_lost");
+    expect(
+      await writeRewardSimulationChunk(db, started!.snapshotId, rows.simulations, {
+        lease: "lease-old",
+        fence: staleFence,
+        now: NOW,
+        rowsWritten: 0,
+      }),
+    ).toBe("lease_lost");
+    // Not a row of either kind: the rows are fenced on the lease like their
+    // checkpoint, so the displaced chunk leaves the build as it found it.
+    expect(rows.estimates.length).toBeGreaterThan(0);
+    expect(rows.simulations.length).toBeGreaterThan(0);
+    for (const table of ["reward_expiry_estimates_v2", "reward_conversion_simulations"])
+      expect(
+        sqlite
+          .query(`SELECT count(*) AS n FROM ${table} WHERE snapshot_id=?1`)
+          .get(started!.snapshotId),
+      ).toEqual({ n: 0 });
     const sealed = await sealAndPublishRewardSnapshot(
       db,
       {
