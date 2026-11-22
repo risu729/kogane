@@ -40,7 +40,7 @@ import {
   changeMutationPlanners,
   economicEventMutation,
 } from "../src/change-commands.ts";
-import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
+import { completedOutcome, dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { executeIdentityCommand } from "../src/identity-commands.ts";
 import { acceptProposal } from "../src/reconciliation-commands.ts";
 import {
@@ -1265,6 +1265,95 @@ test("an outbox target that throws is retried with backoff and never marked proc
   expect(receipt).toMatchObject({ ok: true });
   if (!receipt.ok) throw new Error("unreachable");
   expect(receipt.receipt.status).toBe("accepted");
+});
+
+/**
+ * `db` as one invocation sees it until `ends()` turns true after a call: every
+ * D1 call after that one throws, as calls do once a Worker reached a platform
+ * limit or was evicted mid-pass.
+ */
+function endsAfter(target: D1Database, ends: () => Promise<boolean>) {
+  let ended = false;
+  const raw = new WeakMap<object, D1PreparedStatement>();
+  const call = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (ended) throw new Error("synthetic invocation end");
+    const result = await work();
+    if (await ends()) ended = true;
+    return result;
+  };
+  const forward = (owner: object, property: string | symbol) => {
+    const value = Reflect.get(owner, property) as unknown;
+    return typeof value === "function"
+      ? (value as (...args: unknown[]) => unknown).bind(owner)
+      : value;
+  };
+  const wrap = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const wrapped = new Proxy(statement, {
+      get(owner, property) {
+        if (property === "bind") return (...values: unknown[]) => wrap(owner.bind(...values));
+        if (property === "run" || property === "first" || property === "all" || property === "raw")
+          return (...args: unknown[]) =>
+            call(() =>
+              (Reflect.get(owner, property) as (...a: unknown[]) => Promise<unknown>).apply(
+                owner,
+                args,
+              ),
+            );
+        return forward(owner, property);
+      },
+    });
+    raw.set(wrapped, statement);
+    return wrapped;
+  };
+  const database = new Proxy(target, {
+    get(owner, property) {
+      if (property === "prepare") return (sql: string) => wrap(owner.prepare(sql));
+      if (property === "batch")
+        return (statements: D1PreparedStatement[]) =>
+          call(() => owner.batch(statements.map((statement) => raw.get(statement) ?? statement)));
+      return forward(owner, property);
+    },
+  });
+  return { database, ended: () => ended };
+}
+
+test("an invocation that ends right after an operation's last outbox row completes still publishes its receipt", async () => {
+  // Every target completes; the fault is the invocation, not a processor: it
+  // ends right after the statement that closes the operation's last row.
+  const mapping = await seedParse(299, "smbc-bank:publish-interrupted");
+  const plan = await planFor(mapping.ref, await target("target-publish-interrupted"));
+  const approval = await approveFor(plan);
+  expect((await commitWith("op-publish-interrupted", plan, approval.approvalId)).ok).toBe(true);
+  await isolateDueOutbox("op-publish-interrupted");
+  const completing = {
+    "identity-projection": () => Promise.resolve(completedOutcome("identity_swept", "synthetic")),
+    "balance-projection": () =>
+      Promise.resolve(completedOutcome("balance_projection_active", "synthetic")),
+  };
+  const open = () =>
+    db
+      .prepare(
+        "SELECT count(*) n FROM decision_outbox WHERE operation_id='op-publish-interrupted' AND processed_at IS NULL",
+      )
+      .first<number>("n");
+  const invocation = endsAfter(db, async () => (await open()) === 0);
+  await dispatchDecisionOutbox(invocation.database, { limit: 50, processors: completing }).catch(
+    () => undefined,
+  );
+  expect(invocation.ended()).toBe(true);
+  expect(await open()).toBe(0);
+  // The next invocation, past any lease the ended one held, finds nothing
+  // left to claim; the receipt must already say what the rows say.
+  await dispatchDecisionOutbox(db, {
+    limit: 50,
+    processors: completing,
+    now: Date.now() + 2 * 60_000,
+  });
+  const receipt = await getReceipt(store, operator.id, "op-publish-interrupted");
+  expect(receipt).toMatchObject({ ok: true });
+  if (!receipt.ok) throw new Error("unreachable");
+  expect(receipt.receipt.status).toBe("published");
+  expect(receipt.receipt.publishedAt).not.toBeNull();
 });
 
 test("the internal command routes require a verified actor and refuse an agent's approval", async () => {

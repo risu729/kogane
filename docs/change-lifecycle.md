@@ -542,6 +542,16 @@ up to 20 due rows under a 60 s lease, runs each target's processor, and turns
 the operation's receipt `published` once no row of that operation is
 unprocessed.
 
+The publication is the second statement of the batch that completes a row,
+so the completion that closes an operation's last row publishes its receipt
+in the same transaction. Before 2026-11-21 the pass published at its end, for
+the operations whose rows it had completed; an invocation that ended between
+those (a D1 call refused at a platform limit by a later row's bookkeeping, or
+the Worker evicted mid-pass) left every such receipt `accepted` with every
+row processed, and no later pass looked at it again, because the publication
+only followed a completion. Receipts stranded that way before the change stay
+`accepted`: nothing publishes them retroactively.
+
 ### The four processor results
 
 A processor no longer returns "some outcome" the dispatcher treats as done
@@ -876,7 +886,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (37 tests):
+- `services/processor/test/change-lifecycle.test.ts` (38 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -900,6 +910,8 @@ already recorded is never undone by a DELETE — an undo is a new revision
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an
+  invocation that ends right after an operation's last row completes still
+  leaving its receipt `published`; an
   unregistered target leaving the row blocked and the receipt `accepted` until
   an operator clears it; a throwing
   target retried with backoff, never marked processed, with the receipt staying
