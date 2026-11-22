@@ -703,6 +703,16 @@ export async function runReportJob(
       options.now,
     )
     .run();
+  // The run id is the manifest digest, so a retry over the same inputs meets
+  // the run an interrupted job left. A building run takes its results again
+  // (`ON CONFLICT DO NOTHING`). A complete one already holds them, and
+  // `calculation_results_run_building` refuses any insert for it before the
+  // conflict clause is considered, so its results are not offered again. This
+  // job marks a run complete only with its artifact (below); a complete run
+  // without one is what an earlier build left when it failed between the two.
+  const run = await env.DB.prepare("SELECT status FROM calculation_runs WHERE run_id=?")
+    .bind(runId)
+    .first<{ status: string }>();
   const inserts = [
     ...cells.map((cell, index) => {
       const row = rows[index]!;
@@ -747,12 +757,7 @@ export async function runReportJob(
       );
     }),
   ];
-  if (inserts.length > 0) await env.DB.batch(inserts);
-  await env.DB.prepare(
-    "UPDATE calculation_runs SET status='complete',completed_at=?,replayability=? WHERE run_id=? AND status='building'",
-  )
-    .bind(options.now, replayability, runId)
-    .run();
+  if (run?.status !== "complete" && inserts.length > 0) await env.DB.batch(inserts);
 
   // The stored bytes are the canonical form the digest was taken over, so a
   // reader can verify sha256(bytes) == content_digest without re-serializing.
@@ -782,7 +787,16 @@ export async function runReportJob(
       }),
     ),
   );
+  // The run is marked complete in the same batch that writes its artifact, so
+  // a failure anywhere before it leaves the run building and the next run over
+  // the same manifest finishes it, never a complete run that no report names.
+  // The `generated` event is written only when the report has none: two jobs
+  // that both found the run unfinished write one artifact (`ON CONFLICT`) and
+  // one event, never a second generation of the same report (INV06).
   await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE calculation_runs SET status='complete',completed_at=?,replayability=? WHERE run_id=? AND status='building'",
+    ).bind(options.now, replayability, runId),
     env.DB.prepare(
       `INSERT INTO report_artifacts(report_id,context_id,purpose,schema_version,content_digest,storage_ref,created_by,created_at)
        VALUES(?,?,'holdings-view',?,?,?,?,?) ON CONFLICT(report_id) DO NOTHING`,
@@ -796,8 +810,10 @@ export async function runReportJob(
       options.now,
     ),
     env.DB.prepare(
-      "INSERT INTO report_events(report_id,kind,actor,related_report_id,occurred_at) VALUES(?,'generated',?,NULL,?)",
-    ).bind(reportId, options.actor, options.now),
+      `INSERT INTO report_events(report_id,kind,actor,related_report_id,occurred_at)
+       SELECT ?,'generated',?,NULL,?
+       WHERE NOT EXISTS(SELECT 1 FROM report_events WHERE report_id=? AND kind='generated')`,
+    ).bind(reportId, options.actor, options.now, reportId),
   ]);
 
   return {
