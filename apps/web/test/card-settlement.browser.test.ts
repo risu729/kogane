@@ -598,36 +598,6 @@ describe.if(runnable)("card settlement review", () => {
     return page;
   }
 
-  test("a plan in flight holds the buttons without taking focus, and its refusal leaves focus on the pressed button", async () => {
-    // The plan pins a newer revision than the one on screen: refused here.
-    planRevision = 1;
-    let release!: () => void;
-    planGate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const page = await open();
-    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    const button = page.getByRole("button", { name: "却下内容を確認", exact: true });
-    await button.focus();
-    await page.keyboard.press("Enter");
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll("button")].some(
-        (element) =>
-          element.textContent === "却下内容を確認" &&
-          element.getAttribute("aria-disabled") === "true",
-      ),
-    );
-    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
-    // Another press while the plan is in flight sends nothing.
-    await page.keyboard.press("Enter");
-    release();
-    await page.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
-    expect(await button.getAttribute("aria-disabled")).toBeNull();
-    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
-    expect(posted.filter((row) => row.operation === "plan")).toHaveLength(1);
-    await page.close();
-  });
-
   test("unknown ownership blocks adoption, preserves evidence access and allows explicit rejection planning", async () => {
     review = settlementReview(true);
     const page = await open();
@@ -1125,6 +1095,36 @@ describe.if(runnable)("card settlement review", () => {
     expect(posted.find((row) => row.operation === "plan")?.body.kind).toBe(
       "card-settlement.withdraw",
     );
+    await page.close();
+  });
+
+  test("a plan in flight holds the buttons without taking focus, and its refusal leaves focus on the pressed button", async () => {
+    // The plan pins a newer revision than the one on screen: refused here.
+    planRevision = 1;
+    let release!: () => void;
+    planGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const page = await open();
+    await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const button = page.getByRole("button", { name: "却下内容を確認", exact: true });
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("button")].some(
+        (element) =>
+          element.textContent === "却下内容を確認" &&
+          element.getAttribute("aria-disabled") === "true",
+      ),
+    );
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    // Another press while the plan is in flight sends nothing.
+    await page.keyboard.press("Enter");
+    release();
+    await page.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    expect(await button.getAttribute("aria-disabled")).toBeNull();
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(posted.filter((row) => row.operation === "plan")).toHaveLength(1);
     await page.close();
   });
 
