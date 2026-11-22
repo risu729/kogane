@@ -216,7 +216,7 @@ compound SELECT"; seen in the `services/app` workerd tests).
 
 ## Amendment 2026-11-18: the 依頼の一覧 page reads the list
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-20 in [#1409](https://github.com/risu729/kogane/pull/1409))
 - Date: 2026-11-18
 
 ### Context
@@ -320,7 +320,7 @@ already answered "which requests exist" over one service, `listOperations`.
 
 ## Amendment 2026-11-18: a listed request's status is the one its record reads
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-20 in [#1417](https://github.com/risu729/kogane/pull/1417))
 - Date: 2026-11-18
 - Revises: decision 5 (`status` is the stored status), and the amendment
   above (decision 3's note, and its consequence that a request the list

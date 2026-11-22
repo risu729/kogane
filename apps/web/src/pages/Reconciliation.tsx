@@ -24,6 +24,7 @@ import { Badge, EmptyState, Loading, Notice, Nullable, QueryBoundary } from "../
 import { UnmatchedStatements } from "../unmatched-statements.tsx";
 import { CardDebitAccounts } from "../card-debit-accounts.tsx";
 import { UpcomingCardBills } from "../upcoming-card-bills.tsx";
+import { BusyButton } from "../busy-button.tsx";
 
 function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode {
   const features = useFeatures();
@@ -48,8 +49,9 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
     },
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
-  const canPlan =
-    features.known && features.commands && reason.trim().length > 0 && !plan.isPending;
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
+  const canPlan = features.known && features.commands && reason.trim().length > 0;
   const proposed = review.status === "proposed";
   if (review.status === "rejected" || review.status === "withdrawn")
     return (
@@ -73,34 +75,31 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
       </div>
       <div className="button-row">
         {proposed ? (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan || review.acceptanceBlockers.length > 0}
             onClick={() => plan.mutate("accept")}
           >
             採用内容を確認
-          </button>
+          </BusyButton>
         ) : null}
         {proposed ? (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("reject")}
           >
             却下内容を確認
-          </button>
+          </BusyButton>
         ) : null}
         {review.status === "accepted" ? (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("withdraw")}
           >
             採用を解除する内容を確認
-          </button>
+          </BusyButton>
         ) : null}
       </div>
       {plan.isError ? (

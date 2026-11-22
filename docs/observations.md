@@ -62,6 +62,38 @@ and `fx-exchange` families stay unsupported, so no event writer reads it. Tests:
 `packages/parsers/test/sony-bank-refusals.test.ts`,
 `packages/parsers/test/parser-digests.test.ts`.
 
+## SBI Securities: a domestic trade date that is not a date is no as_of (trade records 0.2.2)
+
+2026-11-22. `sbi-domestic-trade-records` 0.2.1 copied a record's `tradeDate`
+into `as_of` whenever it was a string. The collector writes that field as
+`20YY-MM-DD` from the execution page's `YY/MM/DD` cell without a calendar check
+(`shortDate` in `services/collector-sbi-securities/src/main-site.ts`), so a
+cell such as `26/02/30` became the `as_of` `2026-02-30`, and any other string
+in a stored record passed through verbatim, with no warning. Transactions
+order by `as_of` as text, so such a value sorts among real dates. 0.2.2 reads
+only a calendar `YYYY-MM-DD` date. Any other stated value, or a stated
+non-string, leaves `as_of` empty and records
+`records[N]: tradeDate is not a calendar YYYY-MM-DD date; recorded without
+as_of`, which names the row and never the value; the value stays in `extra`.
+A record without `tradeDate` reads as in 0.2.1. Every valid date reads exactly
+as in 0.2.1, and no other parser's digest changed.
+
+| Parser                     | Previous | Release |
+| -------------------------- | -------- | ------- |
+| sbi-domestic-trade-records | 0.2.1    | 0.2.2   |
+
+**Deploying rewrites nothing**: stored 0.2.1 runs stay as they are; the
+processor registers 0.2.2 itself and the repair lane re-parses stored
+captures under it. No migration and no operator step: the only snapshot
+policy row naming this parser (migration 0100) is an eligibility row with
+`snapshot_selection = 0` and no `required_parser_version`, so it enrols the
+dataset in no snapshot and pins no version, and no snapshot rule reads this
+parser's warnings. Limits: production was not read for this release, so
+whether any stored record states an impossible date is not established; the
+collector still writes the unchecked form (the verbatim cell stays in
+`rawCells[0]`), and the parser is where it is caught. Tests:
+`packages/parsers/test/sbi-refusals.test.ts`.
+
 ## Vpass credit snapshots keep the card name (credit-snapshot 1.1.0)
 
 2026-11-20. Owner approval of the readable-label proposal, 2026-11-19 03:29
@@ -3008,8 +3040,10 @@ Four exist in `packages/parsers/src/parsers/`, all at version
 dataset written by `services/collector-sbi-securities`, whose body is
 `{ records, hasMore }` with each record keeping the source table row in
 `rawCells`. Every record becomes one transaction observation in JPY, with
-`as_of` from `tradeDate`, `description` from `rawCells[1]` (falling back
-to `issueName`), and the whole record spread into `extra`. The amount is
+`as_of` from `tradeDate` when it is a calendar `YYYY-MM-DD` date (any other
+stated value is a warning and no `as_of`, 0.2.2), `description` from
+`rawCells[1]` (falling back to `issueName`), and the whole record spread
+into `extra`. The amount is
 accepted as a display string or as a JSON number, and the verbatim form is
 kept in `amount_text` even when it does not resolve to minor units. It
 does not decide the sign from the trade type, and it does not treat the

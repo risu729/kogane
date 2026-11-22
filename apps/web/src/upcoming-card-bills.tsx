@@ -17,6 +17,7 @@ import type {
   UpcomingDebitAnswer,
 } from "../../../packages/domain/src/card-upcoming-bills.ts";
 import { CARD_DEBIT_ACCOUNTS_PATH } from "../../../packages/observation-shared/src/card-debit-accounts-contract.ts";
+import { debitAccountUnknownReason } from "./card-debit-accounts.tsx";
 import { bankSourceLabel } from "./reconciliation-display.tsx";
 import { formatDecimalText } from "./money.ts";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
@@ -39,6 +40,7 @@ export function useUpcomingCardBills() {
  */
 const COVERS_REASONS: Record<CoversUnknownReason, string> = {
   debit_account_unknown: "引落口座が分かりません。",
+  unit_mismatch: "通貨（単位）の異なる請求があり、合計できません。",
   bill_not_exact: "請求額が確定していない請求があります。",
   balance_not_exact: "口座の残高が分かりません。",
   balance_before_previous_debit:
@@ -201,7 +203,10 @@ export function UpcomingCardBills(): ReactNode {
                             >
                               {label(ANSWERS, bill.debitAccount.answer)}
                             </Badge>{" "}
-                            {bill.debitAccount.answer === "unknown" ? null : (
+                            {bill.debitAccount.answer === "unknown" ? (
+                              // An unknown answer's codes hold its one reason.
+                              bill.debitAccount.codes.map(debitAccountUnknownReason).join(" ")
+                            ) : (
                               <AccountName
                                 account={bill.debitAccount.account}
                                 sourceAccount={bill.debitAccount.sourceAccount}
@@ -236,7 +241,12 @@ export function UpcomingCardBills(): ReactNode {
                           <span className="dim">
                             {" "}
                             · 最新の請求 <Nullable value={card.last.period} /> · 引落日{" "}
-                            <Nullable value={card.last.debitDate} placeholder="不明" />
+                            {/* Null only under `payment_date_not_published` (the
+                                domain's `billOrReason`): the row's own code is why. */}
+                            <Nullable
+                              value={card.last.debitDate}
+                              placeholder={`不明（${card.reason}）`}
+                            />
                           </span>
                         )}
                       </li>

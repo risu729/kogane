@@ -117,12 +117,13 @@ Pages compose these instead of writing their own markup or rules:
 | Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
 | Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
-| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
+| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`; a button that sends a request is `BusyButton` (held, still focused)       |
 | Paging                        | `Pagination` (offset or cursor) rendering `.pagination`, a named group whose status speaks its label; one label per pager on a page   |
 | Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
 | Long tokens                   | `.wrap-any`; `.visually-hidden` for captions whose text is already on screen                                                          |
+| Codes as words                | `displayLabel` or `ownEntry` (`labels.ts`) for a code a table may lack: only own keys answer, so `constructor` is unknown             |
 | Evidence chains               | `ChainStep` in an `<ol className="chain">`: record → parse → original; usage → statement → debit; a candidate's pending → posted row  |
 | Review candidates             | A `.panel` with a `.settlement-head`, then a `.settlement-disclosure` open while a decision is due (see below)                        |
 | Figures kept apart            | `.tiles` of `.tile` (value, then label) in a `role="list"`; one tile per state and unit, never a combined tile                        |
@@ -150,6 +151,19 @@ always on a card settlement's own page (`/reconciliation/<proposalId>`). The
 decision is a `.settlement-decision`: a required `.settlement-reason`, a button
 per action the candidate allows, and a footnote that planning decides nothing.
 The pending-to-posted review also states each action's effect in words.
+
+An unknown value says why (INV05). When the answer carries a closed reason
+for it, the page shows that reason: `不明（<code>）` (`SettlementQuantity`,
+`DateValue`, the 次回の引落 amounts and a not-listed card's due date), or the
+reason in words beside a badge (引落口座は不明). When the answer sends a bare
+null, `Nullable` names what is missing rather than a bare 不明 (a payable
+with no due date recorded on 基準日の保有状況 is 引落予定日未記録). A due or
+debit date the card reconciliation reads send as null carries its closed
+reason (`paymentDateReason`, `debitDateReason`), and `NullableDate` shows it
+as `不明（<code>）`; a null without one, which their wire contracts refuse,
+would read 年月日として読める記録なし. An identifier is printed
+`namespace / scope / value`; an empty scope is part of the key and stays
+empty, never a dash.
 
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.

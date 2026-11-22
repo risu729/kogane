@@ -1,12 +1,12 @@
 # ADR 0123: The balance, schedule and collection quality reads answer a summary by default, and a refused cursor names what must repeat
 
-- Status: proposed. **Owner approval is needed before merge**: it changes the
+- Status: accepted (merged 2026-11-20 in [#1458](https://github.com/risu729/kogane/pull/1458)). Owner approval was required before merge: it changes the
   published input schema and the default answer of three MCP tools and of
   their HTTP routes (decisions D2 and D3 of the 2026-11-19 proposal for
   [issue 1414](https://github.com/risu729/kogane/issues/1414)). The owner
   asked for a compact default on issue 1414; this ADR implements the
   proposal's recommended D2 (the routes' default is the summary too, and the
-  web UI asks for `full`), which the owner decides before merge.
+  web UI asks for `full`), which was the owner's decision before merge.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
   (points 1, "Responses are huge and get truncated", and 2, "Paging is
@@ -335,7 +335,7 @@ offered page size; what remains is that the refusal says nothing.
 
 ## Amendment: the store overview and the maintenance read answer a summary by default (2026-11-19)
 
-- Status: proposed. **Owner approval is needed before merge**, as for the
+- Status: accepted (merged 2026-11-20 in [#1471](https://github.com/risu729/kogane/pull/1471)). Owner approval was required before merge, as for the
   decision above: it changes the published input schema and the default
   answer of `kogane.store.read` and `kogane.schedules.maintenance.read`, the
   default answer of `GET /api/overview` and of
@@ -634,7 +634,7 @@ Measured as the bytes of the MCP result's structured content
 
 ## Amendment: the overview summary is held to 8 KB by construction (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes
+- Status: accepted (merged 2026-11-21 in [#1483](https://github.com/risu729/kogane/pull/1483)). Owner approval was required before merge: it changes
   the default answer of `kogane.store.read` `{page: overview}` and of
   `GET /api/overview` (two new keys, lists that can hold fewer lines than
   their cap, and a new refusal), as the amendment above did.
@@ -802,13 +802,13 @@ Measured as the bytes of the tool's answer
 
 ## Amendment: the collection quality account view answers a paged summary by default (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes
+- Status: accepted (merged 2026-11-21 in [#1486](https://github.com/risu729/kogane/pull/1486)). Owner approval was required before merge: it changes
   the published description and the default answer of
   `kogane.collection-quality.read` with `view: "accounts"`, the default
   answer of `GET /api/collection-quality/<sourceId>/accounts`, and the
   queries that route takes (`detail` and `offset`, where it took none).
   Whether the account view's default becomes the summary, as here and as for
-  the other views, or stays `full` with `summary` opt-in, is the owner's
+  the other views, or stays `full` with `summary` opt-in, was the owner's
   decision (as D2 above).
 - Date: 2026-11-20
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
@@ -1035,7 +1035,7 @@ result):
 
 ## Amendment: cash per account and per bank in one call (`collection: cash`) (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes the
+- Status: accepted (merged 2026-11-21 in [#1487](https://github.com/risu729/kogane/pull/1487)). Owner approval was required before merge: it changes the
   published input schema of `kogane.balances.read` (`collection` gains
   `cash`) and its description, adds `GET /api/v2/balances/cash` to the shared
   request schema (`LIST_REQUEST_SCHEMA`, `LIST_PATH_CAPABILITY`), and the MCP
@@ -1276,7 +1276,7 @@ data }` serialized, the page's own cursor included):
 
 ## Amendment: the v1 grouped balance list answers a summary by default (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**, as for the
+- Status: accepted (merged 2026-11-21 in [#1488](https://github.com/risu729/kogane/pull/1488)). Owner approval was required before merge, as for the
   decision above: it changes the published input schema and the default
   answer of `kogane.observations.list` `{kind: "balances"}`, the default
   answer of `GET /api/balances` and of

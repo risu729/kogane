@@ -1,14 +1,14 @@
 # ADR 0126: One compact list of what waits for the owner's decision, as `kogane.decisions.pending` and on ホーム
 
-- Status: proposed. A new published MCP tool (`kogane.decisions.pending`) and
-  a new operator route: **the owner's approval is needed before merge**, as for
+- Status: accepted (merged 2026-11-20 in [#1457](https://github.com/risu729/kogane/pull/1457)). A new published MCP tool (`kogane.decisions.pending`) and
+  a new operator route: the owner's approval was required before merge, as for
   every published tool change. The owner allowed new tools where needed for
   issue #1414 (2026-11-19, "you may add new tools if needed"); that allows the
   proposal, not this tool.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap G9
-  of the MCP everyday-questions audit (`docs/plans/2026-11-mcp-everyday-questions.md`,
-  proposed in its own pull request; question Q20, "what is waiting for my
+  of the MCP everyday-questions audit ([its plan](../plans/2026-11-mcp-everyday-questions.md),
+  merged in [#1449](https://github.com/risu729/kogane/pull/1449); question Q20, "what is waiting for my
   decision?")
 - Related: [ADR 0081](0081-ui-parity-through-mcp.md) (UI/MCP parity, one
   service), [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (MCP

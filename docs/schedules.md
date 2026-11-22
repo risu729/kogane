@@ -16,8 +16,10 @@ failures since the newest success, and treats a failed receipt that a
 successful collection (fetch run) of the same source followed before the next
 receipt as recovered ([collection](collection.md#is-anything-stuck-the-collection-status-view)).
 
-Save a daily time/weekdays or an interval and enable/disable the job. A version
-conflict requires refreshing before another edit. A successful database save with
+Save a daily time/weekdays or an interval and enable/disable the job. A save
+whose answer does not say what is stored, or a version conflict, reads the job
+back and says how the stored settings compare with the change
+([below](#after-an-answer-that-does-not-say-what-is-stored)). A successful database save with
 pending reservation is not an armed alarm. The five-minute processor job repairs
 pending reservations; deployment bootstrap can also reconcile them.
 
@@ -389,15 +391,31 @@ page and one from an MCP client are the same kind of stored operation.
   request then waits), the next scheduled run and the maintenance status, and
   says that the collector runs its daily scope and that a started collection
   cannot be taken back. **依頼を送信** sends the request; **やめる** sends
-  nothing.
+  nothing. After a send whose answer did not say whether the request was
+  stored, **やめる** keeps that key and window: the section says the request
+  may already be stored and is not withdrawn by backing out, and the next
+  **収集を依頼** opens a confirmation that says it re-sends that request.
+  The key is held in the page's state only: leaving the Schedules page or
+  reloading it forgets it, and the next confirmation is a new request (the
+  notice says so). This is an open limit.
 - **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
   the window is the date in Japan of the confirmation's first send (stored,
   not applied: the collector runs its daily scope), and the key is
-  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
-  lost answer reuses the key and the window, so it is the same payload and the
-  same operation even after midnight; a new confirmation is a new request. A
+  `ui-collect-<uuid>`, new for each confirmation except as below. A retry
+  after a failed or lost answer reuses the key and the window, so it is the
+  same payload and the same operation even after midnight. A new
+  confirmation is a new request once a send under the key was answered with
+  202, or when every send under it was refused; while one send's outcome is
+  unknown, a new confirmation re-sends it under the same key and window. A
   4xx answer other than 408 or 429 is shown as refused and not stored, with
-  its code. The answer shows the operation id.
+  its code; it stored nothing itself, but the server answers it (sign-in,
+  grant, origin, schema or declared-source refusal) before it looks the key
+  up, so it does not settle an earlier unknown send. The
+  answer shows the operation id. A
+  202 with status `accepted` says the collection starts at the next
+  processing run; any other status is the stored operation's current one,
+  answered to a re-send (`running`, `completed`, `failed` or `blocked`), and
+  the page names it and says no new collection starts.
 - **Following it.** An accepted request links to **依頼の経過** ("request trail")
   at `/operations/{id}`. That read-only page follows the request through
   `GET /api/ops/v1/operations/{id}`. The link survives schedule-card refreshes;
@@ -495,6 +513,19 @@ release are each one batch: a job's settings and its history row in
 `collection_schedule_revisions`, or an accepted proposal's revision and
 decision, exist together or not at all. The page's `GET` is not recorded.
 
+Where these routes answer with the Processor's answer — the snapshot under
+`detail=full`, a Processor refusal under either detail, every write's answer
+and a bootstrap refusal — the App relays its status and its body bytes as
+they are, under its own `Content-Type: application/json`. No header of the
+Processor's crosses back, its `Content-Type` included, so a relayed body never
+chooses how the App's origin serves it; the App's own response headers apply
+as on every answer ([production evidence browser](production-evidence-browser.md#response-headers)).
+A summary is the App's own JSON of the snapshot, and a bootstrap success is
+the App's own JSON of the answer it checked. `services/app/test/schedules-relay.test.ts`
+serves a Processor answer labelled `text/html` on each of these paths, and a
+body with a leading byte-order mark or invalid UTF-8, which crosses unchanged
+because a write's answer is read as bytes, not text.
+
 A write that loses its version check — another edit saved the job or the rule
 first, including one by the same operator in the same millisecond — writes
 nothing and answers `409 revision_conflict`. The history row and the
@@ -515,6 +546,58 @@ the code; the tests rebuild the table with one more CHECK to show it
 copied only when the job's `UPDATE`, the statement before it in the batch,
 changed a row (`changes()=1`); the same file runs the same-millisecond race and
 the refused history row on Miniflare D1 as well as on `bun:sqlite`.
+
+### After an answer that does not say what is stored
+
+No settings write carries an operation id or an idempotency key. The job edit
+and the maintenance edit carry the revision they were made from, and the
+Processor stores a revision only on top of that one; a survey decision is
+stored once per proposal. So a retry of one of these three writes that was
+stored is refused with `409` (`revision_conflict`, or
+`proposal_already_decided`), never stored twice, and a `409` alone does not
+say whether the stored change is someone else's or this very one, saved by an
+attempt whose answer was lost. The App answers a relay it lost, after or
+before the Processor wrote, `503 scheduling_unavailable`. (A lease release
+names the exact lease, a repeated one succeeds while the source is unlocked,
+and the page reads the leases back after any answer.)
+
+The page therefore treats an answer as leaving the outcome unknown when there
+is none (a network error), when a `2xx` body cannot be read, and on a `5xx`,
+`408` or `429`. After such an answer, and after a `409`, it reads the snapshot
+again (a read that starts after the answer) and compares what is stored with
+the change it sent. Every other `4xx` is a refusal before anything was
+written and is said as it was.
+
+- **Job edit.** The card shows the stored revision. A stored revision past the
+  one the save was made from that holds exactly this change is said to be
+  saved (`この変更はすでに保存されています` after a `409`); one that holds
+  something else is said to be another change (`他の変更が先に保存されました`
+  after a `409`; after an unknown answer, that it is not known whether this
+  change was stored). A revision that did not move is said not to be stored at
+  the time of the read, with the edit kept for another save, which the
+  version check refuses if the earlier attempt lands after all.
+- **Maintenance edit.** A stored save, or a read back showing exactly this
+  change at a later revision, replaces the form with its result (`停止時間を保存しました。`,
+  followed by `実行予約の反映を待っています。` when the answer's `reservation` is
+  `pending`) and a **閉じる** button, and moves focus to the result. Otherwise
+  the form stays open with the read-back result; a stored revision that holds
+  another change is edited by opening the rule again with **変更**.
+- **Survey decision.** A decided proposal leaves the list, so the section says
+  the result (rejected, accepted, or accepted with the reservation pending)
+  and moves focus to it. After an unknown answer or a `409`, a proposal the
+  read back still lists is undecided and can be decided again; one it no
+  longer lists is said to be accepted when the rule holds the proposal's
+  change at the revision after the proposal's base (a new rule under
+  `<source>-survey-<id>`), and decided otherwise.
+  When more proposals are undecided than the page shows, or the read back has
+  no re-survey part, an unlisted proposal is not taken as decided: the section
+  says that whether it was decided is not known, since the proposal's own row
+  is gone.
+- **A failed read back** says that whether the write was stored is not known.
+
+Limits: buttons are disabled while their write is in flight, so focus leaves
+them; and a job save that moves the card to a new revision redraws the card,
+so focus leaves its button too.
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation

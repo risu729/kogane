@@ -418,8 +418,11 @@ occurrence of that job.
   recorded.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
-  not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
-  messages (`initialize`, `tools/list`, `ping`, an accepted notification) —
+  not serve (`404 not_found`, MCP `unknown_tool`; under `/api/ops/v1` that
+  includes a percent-encoded spelling of a route's fixed segments, which is
+  never served, so no operations request is accepted unrecorded), and the MCP
+  protocol's own messages (`initialize`, `tools/list`, `ping`, an accepted
+  notification) —
   including a JSON-RPC error `/mcp` answers inside a `200` (an unknown method,
   `-32601`). Everything `/mcp` refuses with an HTTP status before a message
   reaches a tool is recorded once as `mcp.request`: the App's own refusals (a
@@ -439,9 +442,11 @@ occurrence of that job.
   not applied either, and the caller gets the writer's failure (the
   schedules' `503 scheduling_unavailable`, the survey's
   `503 decision_record_failed`, a command's 5xx, and the proposal tool's
-  existing `409 idempotency_conflict`, which it answers for every failed
-  append). The command, operations and schedule writers act only for a
-  principal whose subject the actor shape admitted (`principalFor`); the
+  `500 internal_error`; its `409 idempotency_conflict` is only for a
+  proposal whose decision is already recorded,
+  [agent API](agent-api.md#proposals-are-not-adoptions)). The command,
+  operations and schedule writers act only for a principal whose subject the
+  actor shape admitted (`principalFor`); the
   proposal tool acts for any proved caller (ADR 0084: every one holds the
   whole-store grant), so a subject outside the actor shape can read but
   cannot propose.
@@ -475,7 +480,8 @@ rolled back with its record), `services/processor/test/schedule-dispatch-marker.
 `retry_claimed` line names the revision the retry was fenced on, and a lost
 fence logs none), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
-idle, off and unaudited lanes, a failed tick, a record that cannot be written),
+idle, off and unaudited lanes, a lane named like a built-in property such as
+`constructor` taken as unaudited, a failed tick, a record that cannot be written),
 `services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a
 key range without table statistics; the proposal reads equal the shipped text),
 `services/processor/test/card-purchase-lane-audit.test.ts` (the deployed

@@ -49,6 +49,7 @@ import {
   type SourceFetchRunCount,
   type SourceParseRun,
   type SqlExecutor,
+  type UndatedTransactionCount,
 } from "./reader";
 import { CANDIDATE_LIMIT, GLOBAL_PASS_NOTICE_LIMIT, RESULT_BOUND } from "./scope";
 import { sbiIncomeHistorySql, type SbiIncomeHistoryRow } from "./sbi-income-history";
@@ -83,6 +84,7 @@ import {
   SOURCE_FETCH_RUN_COUNTS_SQL,
   SOURCE_PARSE_RUNS_SQL,
   transactionsSql,
+  undatedTransactionsSql,
   VISIBLE_EVIDENCE_PROBE_SQL,
 } from "./sql";
 
@@ -205,6 +207,11 @@ export function createObservationReader(
     async listTransactions({ offset, ...scope }) {
       const page = transactionsSql(scope, offset);
       return (await list<TransactionSqlRow>(page.sql, page.args)).map(transactionRow);
+    },
+
+    async undatedTransactions(scope) {
+      const read = undatedTransactionsSql(scope);
+      return list<UndatedTransactionCount>(read.sql, read.args);
     },
 
     async listLatestBalances({ offset, limit, ...scope }) {

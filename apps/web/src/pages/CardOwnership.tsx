@@ -10,6 +10,7 @@ import {
   ownershipDeclarationRef,
 } from "../../../../packages/domain/src/ownership-declaration.ts";
 import { useCardOwnership } from "../card-ownership-api.ts";
+import { BusyButton } from "../busy-button.tsx";
 import {
   CardOwnershipDetails,
   OWNERSHIP_ROLES,
@@ -93,6 +94,8 @@ function OwnershipForm({
     },
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
   const enabled =
     features.known &&
     features.commands &&
@@ -103,8 +106,7 @@ function OwnershipForm({
     reason.trim().length > 0 &&
     ownershipReviewPartyRef(partyRef) &&
     (!selfDeclared || (declarationRef !== null && side.selfDeclarationBlockers.length === 0)) &&
-    (!ownerDefault || side.ownerDefaultBlockers.length === 0) &&
-    !plan.isPending;
+    (!ownerDefault || side.ownerDefaultBlockers.length === 0);
   const suggestions = [
     ...new Set(
       review.sides.flatMap((s) => s.claims.map((c) => c.partyRef)).filter(ownershipReviewPartyRef),
@@ -249,22 +251,16 @@ function OwnershipForm({
         />
       </div>
       <div className="button-row">
-        <button
-          type="button"
-          className="button"
-          disabled={!enabled}
-          onClick={() => plan.mutate("accept")}
-        >
+        <BusyButton busy={plan.isPending} disabled={!enabled} onClick={() => plan.mutate("accept")}>
           この保有者の関係を確認
-        </button>
-        <button
-          type="button"
-          className="button"
+        </BusyButton>
+        <BusyButton
+          busy={plan.isPending}
           disabled={!enabled || !existing || selfDeclared || ownerDefault}
           onClick={() => plan.mutate("reject")}
         >
           この保有者の関係を却下する内容を確認
-        </button>
+        </BusyButton>
       </div>
       {plan.isError ? (
         <Notice tone="bad" inline role="alert">

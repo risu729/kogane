@@ -276,6 +276,42 @@ describe("the command boundary", () => {
     expect(text).not.toContain("eyJ");
   });
 
+  // The schedules relay follows the same rule (`schedules-relay.test.ts`).
+  it("relays the Processor's status and bytes under its own JSON type, never its headers", async () => {
+    const html = "<!doctype html><title>synthetic</title>";
+    // A leading byte-order mark, which a text read would drop: the bytes cross.
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(html)]);
+    const response = await worker.fetch(
+      new Request("https://fixture.test/api/command/v1/plan", {
+        method: "POST",
+        headers: { "cf-access-jwt-assertion": await token(), "content-type": "application/json" },
+        body: "{}",
+      }),
+      {
+        ...env,
+        ACCESS_ISSUER: issuer,
+        ACCESS_AUDIENCE: "synthetic-test-audience",
+        ...enabled,
+        PIPELINE: {
+          fetch: async () =>
+            new Response(bytes, {
+              status: 409,
+              headers: {
+                "content-type": "text/html; charset=utf-8",
+                "content-security-policy": "default-src *",
+                "x-synthetic-upstream": "1",
+              },
+            }),
+        },
+      } as unknown as Env,
+    );
+    expect(response.status).toBe(409);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(response.headers.get("x-synthetic-upstream")).toBeNull();
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+  });
+
   it("advertises the capability from the deployment flag, never from a constant", async () => {
     const off = (await (await call("/api/meta", { method: "GET" })).json()) as {
       capabilities: { commands: boolean; readOnly: boolean };

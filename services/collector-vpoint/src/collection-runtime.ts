@@ -9,7 +9,7 @@ import type { VPointSession, EmailChallengeResult } from "./session";
 import { vPointScheduledResult } from "./scheduled-result";
 import { persistVPointRun, TerminalPersistenceError } from "./shared-run";
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
-import { collectVPoint, VPointSessionExpiredError } from "./vpoint";
+import { collectVPoint, VPointSessionExpiredError, type VPointCollection } from "./vpoint";
 
 export interface SessionAccess {
   getSession(): Promise<string | null>;
@@ -52,10 +52,9 @@ export async function runCollection(
     const artifacts: StoredArtifact[] = [];
     const collected: RawArtifact[] = [];
     const failures: CollectionFailure[] = [];
-    let historyTotal = 0;
-    let historyPageCount = 0;
-    let vMoneyHistoryTotal = 0;
-    let vMoneyHistoryPageCount = 0;
+    // Unknown until the collection returns: a run that stops earlier reports
+    // no counts rather than zeros (INV05).
+    let counts: HistoryCounts | undefined;
     const session = sessionAccess ?? sessionStub(env);
     let stage: CollectionStage = "session-load";
     const onStage = (next: CollectionStage) => {
@@ -81,10 +80,7 @@ export async function runCollection(
         sessionCookie,
         onStage,
       });
-      historyTotal = collection.historyTotal;
-      historyPageCount = collection.historyPageCount;
-      vMoneyHistoryTotal = collection.vMoneyHistoryTotal;
-      vMoneyHistoryPageCount = collection.vMoneyHistoryPageCount;
+      counts = historyCounts(collection);
       onStage("artifact-store");
       {
         // The shared target stores every artifact in one terminal-last run, so
@@ -114,10 +110,7 @@ export async function runCollection(
       startedAt,
       completedAt,
       status,
-      historyTotal,
-      historyPageCount,
-      vMoneyHistoryTotal,
-      vMoneyHistoryPageCount,
+      ...counts,
       artifacts,
       failures,
     };
@@ -186,6 +179,8 @@ async function persistSharedRun(options: {
     event: "vpoint-collection-persisted",
     runId: manifest.runId,
     status: manifest.status,
+    // An unknown count is undefined in the manifest, so the JSON line leaves
+    // it out instead of writing 0 (INV05).
     historyTotal: manifest.historyTotal,
     historyPageCount: manifest.historyPageCount,
     vMoneyHistoryTotal: manifest.vMoneyHistoryTotal,
@@ -199,6 +194,18 @@ async function persistSharedRun(options: {
     ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
   });
   return { target: "shared", manifest: { ...manifest, artifacts: stored }, terminal };
+}
+type HistoryCounts = Pick<
+  VPointCollection,
+  "historyTotal" | "historyPageCount" | "vMoneyHistoryTotal" | "vMoneyHistoryPageCount"
+>;
+function historyCounts(collection: VPointCollection): HistoryCounts {
+  return {
+    historyTotal: collection.historyTotal,
+    historyPageCount: collection.historyPageCount,
+    vMoneyHistoryTotal: collection.vMoneyHistoryTotal,
+    vMoneyHistoryPageCount: collection.vMoneyHistoryPageCount,
+  };
 }
 function reasonCodeOf(result: PersistRunResult): string {
   return result.outcome === "conflict" || result.outcome === "incomplete"

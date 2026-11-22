@@ -413,8 +413,8 @@ No published snapshot, a different epoch or a changed restriction returns 503 (`
 
 #### Deadline window and summary
 
-[ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read)
-(proposed). `GET /api/v2/rewards/expiry` takes `from` and `before` (calendar dates, `YYYY-MM-DD`), compared
+[ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read).
+`GET /api/v2/rewards/expiry` takes `from` and `before` (calendar dates, `YYYY-MM-DD`), compared
 with each row's `expiresOn` as text: `from` is inclusive, `before` exclusive. Without `from` it is today's
 Asia/Tokyo date (`tokyoToday` in `packages/application/src/query/reward-expiry-window.ts`, the goal search's
 day); without `before` the window has no end. A malformed date is `400 invalid_date`; a window with no day

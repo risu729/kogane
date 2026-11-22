@@ -180,6 +180,104 @@ describe("V Point collection", () => {
     expect(seenPointPages).toEqual(["1", "2"]);
   });
 
+  // A total the page does not state as a count is a reason, never a zero
+  // (INV05): `Number(null)`, `Number("")` and `Number(false)` are all 0, and a
+  // total of 0 would end the walk after the first page as a complete history.
+  test.each([
+    ["null", null],
+    ["an empty string", ""],
+    ["a blank string", " "],
+    ["false", false],
+    ["an empty array", []],
+    ["an exponent string", "3e1"],
+    ["a hex string", "0x1e"],
+    ["a fraction", 30.5],
+  ])("a history total stated as %s stops the walk", async (_label, total) => {
+    const seenPointPages: string[] = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      if (path !== "/api/tpoint_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      const form = init?.body;
+      if (!(form instanceof FormData)) throw new Error("expected FormData");
+      seenPointPages.push(String(form.get("page")));
+      return jsonResponse({
+        status: { code: "0000" },
+        results: { total, history: Array.from({ length: 30 }, () => ({ point: 1 })), graph: {} },
+      });
+    };
+    const failure = await collectVPoint({ sessionCookie: "session=value", fetcher }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({ name: "VPointProtocolError", reasonCode: "invalid-total" });
+    expect(seenPointPages).toEqual(["1"]);
+  });
+
+  test("a history total stated as a digit string is read as that count", async () => {
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: { total: "0", history: [] } });
+      }
+      if (path !== "/api/tpoint_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      const form = init?.body;
+      if (!(form instanceof FormData)) throw new Error("expected FormData");
+      const count = String(form.get("page")) === "2" ? 1 : 30;
+      return jsonResponse({
+        status: { code: "0000" },
+        results: {
+          total: "31",
+          history: Array.from({ length: count }, () => ({ point: 1 })),
+          graph: {},
+        },
+      });
+    };
+    const result = await collectVPoint({ sessionCookie: "session=value", fetcher });
+    expect(result.historyTotal).toBe(31);
+    expect(result.historyPageCount).toBe(2);
+    expect(result.vMoneyHistoryTotal).toBe(0);
+  });
+
+  // The rows a walk keeps never pass the total the pages state: a total of 0
+  // over a page of rows, or a last page longer than what was left, is a
+  // disagreement, not a whole history.
+  test.each([
+    ["a zero total over a page of rows", 0, [30]],
+    ["a last page with more rows than were left", 31, [30, 30]],
+  ])("%s stops the walk", async (_label, total, counts) => {
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      if (path !== "/api/tpoint_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      const form = init?.body;
+      if (!(form instanceof FormData)) throw new Error("expected FormData");
+      const count = counts[Number(form.get("page")) - 1] ?? 0;
+      return jsonResponse({
+        status: { code: "0000" },
+        results: { total, history: Array.from({ length: count }, () => ({ point: 1 })), graph: {} },
+      });
+    };
+    const failure = await collectVPoint({ sessionCookie: "session=value", fetcher }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({
+      name: "VPointProtocolError",
+      reasonCode: "rows-exceed-total",
+    });
+  });
+
   test("an empty V Money page after a page with rows is not an empty history", async () => {
     const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;

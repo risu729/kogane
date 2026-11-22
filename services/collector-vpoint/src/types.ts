@@ -33,10 +33,15 @@ export interface CollectionManifest {
   startedAt: string;
   completedAt: string;
   status: "success" | "partial" | "failed";
-  historyTotal: number;
-  historyPageCount: number;
-  vMoneyHistoryTotal: number;
-  vMoneyHistoryPageCount: number;
+  /**
+   * The four history counts are present only when both history walks finished
+   * and the collection returned them. A run that stopped earlier never learned
+   * them, so they are absent, never 0 (INV05); its `failures` carry the reason.
+   */
+  historyTotal?: number;
+  historyPageCount?: number;
+  vMoneyHistoryTotal?: number;
+  vMoneyHistoryPageCount?: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
   emailReconciliation?: {

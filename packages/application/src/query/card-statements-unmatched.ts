@@ -28,7 +28,9 @@
 //   offers a next page past it (`nextPage`, ./page-budget.ts).
 import {
   cardSettlementCandidate,
+  statementDueDate,
   type CardBankDebitFact,
+  type StatementDueDateReason,
 } from "../../../domain/src/card-settlement.ts";
 import {
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
@@ -140,6 +142,12 @@ export interface UnmatchedCardStatement {
     amount: Quantity;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
+    /**
+     * Why `paymentDate` is null, present exactly then (INV05):
+     * `payment_date_absent` or `payment_date_invalid`
+     * (`STATEMENT_DUE_DATE_REASONS`).
+     */
+    paymentDateReason?: StatementDueDateReason;
     period: string | null;
   };
   code: UnmatchedStatementCode;
@@ -482,10 +490,8 @@ export async function reviewUnmatchedCardStatements(input: {
     // The answer shows every total, with its status and reason when not exact.
     const amount = statementTotal(row);
     if (amount === null) throw invalid();
-    const date =
-      row.payment_date !== null && parseLocalDate(row.payment_date) !== null
-        ? row.payment_date
-        : null;
+    const due = statementDueDate(row.payment_date);
+    const date = due.paymentDate;
     const item: UnmatchedCardStatement = {
       statement: {
         ref: {
@@ -497,10 +503,16 @@ export async function reviewUnmatchedCardStatements(input: {
         sourceAccount: row.source_account,
         accountId: row.account_id ?? null,
         amount,
-        paymentDate:
-          date === null
-            ? null
-            : { kind: "local-date", value: date, zone: "Asia/Tokyo", basis: "provider" },
+        ...(due.paymentDate === null
+          ? { paymentDate: null, paymentDateReason: due.paymentDateReason }
+          : {
+              paymentDate: {
+                kind: "local-date",
+                value: due.paymentDate,
+                zone: "Asia/Tokyo",
+                basis: "provider",
+              },
+            }),
         period: row.period ?? null,
       },
       code: unmatchedStatementCode(total, false, null),
