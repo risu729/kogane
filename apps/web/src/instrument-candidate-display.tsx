@@ -128,8 +128,11 @@ export function IdentifierSide({
         <strong>{identifier.label}</strong>
       </KvRow>
       <KvRow label="識別子">
+        {/* An empty scope is part of the key (`ric//<RIC>`), not a missing
+            value: it stays empty, as the identity list and a record's
+            organization panel print it. */}
         <code className="wrap-any">
-          {identifier.namespace} / {identifier.scope || "—"} / {identifier.value}
+          {identifier.namespace} / {identifier.scope} / {identifier.value}
         </code>
       </KvRow>
       <KvRow label="種別">{identifier.kind}</KvRow>

@@ -151,6 +151,16 @@ decision is a `.settlement-decision`: a required `.settlement-reason`, a button
 per action the candidate allows, and a footnote that planning decides nothing.
 The pending-to-posted review also states each action's effect in words.
 
+An unknown value says why (INV05). When the answer carries a closed reason
+for it, the page shows that reason: `不明（<code>）` (`SettlementQuantity`,
+`DateValue`, the 次回の引落 amounts and a not-listed card's due date), or the
+reason in words beside a badge (引落口座は不明). When the answer sends a bare
+null, `Nullable` names what is missing rather than a bare 不明: a due or debit
+date the card reconciliation reads send as null (absent, or not a civil date)
+is `NullableDate`, 年月日として読める記録なし. An identifier is printed
+`namespace / scope / value`; an empty scope is part of the key and stays
+empty, never a dash.
+
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.
 

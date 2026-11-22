@@ -139,6 +139,16 @@ export function DateValue({ value }: { value: TemporalValue }): ReactNode {
   return <time dateTime={value.value}>{value.value}</time>;
 }
 
+/**
+ * A due or debit date the server sends as a civil date or as null with no
+ * reason (absent, or not a `YYYY-MM-DD` date). Null names what is missing in
+ * words and claims no reason the answer does not carry (INV05).
+ */
+export function NullableDate({ value }: { value: TemporalValue | string | null }): ReactNode {
+  if (value === null) return <Nullable value={null} placeholder="年月日として読める記録なし" />;
+  return typeof value === "string" ? <>{value}</> : <DateValue value={value} />;
+}
+
 function FactLink({ fact, label }: { fact: SourceFactRef; label: string }): ReactNode {
   const match = /^(balance|transaction):([0-9]+)$/u.exec(fact.id);
   return (
@@ -171,7 +181,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
           {facts.statement.sourceAccount}
         </KvRow>
         <KvRow label="請求対象期間">
-          <Nullable value={facts.statement.period} placeholder="不明" />
+          <Nullable value={facts.statement.period} />
         </KvRow>
         <KvRow label="カード会社の請求総額">
           <SettlementQuantity value={facts.statement.amount} />
@@ -253,7 +263,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
               : "（採用済み）"}
         </KvRow>
         <KvRow label="元本負債の減少額">不明（請求総額だけでは元本と手数料を分けられません）</KvRow>
-        <KvRow label="手数料の内訳">不明</KvRow>
+        <KvRow label="手数料の内訳">不明（請求総額だけでは元本と手数料を分けられません）</KvRow>
         <KvRow label="純資産への影響">算定していません（資産・負債全体の情報が不足）</KvRow>
       </Kv>
       <p className="footnote">

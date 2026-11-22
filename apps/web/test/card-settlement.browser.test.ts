@@ -619,6 +619,17 @@ describe.if(runnable)("card settlement review", () => {
     return page;
   }
 
+  test("a candidate's statement with no period recorded says so, never a bare 不明 (INV05)", async () => {
+    const base = settlementReview();
+    review = {
+      ...base,
+      facts: { ...base.facts, statement: { ...base.facts.statement, period: null } },
+    };
+    const page = await open();
+    expect(await page.locator("main").innerText()).toMatch(/請求対象期間\s+未記録/u);
+    await page.close();
+  });
+
   test("unknown ownership blocks adoption, preserves evidence access and allows explicit rejection planning", async () => {
     review = settlementReview(true);
     const page = await open();
@@ -631,7 +642,10 @@ describe.if(runnable)("card settlement review", () => {
     expect(
       await page.getByRole("link", { name: "銀行明細と原本", exact: true }).getAttribute("href"),
     ).toBe("/observations/transaction/12");
-    expect(await page.locator("main").innerText()).toContain("純資産への影響");
+    const details = await page.locator("main").innerText();
+    expect(details).toContain("純資産への影響");
+    // An unknown fee breakdown says why, never a bare 不明 (INV05).
+    expect(details).toMatch(/手数料の内訳\s+不明（請求総額だけでは元本と手数料を分けられません）/u);
     await page.getByRole("button", { name: "却下内容を確認" }).click();
     await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
     expect(posted.filter((row) => row.operation === "plan")[0]?.body).toMatchObject({
@@ -697,6 +711,9 @@ describe.if(runnable)("card settlement review", () => {
     expect(unknown).toContain("請求額が確定していない請求があります。");
     expect(text).toContain("ほかの引落や入金は含みません");
     expect(text).toContain("カード会社が引落日を示していません");
+    // A missing date or account carries the server's reason (INV05).
+    expect(text).toContain("引落日 不明（payment_date_not_published）");
+    expect(text).toContain("引落口座は不明 引落口座を示す記録がありません。");
     // A refund statement is listed apart, never netted against a bill.
     expect(text).toContain("最新の請求総額が0円以下（返金など）のため");
     expect(await section.getByRole("button").count()).toBe(0);
@@ -803,6 +820,31 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("a due or debit date the server sends as null names what is missing, never a bare 不明 (INV05)", async () => {
+    const [stated, settled] = debitAccounts.items;
+    const match = settled!.settled[0]!;
+    debitAccountsPage = {
+      ...debitAccounts,
+      items: [
+        { ...stated!, latestStatement: { ...stated!.latestStatement!, paymentDate: null } },
+        {
+          ...settled!,
+          settled: [{ ...match, latest: { ...match.latest, debitDate: null } }],
+          answer: { ...settled!.answer, debitDate: null },
+        },
+      ],
+    };
+    const page = await open();
+    const section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("myjcb:synthetic:root").waitFor();
+    const text = await section.innerText();
+    expect(text).toContain("引落予定日 年月日として読める記録なし");
+    expect(text).toContain("引落日 年月日として読める記録なし · 照合を見る");
+    expect(text).toContain("最新の引落日 年月日として読める記録なし");
+    expect(text).not.toContain("不明");
+    await page.close();
+  });
+
   test("statements without a candidate show their reason and the planner's answer, with no action", async () => {
     const page = await open();
     const section = page.getByRole("region", { name: "照合候補のない請求" });
@@ -840,6 +882,26 @@ describe.if(runnable)("card settlement review", () => {
     let section = page.getByRole("region", { name: "照合候補のない請求" });
     await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
     expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
+    await page.close();
+    // A due date the server sends as null has no reason: the words name what is missing.
+    unmatchedPage = {
+      ...unmatched,
+      items: [
+        {
+          ...first!,
+          statement: { ...first!.statement, paymentDate: null },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          planner: null,
+        },
+      ],
+    };
+    page = await open();
+    section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
+    const undated = await section.innerText();
+    expect(undated).toContain("引落予定日 年月日として読める記録なし");
+    expect(undated).not.toContain("不明");
     await page.close();
     unmatchedPage = withTotal(null);
     page = await open();
