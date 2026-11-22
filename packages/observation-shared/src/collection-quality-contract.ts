@@ -216,10 +216,7 @@ export type PeriodKind = (typeof PERIOD_KINDS)[number];
 export type CellState = (typeof CELL_STATES)[number];
 export type SourceReason = (typeof SOURCE_REASONS)[number];
 export type CellReason = (typeof CELL_REASONS)[number];
-export type {
-  CollectionFreshness,
-  CollectionFreshnessState,
-} from "../../domain/src/collection-freshness.ts";
+export type { CollectionFreshness } from "../../domain/src/collection-freshness.ts";
 
 const CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
