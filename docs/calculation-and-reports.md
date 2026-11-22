@@ -359,6 +359,18 @@ no verified JP or AU rule package, so every request returns `needs-policy` with
 `taxConclusion: null` and the list of inputs it does not have (AT59). The
 provider's reported cost is stored beside our own numbers as
 `provider.<metric>` rows and is never promoted to the single truth (UC30/AT30).
+The report job writes one such row per `calculation_results` key (subject,
+scope, metric): an instrument held in two scopes (one security in two source
+accounts, such as a taxable and a tax-exempt account) keeps each scope's row,
+and only a second valuation of the same metric for the same holding is
+skipped. An earlier build kept only the first scope's row of an instrument;
+the runs it wrote are not rewritten. The report body holds no provider row,
+so report ids and bodies do not change with this (`REPORT_BUILD_RELEASE`
+names what can change a body), and nothing reads `calculation_results` today.
+Limit: the result insert skips any key conflict (`ON CONFLICT DO NOTHING`, so
+a retried run adds nothing), so two positions of one instrument in one scope
+in one report would share a key and the second holding's rows would be
+skipped without an error, while the body still lists both.
 
 ### Lots over a provisional input contract
 
