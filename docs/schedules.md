@@ -495,6 +495,19 @@ release are each one batch: a job's settings and its history row in
 `collection_schedule_revisions`, or an accepted proposal's revision and
 decision, exist together or not at all. The page's `GET` is not recorded.
 
+Where these routes answer with the Processor's answer — the snapshot under
+`detail=full`, a Processor refusal under either detail, every write's answer
+and a bootstrap refusal — the App relays its status and its body bytes as
+they are, under its own `Content-Type: application/json`. No header of the
+Processor's crosses back, its `Content-Type` included, so a relayed body never
+chooses how the App's origin serves it; the App's own response headers apply
+as on every answer ([production evidence browser](production-evidence-browser.md#response-headers)).
+A summary is the App's own JSON of the snapshot, and a bootstrap success is
+the App's own JSON of the answer it checked. `services/app/test/schedules-relay.test.ts`
+serves a Processor answer labelled `text/html` on each of these paths, and a
+body with a leading byte-order mark or invalid UTF-8, which crosses unchanged
+because a write's answer is read as bytes, not text.
+
 A write that loses its version check — another edit saved the job or the rule
 first, including one by the same operator in the same millisecond — writes
 nothing and answers `409 revision_conflict`. The history row and the
