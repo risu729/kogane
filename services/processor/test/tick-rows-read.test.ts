@@ -72,9 +72,12 @@ const collapsed = (sql: string) => sql.replace(/\s+/gu, " ").trim();
 const NAMED = {
   latestBalances: (sql: string) =>
     sql.includes("snapshot_policies(parser_name") && sql.includes("rank_in_group"),
+  // The report job's one-cut check (POSITION_CUT_SQL) wraps the same text and
+  // returns one row, so it is not a page of positions.
   positions: (sql: string) =>
     sql.includes("snapshot_policies(parser_name") &&
-    sql.includes("FROM position_observations po JOIN parse_runs p"),
+    sql.includes("FROM position_observations po JOIN parse_runs p") &&
+    !sql.startsWith("SELECT count(*) AS current_rows"),
   positionValuations: (sql: string) =>
     sql.includes("snapshot_policies(parser_name") &&
     sql.includes("JOIN valuation_observations v ON v.parse_run_id = po.parse_run_id"),

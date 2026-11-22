@@ -76,6 +76,7 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 | `parsingHealth`         | `observation_parse_jobs`, `parse_runs`; probes `observation_fetch_artifacts`        | job repaired by a newer published parse                                       | none                                                                                                                                                                                           | —                                                   | —                                   |
 | `globalPassEmptyMonths` | the GLOBAL PASS snapshot CTEs, probing `transaction_observations` by run and month  | the month's current snapshot is empty and an older eligible snapshot had rows | none; a notice, not a visibility rule                                                                                                                                                          | source, month desc                                  | 100 months, plus one for truncation |
 | `listTransactions`      | `transaction_observations` via `activeStateProjection`                              | published + successful run + per-source current page/container                | **Group first, then filter.** Duplicates within (source, account, parser family, external id) are ranked over the whole active set and rank 1 kept; the filter applies to that derived result. | `COALESCE(as_of,'') DESC, id DESC`                  | 501                                 |
+| `undatedTransactions`   | the same derived set as `listTransactions`                                          | as `listTransactions`                                                         | **Group first, then filter**, as `listTransactions`, with `source`, `account` and `q` only, then the rows whose `as_of` starts with no calendar date, counted per source account.              | `source_id, source_account`                         | 5,000 bound                         |
 | `listLatestBalances`    | `balance_observations` via `activeStateProjection` + `completeSnapshotCandidates`   | as above, plus current complete snapshot, MyJCB and V Point windows           | **Group first, then filter.** Latest witness per (source, parser family, unit, account, metric, instrument) is ranked over the whole active set; the filter applies after.                     | `source_id, source_account, metric, instrument, id` | 501, or 5001 for the candidate set  |
 | `listBalanceHistory`    | `balance_observations` via `visibleEvidence.parseRuns`                              | recorded: failed, superseded and partial-run rows included, marked            | No grouping; filter, order, page.                                                                                                                                                              | `COALESCE(as_of, observed_at,'') DESC, id DESC`     | 501                                 |
 | `listPositions`         | `position_observations` via `activeStateProjection` + snapshot membership           | published + successful run + current complete snapshot                        | No grouping; filter, order, page, then valuations are matched for the first 500 positions of the page.                                                                                         | `source_id, source_account, security_code, id`      | 501 positions; pairs bounded        |
@@ -97,6 +98,71 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
   `413 result_limit_exceeded`. A result is never silently cut to look complete.
 - `/api/artifacts` walks an immutable descending id cursor; derived lists use
   deterministic total orderings (each ends in `id`) with an offset.
+- Each offset page is its own read of what is current then, so pages read
+  while a parse is published can repeat or skip a row, and a republished
+  snapshot brings its holdings back under new ids, so one holding can appear
+  on two pages under two ids. `POSITION_CUT_SQL` lets a caller that reads the
+  unscoped positions page by page check afterwards that the ids it read are
+  one cut: over the same text `positionsSql` pages, it counts the current
+  rows, the read ids still current, and the current rows that sort at or
+  before the greatest row read. The report job uses it and reads again or
+  refuses
+  ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21));
+  the evidence browser's pages do not. `test/position-cut.test.ts` checks it
+  against an oracle on seeded random stores and checks its plan without
+  table statistics: the same whole-store snapshot passes as one page, the
+  bound row searched by key, the id lists read once.
+
+### Order of `as_of` across shapes
+
+`listTransactions` orders by the text of `as_of` (`COALESCE(as_of, '') DESC,
+id DESC`), and `listBalanceHistory` by the text of `as_of` or `observed_at`.
+The text is not one shape. Transaction parsers write a calendar date
+(`2026-03-04`: MyJCB, Sony Bank, SBI Securities and most others), an instant
+with the `+09:00` offset (PayPay CSV; Mizuho ordinary history at
+`T00:00:00+09:00`; SBI VC Trade's slash-form timestamps), an instant in UTC
+with milliseconds (`2026-03-03T23:00:00.000Z`: V Point Pay notification
+events), or SBI VC Trade's ISO timestamps verbatim with the offset the
+provider wrote. So the order is newest text first, not newest time first:
+
+- Two instants written in different offsets order by their text, not by
+  absolute time: an instant at 05:00 `+09:00` lists above one at 10:00
+  `+09:00` written as `01:00:00.000Z`. Between the `Z` and `+09:00` shapes
+  the error is at most nine hours.
+- A date lists below every instant whose text starts with that date and
+  above every instant whose text starts with an earlier one; an instant in
+  UTC starts with its UTC date. A missing `as_of` lists last.
+- The `from` and `to` filters read the date an `as_of` starts with, so an
+  instant in UTC falls on its UTC date: a V Point Pay event at 08:00
+  `+09:00` on 2026-03-04 is in `to=2026-03-03`. The Transactions page's
+  column sort and date filter in the browser read the same text the same
+  way.
+
+Balance history mixes more shapes than these: a year-month (`2026-03`:
+MyJCB statement payment amounts), which lists below every date and instant
+of its month; a local date-time with no zone (Sony Bank gross balance); an
+instant in UTC with milliseconds (Vpass credit availability); and a row
+without `as_of` sorts by its `observed_at`. It takes no `from` or `to`.
+
+None of this skips or repeats a row: the order is total and ends in `id`,
+so offset pages over a fixed store return every row once. No read picks a
+"latest" transaction from this order. The `activity` intent of
+`kogane.financial.query` merges its per-scope reads with a comparator of
+the same text and id (`compareActivity` in
+`packages/application/src/query/execute.ts`), so its merge takes exactly the
+rows each scope's read put first. `test/transaction-order.test.ts` pins the
+three points above and the paging over mixed shapes.
+
+Ordering by absolute time is an owner decision, not made: instants alone
+could be ordered by their UTC instant, but every total order must also
+place a date among instants, and the domain leaves that open.
+`compareTemporal` (`packages/domain/src/time.ts`) orders an instant against
+a date only when the instant's own calendar date lies wholly outside the
+date (`within_day` otherwise), and `temporalOrderingKey`, the domain's total
+key for paging, sorts every instant before every date rather than among
+them ([domain contracts](domain-contracts.md#timets--role-typed-time)).
+Normalizing the instants alone would also move each date against the
+`+09:00` instants of its own day, which is the same undecided question.
 
 ### Coverage run counts
 
@@ -118,6 +184,94 @@ which `overview`'s own `COUNT(*)` of `fetch_runs` already does on each call.
 The same file is the differential: on 8 random stores inside the window it
 returns the window's count for every scope, and on 8 random stores and a
 fixed one past it the exact count, unmoved by an unlisted source's runs.
+
+### Latest witness ranking
+
+`listLatestBalances` ranks the witnesses of one group (source, parser family,
+unit, account, metric, instrument) by the text of
+`COALESCE(as_of, observed_at, '')`, greatest first, then by `id`. Two
+families rank differently in `src/sql.ts`: MyJCB past-month balances by
+`detailMonth`, and Sony Bank history by capture and then the CSV, after the
+text. Text order is time order only while every key of a group has one
+shape. Which shapes reach one group, from every parser that writes
+`balance_observations` (read from the parsers on 2026-11-21; production was
+not read):
+
+- A parser with a snapshot policy (`SNAPSHOT_DATASETS` and
+  `ARTIFACT_SNAPSHOT_CONTAINERS` in `packages/parsers/src/snapshot-query.ts`)
+  contributes only its current complete capture: `CURRENT_SNAPSHOT` admits
+  one fetch run per source, parser, dataset and unit, each such parser has
+  one dataset, and a group's key holds the parser and the unit, so every key
+  of a group comes from one capture. The keys are the fetch instant, which the
+  `observation_fetch_artifacts` view always writes in UTC with milliseconds
+  (Mizuho, Prestia, SBI Shinsei, Money Forward, MyJCB J-POINT history); one
+  provider time for the whole response (SBI VC Trade `statusDate`, else
+  `meta.timestamp`; Sony Bank `updateDttm`; the SMBC and St.George recorded
+  instant; Vpass `shokaiDate`, while the Vpass revolving rows carry neither
+  `as_of` nor `observed_at`); or SBI foreign cash balances' per-row
+  `businessDate`.
+- Every other group spans captures, and its parser writes one shape: a
+  calendar date (Mobile Suica, the MyJCB statement total, Vpass statement
+  months as `YYYY-MM-01`, Sony Bank history in JSON and CSV), the fetch
+  instant as `observed_at` (MyJCB J-POINT balance; V Point, read from its
+  newest complete run only), a canonical UTC instant (V Point Pay events), or
+  SBI VC Trade's `eventDatetime` (cashflow balances), which the audited
+  captures carry only in the slash form, read as `+09:00`.
+
+So no group of today's parsers mixes a calendar date with an instant, or two
+offsets, and the ranking picks the greatest key in time. Limits, in shapes
+the code accepts and nobody has observed:
+
+- SBI VC Trade's `providerTimestamp` keeps an ISO date-time verbatim with the
+  offset the provider wrote. Cashflow balances span captures, so an
+  `eventDatetime` sent in UTC would put `Z` and `+09:00` text in one group,
+  and the ranking could then be up to nine hours wrong.
+- SBI foreign cash balances keep `businessDate` verbatim as any string; the
+  fixtures, which mirror the captured shape, carry only `YYYY-MM-DD`. Rows of
+  one capture with differently shaped dates would rank by their text, and a
+  row whose `businessDate` is not a string has an empty key and ranks last.
+
+Where a parser leaves `as_of` empty, `observed_at` (when the source displayed
+a value) stands in for `as_of` (the time the value describes), and the two
+are ranked as one kind of time.
+
+### Rows a date window cannot place
+
+The `from` and `to` filters keep a transaction only when its `as_of` starts
+with a real calendar date (`CALENDAR_DATED_AS_OF` in `src/scope.ts`), and
+then compare that date. A row whose `as_of` is null, a year-month
+(`2026-03`), an impossible day (`2026-02-30`) or any other text is in no
+window: a windowed `listTransactions` leaves it out, neither inside nor
+outside the range. An instant, with or without a zone, starts with a date
+and is placed by it.
+
+`undatedTransactions` counts those rows. It reads the same derived set as
+`listTransactions` (`undatedTransactionsSql` wraps `TRANSACTIONS_SQL`),
+applies the same `source`, `account` and `q` predicates, and keeps the rows
+for which `(CALENDAR_DATED_AS_OF) IS NOT 1`, the exact complement of the
+window's date check, grouped per source account. The windowed SQL is the
+shipped text (the predicate moved into the constant unchanged; a test pins
+the frozen text). `test/undated-transactions.test.ts` checks that the
+count's derived set is `TRANSACTIONS_SQL`'s text byte for byte for every
+scope, and, on five seeded random stores (about a quarter of their parses
+never published) and eleven scopes each, that the unwindowed rows of a scope
+are the rows the widest window places plus the counted ones, and that the
+count per source account equals an independent calendar oracle over the
+published rows. Its plan, on every CORE migration with no table statistics,
+makes exactly the scans and searches of the windowed `listTransactions`
+plan, as many times: only the final temporary B-tree differs (`GROUP BY` in
+place of `ORDER BY`).
+
+The `activity` intent of `kogane.financial.query` calls it once per scope
+pair when a request has `from` or `to`, and names each source with such a
+row as the gap `undated_rows_excluded`
+([agent API](agent-api.md#rows-a-date-window-cannot-place)). Its cost is a
+second evaluation of the derived transaction set per scope pair, the same
+work as one `listTransactions` page, and only on windowed requests. The v1
+`/api/transactions` route and `kogane.observations.list` read the same
+windowed SQL and have no field to carry a reason, so they still leave these
+rows out without saying so: a limit, not a guarantee that the window is
+everything in scope.
 
 ### Raw download
 

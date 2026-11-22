@@ -7,6 +7,7 @@ import {
   safeFailure,
 } from "../src/diagnostics";
 import { collectMoneyForward } from "../src/moneyforward";
+import { persistSharedRun } from "../src/shared-collection";
 import { runSharedCollection } from "../src/worker";
 import type { MoneyForwardCredential } from "../src/types";
 
@@ -187,5 +188,132 @@ describe("diagnostics snapshot error properties once", () => {
     expect(statusReads).toBe(1);
     expect(reasonReads).toBe(1);
     expect(JSON.stringify(detail)).not.toContain(PRIVATE);
+  });
+});
+
+// INV05: a run that did not finish its collection never learned how many
+// account details and monthly fragments there were, so its result and its
+// stored manifest leave both counts out instead of reporting 0. A finished
+// run reports what it read, including a known 0 for an empty account list.
+// The provider is a synthetic `fetch`; nothing leaves the test.
+describe("Money Forward run counts are reported only when the collection finished", () => {
+  const COUNT_FIELDS = ["accountDetailCount", "monthlyFragmentCount"] as const;
+
+  async function syntheticProvider(accounts: readonly string[], failingRoute?: string) {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+      "verify",
+    ]);
+    const passkey: MoneyForwardCredential = {
+      ...credential,
+      keyValue: Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString(
+        "base64url",
+      ),
+    };
+    const csrf = '<meta name="csrf-token" content="synthetic-csrf">';
+    spyOn(globalThis, "fetch").mockImplementation((async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const route = `${url.hostname}${url.pathname}`;
+      if (failingRoute !== undefined && route.startsWith(failingRoute))
+        return new Response(PRIVATE, { status: 503 });
+      if (route === "id.moneyforward.com/sign_in") return new Response(csrf);
+      if (route === "id.moneyforward.com/webauthn/assertion/options")
+        return Response.json({ challenge: "synthetic-challenge" });
+      if (route === "id.moneyforward.com/webauthn/assertion")
+        return Response.json({ redirectPath: "/me" });
+      if (route === "id.moneyforward.com/me") return new Response("<html></html>");
+      if (route === "moneyforward.com/accounts")
+        return new Response(
+          `<a href="/sign_out">out</a>${accounts.map((hash) => `<a href="/accounts/show/${hash}">x</a>`).join("")}`,
+        );
+      if (route.startsWith("moneyforward.com/accounts/show/")) {
+        const hash = url.pathname.slice("/accounts/show/".length);
+        return new Response(
+          `${csrf}<input name="account[id_hash]" value="${hash}"><input name="service[id]" value="1">`,
+        );
+      }
+      if (route === "moneyforward.com/cf/fetch") return new Response("<table></table>");
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch);
+    return JSON.stringify(passkey);
+  }
+
+  async function storedManifest(data: FakeR2Bucket, terminalKey: string) {
+    const terminal = JSON.parse(new TextDecoder().decode(data.entries.get(terminalKey)!.bytes)) as {
+      artifacts: { artifactKey: string; storageRef: { key: string } }[];
+    };
+    const entry = terminal.artifacts.find((artifact) => artifact.artifactKey === "manifest.json");
+    if (entry === undefined) return undefined;
+    return JSON.parse(new TextDecoder().decode(data.entries.get(entry.storageRef.key)!.bytes));
+  }
+
+  for (const [label, accounts, counts] of [
+    ["two accounts", ["hash-a", "hash-b"], { accountDetailCount: 2, monthlyFragmentCount: 24 }],
+    ["no account", [], { accountDetailCount: 0, monthlyFragmentCount: 0 }],
+  ] as const) {
+    test(`a finished run reports its counts (${label})`, async () => {
+      captureLogs();
+      const data = new FakeR2Bucket();
+      const result = await runSharedCollection(fixture(await syntheticProvider(accounts), data));
+      expect(result.status).toBe("success");
+      expect(result).toMatchObject(counts);
+      expect(await storedManifest(data, result.terminalKey)).toMatchObject(counts);
+    });
+  }
+
+  for (const [label, failingRoute] of [
+    ["the passkey options", "id.moneyforward.com/webauthn/assertion/options"],
+    ["an account detail", "moneyforward.com/accounts/show/"],
+    ["a monthly fragment", "moneyforward.com/cf/fetch"],
+  ] as const) {
+    test(`a run stopped at ${label} leaves both counts out`, async () => {
+      const logs = captureLogs();
+      const data = new FakeR2Bucket();
+      const secret = await syntheticProvider(["hash-a", "hash-b"], failingRoute);
+      const result = await runSharedCollection(fixture(secret, data));
+      expect(result.status).toBe("failed");
+      expect(result.failureCount).toBe(1);
+      expect(result.persistence).toBe("persisted");
+      for (const field of COUNT_FIELDS) expect(Object.hasOwn(result, field)).toBe(false);
+      // A failed run keeps no artifact, so no manifest carries a count either.
+      expect(await storedManifest(data, result.terminalKey)).toBeUndefined();
+      expect(logs.join()).not.toContain(PRIVATE);
+    });
+  }
+
+  test("a run with no credential leaves both counts out", async () => {
+    captureLogs();
+    const fetch = spyOn(globalThis, "fetch").mockImplementation((async () => {
+      throw new Error("unexpected fetch");
+    }) as unknown as typeof globalThis.fetch);
+    const result = await runSharedCollection(
+      Object.assign({} as Env, { COLLECTOR_SCHEMA_VERSION: "test", DATA: new FakeR2Bucket() }),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    for (const field of COUNT_FIELDS) expect(Object.hasOwn(result, field)).toBe(false);
+  });
+
+  test("a successful input without its account count derives no identity", async () => {
+    const data = new FakeR2Bucket();
+    const outcome = await persistSharedRun(data, {
+      schemaVersion: "test",
+      runId: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      startedAt: "2026-09-11T21:15:00.000Z",
+      completedAt: "2026-09-11T21:17:00.000Z",
+      status: "success",
+      artifacts: [
+        {
+          dataset: "accounts-index",
+          filename: "accounts.html",
+          mediaType: "text/html; charset=utf-8",
+          body: "<html>synthetic index</html>",
+        },
+      ],
+      failures: [],
+    });
+    expect(outcome.identity).toBe("identity_incomplete");
+    const manifest = await storedManifest(data, outcome.result.terminalKey);
+    for (const field of COUNT_FIELDS) expect(Object.hasOwn(manifest, field)).toBe(false);
   });
 });

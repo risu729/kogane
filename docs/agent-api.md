@@ -267,13 +267,24 @@ request, the operator's browser requests and other MCP clients' included
 
 `activity`'s `from` and `to` are calendar days (`YYYY-MM-DD`; `2026-02-30` is
 not one) and `from` is not after `to`, as the v1 activity route reads them;
-anything else is `invalid_query` (`parseQueryRequest`).
+anything else is `invalid_query` (`parseQueryRequest`). Rows are ordered,
+and matched to `from` and `to`, by the text of their `as_of`, which mixes
+calendar dates with instants in UTC and in `+09:00`: a limit described in
+[read model: order of `as_of` across shapes](read-model.md#order-of-as_of-across-shapes).
 
 `coverage` lists each in-scope source — the grant's sources, narrowed by the
 `source` filter — with its `artifactCount` and `collectionRunCount`: the
 exact number of visible fetch artifacts and fetch runs of that source over its
 whole history, and their sums. A source without an artifact is the gap
-`no_artifacts_collected`. The run counts are read by one query restricted to
+`no_artifacts_collected`, and so is a `source` filter that names a source the
+store does not hold: that answer has no scope and every count is 0, so it is
+`partial` with the gap on `source:<filter>`, never a `complete` empty answer
+(INV05). The filter is inside the grant already (a denied one is
+`evidence_restricted` before anything is read), so the gap names nothing the
+caller did not send. Without a filter, each source a listed grant names that
+the store does not hold is the same gap: those are the grant's own values,
+and leaving them out would make a grant whose sources the store holds none of
+a `complete` answer with no scope. The run counts are read by one query restricted to
 the in-scope sources before it counts anything
 (`SOURCE_FETCH_RUN_COUNTS_SQL`, through `idx_fetch_runs_source`), so a run of
 a source outside the scope is never read and never moves an in-scope count.
@@ -288,6 +299,27 @@ newest 501 visible runs across every source — and `coverage` does not count
 inside it ([ADR 0047](adr/0047-mcp-client-connection.md)).
 `test/coverage-scope.test.ts` pins this on the HTTP agent route and `/mcp`:
 520 runs of a source outside the scope leave the whole answer byte-identical.
+
+#### Rows a date window cannot place
+
+An `activity` window places a row by the calendar date its `as_of` starts
+with, so a row whose `as_of` is null, a year-month, an impossible day or other
+text is left out of every windowed page: whether it lies in the window is not
+known. When a request has `from` or `to`, `executeQuery` counts those rows in
+each scope pair, inside the `source`, `account` and `q` filters and the grant
+(`undatedTransactions`,
+[read model](read-model.md#rows-a-date-window-cannot-place)), and names each
+source that has one as the gap `undated_rows_excluded` (`scopeRef`
+`source:<id>`), on every page
+([ADR 0091, amendment of 2026-11-21](adr/0091-query-cursor-paging-basis.md#amendment-2026-11-21-rows-a-date-window-cannot-place-are-a-gap),
+proposed). The answer is then `partial`, and the `freshness` dimension is
+`partial` with the reason `undated_rows_excluded`. Such a source is not also
+named `no_rows_in_scope`. Without `from` and `to` nothing is left out: an
+undated row is returned, and the page's freshness says `as_of_missing` as
+before. `every_row_carries_an_as_of` is the freshness reason only when every
+returned row carries an `as_of` and no row in scope was left out unplaced.
+`packages/application/test/activity-undated.test.ts` pins this over the real
+transactions read.
 
 `holdings` reads A07's adopted balance projection and nothing else. While READ
 is unbound or no snapshot is sealed it answers
@@ -327,6 +359,18 @@ statement amounts, period totals and reward units are excluded by their own
 registry entries. Units are never added together, the answer carries
 `liabilitiesCoverage: "unknown"`, and there is no `netWorth` field: unfetched
 liabilities mean an asset subtotal is not even a lower bound (addendum 05 §5).
+
+A scope the read asks the snapshot for (one per granted source and account
+pair, or the whole filter scope under a whole-store grant) that the
+snapshot holds no measurement of at all — neither a summable row nor a
+coverage row, as for an `account` filter the store never observed or an empty
+snapshot — is the gap `no_measures_in_scope` and makes the answer `partial`,
+and so is a source a listed grant names that the store does not hold (the
+read leaves it out of its pairs):
+nothing is known there, and an empty `units` list would read as a known
+nothing (INV05). An account whose measurements are all adopted but none of
+them a summable currency stock (points only, for example) is measured, so it
+stays `complete` with no unit for it.
 
 Every row is re-checked against the grant before it is summed, and a subject
 scope counted twice in one unit (for example reached through two scope pairs)
@@ -481,8 +525,7 @@ agent principal (`403 operator_required`).
 #### Per-card view (ADR 0125)
 
 `view: cards` answers "how much was each card used" in one compact read
-([ADR 0125](adr/0125-card-purchases-per-card-view.md); proposed, a published
-tool change awaiting the owner's approval). It takes exactly one of `period`
+([ADR 0125](adr/0125-card-purchases-per-card-view.md)). It takes exactly one of `period`
 (a statement month) and `usageMonth` (a month of provider usage dates, so
 purchases not yet on a statement count too), and no `eventId` or `offset`;
 anything else is `400 invalid_query` naming the keys. It is the operator
@@ -567,8 +610,8 @@ route's `GET /api/v2/card-purchases?view=cards` answer, from the same
 
 `view: lines` answers "what did I spend on card X this month, on what" and "my
 largest purchases this month"
-([ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19);
-proposed, a published tool change awaiting the owner's approval). It takes
+([ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19)).
+It takes
 exactly one of `period` and `usageMonth`, optionally `account` (an `accountId`
 from `view: cards`), `sort` and `cursor`, and no `eventId` or `offset`;
 anything else, or a cursor another request issued, is `400 invalid_query`
@@ -806,7 +849,9 @@ card settlement answer offers a page its grant is refused
 (`maxRows` 1000) the last page offered starts at offset 950. Each item has the statement's ref, source, source account,
 resolved account, total (always a quantity: one that is not exact carries
 its status and reason, `stored:<status>` or `decimal_not_projected`, never
-null), due date (null when absent),
+null), due date (null when absent or not a civil date, and then with
+`paymentDateReason` `payment_date_absent` or `payment_date_invalid`,
+[ADR 0114, 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)),
 period, `code`, `debitsInWindow`, `planner` (null unless asked) and
 `acceptable: false`. A planner answer lists at most the first 50 allocations
 (`manifest.planner.bounds.allocations`), with `allocationCount` (all of them)
@@ -839,7 +884,8 @@ any other key or value is `400 invalid_request`. Output without a view:
 account), its `latestStatement` (ref, period, due date, total; null when the
 card has no current statement; a total that is not exact is a quantity with
 its status and reason, `stored:<status>` or `decimal_not_projected`, never
-null), `stated` (status `named`, `conflicting`,
+null; a null due date has `paymentDateReason`, `payment_date_absent` or
+`payment_date_invalid`), `stated` (status `named`, `conflicting`,
 `not_named` or `absent` with its reason, the newest reading and the newest
 one naming exactly one account), `settled` and `proposed` (per bank account:
 distinct statements and the candidate with the latest debit date), and the
@@ -852,6 +898,11 @@ confirmed, and the page shows it as a warning, so an agent reads the same
 `codes` the page does: with `newer_reading_unresolved` it is the last account
 the provider was seen to state, which a newer reading does not confirm, so the
 account may have changed. Undecided candidates are listed, never used as the answer (INV07).
+A debit date that is null, in `settled`, `proposed` or an
+`accepted-settlement` answer, has `debitDateReason` `debit_date_invalid`: the
+candidate's stored bank debit date is not a civil local date, which the only
+candidate writer never stores ([ADR 0114, 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)). Each reason
+is a key only beside a null date.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `maxRows` of at least 100, else
@@ -870,8 +921,7 @@ It is the `カード照合` page's `次回の引落` section's service
 (`reviewUpcomingCardBills`, route
 `GET /api/v2/reconciliation/card-debit-accounts?view=upcoming`), graded as
 above. The view is a published tool schema change (decision D3 of the
-2026-11-19 MCP proposal v2), an owner approval item before merge; no
-catalogue operation is added.
+2026-11-19 MCP proposal v2); no catalogue operation is added.
 
 Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
 
@@ -883,7 +933,10 @@ Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
   `label`, `since`, and `codes`: the answer's notes or its unknown reason).
 - `byDebitAccount`: one line per debit account and debit date. `bills` and
   `cardBills` count every bill to that account due on or before the line's
-  date (summed with `sumQuantities`; not exact when one bill is not);
+  date (summed with `sumQuantities`; `missing` with `unit_mismatch` when
+  they are in more than one unit, else not exact when one bill is not;
+  `reasons` below then also names `unit_mismatch`, between
+  `debit_account_unknown` and `bill_not_exact`);
   `balance` is the account's `deposit.balance` in the reported state for the
   date with `capturedAt` (null on the line of bills with no known account);
   `covers` is `yes` or `no` only when both are exact and no reason holds,
@@ -1177,6 +1230,14 @@ the reader is the route's status with `{ error, refs? }`, as the Worker
 answers it, without the request id. A store read that fails is
 `503 catalogue_read_failed`, as on the route.
 
+Limit: `kogane.observations.list` with `kind: "transactions"` and `from` or
+`to`, like `GET /api/transactions`, leaves out every transaction whose
+`as_of` starts with no calendar date (null, a year-month, an impossible
+day), and its answer has no field that says so. Only `kogane.financial.query`
+`activity` names those rows, as `undated_rows_excluded`
+([rows a date window cannot place](#rows-a-date-window-cannot-place)); the
+same list without `from` and `to` returns them.
+
 Five reads answer one short line per row by default
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
 the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
@@ -1184,8 +1245,8 @@ the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
 `view: "accounts"`),
 `kogane.store.read` with `page: "overview"` and `kogane.observations.list`
 with `kind: "balances"` take `detail`, `summary` (the
-default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19
-(the balance list: before 2026-11-20), unchanged; the web UI asks for it. A `summary` is derived from that same
+default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before their summaries merged
+(2026-11-20, #1458 and #1471; the account view and the balance list: 2026-11-21, #1486 and #1488), unchanged; the web UI asks for it. A `summary` is derived from that same
 answer by one function in `packages/application` or
 `packages/collection`, so the route and the tool give the same summary, and
 it keeps every id that reads a row in full (`observationId`, a job id, a
@@ -1443,8 +1504,8 @@ Until 2026-11-18 every read tool outside the page reads answered a store
 failure inside its read with `500 internal_error`.
 
 `kogane.rewards.read` with `collection: "expiry"` also takes `from`, `before`
-and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read),
-proposed; [rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
+and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read);
+[rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
 `from` (inclusive, default today's Asia/Tokyo date) and `before` (exclusive)
 are `YYYY-MM-DD` and window each row's `expiresOn`. With neither there is no
 window: a summary then counts every dated bucket inside, past deadlines too.
@@ -1469,7 +1530,7 @@ default 50-row page.
 `kogane.reported-holdings-change.read` takes `{ from, to, source?, account?,
 detail?, limit?, cursor? }`, the route's parameters
 ([reported state](reported-state.md#http-contract-and-page); ADR 0075,
-amendment 2026-11-19, proposed). `detail` is `summary` (the default) or
+amendment 2026-11-19). `detail` is `summary` (the default) or
 `full`. The summary answers "how did my holdings change" in one call: it
 lists only the holdings whose change is not an exact zero (`compared` with a
 nonzero change, `listed_at_start_only`, `listed_at_end_only`, then
@@ -1535,8 +1596,8 @@ line, or the summary's `otherSchedules`, alone would pass that is
 proposed, needs the owner's approval). `offset` with the summary's
 `detail: "full"`, which is unpaged, is `400 invalid_request`.
 The account view's summary
-([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20);
-proposed, needs the owner's approval) is one line per account, in id order:
+([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20))
+is one line per account, in id order:
 its id (which `detail: "full"` and the identity reads take), stored label,
 mapping statuses, freshness, observation kinds, number of data types, provider
 data types, periods (count, first and last named), the periods counted by
@@ -2044,13 +2105,13 @@ typed error.
 How the quality dimensions are filled today, from what the shared read model
 actually knows:
 
-| Dimension        | Filled from                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `identity`       | The read mode: `as-recorded` is `verified`; `latest` is `partial` (`mappings_may_change_under_latest`) |
-| `freshness`      | Whether every in-scope source has collected evidence, and every row an `as_of`                         |
-| `numeric`        | The decimal state: exact minor units, or `amount_text_only`                                            |
-| `reconciliation` | `not-applicable` — no reconciliation engine exists yet, and it says so                                 |
-| `valuation`      | `not-applicable` — no valuation policy is adopted                                                      |
+| Dimension        | Filled from                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`       | The read mode: `as-recorded` is `verified`; `latest` is `partial` (`mappings_may_change_under_latest`)                                                   |
+| `freshness`      | Whether every in-scope source has collected evidence, every returned row an `as_of`, and (for an `activity` window) no row in scope was left out undated |
+| `numeric`        | The decimal state: exact minor units, or `amount_text_only`                                                                                              |
+| `reconciliation` | `not-applicable` — no reconciliation engine exists yet, and it says so                                                                                   |
+| `valuation`      | `not-applicable` — no valuation policy is adopted                                                                                                        |
 
 ## Proposals are not adoptions
 
@@ -2059,6 +2120,18 @@ in one D1 batch: a `decision_revisions` row with `decision_kind = 'propose'`
 and `method` `ai` or `manual`, and an `entity_relations` row with
 `status = 'proposed'`. The relation's provenance trigger requires its decision
 to exist first, so a failed guard leaves neither row.
+
+The two rows' ids are a digest of the principal, the context (whose id
+includes the whole-second clock), the kind, both targets, the sorted evidence
+refs, the reason and the recording instant, so the same proposal sent twice in
+one second collides with itself. That refused write is `409
+idempotency_conflict` naming the `proposal:` id, and only when that proposal's
+decision is already recorded (`proposalRecorded`). Any other refused write (a
+store outage, or an audit record the batch could not write) recorded nothing
+and is the store's failure, `500 internal_error` on both transports, never a
+duplicate the caller is told not to resend
+(`services/app/test/audit.test.ts`). The same
+proposal sent in another second is a second proposal.
 
 No reader adopts a `proposed` relation, so a proposal cannot change a mapping,
 a balance, a total or any adopted set. `test/agent-api.test.ts` proves it by

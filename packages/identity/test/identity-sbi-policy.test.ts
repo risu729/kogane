@@ -180,8 +180,17 @@ describe("SBI Securities identity policy versions", () => {
     const row = scopeless("Synthetic one", 4);
     expect(at(row, undefined)).toEqual(at(row, 3));
     expect(at(row, 10)).toEqual(at(row, 3));
-    // Policy 3 changes nothing for a row that states its discriminator.
+    // Policy 3 changes nothing for a row that states its discriminator, so
+    // this row alone cannot tell policy 3 from policy 2.
     expect(at(row, 3)).toEqual(at(row, 2));
+    // A custody row with no account discriminator is planned differently by
+    // policy 3; it shows the call takes policy 3, not policy 2.
+    const undiscriminated = input({
+      extra: { countryCode: "US", securities: { securitiesCode: "SYNX", ric: "SYNX.O" } },
+    });
+    expect(at(undiscriminated, 3)).not.toEqual(at(undiscriminated, 2));
+    expect(at(undiscriminated, undefined)).toEqual(at(undiscriminated, 3));
+    expect(at(undiscriminated, 10)).toEqual(at(undiscriminated, 3));
   });
 
   test("every shape with a RIC, a MIC or a country plans identically under every version", () => {

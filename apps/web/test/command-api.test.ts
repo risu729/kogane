@@ -55,6 +55,15 @@ test("an unknown refusal code falls back to its status, never to the server's te
   expect((await refusal(401, "synthetic_unknown")).message).toBe(FALLBACKS[2]!);
 });
 
+test("a refusal code that names a built-in object member falls back like any unknown code", async () => {
+  for (const code of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+    const error = await refusal(400, code);
+    expect(error.code).toBe(code);
+    expect(error.message).toBe(FALLBACKS[0]!);
+    expect((await refusal(403, code)).message).toBe(FALLBACKS[1]!);
+  }
+});
+
 test("only a refusal the same request would meet again says retrying will not help", async () => {
   // The App's own 400 (a body that is not a JSON object) is refused again.
   const invalid = await refusal(400, "invalid_request");

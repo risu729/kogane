@@ -676,7 +676,7 @@ offer with `offer_not_valid_at_clock` (the test fails on the old route).
 
 ## Amendment: a deadline window and a summary on the expiry read
 
-- Status: proposed. **Owner approval is needed before merge**: it changes the
+- Status: accepted (merged 2026-11-20 in [#1460](https://github.com/risu729/kogane/pull/1460)). Owner approval was required before merge: it changes the
   published input schema of `kogane.rewards.read` (three new optional
   arguments) and the query parameters of `GET /api/v2/rewards/expiry`.
 - Date: 2026-11-19

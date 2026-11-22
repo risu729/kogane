@@ -582,7 +582,7 @@ the validators.
 
 ## Amendment: a read tool's store failure is its route's answer (2026-11-18)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1402](https://github.com/risu729/kogane/pull/1402))
 - Date: 2026-11-18
 
 ### Context
@@ -693,9 +693,9 @@ both eras and on the HTTP path, and checks a read's tool result in both eras.
 
 ## Amendment: activity filters on `kogane.events.read` (2026-11-20)
 
-- Status: proposed. The tool's input schema, its description and the
-  activity route's answer gain fields: published changes, so **the owner's
-  approval is needed before merge**, as for every published tool change.
+- Status: accepted (merged 2026-11-21 in [#1493](https://github.com/risu729/kogane/pull/1493)). The tool's input schema, its description and the
+  activity route's answer gain fields: published changes, so the owner's
+  approval was required before merge, as for every published tool change.
 - Date: 2026-11-20
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap
   G3 of the MCP everyday-questions audit; the next slice

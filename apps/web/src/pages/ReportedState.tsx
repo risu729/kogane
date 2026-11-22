@@ -263,7 +263,10 @@ function PayableTable({ payables }: { payables: ReportedPayable[] }): ReactNode 
                   <Nullable value={payable.period} />
                 </td>
                 <td>
-                  <Nullable value={payable.paymentDate} placeholder="不明" />
+                  {/* Null only when no `_kogane.paymentDate` is recorded: a value
+                      that is not a civil date is shown as stored, and the
+                      status says the due date is unknown either way. */}
+                  <Nullable value={payable.paymentDate} placeholder="引落予定日未記録" />
                 </td>
                 <td className="num">
                   <Link to={`/observations/balance/${idOf(payable.ref)}`}>
