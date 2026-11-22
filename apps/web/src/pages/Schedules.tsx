@@ -267,6 +267,11 @@ function CollectionRequest({
             {name(value.id)}
             にログインし、毎日の収集と同じ範囲を取得します。期間は指定できません。収集が始まった依頼は取り消せません。送信する前に、次の状態を確認してください。
           </p>
+          {unresolved !== null && unresolved.key === pending.key ? (
+            <p>
+              前回の送信は保存されたか確認できていません。同じ依頼として送ります。保存済みなら、その依頼の状態を表示します。
+            </p>
+          ) : null}
           <dl>
             <dt>前回の実行</dt>
             <dd>
@@ -285,11 +290,6 @@ function CollectionRequest({
             <dt>メンテナンス時間</dt>
             <dd>{REF[value.maintenance.status]}。停止時間中は終了まで待機します。</dd>
           </dl>
-          {unresolved !== null && unresolved.key === pending.key ? (
-            <p>
-              前回の送信は保存されたか確認できていません。同じ依頼として送ります。保存済みなら、その依頼の状態を表示します。
-            </p>
-          ) : null}
           <div className="schedule-actions">
             <button type="button" className="button" disabled={busy} onClick={send}>
               {busy ? "送信中…" : "依頼を送信"}
