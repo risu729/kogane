@@ -260,11 +260,15 @@ function scenario(
   return store;
 }
 
-async function review(store: DatedStore, seen?: string[]): Promise<UpcomingCardBillsReview> {
+async function review(
+  store: DatedStore,
+  seen?: string[],
+  date: string = DATE,
+): Promise<UpcomingCardBillsReview> {
   const outcome = await reviewUpcomingCardBills({
     grant: WHOLE,
     sql: executor(store, seen),
-    date: DATE,
+    date,
   });
   if (!outcome.ok) throw new Error(JSON.stringify(outcome.error));
   return outcome.review;
@@ -397,6 +401,34 @@ describe("covers", () => {
       covers: "no",
       reasons: [],
     });
+  });
+
+  test("on a bill's own due date, a balance captured that day may already show the debit", async () => {
+    // Asked on card-002's due date (09-26): bank B's capture of that day may
+    // come after the bank took the 20,000, so comparing it with the bill would
+    // count the debit twice. Captured the day before, it is compared.
+    const today = "2026-09-26";
+    const sameDay = scenario((store) =>
+      balances(store, "2026-09-26T03:00:00Z", [[BANK_B, 10_000, "acct-bank-b"]]),
+    );
+    const [b] = (await review(sameDay, undefined, today)).byDebitAccount.filter(
+      (line) => line.account === "acct-bank-b",
+    );
+    expect(b).toMatchObject({
+      debitDate: today,
+      bills: 1,
+      cardBills: { value: "20000", status: "exact" },
+      balance: { value: "10000", status: "exact", capturedAt: "2026-09-26T03:00:00.000Z" },
+      covers: "unknown",
+      reasons: ["balance_before_previous_debit"],
+    });
+    const dayBefore = scenario((store) =>
+      balances(store, "2026-09-25T03:00:00Z", [[BANK_B, 10_000, "acct-bank-b"]]),
+    );
+    const [earlier] = (await review(dayBefore, undefined, today)).byDebitAccount.filter(
+      (line) => line.account === "acct-bank-b",
+    );
+    expect(earlier).toMatchObject({ debitDate: today, covers: "no", reasons: [] });
   });
 
   test("a refund statement to bank B never offsets card-002's bill", async () => {

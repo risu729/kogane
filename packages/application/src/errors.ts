@@ -34,6 +34,35 @@ export function financialError(
   };
 }
 
+/** The most unknown keys one refusal names. */
+export const UNKNOWN_KEY_REFS_MAX = 10;
+/** The most UTF-16 code units of one unknown key a refusal repeats. */
+export const UNKNOWN_KEY_REF_LENGTH = 64;
+
+/**
+ * The first 64 code units of the caller's text, one fewer when the 64th is a
+ * high surrogate: the cut never makes a lone surrogate, which serialises as a
+ * `\ud83d` escape that strict JSON decoders refuse. A lone surrogate the
+ * caller sent inside the kept prefix is the caller's own text and stays.
+ */
+export function refPrefix(text: string): string {
+  const cut = text.slice(0, UNKNOWN_KEY_REF_LENGTH);
+  const last = cut.charCodeAt(cut.length - 1);
+  return cut.length === UNKNOWN_KEY_REF_LENGTH && last >= 0xd800 && last <= 0xdbff
+    ? cut.slice(0, -1)
+    : cut;
+}
+
+/**
+ * The refs of an `unsupported_semantics` refusal of unknown keys: the first
+ * ten keys, each cut to its first 64 code units (`refPrefix`). A key is the
+ * caller's own text, so it is named only far enough to be recognised, and a
+ * body full of long keys is never repeated back whole.
+ */
+export function unknownKeyRefs(keys: readonly string[]): string[] {
+  return keys.slice(0, UNKNOWN_KEY_REFS_MAX).map(refPrefix);
+}
+
 /** HTTP status for each code. Auth failures keep the transport's own closed responses. */
 export const ERROR_STATUS: Record<FinancialErrorCode, number> = {
   needs_scope_resolution: 422,

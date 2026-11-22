@@ -94,7 +94,10 @@ const OBSERVATION_ROWS = `SELECT parse_run_id,'transaction' AS kind,id AS observ
  UNION ALL SELECT parse_run_id,'valuation',id,raw_locator,subject||'/'||metric FROM valuation_observations WHERE parse_run_id IN (SELECT run FROM runs)`;
 
 /** Scope and side CTEs shared by every comparison query. `?1` source,
- * `?2` dataset, `?3` parser name, `?4` candidate release id. */
+ * `?2` dataset, `?3` parser name, `?4` candidate release id. Each side is
+ * read through its own join, so an artifact whose published run is the
+ * candidate run (the release is active, or was, for that artifact) has every
+ * observation on both sides and compares as identical, never as base-only. */
 const COMPARISON_CTES = `WITH scope AS (
   SELECT a.id AS artifact_id,pub.parse_run_id AS base_run,cand.parse_run_id AS candidate_run
   FROM fetch_artifacts a
@@ -106,9 +109,11 @@ const COMPARISON_CTES = `WITH scope AS (
   UNION SELECT candidate_run FROM scope WHERE candidate_run IS NOT NULL
 ), obs AS (${OBSERVATION_ROWS}
 ), sided AS (
-  SELECT s.artifact_id,CASE WHEN o.parse_run_id=s.base_run THEN 'base' ELSE 'candidate' END AS side,
-    o.kind,o.observation_id,o.raw_locator,o.role
-  FROM scope s JOIN obs o ON o.parse_run_id=s.base_run OR o.parse_run_id=s.candidate_run
+  SELECT s.artifact_id,'base' AS side,o.kind,o.observation_id,o.raw_locator,o.role
+  FROM scope s JOIN obs o ON o.parse_run_id=s.base_run
+  UNION ALL
+  SELECT s.artifact_id,'candidate',o.kind,o.observation_id,o.raw_locator,o.role
+  FROM scope s JOIN obs o ON o.parse_run_id=s.candidate_run
 ), keyed AS (
   SELECT artifact_id,kind,raw_locator,role,
     count(CASE WHEN side='base' THEN 1 END) AS base_n,
@@ -126,6 +131,63 @@ const COMPARISON_CTES = `WITH scope AS (
       WHERE d.kind=k.kind AND d.observation_id=k.candidate_obs AND d.policy_version='decimal-v1') AS candidate_value
   FROM keyed k WHERE k.base_n=1 AND k.candidate_n=1
 )`;
+
+/**
+ * The comparison's statements, each `COMPARISON_CTES` and one summary read,
+ * bound to `?1` source, `?2` dataset, `?3` parser name and `?4` candidate
+ * release id. Exported so a test can run them against frozen text.
+ */
+export const RELEASE_COMPARISON_SQL = {
+  artifacts: `${COMPARISON_CTES} SELECT
+        count(CASE WHEN base_run IS NOT NULL THEN 1 END) AS base,
+        count(CASE WHEN candidate_run IS NOT NULL THEN 1 END) AS candidate,
+        count(CASE WHEN base_run IS NOT NULL AND candidate_run IS NOT NULL THEN 1 END) AS compared,
+        count(CASE WHEN base_run IS NULL THEN 1 END) AS candidate_only FROM scope`,
+  byKind: `${COMPARISON_CTES} SELECT kind,count(CASE WHEN side='base' THEN 1 END) AS base,
+      count(CASE WHEN side='candidate' THEN 1 END) AS candidate FROM sided GROUP BY kind ORDER BY kind`,
+  locators: `${COMPARISON_CTES} SELECT
+        count(CASE WHEN base_n=1 AND candidate_n=1 THEN 1 END) AS matched,
+        count(CASE WHEN base_n>0 AND candidate_n=0 THEN 1 END) AS base_only,
+        count(CASE WHEN base_n=0 AND candidate_n>0 THEN 1 END) AS candidate_only,
+        count(CASE WHEN base_n>1 OR candidate_n>1 THEN 1 END) AS ambiguous FROM keyed`,
+  values: `${COMPARISON_CTES} SELECT count(*) AS compared,
+        count(CASE WHEN base_value IS NOT candidate_value THEN 1 END) AS differing,
+        count(CASE WHEN (base_value IS NULL)<>(candidate_value IS NULL) THEN 1 END) AS missing_one_side
+        FROM valued`,
+  coverage: `${COMPARISON_CTES}, claims AS (
+        SELECT s.artifact_id,'base' AS side,
+          c.scope_key,c.mode||'|'||c.completeness||'|'||c.membership_complete||'|'||c.observed_count
+            ||'|'||coalesce(c.expected_count,-1)||'|'||c.absence_meaning AS shape
+        FROM scope s JOIN parse_coverage_claims c ON c.parse_run_id=s.base_run
+        UNION ALL
+        SELECT s.artifact_id,'candidate',
+          c.scope_key,c.mode||'|'||c.completeness||'|'||c.membership_complete||'|'||c.observed_count
+            ||'|'||coalesce(c.expected_count,-1)||'|'||c.absence_meaning AS shape
+        FROM scope s JOIN parse_coverage_claims c ON c.parse_run_id=s.candidate_run
+      ), paired AS (
+        SELECT artifact_id,scope_key,
+          max(CASE WHEN side='base' THEN shape END) AS base_shape,
+          max(CASE WHEN side='candidate' THEN shape END) AS candidate_shape,
+          count(CASE WHEN side='base' THEN 1 END) AS base_n,
+          count(CASE WHEN side='candidate' THEN 1 END) AS candidate_n
+        FROM claims GROUP BY artifact_id,scope_key
+      ) SELECT sum(base_n) AS base_claims,sum(candidate_n) AS candidate_claims,
+        count(CASE WHEN base_shape IS NOT candidate_shape THEN 1 END) AS differing FROM paired`,
+  empty: `${COMPARISON_CTES}, per_artifact AS (
+        SELECT s.artifact_id,
+          (SELECT count(*) FROM obs o WHERE o.parse_run_id=s.base_run) AS base_rows,
+          (SELECT count(*) FROM obs o WHERE o.parse_run_id=s.candidate_run) AS candidate_rows
+        FROM scope s WHERE s.base_run IS NOT NULL AND s.candidate_run IS NOT NULL
+      ) SELECT count(CASE WHEN base_rows=0 AND candidate_rows>0 THEN 1 END) AS base_empty,
+        count(CASE WHEN candidate_rows=0 AND base_rows>0 THEN 1 END) AS candidate_empty FROM per_artifact`,
+  sample: `${COMPARISON_CTES} SELECT artifact_id,kind,raw_locator,role,
+        CASE WHEN base_n>1 OR candidate_n>1 THEN 'ambiguous'
+          WHEN candidate_n=0 THEN 'base_only' WHEN base_n=0 THEN 'candidate_only' END AS difference
+        FROM keyed WHERE base_n>1 OR candidate_n>1 OR base_n=0 OR candidate_n=0
+      UNION ALL
+      SELECT artifact_id,kind,raw_locator,role,'value' FROM valued WHERE base_value IS NOT candidate_value
+      ORDER BY artifact_id,kind,raw_locator,role LIMIT ${COMPARISON_SAMPLE_LIMIT}`,
+} as const;
 
 export interface ComparisonSummary {
   scope: { sourceId: string; dataset: string; parserName: string };
@@ -179,94 +241,45 @@ export async function compareReleases(
   if (!release) fail("release_not_registered");
   if (release!.parser_name !== request.parser) fail("release_parser_mismatch");
   const bind = [request.source, request.dataset, request.parser, request.releaseId] as const;
-  const query = <T>(sql: string) =>
-    db
-      .prepare(`${COMPARISON_CTES} ${sql}`)
-      .bind(...bind)
-      .all<T>();
-
-  const artifacts = await db
-    .prepare(
-      `${COMPARISON_CTES} SELECT
-        count(CASE WHEN base_run IS NOT NULL THEN 1 END) AS base,
-        count(CASE WHEN candidate_run IS NOT NULL THEN 1 END) AS candidate,
-        count(CASE WHEN base_run IS NOT NULL AND candidate_run IS NOT NULL THEN 1 END) AS compared,
-        count(CASE WHEN base_run IS NULL THEN 1 END) AS candidate_only FROM scope`,
-    )
-    .bind(...bind)
-    .first<{ base: number; candidate: number; compared: number; candidate_only: number }>();
-  const byKind = await query<{ kind: string; base: number; candidate: number }>(
-    `SELECT kind,count(CASE WHEN side='base' THEN 1 END) AS base,
-      count(CASE WHEN side='candidate' THEN 1 END) AS candidate FROM sided GROUP BY kind ORDER BY kind`,
-  );
-  const locators = await db
-    .prepare(
-      `${COMPARISON_CTES} SELECT
-        count(CASE WHEN base_n=1 AND candidate_n=1 THEN 1 END) AS matched,
-        count(CASE WHEN base_n>0 AND candidate_n=0 THEN 1 END) AS base_only,
-        count(CASE WHEN base_n=0 AND candidate_n>0 THEN 1 END) AS candidate_only,
-        count(CASE WHEN base_n>1 OR candidate_n>1 THEN 1 END) AS ambiguous FROM keyed`,
-    )
-    .bind(...bind)
-    .first<{ matched: number; base_only: number; candidate_only: number; ambiguous: number }>();
-  const values = await db
-    .prepare(
-      `${COMPARISON_CTES} SELECT count(*) AS compared,
-        count(CASE WHEN base_value IS NOT candidate_value THEN 1 END) AS differing,
-        count(CASE WHEN (base_value IS NULL)<>(candidate_value IS NULL) THEN 1 END) AS missing_one_side
-        FROM valued`,
-    )
-    .bind(...bind)
-    .first<{ compared: number; differing: number; missing_one_side: number }>();
-  const coverage = await db
-    .prepare(
-      `${COMPARISON_CTES}, claims AS (
-        SELECT s.artifact_id,CASE WHEN c.parse_run_id=s.base_run THEN 'base' ELSE 'candidate' END AS side,
-          c.scope_key,c.mode||'|'||c.completeness||'|'||c.membership_complete||'|'||c.observed_count
-            ||'|'||coalesce(c.expected_count,-1)||'|'||c.absence_meaning AS shape
-        FROM scope s JOIN parse_coverage_claims c ON c.parse_run_id=s.base_run OR c.parse_run_id=s.candidate_run
-      ), paired AS (
-        SELECT artifact_id,scope_key,
-          max(CASE WHEN side='base' THEN shape END) AS base_shape,
-          max(CASE WHEN side='candidate' THEN shape END) AS candidate_shape,
-          count(CASE WHEN side='base' THEN 1 END) AS base_n,
-          count(CASE WHEN side='candidate' THEN 1 END) AS candidate_n
-        FROM claims GROUP BY artifact_id,scope_key
-      ) SELECT sum(base_n) AS base_claims,sum(candidate_n) AS candidate_claims,
-        count(CASE WHEN base_shape IS NOT candidate_shape THEN 1 END) AS differing FROM paired`,
-    )
-    .bind(...bind)
-    .first<{ base_claims: number | null; candidate_claims: number | null; differing: number }>();
-  const empty = await db
-    .prepare(
-      `${COMPARISON_CTES}, per_artifact AS (
-        SELECT s.artifact_id,
-          (SELECT count(*) FROM obs o WHERE o.parse_run_id=s.base_run) AS base_rows,
-          (SELECT count(*) FROM obs o WHERE o.parse_run_id=s.candidate_run) AS candidate_rows
-        FROM scope s WHERE s.base_run IS NOT NULL AND s.candidate_run IS NOT NULL
-      ) SELECT count(CASE WHEN base_rows=0 AND candidate_rows>0 THEN 1 END) AS base_empty,
-        count(CASE WHEN candidate_rows=0 AND base_rows>0 THEN 1 END) AS candidate_empty FROM per_artifact`,
-    )
-    .bind(...bind)
-    .first<{ base_empty: number; candidate_empty: number }>();
-  const sample = await db
-    .prepare(
-      `${COMPARISON_CTES} SELECT artifact_id,kind,raw_locator,role,
-        CASE WHEN base_n>1 OR candidate_n>1 THEN 'ambiguous'
-          WHEN candidate_n=0 THEN 'base_only' WHEN base_n=0 THEN 'candidate_only' END AS difference
-        FROM keyed WHERE base_n>1 OR candidate_n>1 OR base_n=0 OR candidate_n=0
-      UNION ALL
-      SELECT artifact_id,kind,raw_locator,role,'value' FROM valued WHERE base_value IS NOT candidate_value
-      ORDER BY artifact_id,kind,raw_locator,role LIMIT ${COMPARISON_SAMPLE_LIMIT}`,
-    )
-    .bind(...bind)
-    .all<{
-      artifact_id: number;
-      kind: string;
-      raw_locator: string;
-      role: string;
-      difference: ComparisonSummary["sample"][number]["difference"];
-    }>();
+  const statement = (sql: string) => db.prepare(sql).bind(...bind);
+  const artifacts = await statement(RELEASE_COMPARISON_SQL.artifacts).first<{
+    base: number;
+    candidate: number;
+    compared: number;
+    candidate_only: number;
+  }>();
+  const byKind = await statement(RELEASE_COMPARISON_SQL.byKind).all<{
+    kind: string;
+    base: number;
+    candidate: number;
+  }>();
+  const locators = await statement(RELEASE_COMPARISON_SQL.locators).first<{
+    matched: number;
+    base_only: number;
+    candidate_only: number;
+    ambiguous: number;
+  }>();
+  const values = await statement(RELEASE_COMPARISON_SQL.values).first<{
+    compared: number;
+    differing: number;
+    missing_one_side: number;
+  }>();
+  const coverage = await statement(RELEASE_COMPARISON_SQL.coverage).first<{
+    base_claims: number | null;
+    candidate_claims: number | null;
+    differing: number;
+  }>();
+  const empty = await statement(RELEASE_COMPARISON_SQL.empty).first<{
+    base_empty: number;
+    candidate_empty: number;
+  }>();
+  const sample = await statement(RELEASE_COMPARISON_SQL.sample).all<{
+    artifact_id: number;
+    kind: string;
+    raw_locator: string;
+    role: string;
+    difference: ComparisonSummary["sample"][number]["difference"];
+  }>();
   const baseReleaseId = (
     await activeRelease(db, {
       sourceId: request.source,

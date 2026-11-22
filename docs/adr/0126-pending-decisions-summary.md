@@ -1,14 +1,14 @@
 # ADR 0126: One compact list of what waits for the owner's decision, as `kogane.decisions.pending` and on ホーム
 
-- Status: proposed. A new published MCP tool (`kogane.decisions.pending`) and
-  a new operator route: **the owner's approval is needed before merge**, as for
+- Status: accepted (merged 2026-11-20 in [#1457](https://github.com/risu729/kogane/pull/1457)). A new published MCP tool (`kogane.decisions.pending`) and
+  a new operator route: the owner's approval was required before merge, as for
   every published tool change. The owner allowed new tools where needed for
   issue #1414 (2026-11-19, "you may add new tools if needed"); that allows the
   proposal, not this tool.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap G9
-  of the MCP everyday-questions audit (`docs/plans/2026-11-mcp-everyday-questions.md`,
-  proposed in its own pull request; question Q20, "what is waiting for my
+  of the MCP everyday-questions audit ([its plan](../plans/2026-11-mcp-everyday-questions.md),
+  merged in [#1449](https://github.com/risu729/kogane/pull/1449); question Q20, "what is waiting for my
   decision?")
 - Related: [ADR 0081](0081-ui-parity-through-mcp.md) (UI/MCP parity, one
   service), [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (MCP
@@ -78,7 +78,9 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
    browser) is never probed. The answer carries no total;
    the panel's header sums the counted lines and says `以上` when a line is
    cut at its bound or is `unavailable` for any reason but `not_served`, so
-   it never reads as complete when it is not (INV05).
+   it never reads as complete when it is not (INV05). A read that fails
+   after an earlier answer shows the failure and no total, never the
+   earlier answer's total beside it.
 2. **A line.** `count`, `complete` (false when the count reached
    `countBound`, 1,000: at least that many), the first `ids` (at most 5 and
    640 bytes), `oldestAt` with `timeBasis` (`created`, or `not_recorded` for
@@ -183,4 +185,6 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
   accessibility audit, and is absent for a caller the route refuses; its total
   is exact with every line complete or `not_served`, and says `以上` for a cut
   line, a `budget_exceeded` line and an `unauthorized` line, each on its own;
-  the wire contract refuses lines the summary cannot produce.
+  a read that fails after an answer leaves the header without a total until
+  a read succeeds again; the wire contract refuses lines the summary cannot
+  produce.

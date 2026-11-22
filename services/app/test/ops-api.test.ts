@@ -210,6 +210,14 @@ describe("the operations API does not exist until its flag is on", () => {
       expect(verb.status, method).toBe(405);
       expect(await verb.json()).toMatchObject({ error: "method_not_allowed" });
     }
+    // GET and HEAD are verbs this API routes: on an acceptance route, which
+    // does not take them, each is that path's 404 with no Allow (ADR 0130;
+    // HEAD was 405 before it).
+    for (const method of ["GET", "HEAD"]) {
+      const verb = await call(`${OPS}/collections`, { method, environment: ENABLED });
+      expect(verb.status, method).toBe(404);
+      expect(verb.headers.get("allow"), method).toBeNull();
+    }
     expect(await rowCount("collection")).toBe(0);
   });
 

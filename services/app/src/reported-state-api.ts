@@ -15,7 +15,7 @@ import {
 import type { ReportedState } from "../../../packages/domain/src/reported-state.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 
 export const REPORTED_STATE_PATH = "/api/v2/reported-state";
 
@@ -34,8 +34,7 @@ export async function reportedStateApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== REPORTED_STATE_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (!(await reportedStateAvailable(env))) throw new HttpError(404, "not_found");
   // The reader authority: every source and account, summaries and records.
   if (!readerGrant(subject).capabilities.includes("summary.read"))

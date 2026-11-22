@@ -22,11 +22,21 @@ export interface MoneyForwardCollection {
   monthlyFragmentCount: number;
 }
 
+/** How many calendar months, the current JST month included, each account is asked for. */
+const MONTH_WINDOW = 12;
+
 export async function collectMoneyForward(options: {
   credential: MoneyForwardCredential;
   fetcher?: Fetcher;
   onStage?: (stage: Stage) => void;
+  /**
+   * The run's start instant. The month window is computed from it once, so
+   * every account is asked for the same months even when the run crosses a
+   * JST month boundary. Without it, the clock is read once here.
+   */
+  startedAt?: Date;
 }): Promise<MoneyForwardCollection> {
+  const months = recentMonths(options.startedAt ?? new Date(), MONTH_WINDOW);
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
   const cookies = new CookieJar();
   const onStage = (stage: Stage) => {
@@ -171,7 +181,7 @@ export async function collectMoneyForward(options: {
       body: detailHtml,
     });
     const context = extractAccountContext(detailHtml);
-    for (const month of recentMonths(new Date(), 12)) {
+    for (const month of months) {
       onStage("monthly-detail");
       const fragment = await fetchWithCookies(
         new URL("/cf/fetch", ME_ORIGIN),

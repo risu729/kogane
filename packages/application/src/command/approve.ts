@@ -191,7 +191,7 @@ export async function approve(
     // A replay of the same approval at the same instant is the same receipt:
     // the stored row's lifetime, not the one the replay asked for (its TTL is
     // not part of the approval id).
-    if (!existing) return commandError("plan_not_open", [plan.planId]);
+    if (!existing) return insertRefusal(store, plan.planId, input);
     stored = { expiresAt: existing.expires_at, usesRemaining: existing.uses_remaining };
   }
   return {
@@ -208,6 +208,31 @@ export async function approve(
       createdAt,
     },
   };
+}
+
+/**
+ * Why the approval insert wrote nothing when no approval of that id exists:
+ * the plan or a pin moved after `approvalPrecheck` read them and before the
+ * batch, whose insert carries the same conditions. The pre-check, re-run
+ * over the stored plan as it is now, names it with the code and refs it
+ * gives a request that arrives after the move, and a moved pin marks the
+ * plan stale as it does there. `plan_not_open` is left for a refusal it does
+ * not find.
+ */
+async function insertRefusal(
+  store: CommandStore,
+  planId: string,
+  input: { planDigest: unknown; now: string },
+): Promise<CommandError> {
+  const current = await loadPlan(store, planId);
+  if (current) {
+    const check = await approvalPrecheck(store, current, input);
+    if (!check.ok) {
+      if (check.marksStale) await markStale(store, planId);
+      return commandError(check.error, check.refs);
+    }
+  }
+  return commandError("plan_not_open", [planId]);
 }
 
 /** Read one own approval for a retry/preview; the writer revalidates it at commit. */

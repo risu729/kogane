@@ -37,6 +37,7 @@ import {
   readReconstructedState,
   RECONSTRUCTED_STATE_REFUSALS,
   reconstructedStateError,
+  unknownKeyRefs,
 } from "../../../packages/application/src/index";
 import {
   parseInstrumentCandidatesRequest,
@@ -392,7 +393,7 @@ function parseOpenBody(value: unknown):
     (key) => !(OPEN_KEYS as readonly string[]).includes(key),
   );
   if (unknown.length > 0)
-    return { ok: false, code: "unsupported_semantics", refs: unknown.slice(0, 10) };
+    return { ok: false, code: "unsupported_semantics", refs: unknownKeyRefs(unknown) };
   const resolved: {
     query?: QueryRequest;
     knowledgeCutoff?: string;

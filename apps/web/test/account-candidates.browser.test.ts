@@ -267,10 +267,15 @@ describe.if(runnable)("account candidate review", () => {
     );
     const card = tab.locator(".identity-card").first();
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await card
-      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
-      .click();
+    const button = card.getByRole("button", {
+      name: "この連携に含まれる口座として採用する内容を確認",
+      exact: true,
+    });
+    await button.focus();
+    await tab.keyboard.press("Enter");
     await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    // The refusal leaves a keyboard user on the button they pressed.
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
     expect(
       read.some(
         (url) => url.searchParams.get("sourceAccountId") === candidate!.directSourceAccountId,
@@ -337,6 +342,32 @@ describe.if(runnable)("account candidate review", () => {
     expect(items[2]).toContain("synthetic withdrawal");
     expect(items[2]).toContain("含まれないと判断");
     expect(await auditView(tab)).toEqual([]);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
+
+  test("a history read again that fails keeps the earlier entries only under the warning", async () => {
+    const tab = await open();
+    const card = tab.locator(".identity-card").first();
+    const toggle = card.getByRole("button", { name: "取得元の口座の訂正履歴を見る", exact: true });
+    await toggle.click();
+    await card.getByText("記録順の履歴です。", { exact: false }).waitFor();
+    const entries = await card.locator("ol li").count();
+    expect(entries).toBeGreaterThan(0);
+    const warning = "更新できませんでした。前回読み込んだ取得元の口座の訂正履歴を表示しています。";
+    expect(await card.getByText(warning, { exact: true }).count()).toBe(0);
+    // Closing and reopening reads the history again; that read is refused.
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を閉じる", exact: true }).click();
+    historyRows = 0;
+    await toggle.click();
+    await card.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+    expect(await card.locator("ol li").count()).toBe(entries);
+    expect(await auditView(tab)).toEqual([]);
+    // The read recovers on retry, and the warning goes.
+    historyRows = GRANT.budget.maxRows;
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を再試行", exact: true }).click();
+    await card.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+    expect(await card.locator("ol li").count()).toBe(entries);
     expect(posted).toEqual([]);
     await tab.close();
   }, 60_000);
