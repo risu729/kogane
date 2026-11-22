@@ -39,11 +39,15 @@ as in 0.2.1, and no other parser's digest changed.
 
 **Deploying rewrites nothing**: stored 0.2.1 runs stay as they are; the
 processor registers 0.2.2 itself and the repair lane re-parses stored
-captures under it. No migration and no operator step: no snapshot policy row
-names this parser. Limits: production was not read for this release, so
+captures under it. No migration and no operator step: the only snapshot
+policy row naming this parser (migration 0100) is an eligibility row with
+`snapshot_selection = 0` and no `required_parser_version`, so it enrols the
+dataset in no snapshot and pins no version, and no snapshot rule reads this
+parser's warnings. Limits: production was not read for this release, so
 whether any stored record states an impossible date is not established; the
-collector still writes the unchecked form, and the parser is where it is
-refused. Tests: `packages/parsers/test/sbi-refusals.test.ts`.
+collector still writes the unchecked form (the verbatim cell stays in
+`rawCells[0]`), and the parser is where it is caught. Tests:
+`packages/parsers/test/sbi-refusals.test.ts`.
 
 ## Vpass credit snapshots keep the card name (credit-snapshot 1.1.0)
 
@@ -2933,8 +2937,8 @@ dataset written by `services/collector-sbi-securities`, whose body is
 `rawCells`. Every record becomes one transaction observation in JPY, with
 `as_of` from `tradeDate` when it is a calendar `YYYY-MM-DD` date (any other
 stated value is a warning and no `as_of`, 0.2.2), `description` from
-`rawCells[1]` (falling back
-to `issueName`), and the whole record spread into `extra`. The amount is
+`rawCells[1]` (falling back to `issueName`), and the whole record spread
+into `extra`. The amount is
 accepted as a display string or as a JSON number, and the verbatim form is
 kept in `amount_text` even when it does not resolve to minor units. It
 does not decide the sign from the trade type, and it does not treat the
