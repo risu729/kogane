@@ -186,8 +186,16 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
     clauses.push(`b.instrument=${parameter("J_POINT")}`);
     // GLOB, not LIKE: LIKE ignores ASCII case, and a row this read selects but
     // `matches` skips is never claimed, so it would head every page for good.
+    // For the same reason both filters check all that `matches` checks. The
+    // length allows a connection of 1 to 64 characters between the fixed
+    // prefix (6) and suffix (28 with the date, 14 for the total), so the
+    // middle `substr` is exactly the connection. The date's digits are a
+    // pattern of their own: D1 refuses a GLOB pattern longer than 50 bytes.
     if (rule.parserName === "myjcb-jpoint-history") {
       clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:acquired:????-??-??")}`);
+      clauses.push(
+        `length(b.source_account) BETWEEN 35 AND 98 AND substr(b.source_account,7,length(b.source_account)-34) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]' AND substr(b.source_account,-10) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`,
+      );
       clauses.push(`EXISTS (SELECT 1 FROM parse_coverage_claims hc WHERE hc.parse_run_id=p.id
         AND hc.completeness='complete' AND hc.membership_complete=1 AND hc.failure_cause IS NULL)`);
       clauses.push(`EXISTS (SELECT 1 FROM jpoint_histories h JOIN jpoint_totals t ON ${JPOINT_COHORT_MATCH}
