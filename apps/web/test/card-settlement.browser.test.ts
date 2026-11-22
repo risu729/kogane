@@ -1503,10 +1503,11 @@ describe.if(runnable)("card settlement review", () => {
       if (new URL(request.url()).pathname.startsWith("/api/v2/reconciliation/card-settlements"))
         lists.push(request.url());
     });
-    // As the planner answers a candidate whose facts are not eligible.
+    // As the planner answers an acceptance whose facts are not eligible
+    // (`needs_scope_resolution` answers accept and withdraw, never reject).
     await refusePlans(page, 400, "needs_scope_resolution");
     await page.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await page.getByRole("button", { name: "却下内容を確認", exact: true }).click();
+    await page.getByRole("button", { name: "採用内容を確認", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "口座や保有者の対応が未解決です" }).waitFor();
     // A read again would have been sent before the refusal was shown.
     expect(lists).toEqual([]);
