@@ -397,11 +397,12 @@ function decidedAfterReadBack(
   if (survey.proposals.some((p) => p.id === proposal.id)) return "listed";
   if (survey.attention > survey.proposals.length) return null;
   const accepted = ruleChange({ ...proposal, verifiedAt: proposal.fetchedAt });
+  // A `new` proposal's rule is created under `<source>-survey-<id>` (the
+  // Processor's `proposedRuleId`).
+  const ruleId = proposal.ruleId ?? `${proposal.source}-survey-${proposal.id}`;
   return snapshot.maintenance.some(
     (r) =>
-      (proposal.ruleId === null || r.id === proposal.ruleId) &&
-      r.revision === proposal.baseRevision + 1 &&
-      ruleChange(r) === accepted,
+      r.id === ruleId && r.revision === proposal.baseRevision + 1 && ruleChange(r) === accepted,
   )
     ? "accepted"
     : "decided";
@@ -696,10 +697,16 @@ function SurveyProposal({
       // The answer does not say whether the decision is stored (a lost
       // answer, or a 409 that an earlier attempt's own decision may explain):
       // read the proposals and rules back.
-      const decided = decidedAfterReadBack(await readBack(client), value);
-      if (decided === null)
-        setMessage("決定されたか確認できません。表示を更新して確認してください。");
-      else if (decided === "listed")
+      const snapshot = await readBack(client);
+      const decided = decidedAfterReadBack(snapshot, value);
+      if (decided === null) {
+        const unknown = "決定されたか確認できません。表示を更新して確認してください。";
+        // A failed read keeps the list shown, this proposal in it; a read
+        // that does not list it (past the shown bound, or without the
+        // re-survey part) removes it, and a message of its own with it.
+        if (snapshot) said(unknown);
+        else setMessage(unknown);
+      } else if (decided === "listed")
         setMessage(
           conflict(error)
             ? failure(error)

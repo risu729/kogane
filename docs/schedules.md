@@ -555,9 +555,12 @@ written and is said as it was.
   and moves focus to it. After an unknown answer or a `409`, a proposal the
   read back still lists is undecided and can be decided again; one it no
   longer lists is said to be accepted when the rule holds the proposal's
-  change at the revision after the proposal's base, and decided otherwise.
-  When more proposals are undecided than the page shows, an unlisted proposal
-  is not taken as decided.
+  change at the revision after the proposal's base (a new rule under
+  `<source>-survey-<id>`), and decided otherwise.
+  When more proposals are undecided than the page shows, or the read back has
+  no re-survey part, an unlisted proposal is not taken as decided: the section
+  says that whether it was decided is not known, since the proposal's own row
+  is gone.
 - **A failed read back** says that whether the write was stored is not known.
 
 Limits: buttons are disabled while their write is in flight, so focus leaves

@@ -1031,7 +1031,8 @@ describe.if(runnable)("operator schedule administration", () => {
       await page.close();
     }
   }, 30000);
-  test("a survey decision whose answer is lost is read back: undecided stays offered, accepted is said", async () => {
+  /** One undecided proposal revising a stored rule at the revision it was read against. */
+  function oneProposal() {
     snapshot.maintenance = [
       {
         id: "synthetic-weekly",
@@ -1071,6 +1072,9 @@ describe.if(runnable)("operator schedule administration", () => {
         },
       ],
     };
+  }
+  test("a survey decision whose answer is lost is read back: undecided stays offered, accepted is said", async () => {
+    oneProposal();
     const page = await browser.newPage();
     page.on("dialog", (dialog) => void dialog.accept());
     try {
@@ -1092,6 +1096,30 @@ describe.if(runnable)("operator schedule administration", () => {
       );
       await proposal.waitFor({ state: "detached" });
       expect(writes.map((w) => w.body)).toEqual([{ decision: "reject" }, { decision: "accept" }]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a decision the read back cannot place, past the shown bound, says so in the section", async () => {
+    oneProposal();
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      const section = page.locator('section[aria-labelledby="maintenance-survey"]');
+      const proposal = section.locator("li").filter({ hasText: "停止時間の変更" });
+      // Stored, the answer lost, and the read back shows none of the
+      // undecided proposals it still counts: this one may be among them.
+      writeAnswer = { after: lost };
+      readAfterWrite = async () => {
+        snapshot.survey!.attention = 250;
+      };
+      await proposal.getByRole("button", { name: "採用", exact: true }).click();
+      expect(await focusedStatus(page).then((text) => text.jsonValue())).toBe(
+        "ソニー銀行の停止時間の変更：決定されたか確認できません。表示を更新して確認してください。",
+      );
+      await proposal.waitFor({ state: "detached" });
+      expect(writes.map((w) => w.body)).toEqual([{ decision: "accept" }]);
     } finally {
       await page.close();
     }
