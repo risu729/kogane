@@ -37,9 +37,9 @@ import {
 } from "./card-usage-fixture";
 import {
   STATEMENT_SLOT_CURRENT_CARD_USAGE_SQL,
-  STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
   STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
 } from "./card-usage-legacy-sql";
+import { addedStaleKeys, expectStaleKeys } from "./card-purchase-stale-reference";
 
 const NOW = "2026-09-24T00:00:00.000Z";
 
@@ -61,8 +61,9 @@ function usage(db: Database): CurrentCardUsageRow[] {
   );
 }
 
+/** The amended stale read, checked against the shipped text plus exactly its additions. */
 function stale(db: Database, limit = 100): StaleCardPurchaseKeyRow[] {
-  return read(db, staleCardPurchaseKeysSql(limit), STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL);
+  return expectStaleKeys(db, staleCardPurchaseKeysSql(limit));
 }
 
 function unrecognized(db: Database): number {
@@ -331,6 +332,81 @@ describe("recognition keys against current card usage", () => {
       stale(store.db).map((row) => [row.event_id, row.recognition_key, row.key_count]),
     ).toEqual(
       [posted!.recognition_key!, pending!.recognition_key!]
+        .sort()
+        .map((key) => [draft!.revision.eventId, key, 2]),
+    );
+  }, 30_000);
+
+  test("a merged revision is stale once its posted row is gone, even while its pending row is current", async () => {
+    const store = new CardStore();
+    // One purchase on the pending ledger and on a confirmed one, both current:
+    // a MyJCB pending capture stays current until its position is captured
+    // again.
+    const row: UsageRow = {
+      date: "2026/05/10",
+      merchant: "架空店舗J",
+      amount: "800",
+      paymentType: "1回払",
+    };
+    myjcbPending(store, "2026-05-12T00:00:00.000Z", [row]);
+    const confirmed = (fetchedAt: string, rows: readonly UsageRow[]) =>
+      store.identify(
+        store.myjcbLedger({
+          run: store.run("myjcb"),
+          connection: "conn-a",
+          detailMonth: 1,
+          state: "confirmed",
+          period: "2026年6月お支払い分",
+          fetchedAt,
+          rows,
+        }),
+        myjcbRoot("conn-a", "acct-jcb"),
+        { version: 1 },
+      );
+    confirmed("2026-05-12T00:00:00.000Z", [row]);
+    const current = usage(store.db);
+    const pending = current.find((entry) => entry.display_state === "pending")!;
+    const posted = current.find((entry) => entry.display_state === "posted")!;
+    // The merged shape a reviewed pending-to-posted link leaves: the posted
+    // row's revision, also holding the pending key.
+    const fact = factOf(posted);
+    const classified = classifyCardUsage(fact);
+    if (!classified.ok) throw new Error(classified.reasonCode);
+    const draft = await cardPurchaseRevision({
+      action: "recognize",
+      eventId: await cardPurchaseEventId(classified.kind, recognitionKey(fact)!),
+      revision: 1,
+      fact,
+    });
+    const merged: CardPurchaseDraft = {
+      ...draft!,
+      keys: [
+        ...draft!.keys,
+        {
+          key: pending.recognition_key!,
+          role: "pending",
+          observationId: pending.observation_id,
+          parseRunId: pending.parse_run_id,
+        },
+      ],
+    };
+    expect(write(store.db, merged, null)).toBe(true);
+    expect(stale(store.db)).toEqual([]);
+
+    // A newer confirmed capture shows the purchase under another key (its
+    // merchant cell reads differently); the pending capture is not taken
+    // again and its row stays current. The merged revision follows its
+    // posted row, so both its keys are stale now; the shipped text kept it
+    // for its current pending key, beside the new row's event.
+    confirmed("2026-05-13T00:00:00.000Z", [{ ...row, merchant: "架空店舗J 本店" }]);
+    expect(usage(store.db).map((entry) => entry.recognition_key)).toContain(
+      pending.recognition_key,
+    );
+    expect(addedStaleKeys(store.db)).toHaveLength(2);
+    expect(
+      stale(store.db).map((entry) => [entry.event_id, entry.recognition_key, entry.key_count]),
+    ).toEqual(
+      [posted.recognition_key!, pending.recognition_key!]
         .sort()
         .map((key) => [draft!.revision.eventId, key, 2]),
     );
