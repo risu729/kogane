@@ -198,7 +198,10 @@ A build writes rows while `building`, and:
   it is `building`. A failed batch leaves the build as it was, so the next pass
   retires it; a build the pointer was switched to after the selection, or one
   another writer sealed, keeps its rows. Each delete names only a retired
-  build.
+  build; that condition is one search of the build by its key, run once per
+  statement, and every statement of the batch reaches its rows by key
+  (`packages/storage-d1/test/statement-plans.test.ts`, without table
+  statistics).
 
 The pointer's `source_revision` and `visibility_revision` are the watermark
 "the published content was verified against these". A capture that digests to

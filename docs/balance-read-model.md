@@ -389,11 +389,11 @@ sealed and published in one further batch, so a reader that selects
 retained so a reader with an open cursor survives one rebuild. An older build
 is retired and loses its rows in one batch (`retireOldSnapshots`,
 `abandonSnapshot` in `packages/storage-d1/src/read/writer.ts`): a failed batch
-leaves it complete with its rows for the next pass, never retired with rows no
-pass selects again. The published one is never retired: the retirement
-restates that in its own statement, so a build the pointer is switched to after
-the selection read it stays complete, and abandoning a build another writer
-has sealed leaves it as it is.
+leaves it as it was (`complete` or `building`) with its rows for the next pass,
+never retired with rows no pass selects again. The published one is never
+retired: the retirement restates that in its own statement, so a build the
+pointer is switched to after the selection read it stays complete, and
+abandoning a build another writer has sealed leaves it as it is.
 
 Rebuild is currently whole-context, not per scope: the snapshot id changes on
 any published parse, and the build recomputes every candidate. That is bounded
