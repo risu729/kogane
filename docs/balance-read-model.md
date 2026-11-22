@@ -125,11 +125,16 @@ writer fencing and captured CORE references; the contract is in
 | `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                    |
 | `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
 | `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                      |
-| `stale`      | The newest published attempt over the same source and dataset did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                        |
+| `stale`      | The newest published attempt over the same source, dataset and fetch unit did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                            |
 
 Freshness is recorded separately (`current` / `stale` / `unknown`) with the
 `snapshotEligibility` reason code of the failing claim, so "we could not
-observe" is never rendered as "the balance is gone".
+observe" is never rendered as "the balance is gone". The attempt compared is
+the newest published coverage claim of the candidate's own fetch unit (an
+artifact with no unit is its own group), as the latest-balance query keys a
+measurement by its unit: another card or connection of the same dataset can
+neither re-observe the scope nor fail to, so its newer attempt neither marks
+the row stale nor hides the failure of the row's own unit.
 
 ### Build budgets
 
