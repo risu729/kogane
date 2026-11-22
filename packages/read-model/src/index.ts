@@ -22,6 +22,7 @@ export {
   visibleEvidence,
 } from "./concepts";
 export {
+  CALENDAR_DATED_AS_OF,
   CANDIDATE_LIMIT,
   type CollectionScope,
   type MeasureView,
@@ -57,6 +58,8 @@ export {
   type SourceParseRun,
   type SqlExecutor,
   type TransactionQuery,
+  type UndatedTransactionCount,
+  type UndatedTransactionQuery,
 } from "./reader";
 export { createObservationReader } from "./observation-reader";
 export {

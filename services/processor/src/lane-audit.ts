@@ -231,7 +231,7 @@ export async function recordLaneAudit(
   correlationId: string,
   log: (line: string) => void,
 ): Promise<void> {
-  const spec = LANE_AUDIT[lane];
+  const spec = Object.hasOwn(LANE_AUDIT, lane) ? LANE_AUDIT[lane] : undefined;
   if (!spec || mark === null || tick.outcome === "skipped-by-flag") return;
   try {
     const writes = await laneWrites(db, spec, mark);
@@ -301,7 +301,7 @@ export async function resolveLaneRef(
   lane: string,
   ref: string,
 ): Promise<string[] | null> {
-  const spec = LANE_AUDIT[lane];
+  const spec = Object.hasOwn(LANE_AUDIT, lane) ? LANE_AUDIT[lane] : undefined;
   const match = REF.exec(ref)?.groups;
   if (!spec || !match) return null;
   if (match.d !== undefined) {

@@ -1,12 +1,12 @@
 # ADR 0123: The balance, schedule and collection quality reads answer a summary by default, and a refused cursor names what must repeat
 
-- Status: proposed. **Owner approval is needed before merge**: it changes the
+- Status: accepted (merged 2026-11-20 in [#1458](https://github.com/risu729/kogane/pull/1458)). Owner approval was required before merge: it changes the
   published input schema and the default answer of three MCP tools and of
   their HTTP routes (decisions D2 and D3 of the 2026-11-19 proposal for
   [issue 1414](https://github.com/risu729/kogane/issues/1414)). The owner
   asked for a compact default on issue 1414; this ADR implements the
   proposal's recommended D2 (the routes' default is the summary too, and the
-  web UI asks for `full`), which the owner decides before merge.
+  web UI asks for `full`), which was the owner's decision before merge.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
   (points 1, "Responses are huge and get truncated", and 2, "Paging is
@@ -251,6 +251,9 @@ offered page size; what remains is that the refusal says nothing.
   8 KB, and no argument shortens it (a follow-up would page its lines).
   The synthetic store configures every job the migrations configure, so a
   migration that adds one fails `mcp-answer-size.test.ts` once it does.
+  The
+  [amendment of 2026-11-21](#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21)
+  pages its lines and holds every page to 8 KB.
 - Left as they are, and over 8 KB at this scale: `kogane.observations.list`
   `{kind: balances}` (the v1 grouped list, about 520 KB) and the collection
   quality account view (about 107 KB for Vpass in production, issue 1414's
@@ -332,7 +335,7 @@ offered page size; what remains is that the refusal says nothing.
 
 ## Amendment: the store overview and the maintenance read answer a summary by default (2026-11-19)
 
-- Status: proposed. **Owner approval is needed before merge**, as for the
+- Status: accepted (merged 2026-11-20 in [#1471](https://github.com/risu729/kogane/pull/1471)). Owner approval was required before merge, as for the
   decision above: it changes the published input schema and the default
   answer of `kogane.store.read` and `kogane.schedules.maintenance.read`, the
   default answer of `GET /api/overview` and of
@@ -631,7 +634,7 @@ Measured as the bytes of the MCP result's structured content
 
 ## Amendment: the overview summary is held to 8 KB by construction (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes
+- Status: accepted (merged 2026-11-21 in [#1483](https://github.com/risu729/kogane/pull/1483)). Owner approval was required before merge: it changes
   the default answer of `kogane.store.read` `{page: overview}` and of
   `GET /api/overview` (two new keys, lists that can hold fewer lines than
   their cap, and a new refusal), as the amendment above did.
@@ -799,13 +802,13 @@ Measured as the bytes of the tool's answer
 
 ## Amendment: the collection quality account view answers a paged summary by default (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes
+- Status: accepted (merged 2026-11-21 in [#1486](https://github.com/risu729/kogane/pull/1486)). Owner approval was required before merge: it changes
   the published description and the default answer of
   `kogane.collection-quality.read` with `view: "accounts"`, the default
   answer of `GET /api/collection-quality/<sourceId>/accounts`, and the
   queries that route takes (`detail` and `offset`, where it took none).
   Whether the account view's default becomes the summary, as here and as for
-  the other views, or stays `full` with `summary` opt-in, is the owner's
+  the other views, or stays `full` with `summary` opt-in, was the owner's
   decision (as D2 above).
 - Date: 2026-11-20
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
@@ -1032,7 +1035,7 @@ result):
 
 ## Amendment: cash per account and per bank in one call (`collection: cash`) (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes the
+- Status: accepted (merged 2026-11-21 in [#1487](https://github.com/risu729/kogane/pull/1487)). Owner approval was required before merge: it changes the
   published input schema of `kogane.balances.read` (`collection` gains
   `cash`) and its description, adds `GET /api/v2/balances/cash` to the shared
   request schema (`LIST_REQUEST_SCHEMA`, `LIST_PATH_CAPABILITY`), and the MCP
@@ -1273,7 +1276,7 @@ data }` serialized, the page's own cursor included):
 
 ## Amendment: the v1 grouped balance list answers a summary by default (2026-11-20)
 
-- Status: proposed. **Owner approval is needed before merge**, as for the
+- Status: accepted (merged 2026-11-21 in [#1488](https://github.com/risu729/kogane/pull/1488)). Owner approval was required before merge, as for the
   decision above: it changes the published input schema and the default
   answer of `kogane.observations.list` `{kind: "balances"}`, the default
   answer of `GET /api/balances` and of
@@ -1519,3 +1522,183 @@ which `content`'s text serializes):
   `publication-gate.test.ts`, `release-candidates.test.ts`, `load.test.ts`)
   ask for `detail=full`; the browser tests expect the page's request with
   `detail=full`.
+
+## Amendment: every collection quality summary page is held to 8 KB (2026-11-21)
+
+- Status: proposed. **Owner approval is needed before merge**: it changes
+  the published description of `kogane.collection-quality.read`, the
+  default answer of the tool without a source and of
+  `GET /api/collection-quality` (a `coverage` block, and pages), the queries
+  that route takes (`offset`, where it took none), and how many lines a page
+  of a source's cell summary holds.
+- Date: 2026-11-21
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
+  (done when: "which sources are failing?" in one or two calls, each answer
+  under 8 KB); the open limit this ADR's consequences name for the
+  collection quality summary ("no argument shortens it (a follow-up would
+  page its lines)")
+- Carried by: `byteBoundedPage`, `collectionQualitySummaryLines` and
+  `collectionQualityCellSummary` in
+  `packages/application/src/query/collection-quality-detail.ts`;
+  `COLLECTION_QUALITY_SUMMARY_BYTES` and the two summaries' wire checks in
+  `packages/observation-shared/src/collection-quality-contract.ts`;
+  `services/app/src/collection-quality-api.ts`,
+  `services/app/src/page-read-tools.ts`
+- Builds on: the
+  [amendment of 2026-11-20](#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)
+  (the account view's rule, which this applies to the tool's other two
+  summaries), [ADR 0081](0081-ui-parity-through-mcp.md)
+
+### Context
+
+Decision point 3 left the summary without a source unpaged and the cell
+summary at a fixed 20 lines a page. Neither is held to the 8 KB an MCP
+client shows; only the account view is, since the amendment of 2026-11-20.
+
+- **The summary** is one line per source (sources with equal lines share
+  one). On the synthetic store of `mcp-answer-size.test.ts` it is 7,049
+  bytes (every job the migrations configure, no failure code). A line grows with
+  its jobs and with their failure and terminal codes, which are mostly empty
+  on that store: a source with two failed jobs, each with a failure code and
+  two terminal codes, is about 950 bytes, and sources that fail stop sharing
+  a line. With the 37 sources of today's registry each failing that way, the
+  summary is 35,509 bytes, so it passes 8 KB exactly when an agent asks which
+  sources are failing. A migration that adds a job also adds bytes, and
+  `mcp-answer-size.test.ts` fails once the total passes 8 KB.
+- **The cell summary** holds 20 lines a page. A line names its dataset,
+  parser and unit key (each up to 512 characters) and carries the union of
+  its cells' reasons: 20 lines of 80-character datasets with every reason
+  are 18,727 bytes.
+
+### Options considered
+
+1. **The account view's rule (chosen).** Each summary pages its lines by
+   `offset`, up to 20 a page, and ends a page before the line that would
+   carry the tool's answer past 8,192 bytes; a page that cannot hold its first
+   line, or its header, is refused with `413 result_limit_exceeded`, never
+   cut. One rule for the tool's three summaries.
+2. **Trim the summary in a fixed order, as the overview does** (amendment of
+   2026-11-20 above). The overview's lists sit beside counts that keep what
+   it trims; here a line is the only place a source's failing jobs and codes
+   are named, and trimming lines hides failing sources from the agent asking
+   about them.
+3. **A smaller fixed number of lines a page, no byte measure.** A line is
+   about 250 bytes for sources no collector serves and about 950 with two
+   failing jobs; a count that always fits is far under 8 KB for most pages,
+   and a job with many terminal codes passes any count.
+4. **Leave the summary and point agents at `view: status`.** The status view
+   answers whether a job is stuck, but not each source's data type counts,
+   unregistered collectors' codes or fetch run; and it is not held to 8 KB
+   either (below).
+5. **A cursor.** The read is one statement at one instant, so a cursor would
+   bind nothing an offset does not. The cell and account summaries already
+   page by `offset`; ADR 0128 (proposed in
+   [#1494](https://github.com/risu729/kogane/pull/1494), not merged) moves
+   all three to `next` and `paging` in its slice S4.
+
+### Decision
+
+1. **`offset` on the summary.** `GET /api/collection-quality` takes
+   `offset` (an integer from 0, as on the cell route) with the summary.
+   `detail=full` is the unpaged full summary, unchanged: `offset` with it is
+   `400 invalid_query` on the route and `400 invalid_request`
+   (`refs: ["offset"]`) on the tool. A repeated or empty parameter or any
+   other parameter is `400 invalid_query`; an offset that is not a decimal
+   integer is `400 invalid_offset`. The tool already had `offset` in its
+   input schema; without a source it now reaches the reader instead of being
+   refused there. `view: status` still takes none.
+2. **The summary's pages.** The answer keeps its lines and gains
+   `coverage: { sources, lines, limit: 20, offset, truncated, nextOffset }`:
+   the whole answer's source count and line count, and where the next page
+   starts (null on the last page). `sources` holds the page's lines in the
+   summary's order; lines are formed over the whole summary first, so a
+   shared line is one line wherever it falls. `otherSchedules`, the jobs under
+   no CORE source (today only the Processor tick), is on every page.
+3. **The cell summary's pages.** Unchanged in shape: up to 20 lines a page,
+   now fewer when the next would pass the bytes; `coverage.nextOffset` says
+   where the next page starts, as before.
+4. **One rule, one function.** `byteBoundedPage` builds a page from `offset`
+   line by line until it holds 20 lines or the next would carry the tool's
+   answer past `COLLECTION_QUALITY_SUMMARY_BYTES` (8,192): the UTF-8 bytes of
+   `{ schemaVersion: "kogane-page-read-v1", data }` as the MCP adapter writes
+   it (`pageReadAnswerBytes`). A page that cannot hold its first line, or past
+   the last line its header, is `CollectionQualityLimitError`, which the
+   reader answers as `413 result_limit_exceeded`. The three summaries call it;
+   the account view's pages are unchanged. The route and the tool call the
+   same reader (ADR 0081).
+5. **Wire check.** The summary's validator accepts a page only with
+   `coverage`, at most 20 lines, each source named once, at most
+   `coverage.sources` named, `nextOffset` where its lines end (null exactly on
+   the last page; an empty page lies past the last line) and the answer within
+   8,192 bytes. The cell summary's validator gains the byte check and refuses
+   a page that says more follow without listing a line.
+6. **Audit.** The summary's record counts the page's source lines and is
+   truncated while more follow (`coverage.truncated`), under the page rule
+   every page read uses.
+7. **Paging contract.** ADR 0128 is not merged, so this follows the shape on
+   main that the cell and account summaries use (`offset`,
+   `coverage.nextOffset`, `coverage.truncated`); its slice S4 converts all
+   three together.
+8. **Owner approval.** The description, the default answer, the route's
+   queries and the cell page lengths are published changes, merged only with
+   the owner's approval.
+
+### Consequences
+
+Measured as the bytes of the tool's answer (`pageReadAnswerBytes`;
+`packages/application/test/collection-quality-detail.test.ts` and
+`services/app/test/mcp-answer-size.test.ts`, run with `--silent=false`):
+
+| Read                                                                                                   |                  Before | After                                                            |
+| ------------------------------------------------------------------------------------------------------ | ----------------------: | ---------------------------------------------------------------- |
+| `kogane.collection-quality.read` `{}`, synthetic store of `mcp-answer-size.test.ts`                    |                   7,049 | 7,144 (one page)                                                 |
+| the same summary with all 37 sources failing, two jobs each with a failure code and two terminal codes |                  35,509 | 5 pages: 7,946, 7,983, 7,996, 7,996, 5,137 (8, 8, 8, 8, 5 lines) |
+| a source's cell summary, 48 lines with every reason and 80-character datasets                          | 18,727 (first 20 lines) | 6 pages of 8 lines, 7,723 to 7,735                               |
+
+- An agent's first summary read fits what its client shows whatever fails,
+  and names the first sources with every code; `offset` reads the rest, and
+  `detail: "full"` (unpaged) or `kogane.schedules.read` gives each job.
+- The `coverage` block costs about 100 bytes: on the synthetic store the
+  summary is still one page.
+- The tool's description stays within the 2,048 characters a client accepts
+  (2,045), shortened elsewhere to make room.
+- A client that read the summary as one answer must follow
+  `coverage.nextOffset`. The repository's only client of the route, the
+  collection quality page, asks for `detail=full`.
+- Open limits: each page reads the full summary again at its own instant,
+  so a run recorded between two pages can change a line or whether two
+  sources share one, moving lines across a page boundary; `coverage.lines`
+  then shows it, as on the other two summaries. `otherSchedules` is repeated
+  on every page and is not paged: with jobs shaped like a failing Vpass job
+  (a failure code and two terminal codes, about 200 bytes a line), 38 under
+  no source make every page `413`, and a page with a long first line is
+  refused with fewer (today there is one such job). `view: status` is one line per job with
+  no byte bound (about 5 KB on the synthetic store; up to 200 jobs); it is
+  left as it is.
+
+### Verification
+
+- `packages/application/test/collection-quality-detail.test.ts`: the 37
+  failing sources page into five pages, each passing the wire check under
+  `summary` only and within 8,192 bytes, the bytes ending every page but the
+  last before 20 lines; the pages name every source once, in order, each
+  line with its source's reasons, jobs and every failure and terminal code;
+  a page from offsets 1, 7 and the last lists the walk's lines there; the
+  synthetic summary is one page with equal lines still shared; an offset
+  past the end is an empty last page; 60 jobs under no source are
+  `CollectionQualityLimitError`; a page over 8 KB, a misplaced or missing
+  `nextOffset`, a source named twice, a wrong `offset` or no `coverage`
+  fails the wire check. The cell summary of 48 lines with every reason ends
+  each page at 8 lines within 8 KB and lists every line once in order, its
+  first 20 lines fail the wire check; short lines keep 20 a page; a line of
+  512-character multi-byte texts is `CollectionQualityLimitError`. With
+  `collection-quality-detail.ts` as on main, eight of these fail.
+- `services/app/test/page-read-reports.test.ts`: the route,
+  `/api/agent/v1/collection-quality.read` and `/mcp` give one body for the
+  summary at `offset` 0 and, with `detail: summary`, 1;
+  `?detail=full&offset=0`, a repeated `offset` and another parameter are
+  `invalid_query`, a negative offset `invalid_offset`; the tool refuses
+  `detail: full` with `offset` as `invalid_request`.
+- `services/app/test/mcp-answer-size.test.ts` (unchanged): the summary on
+  the route equals `collectionQualitySummaryLines` of the route's full
+  answer, and it is under 8 KB.

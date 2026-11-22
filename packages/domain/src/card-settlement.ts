@@ -212,3 +212,47 @@ export function validCardSettlementFacts(value: unknown): value is CardSettlemen
     return false;
   return cardSettlementCandidate(statement, debit) !== null;
 }
+
+/**
+ * Why a card statement's due date is not answered (INV05), read from the
+ * stored `_kogane.paymentDate` alone: `payment_date_absent` when nothing is
+ * recorded there (no key, or JSON null); `payment_date_invalid` when a value
+ * is recorded but is not a civil `YYYY-MM-DD` date. Neither says why the
+ * provider page or the parser left it so: that is not observed (ADR 0004).
+ */
+export const STATEMENT_DUE_DATE_REASONS = ["payment_date_absent", "payment_date_invalid"] as const;
+export type StatementDueDateReason = (typeof STATEMENT_DUE_DATE_REASONS)[number];
+/** A statement's due date, or null with the reason; the reason is there exactly when the date is not. */
+export type StatementDueDate =
+  | { paymentDate: string }
+  | { paymentDate: null; paymentDateReason: StatementDueDateReason };
+
+/** A stored `_kogane.paymentDate` (as `json_extract` returns it) as a due date or its reason. */
+export function statementDueDate(stored: unknown): StatementDueDate {
+  if (stored === null || stored === undefined)
+    return { paymentDate: null, paymentDateReason: "payment_date_absent" };
+  return typeof stored === "string" && parseLocalDate(stored) !== null
+    ? { paymentDate: stored }
+    : { paymentDate: null, paymentDateReason: "payment_date_invalid" };
+}
+
+/**
+ * Why a settlement candidate's bank debit date is not answered (INV05):
+ * `debit_date_invalid` when its stored `bankDebit.occurred` is not a
+ * `local-date` with a civil value (the code the unmatched statements' planner
+ * input gives such a debit). The only writer, `cardSettlementCandidate`,
+ * never stores one, so a candidate it made always has its date.
+ */
+export const SETTLEMENT_DEBIT_DATE_REASONS = ["debit_date_invalid"] as const;
+export type SettlementDebitDateReason = (typeof SETTLEMENT_DEBIT_DATE_REASONS)[number];
+/** A candidate's debit date, or null with the reason; the reason is there exactly when the date is not. */
+export type SettlementDebitDate =
+  | { debitDate: string }
+  | { debitDate: null; debitDateReason: SettlementDebitDateReason };
+
+/** A stored local-date debit value (null when not a `local-date`) as a debit date or its reason. */
+export function settlementDebitDate(stored: unknown): SettlementDebitDate {
+  return typeof stored === "string" && parseLocalDate(stored) !== null
+    ? { debitDate: stored }
+    : { debitDate: null, debitDateReason: "debit_date_invalid" };
+}

@@ -2,6 +2,9 @@
 // application service itself produces from the synthetic resolution world,
 // and the route that serves the page. Every value is synthetic.
 import { beforeAll, describe, expect, test } from "bun:test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   INSTRUMENT_CANDIDATE_VIEWS,
   reviewInstrumentCandidates,
@@ -14,6 +17,7 @@ import {
 } from "../../../packages/application/test/instrument-resolution-world.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import { INSTRUMENT_CANDIDATES_PATH } from "../../../packages/observation-shared/src/instrument-candidates-contract.ts";
+import { IdentifierSide } from "../src/instrument-candidate-display.tsx";
 import { matchRoute } from "../src/router.tsx";
 
 let store: World;
@@ -104,4 +108,37 @@ describe("the instrument candidate review contract", () => {
     expect(matchRoute("/identities/instrument-candidates/x").name).toBe("notFound");
     expect(matchRoute("/identities").name).toBe("identities");
   });
+});
+
+test("an empty identifier scope is part of the key and stays empty, never a missing-value mark", () => {
+  // The correction history inside reads through a query client; nothing is fetched here.
+  const side = createElement(IdentifierSide, {
+    role: "候補",
+    id: "identifier:synthetic",
+    identifier: {
+      identifierId: "identifier:synthetic",
+      instrumentId: "instrument:synthetic",
+      kind: "security",
+      namespace: "ric",
+      scope: "",
+      value: "SYNTH.X",
+      label: "架空銘柄",
+      mappingMethod: "rule",
+      mappingStatus: "identified",
+      mappingRevision: 1,
+      sources: ["synthetic-broker"],
+      currencies: ["JPY"],
+      currencyUnconfirmed: false,
+      providerMarket: null,
+      state: "no-candidate",
+      sharedWith: [],
+      candidateIds: [],
+    },
+  });
+  const markup = renderToStaticMarkup(
+    createElement(QueryClientProvider, { client: new QueryClient() }, side),
+  );
+  // The same `namespace / scope / value` text the identity list prints.
+  expect(markup).toContain("ric /  / SYNTH.X");
+  expect(markup).not.toContain("—");
 });

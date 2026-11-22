@@ -9,7 +9,15 @@
 import { accessIdentity } from "./auth";
 import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
-import { boundedText, HttpError, json } from "./http";
+import {
+  assertMethod,
+  boundedText,
+  HttpError,
+  json,
+  MethodNotAllowed,
+  READ_METHODS,
+  WRITE_METHODS,
+} from "./http";
 import {
   scheduleSnapshotSummary,
   type ScheduleSnapshot,
@@ -20,6 +28,7 @@ import {
   parseSubjectList,
   principalCan,
 } from "../../../packages/application/src/index";
+import { READ_DETAILS } from "../../../packages/domain/src/read-detail.ts";
 export const SCHEDULES_PATH = "/api/ops/v1/schedules";
 type ScheduleEnv = Env & { SCHEDULES_ENABLED?: string; DEPLOYMENT_SCHEDULE_TOKENS?: string };
 function enabled(env: ScheduleEnv) {
@@ -90,7 +99,7 @@ export async function scheduleSnapshotResponse(
 }
 
 /** The details the schedules page's GET answers; absent is `summary` (ADR 0123). */
-const SCHEDULE_READ_DETAILS = ["summary", "full"] as const;
+const SCHEDULE_READ_DETAILS = READ_DETAILS;
 type ScheduleReadDetail = (typeof SCHEDULE_READ_DETAILS)[number];
 
 /** The page GET's one query parameter, `detail`; anything else is `invalid_query`. */
@@ -114,7 +123,7 @@ export async function scheduleBootstrapApi(
 ): Promise<Response | null> {
   if (url.pathname !== `${SCHEDULES_PATH}/bootstrap`) return null;
   enabled(env);
-  if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, WRITE_METHODS);
   if (url.search) throw new HttpError(400, "invalid_request");
   // Bodyless: a bound of zero bytes, whose overflow (the first byte, read no
   // further) is this route's `400 invalid_request`, not a `413`.
@@ -237,14 +246,19 @@ async function scheduleRoute(
   subject: string,
   suffix: string,
 ): Promise<Response> {
-  // Only the page's GET takes a query: its `detail`.
-  const detail = request.method === "GET" && suffix === "" ? scheduleReadDetail(url) : null;
+  // Only the page's read takes a query: its `detail`. HEAD is that read
+  // without its body, as on every other read route.
+  const read = suffix === "" && (READ_METHODS as readonly string[]).includes(request.method);
+  const detail = read ? scheduleReadDetail(url) : null;
   if (detail === null && url.search) throw new HttpError(400, "invalid_query");
   if (!principalCan(principalFor(env, subject), "interpretation.accept"))
     throw new HttpError(403, "operator_required");
   if (detail !== null) return scheduleSnapshotResponse(env, detail);
-  if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
-  // A job id, a lease release, or the decision on one survey proposal (ADR 0050).
+  // The page itself is read; every path below it is a write (a job id, a
+  // lease release, the decision on one survey proposal, ADR 0050), and a
+  // POST that names none of them is 404.
+  if (request.method !== "POST")
+    throw new MethodNotAllowed(suffix === "" ? READ_METHODS : WRITE_METHODS);
   throw new HttpError(404, "not_found");
 }
 /** One settings write, forwarded with the audit envelope (ADR 0064). */

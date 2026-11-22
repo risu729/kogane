@@ -1,6 +1,6 @@
 # ADR 0118: Classify the SMBC AUD foreign ordinary deposit under identity policy 2, for AUD balance captures only; SBI income and gains stay unresolved
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1413](https://github.com/risu729/kogane/pull/1413))
 - Date: 2026-11-18
 - Carried by:
   `packages/identity/src/other.ts` (SMBC rule, `SMBC_BANK_POLICY_VERSION`),

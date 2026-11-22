@@ -27,7 +27,7 @@ import {
   usePlanRefresh,
 } from "../plan-refresh.tsx";
 import { Link, navigate } from "../router.tsx";
-import { Badge, EmptyState, Loading, QueryBoundary } from "../ui.tsx";
+import { Badge, EmptyState, Loading, Nullable, QueryBoundary } from "../ui.tsx";
 import { UnmatchedStatements } from "../unmatched-statements.tsx";
 import { CardDebitAccounts } from "../card-debit-accounts.tsx";
 import { UpcomingCardBills } from "../upcoming-card-bills.tsx";
@@ -158,7 +158,9 @@ function SettlementCard({
         <dl className="settlement-facts">
           <div id={`${id}-period`}>
             <dt>請求月 </dt>
-            <dd>{facts.statement.period ?? "不明"}</dd>
+            <dd>
+              <Nullable value={facts.statement.period} placeholder="不明" />
+            </dd>
           </div>
           <div>
             <dt>請求総額 </dt>

@@ -1,3 +1,4 @@
+import { ownEntry } from "./labels.ts";
 import { use, useMemo, type ReactNode } from "react";
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
@@ -54,7 +55,7 @@ export default function CodeHighlight({
           output.push(
             <span
               key={output.length}
-              className={TOKEN_CLASSES[token.color?.toLowerCase() ?? ""] ?? "code-text"}
+              className={ownEntry(TOKEN_CLASSES, token.color?.toLowerCase() ?? "") ?? "code-text"}
             >
               {token.content}
             </span>,
