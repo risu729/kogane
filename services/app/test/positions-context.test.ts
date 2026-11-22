@@ -1,6 +1,7 @@
 // The interpretation context of a positions page names the identity releases
 // of the rows the page returns, and of no other row: the reader fetches one
 // position past the page to report truncation, and that row is not shown.
+// `kogane.observations.list` reads the same reader and answers the same.
 // Every row here is synthetic.
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
@@ -8,8 +9,11 @@ import { observationApi } from "../src/observation-api";
 import { NO_RECORDED_IDENTITY_RELEASE } from "../../../packages/read-model/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
+import { pageReadHarness } from "./page-read-harness";
 
 beforeAll(seedRegistry);
+/** `kogane.observations.list`, which reads the route's own reader (ADR 0081). */
+const tools = pageReadHarness("positions-context");
 
 async function page(path: string) {
   const request = new Request(`https://fixture.test${path}`);
@@ -83,4 +87,22 @@ it("names only the identity releases of the positions the page returns", async (
   const second = await page("/api/positions?identityRead=as-recorded&offset=500");
   expect(second.positions.map((row) => row.position.id)).toEqual([last!.id]);
   expect(second.interpretationContext.identityRelease).toBe("identity-default-v1");
+
+  // The MCP list answers both pages as the route does, the same context included.
+  for (const [path, offset, release] of [
+    ["/api/positions?identityRead=as-recorded", 0, NO_RECORDED_IDENTITY_RELEASE],
+    ["/api/positions?identityRead=as-recorded&offset=500", 500, "identity-default-v1"],
+  ] as const) {
+    const answer = await tools.expectSameAnswer(path, "kogane.observations.list", {
+      kind: "positions",
+      identityRead: "as-recorded",
+      offset,
+    });
+    expect(answer.status, path).toBe(200);
+    expect(
+      (answer.body as { interpretationContext: { identityRelease: string } }).interpretationContext
+        .identityRelease,
+      path,
+    ).toBe(release);
+  }
 });
