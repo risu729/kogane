@@ -1012,6 +1012,12 @@ already recorded is never undone by a DELETE — an undo is a new revision
   `balance-projection` row reaches A07's real processor and rebuilds the
   projection, and the same target with no processor handed in is blocked with
   `no_processor` because it has no default.
+- `packages/storage-d1/test/decision-outbox-target.test.ts`: the dispatcher
+  looks a processor up by the row's own `target` key only, so a synthetic row
+  whose target names an `Object.prototype` member (`constructor`,
+  `__proto__`, `toString`, `hasOwnProperty`; inserted with the CHECK switched
+  off, since the CHECK refuses them) is blocked with `no_processor` like any
+  unregistered target, and no processor runs.
 - `services/processor/test/projection-input.test.ts` (G2-11 .. G2-13):
   a flag that is off and a build that has not finished both leave the row open
   and the receipt `accepted`; the completion after the read model finished
