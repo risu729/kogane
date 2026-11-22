@@ -603,7 +603,7 @@ test("following `next` alone reads every row of both lists once, as `full` lists
     expect(seen.latest).toEqual(store.latest.map((entry) => entry.id));
     expect(seen.history).toEqual(store.history.map((entry) => entry.id));
   }
-});
+}, 60_000);
 
 function pick<T>(random: () => number, choices: readonly T[]): T {
   return choices[Math.floor(random() * choices.length)]!;

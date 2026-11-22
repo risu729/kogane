@@ -28,7 +28,7 @@ import {
   REPORTED_HOLDINGS_CHANGE_PATH,
 } from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
 import { readerGrant } from "./agent-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { reportedStateAvailable } from "./reported-state-api";
 
 export { REPORTED_HOLDINGS_CHANGE_PATH };
@@ -77,8 +77,7 @@ export async function reportedHoldingsChangeApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== REPORTED_HOLDINGS_CHANGE_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (!(await reportedHoldingsChangeAvailable(env))) throw new HttpError(404, "not_found");
   // The reader authority: every source and account, summaries and records.
   if (!readerGrant(subject).capabilities.includes("summary.read"))

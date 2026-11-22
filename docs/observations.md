@@ -261,6 +261,66 @@ quoted rows, trailing text, multiline fields and logical row numbering.
 | v-point-smfg-point                       | 1.0.0    | 1.0.1   |
 | vpass-statement-page                     | 1.2.0    | 1.2.1   |
 
+## PayPay CSV: columns read by expected label first, separator-only rows skipped (parser 0.2.4)
+
+2026-11-21. 0.2.4 fixes two independent reading errors of `paypay-csv`
+0.2.3.
+
+**Column labels.** 0.2.3 placed each field on the first free header column
+whose label contained the field's substring, in documented field order.
+`出金` is part of both `出金金額（円）` and `海外出金金額`, so a header that
+listed the overseas amount before the yen outflow gave the outgoing JPY field
+the overseas column: a 12 USD purchase became a yen outflow of 12, the row's
+yen amount was dropped as an undocumented column, and a domestic row
+(overseas amount blank) got no amount at all. The only signs were the header
+warnings, and a header whose overseas column sat at the outgoing column's
+documented position gave no position warning either.
+
+0.2.4 places every column whose trimmed label is exactly the label the parser
+expects first, then matches the remaining fields by substring, and only then
+falls back to the documented position, so neither a substring nor a position
+can take a column an expected label names. The expected labels are the ones
+the synthetic fixtures use; [the source notes](sources/paypay.md#csv-granularity-and-omissions)
+list the 13 columns by meaning, and the current export's exact labels are
+unverified. Neither JPY amount field matches a label containing `海外` (the
+overseas amount is a foreign-currency figure, not yen); the position fallback
+does not read labels, so a JPY field no label matches still takes its
+documented column if no other field took it, whatever its label, with the
+fallback warning. A header with all 13 expected labels in the documented
+order is read exactly as in 0.2.3, with the same warnings. A header that reads differently is one whose overseas column
+precedes the yen outflow, whose labels differ from the expected ones, or that
+lacks a column: 0.2.3 let a field with no label take its documented position
+before later fields looked for their labels, so without `入金金額（円）` the
+incoming JPY field took the overseas amount in column 3, every later field
+took the column after its own (the transaction number was lost), and a
+yen outflow row was left without an amount as stating both. In 0.2.4 the yen
+amounts are the yen columns' and each labelled column keeps its field.
+
+**Rows of separators only.** The shared CSV reader drops an empty line, but a
+line of separators only (`,,,,,,,,,,,,`, as a spreadsheet saves a trailing
+blank row of the export) is a row of empty cells. 0.2.3 turned each such row
+into a transaction observation with no date, amount, external id,
+description or counterparty, and the warning `row N: neither an outgoing nor
+an incoming amount was stated`, so the transaction list showed an empty
+transaction for a line that states nothing.
+
+0.2.4 skips a row whose every cell is blank after trimming and records the
+closed warning `row N: blank row skipped`, which names no value. Row numbers
+and raw locators of every other row are unchanged, and every row with any
+non-blank cell reads exactly as in 0.2.3, including a row that states neither
+amount but does state something else.
+
+**Deploying rewrites nothing**: the processor registers 0.2.4 itself and the
+repair lane re-parses any stored PayPay CSV artifact under it. No migration
+and no operator step; earlier runs and their observations, including any
+empty observation a separators-only row produced, stay as recorded in those
+superseded runs. Limits: PayPay CSV has no production input (see
+[identity rollout](identity-rollout.md)), so no stored export is known to be
+affected by either change, and the parser still reads a header whose labels
+match none of the expected ones by position, with a warning. Tests:
+`packages/parsers/test/paypay-csv-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
 ## PayPay CSV: a signed amount in either amount column is left empty (parser 0.2.2)
 
 2026-11-06. The export states a row's direction by its column: outgoing
@@ -2965,15 +3025,24 @@ skipped, not turned into placeholder rows.
 
 **`paypay-csv`** consumes the official consumer CSV documented in
 `docs/sources/paypay.md`, ingested through the `ingest-file` path. Each
-data row becomes one transaction observation: outgoing amounts negative,
+data row becomes one transaction observation (a row of separators only is
+skipped with a warning, 0.2.4): outgoing amounts negative,
 incoming positive, and the overseas amount, currency, conversion rate, and
 country left decomposed in `extra`, never folded into the JPY figure — the
 same rule `smcc-meisai-scraper` already follows for foreign card use.
 
 Its column mapping is load-bearing and is not positional. Columns are
-located by matching a distinguishing substring of each header label
-(`取引日`, `出金`, `入金`, `海外`, `通貨`, `レート`, `利用国`, `取引内容`,
-`取引先`, `取引方法`, `支払い区分`/`支払区分`, `利用者`, `取引番号`).
+located in three passes (0.2.4): first every column whose trimmed label is
+exactly the one the parser expects (`取引日`, `出金金額（円）`, `入金金額（円）`,
+`海外出金金額`, `通貨`, `変換レート（円）`, `利用国`, `取引内容`, `取引先`,
+`取引方法`, `支払い区分`, `利用者`, `取引番号`); then, for a field still
+unplaced, the first free column whose label contains its distinguishing
+substring (`取引日`, `出金`, `入金`, `海外`, `通貨`, `レート`, `利用国`,
+`取引内容`, `取引先`, `取引方法`, `支払い区分`/`支払区分`, `利用者`,
+`取引番号`), where neither JPY amount column matches a label containing
+`海外`; and last the documented position. The expected labels are the ones the
+synthetic fixtures use; `docs/sources/paypay.md` lists the columns by meaning,
+not by exact label.
 Position is used only as a fallback, and every fallback is warned about,
 as is a column found at a position other than the documented one and any
 header column the documentation does not list. The parser throws outright

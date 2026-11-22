@@ -32,6 +32,28 @@ an operator's edit or an operator's or delegated acceptance of a re-survey propo
 ([below](#official-site-re-survey)). The page flags provenance older than
 thirty days.
 
+**When a refresh fails.** The page reads its snapshot through the shared
+`QueryBoundary` ([frontend](frontend.md#shared-primitives)). The first read
+failing shows `収集スケジュールを読み込めませんでした` ("the collection schedules
+could not be loaded") with the status and a fixed message, and no schedule. A
+later read that fails (a refocus, a retry, the read back after a save)
+keeps the earlier answer only under `更新できませんでした。前回読み込んだ収集スケジュールを表示しています。`
+("could not refresh; showing the collection schedules loaded earlier") with a
+retry, and so does a read paused offline under its own 前回読み込んだ warning.
+Everything below the warning, the `{n}件の提案を確認してください` ("review {n}
+proposals") count included, is that earlier answer. A 401 or 403 hides it. While
+the earlier answer is shown, the two actions that decide from what the page
+shows are held, each with a note saying so: **依頼を送信** (its confirmation
+lists the last run, a held lease, the next run and the maintenance status as
+what to read first, the request carries none of them for the server to
+check, and a started collection cannot be taken back) and **採用**/**却下** of a re-survey proposal (the list of
+undecided proposals may be out of date). The other writes stay available,
+because the server checks each against exactly what the page showed and
+refuses it with 409 when that changed: **設定を保存** and **停止時間を保存** carry
+the revision they were made from, and **停止した実行を解除** carries the exact
+lease reference, so repeating it after a failed read back is safe (below). A
+successful read lifts the warning and the holds.
+
 The initial public snapshot is in `config/maintenance-research.json` (2026-10-04).
 It includes Mizuho Saturday night, Sony login/debit windows, the GLOBAL PASS debit
 member site, Vpass's partial Monday outage, Mobile Suica PC site availability,
@@ -452,7 +474,10 @@ login or render with JavaScript cannot be read this way.
   with its closed states and newest receipt, each source's maintenance
   status and rule count, and the held leases
   ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
-  parameter is accepted.
+  parameter is accepted. `HEAD` is the same read, `detail` included, without
+  the body; another method is `405` with `Allow: GET, HEAD`, except `POST`,
+  which is `404` here. A method other than `POST` on any path below the page
+  is `405` with `Allow: POST`, as it is on `POST /api/ops/v1/schedules/bootstrap`.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped

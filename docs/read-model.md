@@ -299,10 +299,17 @@ stale-key read probed each live revision's keys once per current key (quadratic
 in the live and current sets); it now names the revisions holding a current key
 once, through `card_purchase_recognition_keys_key`. No index was added: a
 partial index on the two card datasets saved about 10 ms. What still grows with
-history is the snapshot step shared with the Transactions page, which reads
-every artifact once per call (about 50 ms here, nearly all of it the 4,869 Vpass
-statement pages; 40,000 unrelated artifacts added 4 ms); the rest grows with the
-current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
+history is the snapshot step shared with the Transactions page (about 50 ms
+here, nearly all of it the 4,869 Vpass statement pages; 40,000 unrelated
+artifacts added 4 ms). It does not read each artifact once: without statistics
+the current card usage page scans every artifact twice, for the Vpass statement
+snapshots (through `sqlite_autoindex_fetch_artifacts_1`) and for the MyJCB
+ledger ranking (through `idx_fetch_artifacts_source_dataset_time`), probing each
+scanned artifact's run, unit reports and parse; the stale-key read reaches the
+same artifacts by walking every terminal run report twice through an automatic
+index on `report_kind`. Its rows read therefore grow linearly with the history
+([rows read by the latest-state reads](#rows-read-by-the-latest-state-reads)).
+The rest grows with the current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
 compares every read with the shipped text (`card-usage-legacy-sql.ts`) on a
 smaller store and fails on a plan that scans observations, parses, runs, reports
 or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
@@ -319,6 +326,87 @@ confirmed captures at positions 0 and 1 so that the substituted rules decide
 rows; the plan checks run the unmodified shipped text. This proves the plan
 rewrite and the rule change separately: the rewrite returns what the shipped
 plan returns under the intended rules, not the shipped rows byte for byte.
+
+### Rows read by the latest-state reads
+
+The reads the Processor tick makes of the current state read rows in
+proportion to the whole history on every call, not to what they return or to
+what changed (issue [#1491](https://github.com/risu729/kogane/issues/1491)).
+Their plans without table statistics, as D1 plans them (`EXPLAIN QUERY PLAN`
+on every CORE migration):
+
+- `listLatestBalances` (the balance projection's capture reads it three times,
+  `services/processor/src/balance-projection-job.ts`) scans `fetch_artifacts`
+  three times through `idx_fetch_artifacts_source_dataset_time`: its own
+  active chain, `eligible_snapshots` and `eligible_artifact_containers`. It
+  walks every terminal fetch-run report twice more, through an automatic index
+  on `report_kind`, for the MyJCB past months and the V Point runs, and reaches
+  every artifact of each run by `fetch_run_id`. Each scanned artifact runs
+  correlated probes: the visible-run checks (annotation, seal, terminal
+  report), its unit reports, the expected-artifact count, the unit policy and
+  unit success, its parse, publication and coverage claim, and `json_each` over
+  the parse's warnings. The window functions then rank the whole set.
+- `listPositions` (the report job reads it on every tick,
+  `services/processor/src/report-job.ts`) walks every terminal report for its
+  active chain and makes the two snapshot scans; its valuation pairs
+  (`POSITION_VALUATIONS_SQL`) reach the positions by id and make the two
+  snapshot scans again.
+- `CURRENT_REWARD_BUCKETS_SQL` evaluates `ELIGIBLE_VPOINT_RUNS`, the same walk
+  of every terminal report, whenever a current claim is a V Point one, and
+  scans every reward bucket claim (`SCAN c USING INDEX
+  reward_bucket_claims_v2_holding`).
+- The card usage page and the stale-key read make the passes in
+  [Cost](#cost) above.
+- The Vpass binding insert of `identitySweep`'s empty-parse batch
+  (`packages/storage-d1/src/core/identity-store.ts`) joins
+  `trusted_vpass_card_bindings` (migration 0057) by artifact, but its plan
+  starts from every binding artifact (`SEARCH ba USING INDEX
+  idx_fetch_artifacts_source_dataset_time (source_id=? AND artifact_role=? AND
+  dataset=?)`) and, for each, searches every Vpass artifact (`SEARCH fa ...
+  (source_id=?)`); the batch's candidates are the innermost loop. It reads
+  binding artifacts times Vpass artifacts whatever the batch holds, and it runs
+  whenever the batch holds an empty parse of any source. The keyed lookup
+  `SELECT ... FROM trusted_vpass_card_bindings WHERE financial_artifact_id=?`
+  is keyed (`services/processor/test/binding-query-plan.test.ts`); the insert's
+  join is not.
+
+`services/processor/test/tick-rows-read.test.ts` measures workerd's own
+`meta.rows_read` per call through each statement's real caller, on two
+synthetic stores with the same current balances, positions, reward buckets and
+stale keys over 30 and 60 capture days
+(972 and 1,942 artifacts: the card store of `card-usage-scale-fixture.ts` at
+`STATEMENT_CI_SCALE`, plus a V Point run, an SBI Securities positions run and
+their reward claims per day), copied into Miniflare D1:
+
+| Statement                      | Caller               | 30 days | 60 days | Growth | Rows returned |
+| ------------------------------ | -------------------- | ------: | ------: | -----: | ------------- |
+| `listLatestBalances`           | `captureFixedInput`  |  37,693 |  74,943 |   1.99 | 10 / 10       |
+| `listPositions`                | `runReportJob`       |  20,041 |  39,791 |   1.99 | 3 / 3         |
+| `POSITION_VALUATIONS_SQL`      | `runReportJob`       |  12,371 |  24,401 |   1.97 | 3 / 3         |
+| `CURRENT_REWARD_BUCKETS_SQL`   | `captureRewardInput` |   8,571 |  17,101 |   2.00 | 2 / 2         |
+| `STALE_CARD_PURCHASE_KEYS_SQL` | `cardPurchaseSweep`  |  17,755 |  32,588 |   1.84 | 5 / 5         |
+| `currentCardUsageSql` page     | `cardPurchaseSweep`  |  15,010 |  27,702 |   1.85 | 68 / 85       |
+| Vpass binding insert           | `identitySweep`      |  75,890 | 283,740 |   3.74 | (insert)      |
+
+Rows read are per call. Doubling the history about doubles every read (1.84
+to 2.00) and nearly quadruples the Vpass binding insert (3.74), while what they
+return stays the same (the card usage page returns the older statement months
+the longer history still holds as current). The report job's second run over
+unchanged inputs reads as much as its first (32,451 rows at 30 days, 64,231 at
+60; the first run reads 32,466 and 64,246) only to find the report it stored:
+it reads every position, valuation, decimal and price before it compares the
+manifest digest. The current-snapshot selections alone (container snapshots,
+MyJCB past months, V Point runs) are 45,503 of the 74,943 rows of one
+latest-balances read at 60 days; the rest is its active chain over every
+artifact. The test fails when a statement's growth exceeds a ceiling (2.4 for
+the linear reads, 4.8 for the Vpass binding insert), so a read that starts to
+grow faster with history fails it; a read made cheaper passes, and its PR
+restates the numbers above and lowers the ceiling. That these reads do not
+grow with history, issue #1491's acceptance, is a `test.todo` per statement:
+it does not hold today. `tick-query-plan.test.ts` accepts the scans among these
+steps by name and checks `SCAN` steps only, so the nested search of the Vpass
+insert, the automatic indexes and the per-row probes pass it; its one-capture
+store does not reach the Vpass binding insert at all.
 
 ## Parity proof
 

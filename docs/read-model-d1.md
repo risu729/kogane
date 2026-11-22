@@ -165,13 +165,8 @@ A build writes rows while `building`, and:
   conflict` in a trigger (G2-07). The reward writer skips only a row whose
   primary key is written (`ON CONFLICT … DO NOTHING`), so a reward row that
   fails a CHECK or NOT NULL raises as well
-  ([rewards.md](rewards.md#read-tables-migration-0002_reward_readsql-current-expiry-rows-use-0004_reward_unclassified_bucketssql)).
-  Limit: the balance writer's `INSERT OR IGNORE` skips such a row without an
-  error and moves the checkpoint past it; the build then stops at the
-  verification before the seal (`projection_rows_unverified`) on each later tick,
-  and nothing names the row. Its input refs (`snapshot_input_refs`) are inserted
-  the same way, so a ref that fails a CHECK is left out and the build starts
-  without it; no step compares the stored refs with the plan;
+  ([rewards.md](rewards.md#read-tables-migration-0002_reward_readsql-current-expiry-rows-use-0004_reward_unclassified_bucketssql)),
+  and so does the balance writer (below);
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
   longer write, seal or publish (G2-09);
 - the balance writer (`packages/storage-d1/src/read/writer.ts`) skips only a

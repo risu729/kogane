@@ -402,6 +402,48 @@ the stored v1 one, and refuses a v2 manifest missing one of its added
 fields, with an unsorted rule list, a `truncated` that is not a boolean or
 an extra field, a v1 manifest with the v2 fields, and an unknown version.
 
+## Amendment: a decimal with more places than its unit holds is grouped, not verbatim (2026-11-21)
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context
+
+The decision above shows a decimal with more places than its unit's minor
+unit "verbatim", while every other amount on the page goes through
+`formatAmount` with its integer digits grouped in threes. The same report
+then wrote `1,200,000 JPY` beside `1234567.5 JPY`, and the client's other
+exact-decimal displays (settlement, reward, reconstructed and latest-balance
+quantities) were ungrouped as well.
+
+### Options considered
+
+1. Keep the verbatim text for the decimals the minor unit cannot hold.
+2. Group the integer digits of every exact decimal in threes and keep every
+   fraction digit, by string work in `apps/web/src/money.ts`.
+
+### Decision
+
+Choose option 2. A decimal with more places than its unit's minor unit, or
+in a unit with no known minor unit, is shown through `formatDecimal`: the
+sign, integer digits grouped in threes, and every fraction digit at the
+decimal's own scale. It is still never rounded, and it never passes through
+a Number.
+
+### Consequences
+
+The report page writes `34,567.5 JPY` and `1,234,567.5 JPY`. Nothing stored,
+exported or read by an agent changes; this is display only. Checks that no
+sum is shown look for both the grouped and the ungrouped text.
+
+### Verification
+
+`apps/web/test/money.test.ts` holds `formatDecimal` to `formatAmount` for
+JPY, USD and AUD on seeded random coefficients and keeps text that is not a
+plain decimal unchanged; `apps/web/test/reports.browser.test.ts` pins
+`34,567.5 JPY` and `1,234,567.5 JPY` and fails with the earlier verbatim
+text.
+
 ## Amendment: the report job reads its positions from one cut (2026-11-21)
 
 - Status: proposed
