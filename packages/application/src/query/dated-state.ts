@@ -1,10 +1,11 @@
 // Reported state on a date (docs/reported-state.md, ADR 0019): per account,
 // what the provider last reported in a complete container snapshot captured
 // before the end of the date, and the card statements due around it with where
-// each stands, the older ones only counted. One bounded read path; it never
-// writes and never adds two amounts. A container without a snapshot is named
-// in the coverage, never shown as a zero balance, and a statement without a
-// readable due date is its own status, never a guess.
+// each stands, the older ones only counted, and the payments the provider's
+// scheduled-payment page listed. One bounded read path; it never writes and
+// never adds two amounts. A container without a snapshot is named in the
+// coverage, never shown as a zero balance, and a statement without a readable
+// due date is its own status, never a guess.
 import { validCardSettlementFacts } from "../../../domain/src/card-settlement.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { METRIC_REGISTRY_RELEASE, resolveMetric } from "../../../domain/src/metrics.ts";
@@ -19,6 +20,8 @@ import {
   REPORTED_STATE_SCHEMA,
   REPORTED_STATE_ZONE,
   reportedStateCutoff,
+  SCHEDULED_PAYMENT_KINDS,
+  scheduledPaymentDueStatus,
   snapshotFreshness,
   STATEMENTS_BEFORE_WINDOW_REASONS,
   UNDATED_STATEMENT_WINDOW_DAYS,
@@ -30,10 +33,13 @@ import {
   type ReportedInstrument,
   type ReportedPayable,
   type ReportedPosition,
+  type ReportedScheduledPaymentCapture,
   type ReportedSettlement,
   type ReportedSnapshot,
   type ReportedState,
   type ReportedStateManifestRow,
+  type ScheduledPaymentKind,
+  type ScheduledPaymentsListing,
   type StatementsBeforeWindow,
   type StatementsBeforeWindowReason,
   type UncountedReportedState,
@@ -48,13 +54,16 @@ import {
 import {
   DATED_BALANCES_SQL,
   DATED_POSITIONS_SQL,
+  DATED_SCHEDULED_PAYMENTS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATE_ROW_BOUND,
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
   type DatedPositionRow,
+  type DatedScheduledPaymentRow,
   type DatedSnapshotRow,
+  SCHEDULED_PAYMENT_PARSER,
   type DatedStatementRow,
   type DatedStatementsBeforeWindowRow,
 } from "../../../read-model/src/dated-state.ts";
@@ -117,6 +126,78 @@ function storedQuantity(
   if (status === "missing" || status === "unparsed" || status === "conflict")
     return absentQuantity(unitRef, status, `stored:${status}`);
   return absentQuantity(unitRef, "missing", "decimal_not_recorded");
+}
+
+const CANONICAL_INTEGER = /^(?:0|-?[1-9][0-9]*)$/u;
+const SCHEDULE_KINDS = new Set<string>(SCHEDULED_PAYMENT_KINDS);
+const LOCAL_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
+
+/**
+ * A scheduled payment's stored amount: `amount_text` is a canonical integer
+ * at scale 0 (migration 0061's checks), read as an exact decimal; any other
+ * text is kept as unparsed, never a zero.
+ */
+function scheduledAmount(text: string, scale: number, currency: string): Quantity {
+  if (scale !== 0 || !CANONICAL_INTEGER.test(text))
+    return absentQuantity(currency, "unparsed", "scheduled_amount_not_canonical");
+  return exactQuantity(currency, normalizeDecimal(BigInt(text), 0));
+}
+
+/**
+ * The scheduled-payment captures as of the cutoff, one per page, each with
+ * the payments it listed in due-date order. A row that breaks the table's
+ * own checks (a kind, a date or a text it refuses) throws rather than being
+ * shown in a shape the answer does not admit.
+ */
+function scheduledPaymentCaptures(
+  rows: readonly DatedScheduledPaymentRow[],
+  date: string,
+): ReportedScheduledPaymentCapture[] {
+  const captures = new Map<number, ReportedScheduledPaymentCapture>();
+  for (const row of rows) {
+    let capture = captures.get(row.artifact_id);
+    if (capture === undefined) {
+      capture = {
+        ref: `artifact:${row.artifact_id}`,
+        sourceId: row.source_id,
+        parserName: SCHEDULED_PAYMENT_PARSER,
+        capturedAt: row.fetched_at,
+        ...snapshotFreshness(row.fetched_at, date),
+        payments: [],
+      };
+      captures.set(row.artifact_id, capture);
+    }
+    if (row.id === null) continue;
+    if (
+      row.source_account === null ||
+      row.schedule_kind === null ||
+      !SCHEDULE_KINDS.has(row.schedule_kind) ||
+      row.usage_date === null ||
+      !LOCAL_DATE.test(row.usage_date) ||
+      row.due_date === null ||
+      !LOCAL_DATE.test(row.due_date) ||
+      row.amount_text === null ||
+      row.amount_scale === null ||
+      row.currency === null ||
+      row.counterparty === null ||
+      row.as_of === null ||
+      !LOCAL_DATE.test(row.as_of)
+    )
+      throw new Error("scheduled_payment_row_invalid");
+    capture.payments.push({
+      ref: `scheduled-payment:${row.id}`,
+      sourceAccount: row.source_account,
+      scheduleKind: row.schedule_kind as ScheduledPaymentKind,
+      usageDate: row.usage_date,
+      dueDate: row.due_date,
+      amount: scheduledAmount(row.amount_text, row.amount_scale, row.currency),
+      providerText: row.amount_text,
+      counterparty: row.counterparty,
+      asOf: row.as_of,
+      dueStatus: scheduledPaymentDueStatus(date, row.due_date),
+    });
+  }
+  return [...captures.values()];
 }
 
 function snapshotKey(row: { parser_name: string; snapshot_artifact_id: number }): string {
@@ -200,24 +281,33 @@ export async function queryDatedState(
   const account = input.account ?? single;
   const scope = input.accounts === undefined || single !== null ? null : new Set(input.accounts);
   const counted = input.includeStatementsBeforeWindow !== false;
+  // A scheduled payment has no identity run, so no resolved account: under an
+  // account filter none can match, and the coverage says they are not listed.
+  const scheduledListing: ScheduledPaymentsListing =
+    account === null && scope === null ? "listed" : "not_listed_account_filter";
 
-  const [positionRows, balanceRows, perimeter, statementRows, omittedRows] = await Promise.all([
-    sql.all<DatedPositionRow>(DATED_POSITIONS_SQL, [cutoff]),
-    sql.all<DatedBalanceRow>(DATED_BALANCES_SQL, [cutoff]),
-    sql.all<DatedSnapshotRow>(DATED_SNAPSHOTS_SQL, [cutoff]),
-    sql.all<DatedStatementRow>(DATED_STATEMENTS_SQL, [cutoff, fromPaymentDate, undatedFrom]),
-    counted
-      ? sql.all<DatedStatementsBeforeWindowRow>(DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
-          cutoff,
-          fromPaymentDate,
-          undatedFrom,
-        ])
-      : null,
-  ]);
+  const [positionRows, balanceRows, perimeter, statementRows, omittedRows, scheduledRows] =
+    await Promise.all([
+      sql.all<DatedPositionRow>(DATED_POSITIONS_SQL, [cutoff]),
+      sql.all<DatedBalanceRow>(DATED_BALANCES_SQL, [cutoff]),
+      sql.all<DatedSnapshotRow>(DATED_SNAPSHOTS_SQL, [cutoff]),
+      sql.all<DatedStatementRow>(DATED_STATEMENTS_SQL, [cutoff, fromPaymentDate, undatedFrom]),
+      counted
+        ? sql.all<DatedStatementsBeforeWindowRow>(DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
+            cutoff,
+            fromPaymentDate,
+            undatedFrom,
+          ])
+        : null,
+      counted && scheduledListing === "listed"
+        ? sql.all<DatedScheduledPaymentRow>(DATED_SCHEDULED_PAYMENTS_SQL, [cutoff])
+        : null,
+    ]);
   bounded(positionRows);
   bounded(balanceRows);
   bounded(statementRows);
   if (omittedRows !== null) bounded(omittedRows);
+  if (scheduledRows !== null) bounded(scheduledRows);
 
   const wanted = (sourceId: string, accountId: string | null): boolean =>
     (source === null || sourceId === source) &&
@@ -494,12 +584,22 @@ export async function queryDatedState(
   // containers without one, each listed or counted row (its id names its
   // parse run) with the identity it was read under, each payable's account,
   // each settlement review at its decision and, when counted, the statements
-  // the payable window leaves out. Observations, candidates and decisions are
-  // append-only, so these ids fix what they name. A state read without the
-  // count records none: its context id claims only the inputs it read (ADR
-  // 0019, amendment of 2026-11-18).
+  // the payable window leaves out and each scheduled-payment capture at its
+  // parse with each payment it lists. Observations, candidates and decisions
+  // are append-only, so these ids fix what they name. A state read without
+  // the count records neither: its context id claims only the inputs it read
+  // (ADR 0019, amendments of 2026-11-18 and 2026-11-21).
+  const scheduledInScope = (scheduledRows ?? []).filter(
+    (row) => source === null || row.source_id === source,
+  );
+  const scheduled = scheduledPaymentCaptures(scheduledInScope, date);
+  const scheduledCaptureRefs = new Map<string, string>();
+  for (const row of scheduledInScope)
+    scheduledCaptureRefs.set(`artifact:${row.artifact_id}`, `parse_run:${row.parse_run_id}`);
   const manifest: UncountedReportedState["manifest"] & {
     statementsBeforeWindow?: ManifestStatementsBeforeWindow[];
+    scheduledPaymentCaptures?: [string, string][];
+    scheduledPaymentRefs?: string[];
   } = {
     schemaVersion: REPORTED_STATE_SCHEMA,
     date,
@@ -522,7 +622,15 @@ export async function queryDatedState(
           `card-settlement:${row.id}@${row.decision_revision_id === null ? "proposed" : `decision:${row.decision_revision_id}`}`,
       )
       .sort(),
-    ...(counts === null ? {} : { statementsBeforeWindow: counts.manifest }),
+    ...(counts === null
+      ? {}
+      : {
+          statementsBeforeWindow: counts.manifest,
+          scheduledPaymentCaptures: [...scheduledCaptureRefs].sort((a, b) => byText(a[0], b[0])),
+          scheduledPaymentRefs: scheduled
+            .flatMap((capture) => capture.payments.map((payment) => payment.ref))
+            .sort(byText),
+        }),
   };
   const state: UncountedReportedState = {
     schemaVersion: REPORTED_STATE_SCHEMA,
@@ -557,10 +665,30 @@ export async function queryDatedState(
     contextId: await canonicalDigest(manifest),
   };
   if (counts === null) return state;
-  // The same objects, typed with the count (the keys keep their order).
+  // The served answer: the same objects with the count and the scheduled
+  // payments, the scheduled payments placed after the payables (the other
+  // keys keep their order).
   return {
-    ...state,
-    coverage: { ...state.coverage, statementsBeforeWindow: counts.coverage },
-    manifest: { ...state.manifest, statementsBeforeWindow: counts.manifest },
+    schemaVersion: state.schemaVersion,
+    date: state.date,
+    cutoff: state.cutoff,
+    zone: state.zone,
+    filters: state.filters,
+    snapshots: state.snapshots,
+    accounts: state.accounts,
+    payables: state.payables,
+    scheduledPayments: scheduled,
+    coverage: {
+      ...state.coverage,
+      statementsBeforeWindow: counts.coverage,
+      scheduledPayments: scheduledListing,
+    },
+    manifest: {
+      ...state.manifest,
+      statementsBeforeWindow: counts.manifest,
+      scheduledPaymentCaptures: manifest.scheduledPaymentCaptures!,
+      scheduledPaymentRefs: manifest.scheduledPaymentRefs!,
+    },
+    contextId: state.contextId,
   };
 }

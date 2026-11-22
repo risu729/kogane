@@ -198,7 +198,8 @@ export function StatusBadge({ status }: { status: string }): ReactNode {
   );
 }
 
-const KIND_LABELS: Record<ObservationKind, string> = {
+/** The observation kinds, as every page names them. */
+export const OBSERVATION_KIND_LABELS: Record<ObservationKind, string> = {
   transaction: "取引",
   balance: "残高",
   position: "保有資産",
@@ -207,8 +208,8 @@ const KIND_LABELS: Record<ObservationKind, string> = {
 
 export function KindBadge({ kind }: { kind: ObservationKind }): ReactNode {
   return (
-    <Badge className="badge-kind" title={`${KIND_LABELS[kind]}の観測記録`}>
-      {KIND_LABELS[kind]}
+    <Badge className="badge-kind" title={`${OBSERVATION_KIND_LABELS[kind]}の観測記録`}>
+      {OBSERVATION_KIND_LABELS[kind]}
     </Badge>
   );
 }
@@ -267,7 +268,7 @@ export function ObservationLink({
   return (
     <Link
       to={`/observations/${kind}/${String(id)}`}
-      title={`${KIND_LABELS[kind]}の観測記録 ${String(id)}`}
+      title={`${OBSERVATION_KIND_LABELS[kind]}の観測記録 ${String(id)}`}
     >
       {children ?? `#${String(id)}`}
     </Link>

@@ -8,6 +8,8 @@ import { objectKey } from "../../../packages/collection/src/index";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  closedErrorName,
+  closedErrorType,
   createDiagnostics,
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
@@ -664,7 +666,8 @@ function parseContainerRecord(line: string): ContainerRecord {
     return {
       type: "error",
       operation: record["operation"],
-      errorType: record["errorType"],
+      // The container's name is data, not a code: only a closed one is kept.
+      errorType: closedErrorName(record["errorType"]),
       errorCode: record["errorCode"],
       ...(record["stage"] === undefined ? {} : { stage: record["stage"] }),
       ...(record["challengeAttempts"] === undefined
@@ -867,9 +870,13 @@ function collectionFailure(
     ...(artifactKey ? { artifactKey } : {}),
   };
 }
+/**
+ * The Worker's own error names a failure entry may carry besides the shared
+ * closed set (`closedErrorType`); every other thrown name is `UnknownError`.
+ */
+const GLOBALPASS_ERROR_TYPES = ["CollectionContractError"] as const;
 function safeErrorType(error: unknown): string {
-  const candidate = error instanceof Error ? error.name : "UnknownError";
-  return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(candidate) ? candidate : "UnknownError";
+  return closedErrorType(error, GLOBALPASS_ERROR_TYPES);
 }
 function oneOf<T extends string>(values: readonly T[], value: unknown): value is T {
   return typeof value === "string" && (values as readonly string[]).includes(value);

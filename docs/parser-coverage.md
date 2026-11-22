@@ -601,6 +601,7 @@ provider's empty row, directly or inside exactly one `div` that carries none
 of the reader's classes) is zero rows, not a failure. Its rows are the fifth observation kind, `scheduled_payment`
 (`scheduled_payment_observations`, migration 0061), declared outside
 `types.ts` so that no other parser's digest changes. They are future
-payments, not purchases, statement rows or balances; no read path reads them
-yet. The ボーナス払い schedule page is not read until it is observed with
+payments, not purchases, statement rows or balances; only the reported state
+on a date reads them, listing them and adding nothing
+([ADR 0019](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)). The ボーナス払い schedule page is not read until it is observed with
 rows.
