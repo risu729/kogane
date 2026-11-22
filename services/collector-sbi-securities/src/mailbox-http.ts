@@ -83,12 +83,16 @@ export class MailboxHttp {
   private csrf = "";
   private riyoCd = "";
   private diagnosis: MailboxDiagnosis = { step: "landing", hop: 0 };
+  private readonly fetcher: Fetcher;
   constructor(
     cookies: readonly MailboxCookie[],
-    private readonly fetcher: Fetcher = fetch,
+    fetcher: Fetcher = fetch,
     private readonly deadline = Number.POSITIVE_INFINITY,
     private readonly leaseSignal = new AbortController().signal,
   ) {
+    // Called as `this.fetcher(...)`, the Workers runtime's `fetch` throws
+    // "Illegal invocation" before any request leaves, so call it unbound.
+    this.fetcher = (input, init) => fetcher(input, init);
     this.cookies = cookies.map((cookie) => {
       if (
         !sbiDomain(cookie.domain) ||

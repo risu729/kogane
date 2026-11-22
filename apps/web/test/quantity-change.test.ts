@@ -1,6 +1,7 @@
 // `QuantityChange` writes the server's exact change with its sign and nothing
-// else: no Number on the way, `±0` for zero, the minus the decimal carries, and
-// every fraction digit. A change that is not exact is unknown, not a number.
+// else: no Number on the way, `±0` for zero, the minus the decimal carries,
+// integer digits grouped in threes as every exact amount is, and every
+// fraction digit. A change that is not exact is unknown, not a number.
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -28,12 +29,16 @@ test("the sign is always written and zero is ±0", () => {
   expect(shown(exact("0", 0))).toBe("±0");
   expect(shown(exact("7", 0))).toBe("+7");
   expect(shown(exact("-5", 1))).toBe("-0.5");
+  expect(shown(exact("12345", 1))).toBe("+1,234.5");
+  expect(shown(exact("-1234", 0))).toBe("-1,234");
 });
 
 test("every digit survives, beyond what a Number holds", () => {
   expect(shown(exact("1", 18))).toBe("+0.000000000000000001");
-  expect(shown(exact("-123456789012345678901234567", 9))).toBe("-123456789012345678.901234567");
-  expect(shown(exact("90071992547409931", 0))).toBe("+90071992547409931");
+  expect(shown(exact("-123456789012345678901234567", 9))).toBe(
+    "-123,456,789,012,345,678.901234567",
+  );
+  expect(shown(exact("90071992547409931", 0))).toBe("+90,071,992,547,409,931");
 });
 
 test("a change that is not exact is unknown, never a number", () => {

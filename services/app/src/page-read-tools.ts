@@ -45,9 +45,9 @@ import { mcpInputSchema } from "./mcp-input-schema";
 import { schedulesServed } from "./schedule-tools";
 import { scheduleSnapshotResponse } from "./schedules-api";
 import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
-
-/** The result envelope of every page read: the route's answer, under `data`. */
-const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
+// The result envelope of every page read: the route's answer, under `data`.
+// Shared, so the overview summary's byte budget measures this very envelope.
+import { PAGE_READ_SCHEMA_VERSION } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /** A free query value a route accepts: bounded, non-empty, no control character. */
 const routeText = (max: number) =>
@@ -119,7 +119,7 @@ const TOOLS = {
   "kogane.store.read": tool({
     title: "Store metadata, overview and filter options",
     description:
-      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the newest 500 fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). `overview` takes `detail`: `summary` (the default) keeps the counts and coverage, lists the sources by artifact count (equal counts share a line with `sourceIds`), and collapses each run window by status (fetch `success`/`partial`, parse `ok`/`pending`/`error`) into runs, sources or parsers, superseded and warning counts, every closed `failureCodes` of a parse status and the newest run's ids, with a line per source or parser for each status that is not a success (`notSuccessful`, `notOk` with its newest three `failureCodes` and `moreFailureCodes`) and per partial-unit dataset (`unitUpdates`), the five with the newest runs each, the rest counted in `notSuccessfulOmitted`, `notOkOmitted` and `unitUpdatesOmitted`; `full` lists every run with its producer, session id, parser version, warnings and error. The same answer as GET /api/meta, /api/overview or /api/filter-options with the same `detail`, under records.read and a whole-store read grant. Read-only.",
+      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the newest 500 fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). `overview` takes `detail`: `summary` (the default) keeps the counts and coverage, lists the sources by artifact count (equal counts share a line with `sourceIds`), and collapses each run window by status (fetch `success`/`partial`, parse `ok`/`pending`/`error`) into runs, sources or parsers, superseded and warning counts, every closed `failureCodes` of a parse status and the newest run's ids, with a line per source or parser for each status that is not a success (`notSuccessful`, `notOk` with its newest three `failureCodes` and `moreFailureCodes`) and per partial-unit dataset (`unitUpdates`), the five with the newest runs each, the rest counted in `notSuccessfulOmitted`, `notOkOmitted` and `unitUpdatesOmitted`. The summary is held to 8,192 bytes: past it, sources (the last by id first, counted in `sourcesOmitted`), then line codes (into `moreFailureCodes`), then lines (oldest first, into the omitted counts) are left out and `budget.trimmed` is true; every status keeps every code. When its counts and status lines alone pass it, the read is 413 result_limit_exceeded with `retryWith: {detail: \"full\"}`. `full` lists every run with its producer, session id, parser version, warnings and error. The same answer as GET /api/meta, /api/overview or /api/filter-options with the same `detail`, under records.read and a whole-store read grant. Read-only.",
     schema: z.strictObject({
       page: z.enum(["meta", "overview", "filter-options"]),
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]).optional(),
@@ -133,7 +133,7 @@ const TOOLS = {
   "kogane.observations.list": tool({
     title: "Lists of transactions, balances, positions or artifacts",
     description:
-      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind>, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. Read-only.",
+      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind> with the same `detail`, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. `balances` takes `detail`: `summary` (the default) answers the first lines of each list, latest and history in turn, up to 10 each and under 8 KB: observationId, `account` and `metric` refs into page-local `accounts` (source, sourceAccount, entity, label, mapping status, lineage) and `metrics` (source, providerMetric and the interpretation's closed kind, measurementKind, assetClass, timeBasis), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status, never a zero) and asOf; a latest line's `duplicates` (the ids its group folded in) and `interpretation:conflict`, a history line's `parse:superseded`, `parse:pending`, `parse:error`; `coverage.nextOffset` and `latestNextOffset` start each list's next page; `coverage.next` is both offsets of the next page (an ended list at its end), null when both lists have ended: pass both with the same filters. A first line over the budget alone is 413 result_limit_exceeded with `retryWith: {detail: \"full\"}`. `full` answers up to 500 rows a list with each row's organization and interpretation. The adopted balances of the published snapshot are kogane.balances.read's. Read-only.",
     schema: z.strictObject({
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]),
       source: FILTER_TEXT.optional(),
@@ -148,6 +148,7 @@ const TOOLS = {
       latestOffset: OFFSET.optional(),
       cursor: FILTER_TEXT.optional(),
       identityRead: IDENTITY_READ.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
     routes: ["/api/transactions", "/api/balances", "/api/positions", "/api/artifacts"],
@@ -171,11 +172,11 @@ const TOOLS = {
       ),
   }),
   "kogane.balances.read": tool({
-    title: "Latest balances and balance history of the published snapshot",
+    title: "Latest balances, balance history and cash per account of the published snapshot",
     description:
-      "One page of the v2 balance read: `latest` (each adopted balance of the published snapshot, with the page's coverage and known-asset subtotals) or `history` (the visible balance observations up to that snapshot). `detail: summary` (the default) answers one line per row: observationId, source, account with its label, mapping status and lineage, metric (registry id and provider name), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status as the reason, never a zero), asOf, reasons, and for `latest` freshness and adoption; a `history` row of a superseded, pending or failed parse says so (`parse:superseded`, `parse:pending`, `parse:error`); 10 rows by default. `detail: full` answers each row with its whole provenance (organization, product, instruments, interpretation, quantity, metric, adoption evidence, temporal reference); 100 rows by default. The same answer as GET /api/v2/balances/latest or /api/v2/balances/history with the same `detail`, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is one of 10, 25, 50, 100, 200 or 500; `cursor` is the previous page's `nextCursor` and continues at any offered `limit` and either `detail`. A cursor read with other filters is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. 503 read_model_unavailable while no snapshot is published. Read-only.",
+      "One page of the v2 balance read of the published snapshot: `latest` (each adopted balance, with the coverage and known-asset subtotals), `history` (the visible balance observations up to it) or `cash` (how much cash per account and per bank, in one call). `detail: summary` (the default) answers one line per row: observationId, source, account with its label, mapping status and lineage, metric (registry id, provider name), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status as the reason, never a zero), asOf, reasons, and for `latest` freshness and adoption; a superseded, pending or failed `history` row says so (`parse:superseded`, `parse:pending`, `parse:error`); 10 rows by default. `detail: full` answers each row with its whole provenance; 100 rows by default. `cash` takes no `detail`, `metric` or `view`: one line per account (entity, label, amounts of deposit.balance, broker.foreign-cash-deposit and exchange.cash-balance, each with source, sourceAccount, unit, value, status, adoption, `counted`, asOf, reasons; whole lines up to `limit` amounts, under 8 KB a page), exact `subtotals` byUnit and bySource over the whole scope (never across units; no value when nothing is counted, never a zero; `partial` with reasons when an amount is not counted; two adopted amounts of one unit on one account are `cash:account_reported_twice`, not added), `leftOut` (every other measurement, by closed reason) and liabilitiesCoverage unknown. The same answer as GET /api/v2/balances/<collection>, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is 10, 25, 50, 100, 200 or 500; `cursor` is the previous `nextCursor` and continues at any offered `limit` and `detail`. A cursor read with other filters is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. 503 read_model_unavailable while no snapshot is published; `cash` is 413 result_limit_exceeded past 5,000 rows or when no line fits in 8 KB. Read-only.",
     schema: z.strictObject({
-      collection: z.enum(["latest", "history"]),
+      collection: z.enum(["latest", "history", "cash"]),
       source: FILTER_TEXT.optional(),
       account: FILTER_TEXT.optional(),
       instrument: FILTER_TEXT.optional(),
@@ -187,7 +188,7 @@ const TOOLS = {
       detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
-    routes: ["/api/v2/balances/latest", "/api/v2/balances/history"],
+    routes: ["/api/v2/balances/latest", "/api/v2/balances/history", "/api/v2/balances/cash"],
     read: (env, { collection, ...params }) =>
       observationBody(env, `/api/v2/balances/${collection}`, params),
   }),
@@ -234,11 +235,16 @@ const TOOLS = {
   "kogane.events.read": tool({
     title: "Economic activity by basis, and obligations",
     description:
-      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. Served where the projection exists. Read-only.",
+      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. `activity` takes filters, each optional: `since` (inclusive) and `before` (exclusive), ISO 8601 instants with a zone, on when a revision was recorded, as kogane.changes.since counts it; `account`, an account id (or `account:<id>`) a leg names; `source`, a source id an evidence parse run was captured from. A filtered list is in the same order and echoes `filters`; each call walks at most `walk.bound` current revisions, so a page may be short or empty and still continue: merge `next.arguments` (its `cursor`, also `nextCursor`) into the same call, no `offset`; `paging` says how the page ended (`stoppedBy` `limit` or `walk`). Other filters are 400 cursor_mismatch with `mustMatch`. A malformed filter is 400 invalid_query naming it. Served where the projection exists. Read-only.",
     schema: z.strictObject({
       collection: z.enum(["activity", "obligations"]),
       basis: z.enum(ACTIVITY_BASES).optional(),
       offset: OFFSET.optional(),
+      since: ROUTE_TEXT.optional(),
+      before: ROUTE_TEXT.optional(),
+      account: routeText(300).optional(),
+      source: ROUTE_TEXT.optional(),
+      cursor: routeText(2048).optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/activity", "/api/v2/obligations"],
@@ -289,7 +295,7 @@ const TOOLS = {
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source, dataset and account",
     description:
-      "Collection stages in closed codes. `detail: summary` (default) or `full`. Without `source`: summary: a line per source (freshness, newest fetch run, reasons, each job's newest receipt status, failure and terminal codes, unregistered collectors' codes, data types counted by status; equal lines share one via `sourceIds`); full: job/source summaries (schedules, alarm, runs and stages, terminals, data types under `provider-data-types-v1`, each with its status, parsers and tracking issue). `view: status` (no `source`, `offset` or `detail`) says if anything is stuck, a line per configured job: `lastRun` (`recovered` if a later fetch run succeeded), `lastSuccessAt`, `failuresSinceSuccess` (newest 100 receipts, else `100+`), `failureCode`, `state` (`ok`; `degraded`: a dataset's newest parse over 3 days old; `failing`; `needs-owner`; `disabled`), `notPublishing` datasets with reasons. With `source`, `view: cells` (default): summary: a line per dataset, parser and unit (cell count, first/last period, counts by state, newest capture, freshness, reasons, failure codes, coverage causes), 20 lines a page (`offset` counts lines); full: cells by unit, dataset and period (`offset` pages 500). `view: accounts` (no `offset` or `detail`) regroups cells by the accounts their newest or current capture's observations name: label, mapping statuses, data types with periods, standing and reasons; unattributed cells apart; a unit key is never an account. Freshness is `collection-freshness-v1`, to `freshnessAsOf` (Asia/Tokyo days): `same-day`, `recent` (1-3 days), `stale`, `human-required`, `disabled`, `no-capture`; in `view: accounts` per named capture, independent of standing, and self-contained (`dataTypesVersion`, `dataTypes`, parsers' `providerTypes`). Ids, times, counts, labels, codes; no amount. Same answer as GET /api/collection-quality (or ?view=status), /api/collection-quality/{source}[/accounts] with the same `detail`, under evidence.read on the whole store. Served while its tables exist. Read-only.",
+      "Collection stages in closed codes. `detail: summary` (default) or `full`. Without `source`: summary: a line per source (freshness, newest fetch run, reasons, each job's newest receipt status, failure and terminal codes, unregistered collectors' codes, data types by status; equal lines share one via `sourceIds`); full: jobs and sources (schedules, alarm, runs, stages, terminals, data types under `provider-data-types-v1` with status, parsers, issue). `view: status` (no `source`, `offset` or `detail`) is anything stuck, a line per job: `lastRun` (`recovered` if a later fetch run succeeded), `lastSuccessAt`, `failuresSinceSuccess` (newest 100 receipts, else `100+`), `failureCode`, `state` (`ok`; `degraded`: a dataset's parse over 3 days old; `failing`; `needs-owner`; `disabled`), `notPublishing` datasets with reasons. With `source`, `view: cells` (default): summary: a line per dataset, parser and unit (cells by state, first/last period, newest capture, freshness, reasons, failure codes, coverage causes), 20 lines a page by `offset`; full: cells by unit, dataset and period (`offset` pages 500). `view: accounts`: cells by the accounts their newest or current capture's observations name (a unit key is never one); summary: a line per account (id, label, statuses, freshness, kinds, providerTypes, periods by standing and cell state, reasons), then per unit of unattributed cells, up to 20 lines and 8 KB a page (`offset`); full (unpaged): data types with periods, standing, reasons, and unattributed cells. Freshness is `collection-freshness-v1`, to `freshnessAsOf` (Tokyo days): `same-day`, `recent` (1-3 days), `stale`, `human-required`, `disabled`, `no-capture`; in `view: accounts` per named capture, independent of standing, with `dataTypesVersion` and `dataTypes`. Ids, times, counts, labels, codes; no amount. Same answer as GET /api/collection-quality (or ?view=status), /api/collection-quality/{source}[/accounts] with the same `detail`, under evidence.read on the whole store. Served while its tables exist. Read-only.",
     schema: z.strictObject({
       source: z
         .string()
@@ -321,15 +327,13 @@ const TOOLS = {
           searchParams: new URLSearchParams({ view: "status" }),
         });
       }
-      // Any other view names one source's page; the account view is unpaged.
+      // Any other view names one source's page.
       if (source === undefined && view !== undefined)
         throw new HttpError(400, "invalid_request", ["view"]);
-      // The account view has one detail, its full answer (ADR 0123).
-      const wrong = [
-        ...(view === "accounts" && params.offset !== undefined ? ["offset"] : []),
-        ...(view === "accounts" && params.detail !== undefined ? ["detail"] : []),
-      ];
-      if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
+      // The account view's full answer is unpaged; its summary pages lines
+      // (ADR 0123, amendment 2026-11-20).
+      if (view === "accounts" && params.detail === "full" && params.offset !== undefined)
+        throw new HttpError(400, "invalid_request", ["offset"]);
       return readCollectionQuality(env, {
         pathname:
           source === undefined

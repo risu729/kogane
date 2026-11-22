@@ -14,7 +14,7 @@
 import { RELATION_KINDS, type RelationKind } from "../../domain/src/decisions.ts";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import type { FinancialError } from "../../domain/src/result.ts";
-import { financialError } from "./errors.ts";
+import { financialError, unknownKeyRefs } from "./errors.ts";
 import { type Grant, grantAllows, grantAllowsRow } from "./grants.ts";
 import type { OpenedContext } from "./context/open.ts";
 
@@ -101,7 +101,7 @@ export function parseProposalRequest(
     (key) => !(REQUEST_KEYS as readonly string[]).includes(key),
   );
   if (unknown.length > 0)
-    return { ok: false, code: "unsupported_semantics", refs: unknown.slice(0, 10) };
+    return { ok: false, code: "unsupported_semantics", refs: unknownKeyRefs(unknown) };
   const kind = body["kind"];
   if (typeof kind !== "string" || !(RELATION_KINDS as readonly string[]).includes(kind))
     return { ok: false, code: "unsupported_semantics", refs: ["kind"] };

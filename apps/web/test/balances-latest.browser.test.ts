@@ -46,9 +46,21 @@ function snapshotPage(snapshot: number, complete: boolean, more = false) {
     },
     subtotals: {
       policyRelease: "synthetic-policy",
-      knownAssetsSubtotal: null,
+      // A complete snapshot carries per-unit subtotals, written through the
+      // shared exact formatter; a partial one gives its reason instead.
+      knownAssetsSubtotal: complete
+        ? [
+            { unitRef: "JPY", coefficient: "1234567", scale: 0, adoptedCount: 2 },
+            {
+              unitRef: "instrument:synthetic",
+              coefficient: "-90071992547409931",
+              scale: 4,
+              adoptedCount: 1,
+            },
+          ]
+        : null,
       liabilitiesCoverage: "unknown",
-      reasonCode: "synthetic_reason",
+      reasonCode: complete ? null : "synthetic_reason",
     },
     interpretationContext: {
       mode: "latest",
@@ -129,6 +141,9 @@ describe.if(runnable)("latest balance read model paging", () => {
       // The newer snapshot replaces the one shown; nothing else changed on the page.
       await page.getByText("この範囲で未解決の記録はありません").waitFor({ timeout: 10_000 });
       expect(latestReads).toBe(before + 1);
+      const main = await page.locator("main").innerText();
+      expect(main).toContain("JPY: 1,234,567（採用 2件）");
+      expect(main).toContain("instrument:synthetic: -9,007,199,254,740.9931（採用 1件）");
     } finally {
       await page.close();
     }

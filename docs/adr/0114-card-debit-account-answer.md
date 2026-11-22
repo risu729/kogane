@@ -531,3 +531,63 @@ before; only the `proposed` filter changes.
   scaled store without statistics, the same equality (the store draws no
   such proposal, so the shipped rows too), and a plan whose only whole read of
   a base table is the one candidate scan.
+
+## Amendment 2026-11-21: a balance captured on a bill's own due date is not compared with it
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. No field, code or type changes, but
+  on a bill's due date the published answer of
+  `kogane.card-settlements.debit-accounts` with `view: "upcoming"` can read
+  `unknown` with `balance_before_previous_debit` where it read `yes` or `no`
+  (the 2026-11-18 amendment above: a change to a published tool's answer is
+  the owner's to approve).
+
+### Context
+
+The 2026-11-19 amendment counts a statement due on the date itself as a bill
+and adds it to its account's lines. Its `balance_before_previous_debit`
+looked only at debits already due before the date (and accepted settlement
+debits), so on a bill's own due date a balance captured that day was
+compared with the bill. The bank may have taken the bill before the capture:
+the balance then already shows the debit, the line subtracts it a second
+time, and `covers` could read `no` for a bill the account had paid (INV06).
+
+### Options considered
+
+1. **Leave it.** Rejected: a confident `no` (or `yes`) built on a debit
+   counted twice.
+2. **Treat a bill due on the date as a previous debit.** Rejected: every
+   capture on or before the date is then refused, including yesterday's,
+   which cannot show today's debit and is exactly the balance to compare.
+3. **A capture on the due date of a bill the line counts is `unknown`.**
+   Chosen. Captures are never later than the date, so only a bill due on the
+   date itself can share its capture's day.
+4. **A new reason code for it.** Not chosen here: it would change the closed
+   list the wire contract, the page and the tool description carry. The
+   existing code's words already cover a capture "on or before" a debit's
+   date; an own code is an owner item.
+
+### Decision
+
+`balance_before_previous_debit` also holds when the balance's Asia/Tokyo
+capture date is the due date of a bill the line counts. Nothing else
+changes: the rule version, the reasons' order and the wire contract stay.
+The page's words for the code now say the balance was captured on or before
+a card debit's day, so whether it shows the debit is unknown.
+
+### Consequences
+
+- On a bill's due date, its account's lines read `unknown` when the balance
+  was captured that day; a capture of the day before is compared as before.
+- A bank that debits later than the due date (a holiday) is still not
+  modelled (docs/card-settlements.md, Limits).
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: a capture on the bill's
+  own day makes both of the account's lines `unknown`; one of the evening
+  before is compared (fails before the change).
+- `packages/application/test/card-upcoming-bills.test.ts`: on card-002's due
+  date, bank B captured that day reads `unknown`, captured the day before
+  reads `no` (fails before the change).

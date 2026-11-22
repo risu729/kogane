@@ -24,7 +24,14 @@ and its JavaScript regex engine. Tokens become escaped React text with fixed CSS
 classes; the content security policy does not need inline styles, script execution,
 or WebAssembly permissions. No additional component, state, or chart library is required.
 Navigation keeps the existing small History API router. Monetary values stay
-as decimal strings and use the shared exact formatter; provider text remains
+as decimal strings and use the shared exact formatters in `apps/web/src/money.ts`:
+`formatAmount` for integer minor units, and `formatDecimal` (or
+`formatDecimalText` for a compact wire quantity) for an exact decimal such as
+a settlement, reward, report or subtotal quantity. Both group integer digits
+in threes and keep the sign and every fraction digit, never through floating point;
+`test/money.test.ts` holds them to the same text for each known currency.
+Counts are printed as plain digits, without separators, and nothing in the
+client calls `toLocaleString` or `Intl.NumberFormat`. Provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
 Transaction filters, search, sort, and page selection, balance source/account,
@@ -50,7 +57,15 @@ observation preview; the deployed evidence mode still shows raw records only.
 Authentication failures (401/403) clear the rejected response from the in-memory
 query cache and hide its records. A failed retry cannot restore them; a successful
 response is required. Connection metadata gates observation pages as well. Other
-refresh failures retain previously authorized records with an explicit warning.
+refresh failures retain previously authorized records with an explicit warning:
+`QueryBoundary` shows them under `更新できませんでした。前回読み込んだ{label}を表示しています。`
+("could not refresh; showing the {label} loaded earlier") with a retry, or under its
+offline 前回読み込んだ notice while a read is paused. `収集スケジュール`
+("collection schedules") renders through it, and so do the two correction
+histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
+on an account candidate), which are read again when reopened. While the schedules page shows an earlier
+answer it also holds 依頼を送信 and the re-survey 採用/却下, which decide from what
+it shows ([schedules](schedules.md#schedule-administration)).
 
 ## Design tokens and stylesheet layout
 
@@ -97,7 +112,7 @@ Pages compose these instead of writing their own markup or rules:
 | Page header                   | `.page-head` with the `<h1>` and a `.lede`; `.footnote` for caveats                                                                   |
 | Grouped content               | `Panel` (`.panel` with `.panel-head`, `.panel-note`, `.panel-body`); content inside a panel always sits in `.panel-body`              |
 | Key/value facts               | `Kv` / `KvRow`                                                                                                                        |
-| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, never blank                                                    |
+| Status words                  | `Badge`, `StatusBadge`, `LineageBadge`; an absent value is `Nullable`, in words naming what is absent, never blank                    |
 | Loading, error, empty, stale  | `QueryBoundary` (with `isEmpty`/`empty`), `ErrorState`, `EmptyState`                                                                  |
 | Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |

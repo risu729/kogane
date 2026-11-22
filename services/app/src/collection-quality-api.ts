@@ -4,7 +4,8 @@
 // (packages/application/src/query/collection-quality.ts, ADR 0045,
 // docs/evidence-browser.md); and `GET /api/collection-quality/<sourceId>/accounts`,
 // the same source's cells regrouped by the accounts their captures'
-// observations name (ADR 0088); and `GET /api/collection-quality?view=status`,
+// observations name (ADR 0088), as a paged summary by default (ADR 0123,
+// amendment 2026-11-20); and `GET /api/collection-quality?view=status`,
 // one line per configured job saying whether it is stuck (ADR 0045, amendment
 // 2026-11-19). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
@@ -19,6 +20,7 @@ import {
 } from "../../../packages/application/src/query/collection-quality.ts";
 import { queryCollectionQualityStatus } from "../../../packages/application/src/query/collection-quality-status.ts";
 import {
+  accountCoverageSummary,
   collectionQualityCellSummary,
   collectionQualitySummaryLines,
 } from "../../../packages/application/src/query/collection-quality-detail.ts";
@@ -37,7 +39,7 @@ import {
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import { readerGrant } from "./agent-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
 const OFFSET = /^(?:0|[1-9][0-9]{0,6})$/u;
@@ -58,8 +60,7 @@ export async function collectionQualityApi(
   const path = url.pathname;
   if (path !== COLLECTION_QUALITY_PATH && !path.startsWith(`${COLLECTION_QUALITY_PATH}/`))
     return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   // Resolve authority before schema/source enumeration. This aggregation
   // cannot safely answer an account-filtered grant, even for a known source.
   const grant = readerGrant(subject);
@@ -67,11 +68,9 @@ export async function collectionQualityApi(
   if (grant.scopes.sources !== "*" || grant.scopes.accounts !== "*")
     throw new HttpError(403, "scope_restricted");
   if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
-  // The account view takes no query at all, not even an empty one (`?`); the
-  // summary takes its `detail` (ADR 0123), checked by the reader, or else is
+  // The summary, the cells and the account view take their `detail` (and
+  // `offset`) (ADR 0123), checked by the reader; the summary's path is else
   // its status view, `?view=status` exactly, which takes no `detail`.
-  if (path.endsWith(ACCOUNT_COVERAGE_SUFFIX) && url.search)
-    throw new HttpError(400, "invalid_query");
   if (
     path === COLLECTION_QUALITY_PATH &&
     url.searchParams.has("view") &&
@@ -117,17 +116,19 @@ export async function readCollectionQuality(
     if (rest.endsWith(ACCOUNT_COVERAGE_SUFFIX)) {
       const sourceId = rest.slice(0, -ACCOUNT_COVERAGE_SUFFIX.length);
       if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
-      if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
+      // The full answer is unpaged; the summary pages its lines (`offset`).
+      const detail = detailOf(url.searchParams, ["offset"]);
+      if (detail === "full" && url.searchParams.has("offset"))
+        throw new HttpError(400, "invalid_query");
+      const offset = offsetOf(url.searchParams);
       const coverage = await queryAccountCoverage(d1Executor(env.DB), { sourceId, asOf });
       if (coverage === null) throw new HttpError(404, "not_found");
-      return coverage;
+      return detail === "full" ? coverage : accountCoverageSummary(coverage, offset);
     }
     const sourceId = rest;
     if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
     const detail = detailOf(url.searchParams, ["offset"]);
-    const offsetText = url.searchParams.get("offset") ?? "0";
-    if (!OFFSET.test(offsetText)) throw new HttpError(400, "invalid_offset");
-    const offset = Number(offsetText);
+    const offset = offsetOf(url.searchParams);
     if (detail === "full") {
       const cells = await queryCollectionQualityCells(d1Executor(env.DB), {
         sourceId,
@@ -178,6 +179,13 @@ function detailOf(params: URLSearchParams, others: readonly string[]): Collectio
   if (!(COLLECTION_QUALITY_DETAILS as readonly string[]).includes(detail))
     throw new HttpError(400, "invalid_query");
   return detail as CollectionQualityDetail;
+}
+
+/** The `offset` a cell or account request names; absent is 0. */
+function offsetOf(params: URLSearchParams): number {
+  const text = params.get("offset") ?? "0";
+  if (!OFFSET.test(text)) throw new HttpError(400, "invalid_offset");
+  return Number(text);
 }
 
 /** Enrich only matching stored configurations; a relay failure stays unknown. */

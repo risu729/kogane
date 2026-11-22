@@ -15,6 +15,7 @@ import {
 } from "../api.ts";
 import type { MeasureView } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { Amount, Badge, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
+import { formatDecimal } from "../money.ts";
 import { CursorPager } from "../pagination.tsx";
 import { OrganizedSourceAccount } from "../organization.tsx";
 import { balanceMeaning } from "../balance-display.tsx";
@@ -258,21 +259,13 @@ function Subtotals({ page }: { page: LatestBalancePage }): ReactNode {
       <ul className="plain-list footnote">
         {subtotal.map((total) => (
           <li key={total.unitRef}>
-            {total.unitRef}: {decimalText(total.coefficient, total.scale)}（採用{" "}
-            {total.adoptedCount}件）
+            {total.unitRef}: {formatDecimal({ coefficient: total.coefficient, scale: total.scale })}
+            （採用 {total.adoptedCount}件）
           </li>
         ))}
       </ul>
     </div>
   );
-}
-
-/** Plain decimal text; formatting never changes the stored value. */
-function decimalText(coefficient: string, scale: number): string {
-  if (scale === 0) return coefficient;
-  const negative = coefficient.startsWith("-");
-  const digits = (negative ? coefficient.slice(1) : coefficient).padStart(scale + 1, "0");
-  return `${negative ? "-" : ""}${digits.slice(0, digits.length - scale)}.${digits.slice(digits.length - scale)}`;
 }
 
 function ItemRow({ item }: { item: LatestBalanceItem }): ReactNode {

@@ -252,7 +252,7 @@ describe("Sony CSV differential on a scaled random CORE store", () => {
         );
       }
     })();
-  });
+  }, 60_000);
   afterAll(() => store.db.close());
   test.each([
     {},

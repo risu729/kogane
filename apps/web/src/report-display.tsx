@@ -1,14 +1,14 @@
 // Labels and small display pieces for the fixed report pages. Nothing here
 // adds, converts or rounds an amount: a stored exact decimal is widened to
 // minor units by string manipulation and handed to the shared formatter, and
-// a decimal that has more places than its unit's minor unit is shown verbatim
-// rather than rounded.
+// a decimal that has more places than its unit's minor unit is shown with
+// every place through `formatDecimal` rather than rounded.
 import type { ReactNode } from "react";
-import { decimalToString, type ExactDecimal } from "../../../packages/domain/src/values.ts";
+import type { ExactDecimal } from "../../../packages/domain/src/values.ts";
 import type { Replayability } from "../../../packages/domain/src/context.ts";
 import type { ResultPartition, UnvaluedReason } from "../../../packages/domain/src/calculation.ts";
 import type { ReportEventKind, ReportPurpose } from "../../../packages/domain/src/reports.ts";
-import { minorUnitExponent } from "./money.ts";
+import { formatDecimal, minorUnitExponent } from "./money.ts";
 import { Amount, Badge, type Tone } from "./ui.tsx";
 import { Link } from "./router.tsx";
 
@@ -79,7 +79,8 @@ export function metricLabel(metric: string): string {
 /**
  * The exact decimal as integer minor units of `unit`, or null when the unit
  * has no known minor unit or the value has places the minor unit cannot hold
- * (then the decimal is shown as written, never rounded). String work only.
+ * (then every digit of the decimal is shown through `formatDecimal`, never
+ * rounded). String work only.
  */
 export function reportAmountMinor(value: ExactDecimal, unit: string): string | null {
   const exponent = minorUnitExponent(unit);
@@ -104,7 +105,7 @@ export function ReportAmount({ value, unit }: { value: ExactDecimal; unit: strin
     <Amount
       minor={reportAmountMinor(value, unit)}
       unit={unit}
-      text={decimalToString(value)}
+      text={formatDecimal(value)}
       neutral
     />
   );
