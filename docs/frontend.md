@@ -60,7 +60,11 @@ response is required. Connection metadata gates observation pages as well. Other
 refresh failures retain previously authorized records with an explicit warning:
 `QueryBoundary` shows them under `更新できませんでした。前回読み込んだ{label}を表示しています。`
 ("could not refresh; showing the {label} loaded earlier") with a retry, or under its
-offline 前回読み込んだ notice while a read is paused. `収集スケジュール`
+offline 前回読み込んだ notice while a read is paused. A retry button, in that warning or in
+the alert of a load that has no answer yet, waits while its read is in flight: it says
+再試行中…, is `aria-disabled` and ignores a press rather than `disabled`, so the focus
+stays on it, and a failed first load keeps its alert through the retry instead of
+turning back into the loading state (`test/query-boundary.browser.test.ts`). `収集スケジュール`
 ("collection schedules") renders through it, and so do the two correction
 histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
 on an account candidate), which are read again when reopened. While the schedules page shows an earlier
