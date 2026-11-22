@@ -2,8 +2,9 @@
 // line per kind with its count, a link to the page that decides the first
 // item, the reason of a line that cannot be counted, no total from an earlier
 // answer once a later read fails, a wait announced as a status and a failure
-// as an alert with a retry named for it, and no panel for a caller the route refuses
-// or on a store that does not advertise the route.
+// as an alert with a retry named for it, a refresh that starts on its own
+// after a failure waiting as a status, and no panel for a caller the route
+// refuses or on a store that does not advertise the route.
 // Every id is synthetic.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -346,6 +347,77 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       expect(await panel.locator(".panel-head .count").textContent()).toBe(
         `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
       );
+    } finally {
+      release();
+      held = null;
+      unavailable = false;
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a refresh that starts on its own after a failed first read waits as a status, never as the earlier alert", async () => {
+    refuse = false;
+    unavailable = true;
+    let release = (): void => {};
+    const page = await browser.newPage();
+    const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+    const total = panel.locator(".panel-head .count");
+    const loading = panel.getByRole("status").getByText("判断待ちの件数を読み込んでいます…");
+    const failed = panel.getByRole("alert").getByText("判断待ちの件数を読み込めませんでした");
+    // Waits until the panel has asked for one more read than `before`.
+    const askedAfter = async (before: number): Promise<void> => {
+      const asked = (): boolean => requested > before;
+      while (!asked()) await Bun.sleep(10);
+    };
+    try {
+      await page.goto(`${origin}/`);
+      await failed.waitFor({ timeout: 5_000 });
+      // The page comes back into view: the refresh it starts is no retry the
+      // owner pressed, so the panel waits as a status, with no total.
+      held = new Promise((resolve) => (release = resolve));
+      let before = requested;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await askedAfter(before);
+      await loading.waitFor({ timeout: 2_000 });
+      expect(await panel.getByRole("alert").count()).toBe(0);
+      expect(await total.count()).toBe(0);
+      release();
+      held = null;
+      await failed.waitFor({ timeout: 5_000 });
+      // A pressed retry that fails again leaves its alert; a refresh that
+      // starts on its own after that second failure waits as a status, not
+      // as the alert of the failure the retry repeated.
+      held = new Promise((resolve) => (release = resolve));
+      before = requested;
+      await panel
+        .getByRole("alert")
+        .getByRole("button", { name: "判断待ちの件数を再試行", exact: true })
+        .click();
+      await askedAfter(before);
+      await panel
+        .getByRole("alert")
+        .getByRole("button", { name: "判断待ちの件数を再試行中…", exact: true })
+        .waitFor({ timeout: 2_000 });
+      release();
+      held = null;
+      await panel
+        .getByRole("alert")
+        .getByRole("button", { name: "判断待ちの件数を再試行", exact: true })
+        .waitFor({ timeout: 5_000 });
+      unavailable = false;
+      held = new Promise((resolve) => (release = resolve));
+      before = requested;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await askedAfter(before);
+      await loading.waitFor({ timeout: 2_000 });
+      expect(await panel.getByRole("alert").count()).toBe(0);
+      expect(await total.count()).toBe(0);
+      // The answer replaces the status, and no alert comes back after it.
+      release();
+      held = null;
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(await panel.getByRole("alert").count()).toBe(0);
+      expect(await total.textContent()).toBe(`${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
     } finally {
       release();
       held = null;
