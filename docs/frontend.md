@@ -102,7 +102,7 @@ Pages compose these instead of writing their own markup or rules:
 | Notices                       | `Notice` (`.panel-note` tones `-warn`/`-bad`) at panel level; `Notice` with `inline` (`.notice`) inside a body                        |
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
 | Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
-| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
+| Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`; a button that sends a request is `BusyButton` (held, still focused)       |
 | Paging                        | `Pagination` (offset or cursor) rendering `.pagination`, a named group whose status speaks its label; one label per pager on a page   |
 | Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |

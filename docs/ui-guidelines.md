@@ -82,6 +82,16 @@ page passes when:
   alerts are distinct by name: each shows 再試行 and is named for the read it
   repeats (`取引を再試行`).
 - Loading and error states carry `role="status"` or `role="alert"`.
+- A button whose request is in flight keeps focus: it is `aria-disabled` and
+  ignores activation instead of becoming `disabled`, because a focused button
+  that becomes `disabled` drops focus to the document body, and a keyboard
+  user would meet the answer, a refusal included, back at the top of the
+  page. The shell's 表示を更新 and the review pages' plan buttons
+  (`BusyButton` on 口座の対応候補, 銘柄の同一性の候補, 請求と引落の照合候補,
+  口座の保有者を確認 and カード利用の説明) do this, and the review pages'
+  browser tests check that focus stays after a refusal. Open limit: the
+  pagers, the schedules page's writes and the confirmation screen's 承認する
+  and 確定する still become `disabled` while their request is in flight.
 - Every visible table has a caption (visually hidden when the panel title
   already says it) and every header cell a `scope`; every `.table-scroll` is
   a named `role="region"` with `tabIndex={0}` at every width. Anything else

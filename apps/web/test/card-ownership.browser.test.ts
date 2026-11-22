@@ -211,6 +211,27 @@ describe.if(runnable)("explicit card ownership review", () => {
     expect(await page.locator("main").innerText()).toContain("カード決済は採用されません");
     await page.close();
   });
+  test("a plan pinned to other revisions than shown is refused with focus left on the pressed button", async () => {
+    stale = true;
+    const page = await open();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await form.getByLabel("保有者の識別名", { exact: true }).fill("本人A");
+    await form
+      .getByLabel("判断の理由・原本で確認した箇所", { exact: true })
+      .fill("原本の名義と口座の対応を確認した");
+    await form.getByRole("checkbox").check();
+    const button = form.getByRole("button", { name: "この保有者の関係を確認", exact: true });
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await form
+      .getByRole("alert")
+      .filter({ hasText: "口座または保有者の記録が更新されています" })
+      .waitFor();
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(new URL(page.url()).pathname).toBe(`/reconciliation/${review.proposalId}/ownership`);
+    await page.close();
+  });
+
   test("a competing ownership claim blocks approval even when the candidate revision is unchanged", async () => {
     stale = true;
     const page = await open(`/confirm/${PLAN}`);

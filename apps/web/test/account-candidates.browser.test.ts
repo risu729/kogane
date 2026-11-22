@@ -267,10 +267,15 @@ describe.if(runnable)("account candidate review", () => {
     );
     const card = tab.locator(".identity-card").first();
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await card
-      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
-      .click();
+    const button = card.getByRole("button", {
+      name: "この連携に含まれる口座として採用する内容を確認",
+      exact: true,
+    });
+    await button.focus();
+    await tab.keyboard.press("Enter");
     await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    // The refusal leaves a keyboard user on the button they pressed.
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
     expect(
       read.some(
         (url) => url.searchParams.get("sourceAccountId") === candidate!.directSourceAccountId,
