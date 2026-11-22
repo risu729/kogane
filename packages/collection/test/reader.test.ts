@@ -299,6 +299,44 @@ describe("verifyReferencedObjects with streamHash on a large object", () => {
     expect(result.problems.map((problem) => problem.reasonCode)).toEqual(["object_hash_mismatch"]);
     expect(reads).toMatchObject({ bytes: SIZE, buffered: 0 });
   });
+
+  test("a body that fails mid-stream rejects with its error, as the buffered read did", async () => {
+    // A read that fails partway is no verdict: no reason code is invented for
+    // it, and the error reaches the caller, as `arrayBuffer()` rejecting did.
+    const whole = Uint8Array.from({ length: SIZE }, (_, at) => byteAt(at));
+    const artifact = await syntheticArtifact("large.bin", "", {
+      sha256: await sha256Hex(whole),
+      byteSize: SIZE,
+    });
+    const manifest = planManifest(await syntheticPlan({ artifacts: [artifact] }));
+    const key = objectKey(artifact.sha256);
+    const failure = new Error("synthetic_body_failed");
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls > 2) controller.error(failure);
+        else controller.enqueue(whole.subarray((pulls - 1) * CHUNK, pulls * CHUNK));
+      },
+    });
+    const head = { key, size: SIZE, etag: "etag-large", checksums: {} };
+    const bucket = new FakeR2Bucket();
+    bucket.head = async (requested) => (requested === key ? head : null);
+    bucket.get = async (requested) =>
+      requested === key
+        ? {
+            ...head,
+            body,
+            arrayBuffer: async (): Promise<ArrayBuffer> => {
+              throw failure;
+            },
+          }
+        : null;
+    await expect(verifyReferencedObjects(bucket, manifest, { streamHash: true })).rejects.toBe(
+      failure,
+    );
+    expect(pulls).toBe(3);
+  });
 });
 
 describe("oversized terminal", () => {
