@@ -87,6 +87,22 @@ count) inserts no second approval and answers with that row: its stored
 for, so the receipt always equals what `readOwnApproval` and `commit` read.
 The processor route always asks for the default ten-minute lifetime.
 
+The approval insert carries the conditions `approve` checked before it: the
+plan is open and unexpired and every expected revision still holds. When the
+plan's status or a pin moved between those reads and the batch, the insert
+writes nothing, and `approve` runs its pre-check again over the stored plan
+to name it, with the code and refs a request arriving after the move gets:
+`stale_context` with the moved refs (and the plan marked `stale`) for a moved
+pin, `plan_not_open` for a plan committed or marked stale meanwhile (its
+status is checked before its pins, so a committed plan is never marked
+stale). A miss the pre-check does not see still answers `plan_not_open`,
+never success. The expiry does not move between the two: both compare the
+plan's fixed `expires_at` with the request's one `now`. Before 2026-11-21
+every such miss answered `plan_not_open`,
+so a plan whose pin had moved stayed `planned` and the confirmation screen
+said it was already committed or invalid instead of offering the
+re-simulated plan.
+
 ### Expected revisions
 
 Every impact query joins `published_parse_runs`. Since migration 0026 "current"
@@ -886,7 +902,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (38 tests):
+- `services/processor/test/change-lifecycle.test.ts` (40 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -908,7 +924,10 @@ already recorded is never undone by a DELETE — an undo is a new revision
   release ends between its reads and its batch → `stale_context` with
   nothing written and its approval unspent; typed
   relations with their own decision and no derived `same_account` (SC06); an
-  agent refused approval and commit; approval digest/expiry/scope binding; the
+  agent refused approval and commit; approval digest/expiry/scope binding; an
+  approval whose pin moves between its reads and its batch refused
+  `stale_context` with its plan marked `stale`, and one whose plan is
+  committed there refused `plan_not_open` with the plan left `committed`; the
   outbox publishing once and a duplicate delivery changing nothing; an
   invocation that ends right after an operation's last row completes still
   leaving its receipt `published`; an
