@@ -48,7 +48,7 @@ test("a Tokyo window starting in the horizon's last hours, on the next local dat
     { start: ms("2026-11-01T16:00:00.000Z"), end: ms("2026-11-01T20:00:00.000Z") },
   ]);
   expect(longestDeferral(rules, from, horizon, DAY)).toBe(4 * HOUR);
-  // One minute short of it, the window is outside the horizon.
+  // A horizon that ends as the window starts leaves it out: the end is exclusive.
   expect(deferralUnions(rules, from, 16 * HOUR, DAY)).toEqual([]);
 });
 
@@ -75,6 +75,20 @@ test("a Sydney window starting in the horizon's last hours counts toward the lon
     { start: ms("2026-11-08T13:30:00.000Z"), end: ms("2026-11-09T12:30:00.000Z") },
   ]);
   expect(longestDeferral(rules, from, horizon, DAY)).toBe(23 * HOUR);
+});
+
+test("a Sydney window on the clock-change day, starting in the horizon's last hours, is a union", () => {
+  // Summer time starts on Sunday 2026-10-04 at 02:00 (+10:00 to +11:00).
+  // That day's 01:00 is 2026-10-03T15:00Z, before the horizon's end at 16:00Z;
+  // its 05:00 is 18:00Z, so the four wall-clock hours defer three.
+  const rules = [
+    rule("Australia/Sydney", { kind: "weekly", weekdays: [0], start: "01:00", end: "05:00" }),
+  ];
+  const from = ms("2026-10-03T00:00:00.000Z");
+  expect(deferralUnions(rules, from, 16 * HOUR, DAY)).toEqual([
+    { start: ms("2026-10-03T15:00:00.000Z"), end: ms("2026-10-03T18:00:00.000Z") },
+  ]);
+  expect(longestDeferral(rules, from, 16 * HOUR, DAY)).toBe(3 * HOUR);
 });
 
 test("a UTC window on the horizon's last date is unchanged", () => {
