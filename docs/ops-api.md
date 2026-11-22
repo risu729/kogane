@@ -65,7 +65,15 @@ that does not take it is `404 not_found`, and any other verb is
 `405 method_not_allowed` with an `Allow` header naming what the path serves —
 `POST` on an acceptance route, `GET, HEAD` on a read, all three on a path that
 is neither — as everywhere else on this Worker
-([methods](production-evidence-browser.md#methods)).
+([methods](production-evidence-browser.md#methods)). A route's fixed segments
+are matched as they were sent: a percent-encoded spelling of one
+(`/api/ops/v1/coll%65ctions`) is another path and `404 not_found`, because the
+function that names a request's audit operation (`opsOperation`) is the route
+table, and a path it does not name never reaches a handler, so the router's own
+percent-decoding cannot accept a request no audit record names (ADR 0064). The
+one variable segment, `{source}` or `{id}`, may be percent-encoded: it is
+decoded before its schema checks it, and the request is named and recorded
+like any other.
 
 | Route                                        | Body                                                       | Answers                     | What "done" means                                                          |
 | -------------------------------------------- | ---------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------- |

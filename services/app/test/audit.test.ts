@@ -444,6 +444,46 @@ describe("the operations routes (ui)", () => {
       },
     ]);
   });
+
+  it("a percent-encoded spelling of a route is 404 and stores nothing, so no request goes unrecorded", async () => {
+    // The path that names the operation and the path that runs it are one
+    // path: a spelling the operation classifier does not know is never served.
+    const operations = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+    const before = await operations();
+    const body = {
+      source: "sony-bank",
+      requestedScope: { from: "2026-01-01", to: "2026-01-31" },
+      idempotencyKey: "audit-encoded-path",
+    };
+    for (const [method, path] of [
+      ["POST", "/api/ops/v1/coll%65ctions"],
+      ["POST", "/api/ops/v1/%63ollections"],
+      ["POST", "/api/ops/v1/project%69ons"],
+      ["POST", "/api/ops/v1/sessions/sony-bank/refres%68"],
+      ["GET", "/api/ops/v1/operation%73"],
+    ] as const) {
+      const answer = await call(path, method === "POST" ? { body } : {});
+      expect(answer.response.status, path).toBe(404);
+      expect(await answer.response.json(), path).toMatchObject({ error: "not_found" });
+      expect(await recordsOf(answer.requestId), path).toEqual([]);
+    }
+    expect(await operations()).toBe(before);
+    // The variable segment may be encoded: the route is named, served and recorded.
+    const accepted = await call("/api/ops/v1/sessions/sony%2Dbank/refresh", {
+      body: { idempotencyKey: "audit-encoded-segment" },
+    });
+    expect(accepted.response.status).toBe(202);
+    const { operationId } = (await accepted.response.json()) as { operationId: string };
+    expect((await recordsOf(accepted.requestId)).map(brief)).toMatchObject([
+      { operation: "ops.session.refresh", result: "accepted" },
+    ]);
+    const read = await call(`/api/ops/v1/operations/%6F${operationId.slice(1)}`);
+    expect(read.response.status).toBe(200);
+    expect((await recordsOf(read.requestId)).map(brief)).toMatchObject([
+      { operation: "ops.operation.get", result: "read" },
+    ]);
+  });
 });
 
 describe("another site's Origin on the command and operations routes (ADR 0078)", () => {
