@@ -838,7 +838,10 @@ export async function rewardSimulationPage(
 /**
  * Retire builds older than the retained window and delete their rows. A reader
  * on an older cursor gets `context_expired` rather than a silently different
- * list, and the published snapshot is never retired.
+ * list, and the published snapshot is never retired: the retirement restates
+ * it in its own statement, so a build the pointer was switched to after the
+ * selection read it stays `complete` with its rows. Returns the number of
+ * builds this call retired.
  */
 export async function retireOldRewardSnapshots(
   db: D1Like,
@@ -849,36 +852,58 @@ export async function retireOldRewardSnapshots(
     .prepare(RETIREABLE_REWARD_SNAPSHOTS_SQL)
     .bind(keep, Math.max(retained - 1, 0))
     .all<{ snapshot_id: string }>();
-  for (const row of stale.results) await retireRewardSnapshot(db, row.snapshot_id, "retired");
-  return stale.results.length;
+  let retired = 0;
+  for (const row of stale.results)
+    if (
+      await retireRewardSnapshot(
+        db,
+        row.snapshot_id,
+        `status IN ('complete','building')
+          AND snapshot_id<>coalesce((SELECT p.snapshot_id FROM reward_snapshot_pointer p
+            WHERE p.id=1),'')`,
+      )
+    )
+      retired += 1;
+  return retired;
 }
 
-/** Retire one unfinished build and drop what it wrote; the next tick starts a new attempt. */
+/**
+ * Retire one unfinished build and drop what it wrote; the next tick starts a
+ * new attempt. A build another writer sealed in the meantime is left as it is.
+ */
 export async function abandonRewardSnapshot(db: D1Like, snapshotId: string): Promise<void> {
-  await retireRewardSnapshot(db, snapshotId, "building");
+  await retireRewardSnapshot(db, snapshotId, "status='building'");
 }
 
+/**
+ * The retirement and the deletion of the build's rows, in one batch, so a
+ * failure leaves the build either untouched or retired without rows — never
+ * retired with rows no later call selects again. Each delete names only a
+ * retired build, so it removes nothing when the retirement's condition `when`
+ * did not hold. True when this batch retired it.
+ */
 async function retireRewardSnapshot(
   db: D1Like,
   snapshotId: string,
-  from: "building" | "retired",
-): Promise<void> {
-  await db
-    .prepare(
-      from === "building"
-        ? "UPDATE reward_expiry_snapshots SET status='retired' WHERE snapshot_id=?1 AND status='building'"
-        : "UPDATE reward_expiry_snapshots SET status='retired' WHERE snapshot_id=?1",
-    )
-    .bind(snapshotId)
-    .run();
-  await runBatch(db, [
-    db.prepare("DELETE FROM reward_provider_expiry_sections WHERE snapshot_id=?1").bind(snapshotId),
+  when: string,
+): Promise<boolean> {
+  const retired = `snapshot_id=?1 AND EXISTS(SELECT 1 FROM reward_expiry_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='retired')`;
+  const results = await runBatch(db, [
     db
-      .prepare("DELETE FROM reward_provider_display_checkpoints WHERE snapshot_id=?1")
+      .prepare(
+        `UPDATE reward_expiry_snapshots SET status='retired' WHERE snapshot_id=?1 AND ${when}
+         RETURNING snapshot_id`,
+      )
       .bind(snapshotId),
-    db.prepare("DELETE FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM reward_conversion_simulations WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM reward_snapshot_input_refs WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM reward_build_checkpoints WHERE snapshot_id=?1").bind(snapshotId),
+    ...[
+      "reward_provider_expiry_sections",
+      "reward_provider_display_checkpoints",
+      "reward_expiry_estimates_v2",
+      "reward_conversion_simulations",
+      "reward_snapshot_input_refs",
+      "reward_build_checkpoints",
+    ].map((table) => db.prepare(`DELETE FROM ${table} WHERE ${retired}`).bind(snapshotId)),
   ]);
+  return (results[0]?.results?.length ?? 0) === 1;
 }

@@ -191,7 +191,14 @@ A build writes rows while `building`, and:
   snapshot at least as current as the published one under the same epoch, so a
   build that finishes late is complete but not published (G2-10);
 - the App reads only through the pointer. There is no "newest complete build"
-  fallback, so an unfinished or unpublished build is never served.
+  fallback, so an unfinished or unpublished build is never served;
+- retiring a build and deleting its rows are one batch, for both the balance
+  and the reward writer, and the retirement states its own condition: an old
+  build only while the pointer does not name it, an abandoned one only while
+  it is `building`. A failed batch leaves the build as it was, so the next pass
+  retires it; a build the pointer was switched to after the selection, or one
+  another writer sealed, keeps its rows. Each delete names only a retired
+  build.
 
 The pointer's `source_revision` and `visibility_revision` are the watermark
 "the published content was verified against these". A capture that digests to
@@ -313,17 +320,17 @@ separation exists for, and it is tested in
 
 ## Verified locally (synthetic data only)
 
-| Acceptance                                                                                                                     | Where                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| The schema: STRICT, no CORE foreign key, the instance guard                                                                    | `packages/storage-d1/test/read-schema.test.ts`           |
-| Identity, the retired-content rebuild, the racing start, G2-07, G2-08, G2-09 (late seal after a successor), G2-10              | `packages/storage-d1/test/read-writer.test.ts`           |
-| The cursor codec and the pointer-only reader (G3-01, G3-03)                                                                    | `packages/storage-d1/test/read-cursor.test.ts`           |
-| The lane end to end on real D1: G2-05, G2-07, G2-11, G2-12, the attempt rebuild, and the total loss (G0-09, G3-12)             | `services/processor/test/read-projection.test.ts`        |
-| The routes: G3-01, G3-02, G3-03, G3-04, another baseline refused, and a saved report with every READ table dropped (G0-11)     | `services/app/test/balances-v2-read.test.ts`             |
-| The READ schema ledger is the generator's output and is built from its own directory                                           | `scripts/core-schema-ledger.test.ts`                     |
-| U16 — the reward schema and writer: the fixed instant, the replay, the chunk, the displaced writer, the pointer (G2-19, G2-20) | `packages/storage-d1/test/reward-read-writer.test.ts`    |
-| U16 — the reward lane end to end on real D1, and its total loss (G2-19, G2-20, G0-09)                                          | `services/processor/test/reward-read-projection.test.ts` |
-| U16 — the reward routes: the published instant, the replay states, the cursor rules                                            | `services/app/test/rewards-v2-read.test.ts`              |
+| Acceptance                                                                                                                                              | Where                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| The schema: STRICT, no CORE foreign key, the instance guard                                                                                             | `packages/storage-d1/test/read-schema.test.ts`           |
+| Identity, the retired-content rebuild, the racing start, G2-07, G2-08, G2-09 (late seal after a successor), G2-10, retirement in one batch              | `packages/storage-d1/test/read-writer.test.ts`           |
+| The cursor codec and the pointer-only reader (G3-01, G3-03)                                                                                             | `packages/storage-d1/test/read-cursor.test.ts`           |
+| The lane end to end on real D1: G2-05, G2-07, G2-11, G2-12, the attempt rebuild, and the total loss (G0-09, G3-12)                                      | `services/processor/test/read-projection.test.ts`        |
+| The routes: G3-01, G3-02, G3-03, G3-04, another baseline refused, and a saved report with every READ table dropped (G0-11)                              | `services/app/test/balances-v2-read.test.ts`             |
+| The READ schema ledger is the generator's output and is built from its own directory                                                                    | `scripts/core-schema-ledger.test.ts`                     |
+| U16 — the reward schema and writer: the fixed instant, the replay, the chunk, the displaced writer, the pointer, retirement in one batch (G2-19, G2-20) | `packages/storage-d1/test/reward-read-writer.test.ts`    |
+| U16 — the reward lane end to end on real D1, and its total loss (G2-19, G2-20, G0-09)                                                                   | `services/processor/test/reward-read-projection.test.ts` |
+| U16 — the reward routes: the published instant, the replay states, the cursor rules                                                                     | `services/app/test/rewards-v2-read.test.ts`              |
 
 Not verified: production volumes, a real second Worker racing the lease (the
 displaced writer is simulated), R2 failure injection, and the retention of

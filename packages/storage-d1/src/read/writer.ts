@@ -673,6 +673,12 @@ export async function publishedSnapshotAt(
  * Retire builds older than the retained window and delete their rows. A reader
  * on an older cursor gets `context_expired` rather than a silently different
  * list, and the published snapshot is never retired.
+ *
+ * Each build is retired and loses its rows in one batch. The retirement
+ * restates "not the published snapshot" in its own statement, because another
+ * writer may switch the pointer to a build of the same content (a watermark
+ * advance) after the selection read it; such a build stays `complete` and keeps
+ * its rows. Returns the number of builds this call retired.
  */
 export async function retireOldSnapshots(
   db: D1Like,
@@ -684,35 +690,52 @@ export async function retireOldSnapshots(
     .prepare(RETIREABLE_SNAPSHOTS_SQL)
     .bind(keep, Math.max(retained - 1, 0))
     .all<{ snapshot_id: string }>();
-  for (const row of stale.results) {
-    await db
-      .prepare("UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1")
-      .bind(row.snapshot_id)
-      .run();
-    await runBatch(db, [
-      db
-        .prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
-        .bind(row.snapshot_id),
-      db.prepare("DELETE FROM scope_relations WHERE snapshot_id=?1").bind(row.snapshot_id),
-      db.prepare("DELETE FROM snapshot_input_refs WHERE snapshot_id=?1").bind(row.snapshot_id),
-      db.prepare("DELETE FROM read_build_checkpoints WHERE snapshot_id=?1").bind(row.snapshot_id),
-    ]);
-  }
-  return stale.results.length;
+  let retired = 0;
+  for (const row of stale.results)
+    if (
+      await retireSnapshot(
+        db,
+        row.snapshot_id,
+        `status IN ('complete','building')
+          AND snapshot_id<>coalesce((SELECT p.snapshot_id FROM balance_snapshot_pointer p
+            WHERE p.id=1),'')`,
+      )
+    )
+      retired += 1;
+  return retired;
 }
 
-/** Retire one unfinished build and drop what it wrote; the next tick starts a new attempt. */
+/**
+ * Retire one unfinished build and drop what it wrote; the next tick starts a
+ * new attempt. A build another writer sealed in the meantime is left as it is.
+ */
 export async function abandonSnapshot(db: D1Like, snapshotId: string): Promise<void> {
-  await db
-    .prepare(
-      "UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1 AND status='building'",
-    )
-    .bind(snapshotId)
-    .run();
-  await runBatch(db, [
-    db.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM scope_relations WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM snapshot_input_refs WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM read_build_checkpoints WHERE snapshot_id=?1").bind(snapshotId),
+  await retireSnapshot(db, snapshotId, "status='building'");
+}
+
+/**
+ * The retirement and the deletion of the build's rows, in one batch, so a
+ * failure leaves the build either untouched or retired without rows — never
+ * retired with rows no later call selects again. Each delete names only a
+ * retired build, so it removes nothing when the retirement's condition `when`
+ * did not hold. True when this batch retired it.
+ */
+async function retireSnapshot(db: D1Like, snapshotId: string, when: string): Promise<boolean> {
+  const retired = `snapshot_id=?1 AND EXISTS(SELECT 1 FROM balance_read_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='retired')`;
+  const results = await runBatch(db, [
+    db
+      .prepare(
+        `UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1 AND ${when}
+         RETURNING snapshot_id`,
+      )
+      .bind(snapshotId),
+    ...[
+      "current_balance_projection",
+      "scope_relations",
+      "snapshot_input_refs",
+      "read_build_checkpoints",
+    ].map((table) => db.prepare(`DELETE FROM ${table} WHERE ${retired}`).bind(snapshotId)),
   ]);
+  return (results[0]?.results?.length ?? 0) === 1;
 }
