@@ -2777,6 +2777,19 @@ says are still due (the MyJCB ショッピングスキップ払い page,
 [ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
 It is append-only like the four above and is read by nothing yet.
 
+In CORE, each of the five observation tables, `observation_decimal_values`,
+`parse_issues`, `parse_coverage_claims`, `parse_input_references`,
+`price_observations` and `price_observation_claims` refuses an `UPDATE` and a
+`DELETE` by trigger. Since migration 0105 each also refuses an insert that
+collides with a stored key (`*_no_replace`), because SQLite's
+`INSERT OR REPLACE` deletes the colliding row without firing `DELETE`
+triggers while `recursive_triggers` is off, which rewrote a stored observation
+and its amount past both guards. Acquisition history, identity and the
+decision log already had the same guard. No writer depends on a collision:
+the Processor inserts observations, issues and coverage claims without an id,
+and prices behind `WHERE NOT EXISTS`
+(`packages/storage-d1/test/observation-no-replace-migration.test.ts`).
+
 The `source_account` comment is reproduced from `schema.sql` as it stands
 and is, as described above, not what the parsers do. The
 `balance_observations.metric` comment is also stale: it names

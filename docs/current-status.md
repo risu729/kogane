@@ -121,7 +121,7 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0104 (no
+rewards, reports and READ projections. CORE migrations reach 0105 (no
 file uses 0054, 0067, 0073, 0074, 0076, 0081 or 0087); READ reaches 0005. The Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`,
 `moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and `prestia-bank`, the connections
