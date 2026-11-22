@@ -19,7 +19,7 @@
 // on the page.
 
 import type { Warnings } from "./api.ts";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { amountSign, formatAmount } from "./money.ts";
 import { Link, type ObservationKind } from "./router.tsx";
@@ -410,10 +410,17 @@ export function ErrorState({
         // Two failed loads on one page are two alerts: each retry says which
         // load it repeats (docs/ui-guidelines.md#accessibility), its name
         // ending in the words it shows.
+        // While the read is in flight the button waits with aria-disabled
+        // and ignores a press, but is not disabled: a focused button that
+        // becomes disabled drops the focus to the document body
+        // (docs/frontend.md, the same rule as CursorPager).
         <button
           className="button"
-          onClick={onRetry}
-          disabled={retrying}
+          type="button"
+          onClick={() => {
+            if (!retrying) onRetry();
+          }}
+          aria-disabled={retrying ? true : undefined}
           aria-label={`${label}を${retrying ? "再試行中…" : "再試行"}`}
         >
           {retrying ? "再試行中…" : "再試行"}
@@ -455,15 +462,29 @@ export function QueryBoundary<T>({
   coverageNotice?: boolean;
   children: (data: T) => ReactNode;
 }): ReactNode {
+  // The failure a pressed retry repeats. React Query clears the error of a
+  // query that holds no answer as soon as a refetch starts, which would swap
+  // the alert, and the retry button the owner pressed, for the loading state
+  // and drop the focus to the document body. Until that read settles the
+  // alert stays, its button waiting (再試行中…).
+  const [repeating, setRepeating] = useState<{ error: Error; at: number } | null>(null);
   const retry = (): void => {
+    if (query.isFetching) return;
+    if (query.error !== null) setRepeating({ error: query.error, at: query.errorUpdatedAt });
     void query.refetch();
   };
+  const failure =
+    query.error ??
+    (repeating !== null &&
+    query.data === undefined &&
+    query.fetchStatus === "fetching" &&
+    query.errorUpdatedAt === repeating.at
+      ? repeating.error
+      : null);
   // Authorization failures hide cached records; transient failures keep the
   // previous response with a warning. An empty success replaces old rows.
-  if (query.isError && query.error instanceof ApiError && [401, 403].includes(query.error.status)) {
-    return (
-      <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
-    );
+  if (failure instanceof ApiError && [401, 403].includes(failure.status)) {
+    return <ErrorState error={failure} label={label} onRetry={retry} retrying={query.isFetching} />;
   }
   if (query.data === undefined) {
     if (query.fetchStatus === "paused")
@@ -479,9 +500,9 @@ export function QueryBoundary<T>({
           onRetry={retry}
         />
       );
-    if (query.isError)
+    if (failure !== null)
       return (
-        <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
+        <ErrorState error={failure} label={label} onRetry={retry} retrying={query.isFetching} />
       );
     return <Loading label={label} />;
   }
@@ -537,8 +558,9 @@ export function QueryBoundary<T>({
           <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>
           <button
             className="button"
+            type="button"
             onClick={retry}
-            disabled={query.isFetching}
+            aria-disabled={query.isFetching ? true : undefined}
             aria-label={`${label}を${query.isFetching ? "再試行中…" : "再試行"}`}
           >
             {query.isFetching ? "再試行中…" : "再試行"}
