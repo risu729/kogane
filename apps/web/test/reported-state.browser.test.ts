@@ -209,7 +209,7 @@ describe.if(runnable)("reported state on a date", () => {
         exact: true,
       })
       .innerText();
-    expect(listed).toContain("4500 JPY");
+    expect(listed).toContain("4,500 JPY");
     expect(listed).toContain("-300 JPY");
     expect(listed).toContain("基準日より後に支払予定");
     expect(listed).toContain("支払予定日が基準日以前（支払は未確認）");
