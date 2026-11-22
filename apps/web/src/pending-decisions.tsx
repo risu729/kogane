@@ -7,7 +7,7 @@
 // without it (the local evidence browser) is never probed. The route is the
 // operator's; for anyone else the panel is not shown.
 import { ownEntry } from "./labels.ts";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getJson, useFeatures } from "./api.ts";
 import type {
@@ -88,6 +88,24 @@ function Line({ line }: { line: PendingDecisionLine }): ReactNode {
 export function PendingDecisionsPanel(): ReactNode {
   const features = useFeatures();
   const query = usePendingDecisions(features.pendingDecisions);
+  // The failure a pressed retry repeats. React Query clears the error of a
+  // query that holds no answer as soon as a refetch starts, which would swap
+  // the alert, and the retry the owner pressed, for the loading status. Until
+  // that read settles the alert stays, its button waiting (再試行中…).
+  const [repeating, setRepeating] = useState<{ error: Error; at: number } | null>(null);
+  const failure =
+    query.error ??
+    (repeating !== null &&
+    query.data === undefined &&
+    query.fetchStatus === "fetching" &&
+    query.errorUpdatedAt === repeating.at
+      ? repeating.error
+      : null);
+  const retry = (): void => {
+    if (query.isFetching) return;
+    if (query.error !== null) setRepeating({ error: query.error, at: query.errorUpdatedAt });
+    void query.refetch();
+  };
   // A store that does not advertise the route (the local evidence browser),
   // or not the operator (the route is theirs): the panel is not shown.
   if (!features.pendingDecisions) return null;
@@ -96,7 +114,7 @@ export function PendingDecisionsPanel(): ReactNode {
   // A read that failed after an earlier answer keeps that answer in the
   // query, but the body then says the count could not be read: the heading
   // shows no total, rather than the earlier one as if it were current (INV05).
-  const shown = query.error ? undefined : query.data;
+  const shown = failure ? undefined : query.data;
   const waiting =
     shown?.kinds.reduce(
       (sum, line) => sum + (line.state === "counted" ? (line.count ?? 0) : 0),
@@ -117,16 +135,17 @@ export function PendingDecisionsPanel(): ReactNode {
       note="提案された対応や変更のうち、まだ判断していないものです。判断は各ページで行います。"
     >
       {/* The shared loading status and error alert, with a retry named for
-          this read (docs/ui-guidelines.md#accessibility). The error comes
-          first: a read in flight after a failure leaves the failure standing. */}
-      {query.error ? (
+          this read (docs/ui-guidelines.md#accessibility). The failure comes
+          first: a read in flight after it, a pressed retry or a refresh of an
+          earlier answer, leaves the failure standing. */}
+      {failure ? (
         <ErrorState
-          error={query.error}
+          error={failure}
           label="判断待ちの件数"
-          onRetry={() => void query.refetch()}
+          onRetry={retry}
           retrying={query.isFetching}
         />
-      ) : query.isPending ? (
+      ) : query.data === undefined ? (
         <Loading label="判断待ちの件数" />
       ) : (
         <ul>

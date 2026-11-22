@@ -152,10 +152,12 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
             : unavailable
-              ? // As the App answers a read that failed unexpectedly.
+              ? // As the App answers a read whose store read failed: the
+                // route runs in `catalogue`, which answers any failure that
+                // is not already an HTTP refusal as 503 catalogue_read_failed.
                 Response.json(
-                  { error: "internal_error", requestId: "req_synthetic" },
-                  { status: 500 },
+                  { error: "catalogue_read_failed", requestId: "req_synthetic" },
+                  { status: 503 },
                 )
               : Response.json(current);
         if (url.pathname.startsWith("/api/"))
@@ -321,10 +323,23 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       await alert.getByText("判断待ちの件数を読み込めませんでした").waitFor({ timeout: 5_000 });
       expect(await panel.locator(".panel-head .count").count()).toBe(0);
       expect(await auditPage(page)).toEqual([]);
-      // The retry reads again, and the answer replaces the alert.
+      // The retry reads again. While that read is in flight the alert
+      // stands, its button waiting, rather than turning back into the
+      // loading status, and there is still no total.
       unavailable = false;
+      held = new Promise((resolve) => (release = resolve));
       const before = requested;
       await alert.getByRole("button", { name: "判断待ちの件数を再試行", exact: true }).click();
+      const asked = (): boolean => requested > before;
+      while (!asked()) await Bun.sleep(10);
+      await alert
+        .getByRole("button", { name: "判断待ちの件数を再試行中…", exact: true })
+        .waitFor({ timeout: 2_000 });
+      expect(await panel.getByRole("status").count()).toBe(0);
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      // The answer replaces the alert.
+      release();
+      held = null;
       await panel.getByText("カード請求と引落の照合").waitFor();
       expect(requested).toBe(before + 1);
       expect(await alert.count()).toBe(0);

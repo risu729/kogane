@@ -69,7 +69,9 @@ it shows ([schedules](schedules.md#schedule-administration)).
 The ホーム page's `判断待ち` panel does not go through `QueryBoundary`: a failed read
 there shows no total and no earlier lines (INV05). It uses the shared states directly: `Loading`
 (a status) while the first read waits, and `ErrorState` (an alert with
-`判断待ちの件数を再試行`) once a read fails, which stays while the next read is in flight.
+`判断待ちの件数を再試行`) once a read fails. The alert stays, its button saying 再試行中…,
+while that retry or a refresh after an earlier answer is in flight; a refresh that starts
+on its own after a failed first read shows `Loading` again.
 
 ## Design tokens and stylesheet layout
 
