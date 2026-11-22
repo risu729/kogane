@@ -54,7 +54,7 @@ import {
   type AccountSourceFactsRow,
 } from "../../../read-model/src/account-candidates.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
-import { financialError } from "../errors.ts";
+import { financialError, unknownKeyRefs } from "../errors.ts";
 import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 
 export type { AccountCandidate, AccountConnectionEntry, UnreviewedAggregatorAccount };
@@ -266,7 +266,7 @@ export function parseAccountCandidatesRequest(
     return {
       ok: false,
       code: "unsupported_semantics",
-      refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
+      refs: unknownKeyRefs(unknown),
     };
   const { view, offset, sourceAccountId } = value;
   if (view !== undefined) {

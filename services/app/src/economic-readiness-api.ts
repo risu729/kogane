@@ -4,7 +4,7 @@ import { readEconomicRowReadinessForGrant } from "../../../packages/application/
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
 import { auditContext, auditedRoute } from "./audit";
-import { HttpError, json } from "./http";
+import { assertMethod, json, READ_METHODS } from "./http";
 
 export const ECONOMIC_READINESS_PATH = "/api/v2/economic-readiness";
 
@@ -41,8 +41,7 @@ export async function economicReadinessApi(
     auditContext(request, env, "ui", subject),
     "economic-readiness.read",
     async () => {
-      if (request.method !== "GET" && request.method !== "HEAD")
-        throw new HttpError(405, "method_not_allowed");
+      assertMethod(request, READ_METHODS);
       const outcome = await readEconomicRowReadinessForGrant({
         grant: readerGrant(subject),
         sql: d1Executor(env.DB),

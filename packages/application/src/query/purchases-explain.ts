@@ -56,7 +56,7 @@ import { CARD_SETTLEMENT_NEXT_PAGE } from "../../../domain/src/card-settlement-r
 import { isRecord } from "../../../domain/src/guards.ts";
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
-import { financialError } from "../errors.ts";
+import { financialError, unknownKeyRefs } from "../errors.ts";
 import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import {
   CARD_PURCHASE_ACCOUNT,
@@ -211,7 +211,7 @@ export function parsePurchasesExplainRequest(
     return {
       ok: false,
       code: "unsupported_semantics",
-      refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
+      refs: unknownKeyRefs(unknown),
     };
   const { view, period, usageMonth, eventId, offset, account, sort, cursor } = value;
   if (

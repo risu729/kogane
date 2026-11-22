@@ -249,7 +249,10 @@ an `instrument-candidate:` base context without that bundle.
 
 `GET /api/identity/instrument-history?identifierId=` serves the complete
 stored mapping/decision/relation history for one identifier under
-`records.read` and whole-store scope. The page opens it on request. The
+`records.read` and whole-store scope. The page opens it on request and
+reads it again on each reopening; if that read fails, the earlier entries stay
+only under the shared `前回読み込んだ訂正履歴` warning
+([frontend](frontend.md#stack-decision)). The
 service counts by index before loading entries and refuses past `maxRows`;
 it never truncates the history. This is recorded history, not effective-date
 mapping. An agent reads the same history through `kogane.instruments.history`
@@ -391,7 +394,9 @@ and decision indexes, one probe per relation kind on `entity_relations_from`
 and `_to`, each decision by primary key), so the cost grows with that
 account's own history only. The browser checks the answer with
 `validAccountHistoryRead`, which refuses a relation entry that does not name
-the account on exactly one side.
+the account on exactly one side. Reopening reads it again; if that read
+fails, the earlier entries stay only under the shared
+`前回読み込んだ取得元の口座の訂正履歴` warning.
 
 Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two

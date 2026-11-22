@@ -29,7 +29,7 @@
 import { centralStoreCapabilities } from "./capabilities";
 import { accessIdentity } from "./auth";
 import { grantsUsable, principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { OPS_PREFIX } from "./ops-api";
 import {
   parseSubjectList,
@@ -268,7 +268,7 @@ export async function healthApi(request: Request, env: Env, url: URL): Promise<R
   // Identity first, as on every other route of this Worker: a caller that is
   // not allowed here learns nothing about the route's shape from a 405 or 400.
   authorizeHealth(env, await accessIdentity(request, env));
-  if (request.method !== "GET") throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (url.search) throw new HttpError(400, "invalid_query");
   const { status, body } = await healthBody(env);
   return json(body, status);

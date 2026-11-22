@@ -270,7 +270,7 @@ export {
   validGrant,
   wholeStoreReadRefusal,
 } from "./grants.ts";
-export { ERROR_REMEDIES, ERROR_STATUS, financialError } from "./errors.ts";
+export { ERROR_REMEDIES, ERROR_STATUS, financialError, unknownKeyRefs } from "./errors.ts";
 export {
   type AgentCapabilitiesReport,
   capabilitiesFor,

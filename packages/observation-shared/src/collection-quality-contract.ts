@@ -960,8 +960,17 @@ export function validCollectionQualityResponse(
  */
 export const COLLECTION_QUALITY_DETAILS = READ_DETAILS;
 export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number];
-/** Summary lines of one source's cells per page. */
+/** Summary lines per page: of the sources, and of one source's cells. */
 export const COLLECTION_QUALITY_LINE_PAGE = 20;
+/**
+ * The bytes every summary page is held to (ADR 0123, amendments of
+ * 2026-11-20 and 2026-11-21): the UTF-8 bytes of the tool's answer,
+ * `{ schemaVersion, data }` serialized as the MCP adapter writes it
+ * (`pageReadAnswerBytes`), which is what an MCP client shows (issue 1414). A
+ * page ends before the line that would pass it, and a page that cannot hold
+ * its first line is refused (413), never cut.
+ */
+export const COLLECTION_QUALITY_SUMMARY_BYTES = 8_192;
 /** More cells than this in one source's summary is refused (413), never cut. */
 export const COLLECTION_QUALITY_SUMMARY_CELL_BOUND = 2_000;
 
@@ -1002,8 +1011,24 @@ export interface CollectionQualitySummaryLines {
   apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
   detail: "summary";
   freshnessAsOf: CollectionQualitySummary["freshnessAsOf"];
+  /** This page's source lines, from `coverage.offset` in the summary's order. */
   sources: CollectionQualitySourceLine[];
+  /** The jobs under no CORE source, on every page. */
   otherSchedules: CollectionQualityScheduleLine[];
+  /**
+   * The whole answer's source and line counts and where the next page starts
+   * (ADR 0123, amendment 2026-11-21): up to `limit` lines a page, fewer when
+   * the next would carry the tool's answer past
+   * `COLLECTION_QUALITY_SUMMARY_BYTES`.
+   */
+  coverage: {
+    sources: number;
+    lines: number;
+    limit: typeof COLLECTION_QUALITY_LINE_PAGE;
+    offset: number;
+    truncated: boolean;
+    nextOffset: number | null;
+  };
 }
 
 /**
@@ -1039,7 +1064,11 @@ export interface CollectionQualityCellSummary {
   sourceId: string;
   latestFetchRun: CollectionQualityCells["latestFetchRun"];
   lines: CollectionQualityCellLine[];
-  /** Every cell of the source was read; `offset` pages the lines. */
+  /**
+   * Every cell of the source was read; `offset` pages the lines, up to
+   * `limit` a page and fewer when the next would carry the tool's answer past
+   * `COLLECTION_QUALITY_SUMMARY_BYTES` (ADR 0123, amendment 2026-11-21).
+   */
   coverage: {
     cells: number;
     lines: number;
@@ -1061,26 +1090,61 @@ const scheduleLine = z.strictObject({
     }),
   ),
 });
-const summaryLines = z.strictObject({
-  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
-  detail: z.literal("summary"),
-  freshnessAsOf,
-  sources: z.array(
-    z.strictObject({
-      sourceIds: z.array(sourceId).check(z.minLength(1), z.maxLength(COLLECTION_QUALITY_BOUND)),
-      freshness,
-      latestFetchRun: fetchRun,
-      reasons: distinct(z.enum(SOURCE_REASONS)),
-      schedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
-      unregistered: count,
-      unregisteredCodes: distinct(code),
-      dataTypes: z.nullable(
-        z.strictObject({ collected: count, partial: count, notCollected: count }),
-      ),
+const summaryLines = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    sources: z
+      .array(
+        z.strictObject({
+          sourceIds: z.array(sourceId).check(z.minLength(1), z.maxLength(COLLECTION_QUALITY_BOUND)),
+          freshness,
+          latestFetchRun: fetchRun,
+          reasons: distinct(z.enum(SOURCE_REASONS)),
+          schedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+          unregistered: count,
+          unregisteredCodes: distinct(code),
+          dataTypes: z.nullable(
+            z.strictObject({ collected: count, partial: count, notCollected: count }),
+          ),
+        }),
+      )
+      .check(z.maxLength(COLLECTION_QUALITY_LINE_PAGE)),
+    otherSchedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+    coverage: z.strictObject({
+      /** Sources in the whole answer, each on exactly one line. */
+      sources: count,
+      /** Lines in the whole answer. */
+      lines: count,
+      limit: z.literal(COLLECTION_QUALITY_LINE_PAGE),
+      offset: count,
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
     }),
-  ),
-  otherSchedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
-});
+  })
+  .check(
+    z.refine((value) => {
+      const { coverage } = value;
+      const listed = value.sources.length;
+      const end = coverage.offset + listed;
+      const named = value.sources.flatMap((line) => line.sourceIds);
+      return (
+        new Set(named).size === named.length &&
+        named.length <= coverage.sources &&
+        coverage.lines <= coverage.sources &&
+        // A page ends where the next one starts, or at the last line; an
+        // empty page lies past the last line.
+        (listed === 0
+          ? !coverage.truncated && coverage.nextOffset === null && coverage.offset >= coverage.lines
+          : coverage.truncated
+            ? coverage.nextOffset === end && end < coverage.lines
+            : coverage.nextOffset === null && end === coverage.lines)
+      );
+    }),
+    // What a client shows: the page fits it by construction.
+    z.refine((value) => pageReadAnswerBytes(value) <= COLLECTION_QUALITY_SUMMARY_BYTES),
+  );
 const cellSummary = z
   .strictObject({
     apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
@@ -1125,6 +1189,10 @@ const cellSummary = z
   .check(
     z.refine((value) => (value.coverage.nextOffset === null) === !value.coverage.truncated),
     z.refine((value) => value.coverage.lines <= value.coverage.cells),
+    // A page that says more follow lists at least one line.
+    z.refine((value) => !value.coverage.truncated || value.lines.length > 0),
+    // What a client shows: the page fits it by construction.
+    z.refine((value) => pageReadAnswerBytes(value) <= COLLECTION_QUALITY_SUMMARY_BYTES),
   );
 
 /**
@@ -1141,7 +1209,7 @@ export const ACCOUNT_SUMMARY_LINE_PAGE = 20;
  * tool's answer, `{ schemaVersion, data }` serialized as the MCP adapter
  * writes it, which is what an MCP client shows (issue 1414).
  */
-export const ACCOUNT_SUMMARY_BYTES = 8_192;
+export const ACCOUNT_SUMMARY_BYTES = COLLECTION_QUALITY_SUMMARY_BYTES;
 /** The bytes of `data` as a page read tool answers it (`{ schemaVersion, data }`, serialized). */
 export function pageReadAnswerBytes(data: unknown): number {
   return new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))

@@ -344,6 +344,17 @@ refused with `unsupported_semantics`. An unknown request key or an unknown
 filter key is refused the same way rather than ignored: silently dropping a
 filter answers a different question from the one that was asked.
 
+The refusal's `refs` name the unknown keys (a filter key as `filter:<key>`).
+A key is the caller's own text, so the tools that name unknown keys —
+`financial.query`, `context.open`, `explain`, `reconcile.propose`,
+`instruments.candidates` and `purchases.explain` — name at most the first
+ten, each cut to its first 64 UTF-16 code units, or 63 when the 64th is a
+high surrogate, so the cut never splits a surrogate pair (a lone surrogate
+the caller sent inside the kept prefix is repeated as sent; all six through
+`unknownKeyRefs` in `packages/application/src/errors.ts`; an unsupported
+`financial.query` intent is named as `intent:<intent>` under the same cut): a
+body of long keys is never repeated back whole.
+
 The `activity` intent reads provider transaction observations, not recognised
 purchase events, so its rows and the purchase figures below answer different
 questions, and neither is a complete card history.
@@ -877,7 +888,9 @@ Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
   date with `capturedAt` (null on the line of bills with no known account);
   `covers` is `yes` or `no` only when both are exact and no reason holds,
   else `unknown` with `reasons` from `debit_account_unknown`,
-  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit`,
+  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit`
+  (also when the balance was captured on the due date of a bill the line
+  counts: it may already show that debit),
   `cards_with_unknown_account` and `cards_with_unknown_due_date`; `notes` is always
   `["other_debits_not_modelled"]`: only known card bills are compared with
   the provider's balance, so `yes` is not a forecast.
@@ -1495,7 +1508,8 @@ beside the stored `body`, the partition the page shows: a body stored
 ([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).
 
 `kogane.collection-quality.read` takes `{ source?, view?, offset?, detail? }`:
-without `source` the summary (which takes no `offset` and no `view`), with it
+without `source` the summary (which takes no `view`, and `offset` only with
+`detail: "summary"`), with it
 that source's cells (`view: "cells"`, the default; `offset` pages them) or the
 same cells regrouped by the accounts their captures' observations name
 (`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`;
@@ -1505,12 +1519,21 @@ whose lines would be equal share one, naming each in `sourceIds`): freshness,
 newest fetch run, reasons, each job's newest receipt status and failure code
 with its terminals' distinct blocked and failure codes (`terminalCodes`), the
 count of unregistered collectors and their distinct codes
-(`unregisteredCodes`), and the provider data types counted by status; and a
+(`unregisteredCodes`), and the provider data types counted by status, with
+the jobs under no CORE source (`otherSchedules`) on every page and
+`coverage` giving the source and line counts; and a
 source's cells are read whole (refused past 2,000 cells with
 `413 result_limit_exceeded`, never cut) and answered as one line per dataset,
 parser and fetch unit, collapsed over periods, with the union of the cells'
-reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
-(`offset` then counts lines, and `coverage` gives the cell and line counts).
+reasons, failure codes (`failureCodes`) and coverage causes (`coverage` gives
+the cell and line counts). Both summaries page their lines by `offset`: up to
+20 a page, fewer when the next would carry the tool's answer past 8,192 bytes
+(`coverage.nextOffset` is where the next page starts), and a page whose first
+line, or the summary's `otherSchedules`, alone would pass that is
+`413 result_limit_exceeded`, never cut
+([ADR 0123, amendment of 2026-11-21](adr/0123-summary-detail-for-large-reads.md#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21);
+proposed, needs the owner's approval). `offset` with the summary's
+`detail: "full"`, which is unpaged, is `400 invalid_request`.
 The account view's summary
 ([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20);
 proposed, needs the owner's approval) is one line per account, in id order:
@@ -1972,6 +1995,30 @@ hand to each other: the receiver reads them back under its own authority
 instead of trusting the sender's figures (addendum 11 §8). The Overview page
 shows both under a disclosure for exactly that purpose.
 
+### Explain and the identity read
+
+`kogane.explain` takes `ref` and `depth` and nothing else: any other key,
+`identityRead` included, is `400 unsupported_semantics` with that key as a ref
+(`parseExplainRequest`, `packages/application/src/explain.ts`), on the route
+and the tool alike. Its context is always opened under the latest identity
+(`contextInputs`, `services/app/src/agent-service.ts`), so its `contextId`
+pins the identity release (`identity:latest:current-mappings-v1`) and the
+evaluation clock, which the Worker cuts to whole seconds
+(`services/app/src/agent-api.ts`), and no mapping revision: a mapping
+corrected between two calls in the same second leaves the `contextId` as it
+was. A graph's `account_mapping:<referenceId>@<revision>` and
+`instrument_mapping:<referenceId>@<revision>` refs (and the
+`identity-decision:` ref under the account one) are written from the
+organization on the observation detail the reader returned, so they name the
+revision that was read, which the `contextId` does not pin.
+
+Limit: the reader the Worker passes is the evidence reader, whose
+`getObservation` returns no organization
+(`packages/read-model/src/observation-reader.ts`). A graph served today
+therefore holds no `adopted-claim` or `identity-decision` node and reads no
+mapping; those levels are exercised only with a test reader
+(`packages/application/test/explain-propose.test.ts`).
+
 ## Result contract
 
 Every successful query returns
@@ -2078,9 +2125,11 @@ Converting them to JSON does not make them instructions.
   `kogane.command.plan` `baseContextId` (256) and `kogane.command.approve`
   `scope` items (512). The keys of both open maps, and the values of
   `kogane.audit.search` `filters`, have no length bound in the schema.
-- `explain` returns identifiers only — `account_mapping:`, `parse_run:`,
-  `fetch_artifact:`, `raw:<sha256>`. The provider URL an artifact was fetched
-  from is never in a graph, at any capability.
+- `explain` returns identifiers only — `account_mapping:` (where its reader
+  supplies an organization, which the served one does not:
+  [explain and the identity read](#explain-and-the-identity-read)),
+  `parse_run:`, `fetch_artifact:`, `raw:<sha256>`. The provider URL an
+  artifact was fetched from is never in a graph, at any capability.
 - Errors carry a code, a fixed remedy sentence and safe refs. No provider
   content, token, SQL text or raw exception string reaches a caller.
 - Bank credentials, sessions and keys are never in a response, and no Access
@@ -2115,6 +2164,9 @@ client can get, transport refusals included, is in
 [the refusal table](#refusals-a-client-sees).
 
 Requests are bounded at 64 KiB; a larger body is 413 before it reaches a tool.
+Every agent path (`/api/agent/v1/*` and `/mcp`) takes `POST` only: any other
+method is `405 method_not_allowed` with `Allow: POST`, decided after the
+caller is proved ([methods](production-evidence-browser.md#methods)).
 
 ## Connecting an MCP client
 
@@ -2187,7 +2239,7 @@ are unchanged.
   HTTP transport and the stateless 2026-07-28 revision through
   `createMcpHandler`, both answering one JSON object per request from one
   server definition. No session (`Mcp-Session-Id` is never minted), no SSE
-  stream; `GET` and `DELETE` are `405`.
+  stream; `GET`, `HEAD` and `DELETE` are `405`, with `Allow: POST`.
 - A client must send `Accept: application/json, text/event-stream` and
   `Content-Type: application/json` (the SDK answers `406` / `415`
   otherwise), as every MCP client does.
@@ -2206,7 +2258,7 @@ are unchanged.
 | a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                                         |
 | a store failure (or a bug) inside a read tool's own read, page reads included                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers (economic readiness: its own `503` body, as its route answers)         |
 | `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                                          |
-| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                                                    |
+| `GET` / `HEAD` / `DELETE`; a query string                                                                                                                         | Worker                                      | `405 method_not_allowed` with `Allow: POST` / `400 invalid_query`                                                                                 |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
 | unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                                          |
 | an operations tool whose principal does not resolve (a malformed subject, a bad clock)                                                                            | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_mcp_client"}` (or the resolution's other closed code); only the refusal record                         |
