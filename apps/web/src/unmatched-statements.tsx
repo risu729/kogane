@@ -15,7 +15,7 @@ import type {
 import { CARD_STATEMENTS_UNMATCHED_PATH } from "../../../packages/observation-shared/src/card-statements-unmatched-contract.ts";
 import {
   bankSourceLabel,
-  DateValue,
+  NullableDate,
   PageBudgetNote,
   SettlementQuantity,
 } from "./reconciliation-display.tsx";
@@ -93,7 +93,7 @@ function PlannerAnswer({ answer }: { answer: UnmatchedPlannerAnswer }): ReactNod
         // The server lists the first 50 and counts every one (ADR 0074,
         // amendment 2026-11-07): the page says how many it does not show.
         <p className="footnote" role="note">
-          {`一致する組み合わせ ${answer.allocationCount.toLocaleString("ja-JP")}件のうち、` +
+          {`一致する組み合わせ ${answer.allocationCount}件のうち、` +
             `出金の件数が少ない順に先頭の${answer.allocations.length}件を表示しています。`}
         </p>
       ) : null}
@@ -130,11 +130,7 @@ function UnmatchedRow({ item }: { item: UnmatchedCardStatement }): ReactNode {
         <strong>{statement.sourceId === "vpass" ? "Vpass" : "MyJCB"}</strong> · 対象月{" "}
         <Nullable value={statement.period} /> · 請求総額{" "}
         <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
-        {statement.paymentDate === null ? (
-          <Nullable value={null} placeholder="不明" />
-        ) : (
-          <DateValue value={statement.paymentDate} />
-        )}
+        <NullableDate value={statement.paymentDate} reason={statement.paymentDateReason} />
       </p>
       <p>{label(CODES, item.code)}</p>
       {item.planner === null ? null : <PlannerAnswer answer={item.planner} />}

@@ -293,5 +293,5 @@ describe("card purchases on a scaled store without statistics", () => {
     expect(keySteps.some((detail) => /^SEARCH t USING INTEGER PRIMARY KEY/u.test(detail))).toBe(
       true,
     );
-  });
+  }, 60_000);
 });

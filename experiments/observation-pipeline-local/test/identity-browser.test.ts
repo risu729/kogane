@@ -314,16 +314,25 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         page.getByRole("button", { name: "絞り込む", exact: true }).click(),
       ]);
       expect(new URL(page.url()).search).toBe("");
-      await page.getByRole("button", { name: "次の100件", exact: true }).last().click();
+      // The list renders after its response arrives, and until then the only
+      // 次の100件 is the 整理状況 pager's, disabled with no next page. Wait for
+      // the filtered rows, then press the list's own pager.
+      await page
+        .locator("article")
+        .filter({ hasText: `${freshLabel}-0` })
+        .filter({ hasText: "sbi-securities · " })
+        .waitFor();
+      const listPages = page.getByRole("group", { name: "一覧のページ", exact: true });
+      await listPages.getByRole("button", { name: "次の100件", exact: true }).click();
       await page.getByRole("heading", { name: new RegExp(pageTwo) }).waitFor();
-      await page.getByRole("button", { name: "前の100件", exact: true }).last().click();
+      await listPages.getByRole("button", { name: "前の100件", exact: true }).click();
       await page
         .getByRole("heading", { name: new RegExp(freshLabel) })
         .first()
         .waitFor();
       await page.getByRole("button", { name: "通貨・銘柄", exact: true }).click();
       await page.getByRole("heading", { name: /Synthetic foreign security/ }).waitFor();
-      await page.getByRole("button", { name: "次の100件", exact: true }).last().click();
+      await listPages.getByRole("button", { name: "次の100件", exact: true }).click();
       await page.getByRole("heading", { name: new RegExp(pageTwo) }).waitFor();
       await page.getByRole("link", { name: "代表記録・原本を確認", exact: true }).click();
       await page.waitForURL(`**/observations/transaction/${observation.id}`);

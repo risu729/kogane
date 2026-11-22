@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { Quantity } from "../../../packages/domain/src/values.ts";
-import { decimalToString } from "../../../packages/domain/src/values.ts";
 import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
 import type { CardSettlementNextPage } from "../../../packages/domain/src/card-settlement-review.ts";
 import type { CardSettlementReview } from "./reconciliation-api.ts";
 import { Link } from "./router.tsx";
+import { formatDecimal } from "./money.ts";
 import { Badge, Kv, KvRow, Notice, Nullable } from "./ui.tsx";
 
 export const SETTLEMENT_STATUS = {
@@ -108,7 +108,7 @@ export function settlementReason(code: string): string {
 export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
   return value.value.status === "exact" ? (
     <span>
-      {decimalToString(value.value.value)} {value.unitRef}
+      {formatDecimal(value.value.value)} {value.unitRef}
     </span>
   ) : (
     <Nullable value={null} placeholder={`不明（${value.value.reasonCode}） · ${value.unitRef}`} />
@@ -123,7 +123,7 @@ export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
 export function QuantityChange({ value }: { value: Quantity }): ReactNode {
   if (value.value.status !== "exact")
     return <Nullable value={null} placeholder={`不明（${value.value.reasonCode}）`} />;
-  const text = decimalToString(value.value.value);
+  const text = formatDecimal(value.value.value);
   return <span>{text === "0" ? "±0" : text.startsWith("-") ? text : `+${text}`}</span>;
 }
 
@@ -137,6 +137,30 @@ export function DateValue({ value }: { value: TemporalValue }): ReactNode {
       </span>
     );
   return <time dateTime={value.value}>{value.value}</time>;
+}
+
+/**
+ * A due or debit date the server sends as a civil date, or as null with the
+ * closed reason beside it (`paymentDateReason`, `debitDateReason`): null shows
+ * 不明（reason）, as `DateValue` shows an unknown time. A null that came with
+ * no reason names what is missing in words and claims no reason the answer
+ * does not carry (INV05).
+ */
+export function NullableDate({
+  value,
+  reason,
+}: {
+  value: TemporalValue | string | null;
+  reason?: string | undefined;
+}): ReactNode {
+  if (value === null)
+    return (
+      <Nullable
+        value={null}
+        placeholder={reason === undefined ? "年月日として読める記録なし" : `不明（${reason}）`}
+      />
+    );
+  return typeof value === "string" ? <>{value}</> : <DateValue value={value} />;
 }
 
 function FactLink({ fact, label }: { fact: SourceFactRef; label: string }): ReactNode {
@@ -171,7 +195,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
           {facts.statement.sourceAccount}
         </KvRow>
         <KvRow label="請求対象期間">
-          <Nullable value={facts.statement.period} placeholder="不明" />
+          <Nullable value={facts.statement.period} />
         </KvRow>
         <KvRow label="カード会社の請求総額">
           <SettlementQuantity value={facts.statement.amount} />
@@ -253,7 +277,7 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
               : "（採用済み）"}
         </KvRow>
         <KvRow label="元本負債の減少額">不明（請求総額だけでは元本と手数料を分けられません）</KvRow>
-        <KvRow label="手数料の内訳">不明</KvRow>
+        <KvRow label="手数料の内訳">不明（請求総額だけでは元本と手数料を分けられません）</KvRow>
         <KvRow label="純資産への影響">算定していません（資産・負債全体の情報が不足）</KvRow>
       </Kv>
       <p className="footnote">

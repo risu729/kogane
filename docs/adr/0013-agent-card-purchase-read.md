@@ -123,7 +123,7 @@ on 101 synthetic events.
 
 ## Amendment: a per-card view (2026-11-19, ADR 0125)
 
-Status: proposed. [ADR 0125](0125-card-purchases-per-card-view.md) adds
+Status: accepted (merged 2026-11-20 in [#1449](https://github.com/risu729/kogane/pull/1449)). [ADR 0125](0125-card-purchases-per-card-view.md) adds
 `view: cards` (with `usageMonth`) to this tool and to the operator route: the
 same whole-filter figures grouped by card, without the per-event explanation.
 Its amendment adds `view: lines` (with `account`, `sort` and `cursor`): one

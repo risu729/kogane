@@ -101,10 +101,19 @@ import type {
 } from "./organization-contract.ts";
 import {
   BALANCE_HISTORY_REASONS,
+  BALANCE_LIST_LATEST_REASONS,
+  BALANCE_LIST_SUMMARY_LINES,
+  CASH_LEFT_OUT_METRICS,
+  CASH_LEFT_OUT_REASONS,
+  CASH_METRIC_IDS,
+  CASH_PAGE_BYTES,
+  cashAnswerBytes,
   OVERVIEW_FETCH_RUN_STATUSES,
   OVERVIEW_LINE_FAILURE_CODES,
   OVERVIEW_PARSE_RUN_STATUSES,
+  OVERVIEW_SUMMARY_BYTES,
   OVERVIEW_SUMMARY_LINES,
+  PAGE_READ_SCHEMA_VERSION,
 } from "./api-contract.ts";
 import type {
   ApiMetadata,
@@ -117,6 +126,18 @@ import type {
   BalanceHistoryPage,
   BalanceHistorySummaryItem,
   BalanceHistorySummaryPage,
+  BalanceListLatestLine,
+  BalanceListPage,
+  BalanceListSummaryMetric,
+  BalanceListSummaryPage,
+  CashAmount,
+  CashLeftOut,
+  CashLine,
+  CashPageInfo,
+  CashReference,
+  CashPerAccountPage,
+  CashSourceSubtotal,
+  CashSubtotal,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
@@ -476,6 +497,8 @@ const overview = object<Overview>({
 // status is one of the closed set and listed once, a line per source or
 // parser names a status other than the success one, each list is capped, and
 // its lines with the ones it left out count exactly the runs of their status.
+// The tool's answer is within its byte budget, and it says it was trimmed
+// exactly when it shows what only the budget trims (amendment 2026-11-20).
 type OverviewFetchLine = OverviewSummary["fetchRuns"]["byStatus"][number];
 /** A closed failure code, as `safeCode` in the collection quality read writes one. */
 const failureCode: Check<string> = (value): value is string =>
@@ -487,6 +510,11 @@ const overviewSummaryShape = object<OverviewSummary>({
   sources: array(
     object<OverviewSummary["sources"][number]>({ sourceIds: array(text), artifacts: number }),
   ),
+  sourcesOmitted: identifier,
+  budget: object<OverviewSummary["budget"]>({
+    bytes: literal(OVERVIEW_SUMMARY_BYTES),
+    trimmed: boolean,
+  }),
   fetchRuns: object<OverviewSummary["fetchRuns"]>({
     byStatus: array(
       object<OverviewFetchLine>({
@@ -587,10 +615,10 @@ const overviewSummaryShape = object<OverviewSummary>({
 });
 /**
  * Each status once; a capped list holds at most `OVERVIEW_SUMMARY_LINES`
- * lines and leaves lines out only when full, each status's omitted entry
- * once; and a status's per-source or per-parser lines with its omitted ones
- * count exactly its runs and its sources or parsers (`distinct`), one line
- * each.
+ * lines, each status's omitted entry once; and a status's per-source or
+ * per-parser lines with its omitted ones count exactly its runs and its
+ * sources or parsers (`distinct`), one line each. Whether a list that is not
+ * full may leave lines out is `budgetTrimmed`'s.
  */
 function linesCountStatus<Line extends { status: string; runs: number }>(
   byStatus: readonly Line[],
@@ -616,18 +644,18 @@ function linesCountStatus<Line extends { status: string; runs: number }>(
     ) && [...lines, ...omitted].every((entry) => statuses.includes(entry.status))
   );
 }
-/** At most the cap listed, and lines left out only from a full list, each counting its runs. */
+/** At most the cap listed, and each entry of lines left out counting its runs. */
 function capped(listed: number, omitted: readonly { lines: number; runs: number }[]): boolean {
   return (
     listed <= OVERVIEW_SUMMARY_LINES &&
-    omitted.every((entry) => entry.lines > 0 && entry.runs >= entry.lines) &&
-    (omitted.length === 0 || listed === OVERVIEW_SUMMARY_LINES)
+    omitted.every((entry) => entry.lines > 0 && entry.runs >= entry.lines)
   );
 }
 /**
  * A failing parser's line lists at most `OVERVIEW_LINE_FAILURE_CODES` codes,
- * counts the rest only when it is full, and each of its codes is on its
- * status's line, which lists each code once.
+ * and each of its codes is on its status's line, which lists each code once
+ * and has at least the codes the line lists and counts. Whether a line that
+ * is not full may count codes is `budgetTrimmed`'s.
  */
 function failureCodesKept(summary: OverviewSummary): boolean {
   const byStatus = new Map(
@@ -641,7 +669,6 @@ function failureCodesKept(summary: OverviewSummary): boolean {
       (line) =>
         line.failureCodes.length <= OVERVIEW_LINE_FAILURE_CODES &&
         new Set(line.failureCodes).size === line.failureCodes.length &&
-        (line.moreFailureCodes === 0 || line.failureCodes.length === OVERVIEW_LINE_FAILURE_CODES) &&
         line.failureCodes.every((code) => byStatus.get(line.status)?.includes(code)) &&
         (byStatus.get(line.status)?.length ?? 0) >=
           line.failureCodes.length + line.moreFailureCodes,
@@ -657,8 +684,36 @@ function unitUpdatesCapped(summary: OverviewSummary): boolean {
     ? runs === 0 && summary.unitUpdates.length <= OVERVIEW_SUMMARY_LINES
     : capped(summary.unitUpdates.length, [{ lines, runs }]);
 }
+/**
+ * Whether the summary shows what only its byte budget trims: a list that
+ * leaves lines out while holding fewer than `OVERVIEW_SUMMARY_LINES`, a
+ * `notOk` line that counts codes while listing fewer than
+ * `OVERVIEW_LINE_FAILURE_CODES`, or sources left out. A summary under its
+ * caps alone shows none of them.
+ */
+function budgetTrimmed(summary: OverviewSummary): boolean {
+  const short = (listed: readonly unknown[], omitted: number) =>
+    omitted > 0 && listed.length < OVERVIEW_SUMMARY_LINES;
+  const lines = (omitted: readonly { lines: number }[]) =>
+    omitted.reduce((sum, entry) => sum + entry.lines, 0);
+  return (
+    summary.sourcesOmitted > 0 ||
+    short(summary.fetchRuns.notSuccessful, lines(summary.fetchRuns.notSuccessfulOmitted)) ||
+    short(summary.parseRuns.notOk, lines(summary.parseRuns.notOkOmitted)) ||
+    short(summary.unitUpdates ?? [], summary.unitUpdatesOmitted?.lines ?? 0) ||
+    summary.parseRuns.notOk.some(
+      (line) => line.moreFailureCodes > 0 && line.failureCodes.length < OVERVIEW_LINE_FAILURE_CODES,
+    )
+  );
+}
+/** The UTF-8 bytes of the tool's answer that carries `data`, as the tool serializes it. */
+const pageReadAnswerBytes = (data: unknown) =>
+  new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))
+    .length;
 const overviewSummary: Check<OverviewSummary> = (value): value is OverviewSummary =>
   overviewSummaryShape(value) &&
+  pageReadAnswerBytes(value) <= OVERVIEW_SUMMARY_BYTES &&
+  value.budget.trimmed === budgetTrimmed(value) &&
   linesCountStatus(
     value.fetchRuns.byStatus,
     (line) => line.sources,
@@ -916,7 +971,7 @@ function refsNamed(entries: readonly { ref: string }[], named: readonly string[]
 }
 function accountsNamed(value: {
   accounts: SummaryAccount[];
-  metrics: SummaryMetric[];
+  metrics: readonly { ref: string }[];
   items: { account: string; metric: string }[];
 }): boolean {
   return (
@@ -962,11 +1017,211 @@ const balanceHistorySummaryPage: Check<BalanceHistorySummaryPage> = (
   withoutNetWorth(value) &&
   accountsNamed(value) &&
   value.items.length <= value.page.limit;
+
+// Cash per account (ADR 0123, amendment 2026-11-20). An exact amount has its
+// value and scale and a value that is not exact neither (INV05); only an
+// adopted exact amount may be counted, and an amount not counted says why. A
+// subtotal with nothing counted has no value, never a zero; a partial one
+// names its reasons. Units and left-out reasons appear once each.
+const unique = (keys: readonly string[]) => new Set(keys).size === keys.length;
+const cashAmount: Check<CashAmount> = (value): value is CashAmount =>
+  object<CashAmount>({
+    observationId: identifier,
+    metric: literal(...CASH_METRIC_IDS),
+    unit: text,
+    value: nullableText,
+    scale: nullable(identifier),
+    status: literal("exact", "missing", "unparsed", "conflict"),
+    adoption: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
+    counted: boolean,
+    asOf: nullableText,
+    reasons: array(text),
+  })(value) &&
+  (value.status === "exact"
+    ? value.value !== null && value.scale !== null
+    : value.value === null && value.scale === null) &&
+  (!value.counted || (value.adoption === "adopted" && value.status === "exact")) &&
+  (value.counted || value.reasons.length > 0);
+const cashReference: Check<CashReference> = (value): value is CashReference =>
+  object<CashReference>({
+    source: text,
+    sourceAccount: text,
+    amounts: array(cashAmount),
+  })(value) && value.amounts.length > 0;
+const cashLine: Check<CashLine> = (value): value is CashLine =>
+  object<CashLine>({
+    account: nullableText,
+    label: nullableText,
+    references: array(cashReference),
+  })(value) &&
+  value.references.length > 0 &&
+  unique(value.references.map((entry) => JSON.stringify([entry.source, entry.sourceAccount]))) &&
+  (value.account === null) === (value.label === null);
+const cashSubtotalFields = {
+  unit: text,
+  value: nullableText,
+  scale: nullable(identifier),
+  counted: identifier,
+  notCounted: identifier,
+  status: literal("complete", "partial"),
+  reasons: array(text),
+};
+function cashSubtotalSound(value: CashSubtotal): boolean {
+  return (
+    (value.counted === 0
+      ? value.value === null && value.scale === null
+      : value.value !== null && value.scale !== null) &&
+    (value.status === "complete" || value.reasons.length > 0) &&
+    (value.notCounted === 0 || value.reasons.length > 0)
+  );
+}
+const cashSubtotal: Check<CashSubtotal> = (value): value is CashSubtotal =>
+  object<CashSubtotal>(cashSubtotalFields)(value) && cashSubtotalSound(value);
+const cashSourceSubtotal: Check<CashSourceSubtotal> = (value): value is CashSourceSubtotal =>
+  object<CashSourceSubtotal>({ ...cashSubtotalFields, source: text })(value) &&
+  cashSubtotalSound(value);
+const cashLeftOut: Check<CashLeftOut> = (value): value is CashLeftOut =>
+  object<CashLeftOut>({
+    reason: literal(...CASH_LEFT_OUT_REASONS),
+    rows: identifier,
+    metrics: array(text),
+    moreMetrics: identifier,
+  })(value) &&
+  value.metrics.length > 0 &&
+  value.metrics.length <= CASH_LEFT_OUT_METRICS &&
+  (value.moreMetrics === 0 || value.metrics.length === CASH_LEFT_OUT_METRICS) &&
+  unique(value.metrics) &&
+  value.rows >= value.metrics.length + value.moreMetrics;
+const cashPageInfo = object<CashPageInfo>({
+  limit: identifier,
+  hasMore: boolean,
+  nextCursor: nullableText,
+  snapshotId: text,
+  paginationVersion: literal("keyset-v2"),
+  lines: identifier,
+});
+const cashPerAccountPage: Check<CashPerAccountPage> = (value): value is CashPerAccountPage =>
+  object<CashPerAccountPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    collection: literal("cash"),
+    policyRelease: text,
+    lines: array(cashLine),
+    subtotals: object<CashPerAccountPage["subtotals"]>({
+      byUnit: array(cashSubtotal),
+      bySource: array(cashSourceSubtotal),
+    }),
+    leftOut: array(cashLeftOut),
+    liabilitiesCoverage: literal("unknown"),
+    dataCoverage: snapshotCoverage,
+    page: cashPageInfo,
+  })(value) &&
+  withoutNetWorth(value) &&
+  withoutNetWorth(value.subtotals) &&
+  unique(value.subtotals.byUnit.map((entry) => entry.unit)) &&
+  unique(value.subtotals.bySource.map((entry) => JSON.stringify([entry.source, entry.unit]))) &&
+  unique(value.leftOut.map((entry) => entry.reason)) &&
+  // Whole lines up to `limit` measurements; a longer line is a page alone.
+  (value.lines.length <= 1 ||
+    value.lines
+      .flatMap((line) => line.references)
+      .reduce((sum, reference) => sum + reference.amounts.length, 0) <= value.page.limit) &&
+  value.lines.length <= value.page.lines &&
+  value.page.hasMore === (value.page.nextCursor !== null) &&
+  // At most the bytes an MCP client shows, as the tool answers it.
+  cashAnswerBytes(value) <= CASH_PAGE_BYTES;
+
 /** A full page carries no `detail`; a summary page says it is one. */
 const fullPage =
   <T>(check: Check<T>): Check<T> =>
   (value): value is T =>
     check(value) && !Object.hasOwn(value as object, "detail");
+
+// The v1 grouped balance list (`GET /api/balances`) in full and as its
+// summary (ADR 0123, amendment of 2026-11-20).
+// The full list is checked as before: the local store's carries no coverage
+// record (it does not page), the central store's does.
+const balanceList = fullPage(
+  object<Omit<BalanceListPage, "coverage">>({
+    latest: array(balance),
+    history: array(balanceHistory),
+    interpretationContext: optional(validInterpretationContext),
+  }),
+);
+const balanceListSummaryMetric = object<BalanceListSummaryMetric>({
+  ref: text,
+  source: text,
+  providerMetric: text,
+  kind: literal("asset", "liability", "statement", "aggregate", "period_total", "other"),
+  measurementKind: nullable(
+    literal(
+      "balance",
+      "aggregate_balance",
+      "period_total",
+      "statement_amount",
+      "capacity",
+      "unknown",
+    ),
+  ),
+  assetClass: nullable(literal("cash", "prepaid", "reward", "mixed", "unknown")),
+  timeBasis: nullable(
+    literal(
+      "reported_snapshot",
+      "event_report",
+      "previous_calendar_month",
+      "statement_month",
+      "unknown",
+    ),
+  ),
+});
+const balanceListLatestLine: Check<BalanceListLatestLine> = (
+  value,
+): value is BalanceListLatestLine =>
+  object<BalanceListLatestLine>({
+    ...historySummaryFields,
+    duplicates: array(identifier),
+    reasons: (reasons): reasons is BalanceListLatestLine["reasons"] =>
+      subset(BALANCE_LIST_LATEST_REASONS)(reasons),
+  })(value) &&
+  // A group folds in one other witness at most, never its own id, and a
+  // conflict keeps its witnesses apart (`validBalanceInterpretation`).
+  value.duplicates.length <= 1 &&
+  !value.duplicates.includes(value.observationId) &&
+  (value.duplicates.length === 0 || value.reasons.length === 0);
+const balanceListSummary: Check<BalanceListSummaryPage> = (
+  value,
+): value is BalanceListSummaryPage =>
+  object<BalanceListSummaryPage>({
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(balanceListSummaryMetric),
+    latest: array(balanceListLatestLine),
+    history: array(historySummaryItem),
+    coverage: object<BalanceListSummaryPage["coverage"]>({
+      limit: literal(BALANCE_LIST_SUMMARY_LINES),
+      truncated: boolean,
+      nextOffset: nullableIdentifier,
+      latestNextOffset: nullableIdentifier,
+      next: nullable(object({ offset: identifier, latestOffset: identifier })),
+    }),
+  })(value) &&
+  value.latest.length <= value.coverage.limit &&
+  value.history.length <= value.coverage.limit &&
+  value.coverage.truncated ===
+    (value.coverage.nextOffset !== null || value.coverage.latestNextOffset !== null) &&
+  // `next` is there exactly while a list has more, and carries each list's
+  // own next offset where it has one.
+  (value.coverage.next === null) === !value.coverage.truncated &&
+  (value.coverage.next === null ||
+    ((value.coverage.nextOffset === null ||
+      value.coverage.next.offset === value.coverage.nextOffset) &&
+      (value.coverage.latestNextOffset === null ||
+        value.coverage.next.latestOffset === value.coverage.latestNextOffset))) &&
+  // Accounts and metrics are named once per page, across both lists.
+  accountsNamed({
+    accounts: value.accounts,
+    metrics: value.metrics,
+    items: [...value.latest, ...value.history],
+  });
 
 const rewardBucket = object<RewardBucketRow>({
   bucketRef: text,
@@ -1217,11 +1472,10 @@ const endpoints: Record<string, Check<unknown>> = {
     transactions: TransactionRow[];
     interpretationContext?: InterpretationContext;
   }>({ transactions: array(transaction), interpretationContext: context }),
-  "/api/balances": object<{
-    latest: BalanceRow[];
-    history: BalanceHistoryRow[];
-    interpretationContext?: InterpretationContext;
-  }>({ latest: array(balance), history: array(balanceHistory), interpretationContext: context }),
+  // The central store answers its summary unless asked for `full`; the local
+  // store answers its full list only.
+  "/api/balances": (value): value is BalanceListPage | BalanceListSummaryPage =>
+    balanceList(value) || balanceListSummary(value),
   "/api/positions": object<{
     positions: PositionWithValuations[];
     interpretationContext?: InterpretationContext;
@@ -1233,6 +1487,7 @@ const endpoints: Record<string, Check<unknown>> = {
     fullPage(latestBalancePage)(value) || latestBalanceSummaryPage(value),
   "/api/v2/balances/history": (value): value is BalanceHistoryPage | BalanceHistorySummaryPage =>
     fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
+  "/api/v2/balances/cash": cashPerAccountPage,
 };
 
 /** Each detail's own check of the balance pages and the overview (ADR 0123). */
@@ -1246,6 +1501,7 @@ const pagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
     summary: balanceHistorySummaryPage,
   },
   "/api/overview": { full: fullPage(overview), summary: overviewSummary },
+  "/api/balances": { full: balanceList, summary: balanceListSummary },
 };
 
 /**

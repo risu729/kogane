@@ -244,13 +244,109 @@ test("a metadata projection or input the schema refuses raises instead of being 
       NOW,
     ),
   ).rejects.toThrow(/NOT NULL constraint failed/u);
-  // The inputs are one batch: none of them is written. The projection,
-  // written before them, stays without its inputs (a documented limit).
+  // The projection and its inputs are one batch: the refused input rolls back
+  // the projection too, so no projection is left without its inputs.
   expect(
-    await count(
-      "SELECT count(*) n FROM metadata_projection_inputs i JOIN metadata_projections p ON p.id=i.projection_id WHERE p.fetch_artifact_id=631",
-    ),
+    await count("SELECT count(*) n FROM metadata_projections WHERE fetch_artifact_id=631"),
   ).toBe(0);
+  expect(
+    await count("SELECT count(*) n FROM metadata_projection_inputs WHERE input_artifact_id=631"),
+  ).toBe(0);
+  // The same extraction with every input accepted is then written whole.
+  const id = await persistProjection(
+    env.DB,
+    artifact(631),
+    MANIFEST_METADATA_RELEASE,
+    extraction([
+      { artifactId: 631, role: "subject", rawSha256: "a".repeat(64) },
+      { artifactId: 631, role: "collector_manifest", rawSha256: "c".repeat(64) },
+    ]),
+    NOW,
+  );
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT input_artifact_id,role,raw_sha256 FROM metadata_projection_inputs WHERE projection_id=? ORDER BY role",
+      )
+        .bind(id)
+        .all()
+    ).results,
+  ).toEqual([
+    { input_artifact_id: 631, role: "collector_manifest", raw_sha256: "c".repeat(64) },
+    { input_artifact_id: 631, role: "subject", raw_sha256: "a".repeat(64) },
+  ]);
+});
+
+test("an input refused after its projection was written raises without adding to it", async () => {
+  await seedArtifact(
+    env,
+    634,
+    "smbc-bank",
+    "balance-normalized",
+    "balance.normalized.json",
+    balance,
+  );
+  const first = await persistProjection(
+    env.DB,
+    artifact(634),
+    MANIFEST_METADATA_RELEASE,
+    extraction([{ artifactId: 634, role: "subject", rawSha256: "a".repeat(64) }]),
+    NOW,
+  );
+  // A recompute that adds a second, refused input: the existing projection is
+  // the key the batch skips, and the refusal rolls back the accepted input too.
+  await expect(
+    persistProjection(
+      env.DB,
+      artifact(634),
+      MANIFEST_METADATA_RELEASE,
+      extraction([
+        { artifactId: 634, role: "subject", rawSha256: "a".repeat(64) },
+        { artifactId: 634, role: "collector_manifest", rawSha256: null as never },
+      ]),
+      NOW,
+    ),
+  ).rejects.toThrow(/NOT NULL constraint failed/u);
+  expect(
+    await count("SELECT count(*) n FROM metadata_projections WHERE fetch_artifact_id=634"),
+  ).toBe(1);
+  expect(
+    await count("SELECT count(*) n FROM metadata_projection_inputs WHERE projection_id=?", first),
+  ).toBe(1);
+});
+
+test("a projection an earlier writer left without its inputs gets them from the next accepted call", async () => {
+  await seedArtifact(
+    env,
+    635,
+    "smbc-bank",
+    "balance-normalized",
+    "balance.normalized.json",
+    balance,
+  );
+  // The row the writer before the single batch left after a refused input:
+  // the projection alone, under the key the next call computes.
+  const computed = extraction([{ artifactId: 635, role: "subject", rawSha256: "a".repeat(64) }]);
+  await env.DB.prepare(
+    `INSERT INTO metadata_projections
+      (fetch_artifact_id,extractor_release,input_digest,output_json,output_digest,status,created_at)
+      VALUES(635,?,?,'{}','synthetic','ok',?)`,
+  )
+    .bind(MANIFEST_METADATA_RELEASE, computed.inputDigest, NOW)
+    .run();
+  const id = await persistProjection(
+    env.DB,
+    artifact(635),
+    MANIFEST_METADATA_RELEASE,
+    computed,
+    NOW,
+  );
+  expect(
+    await count("SELECT count(*) n FROM metadata_projections WHERE fetch_artifact_id=635"),
+  ).toBe(1);
+  expect(
+    await count("SELECT count(*) n FROM metadata_projection_inputs WHERE projection_id=?", id),
+  ).toBe(1);
 });
 
 test("the legacy extractor keeps an artifact's first metadata row, and a refused row raises", async () => {

@@ -22,7 +22,7 @@ import type { ObservationOrganization } from "../../observation-shared/src/organ
 import type { IdentityReadMode, ObservationReader } from "../../read-model/src/index";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { observationOrganizations, organizationKey } from "./query/observation-organization.ts";
-import { financialError } from "./errors.ts";
+import { financialError, unknownKeyRefs } from "./errors.ts";
 import { type Grant, grantAllows, grantAllowsRow, grantAllowsSource } from "./grants.ts";
 import type { OpenedContext } from "./context/open.ts";
 
@@ -227,7 +227,7 @@ export function parseExplainRequest(
   const body = value as Record<string, unknown>;
   const unknown = Object.keys(body).filter((key) => key !== "ref" && key !== "depth");
   if (unknown.length > 0)
-    return { ok: false, code: "unsupported_semantics", refs: unknown.slice(0, 10) };
+    return { ok: false, code: "unsupported_semantics", refs: unknownKeyRefs(unknown) };
   const ref = body["ref"];
   if (typeof ref !== "string" || ref.length === 0 || ref.length > 512)
     return { ok: false, code: "invalid_query", refs: ["ref"] };

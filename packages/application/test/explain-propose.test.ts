@@ -212,8 +212,12 @@ function store(
     resolveTarget: async (ref) => known[ref] ?? null,
     resolveEvidence: async (ref) => known[ref] ?? null,
     appendProposal: async (proposal) => {
+      // The append-only store refuses a second row under the same id.
+      if (written.some((row) => row.decisionRevisionId === proposal.decisionRevisionId))
+        throw new Error("synthetic UNIQUE constraint failed");
       written.push(proposal);
     },
+    proposalRecorded: async (id) => written.some((row) => row.decisionRevisionId === id),
   };
 }
 
@@ -331,5 +335,45 @@ describe("proposals are immutable claims, never adoptions", () => {
     );
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe("budget_exceeded");
+  });
+});
+
+describe("a failed proposal write is the store's failure, not a duplicate", () => {
+  async function proposeWith(target: ProposalStore) {
+    const full = grant();
+    const parsed = parseProposalRequest(BODY, full.budget.maxProposalTargets);
+    if (!parsed.ok) throw new Error("unreachable");
+    return proposeReconciliation({
+      grant: full,
+      opened: await opened(full),
+      store: target,
+      request: parsed.value,
+      now: "2026-09-09T00:00:00Z",
+    });
+  }
+
+  test("a write the store could not make throws, so the caller answers internal_error", async () => {
+    // Nothing was recorded: telling the agent `idempotency_conflict` ("do not
+    // resend") would leave it believing a proposal exists that does not.
+    const failing: ProposalStore = {
+      ...store(KNOWN),
+      appendProposal: async () => {
+        throw new Error("synthetic store outage");
+      },
+      proposalRecorded: async () => false,
+    };
+    await expect(proposeWith(failing)).rejects.toThrow("synthetic store outage");
+  });
+
+  test("the same proposal in the same instant is idempotency_conflict, and is not written twice", async () => {
+    const target = store(KNOWN);
+    const first = await proposeWith(target);
+    expect(first.ok).toBe(true);
+    const second = await proposeWith(target);
+    expect(second.ok).toBe(false);
+    if (second.ok || !first.ok) return;
+    expect(second.error.code).toBe("idempotency_conflict");
+    expect(second.error.refs).toEqual([first.receipt.proposalId]);
+    expect(target.written).toHaveLength(1);
   });
 });
