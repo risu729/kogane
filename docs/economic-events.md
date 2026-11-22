@@ -88,7 +88,11 @@ it, and no rule proposes one:
   amount (one deferred payment or the rest of it), which is not confirmed
   (ADR 0004).
 
-This is a limit, not a design: upcoming obligations have no read path yet.
+The one read path is the [reported state on a date](reported-state.md#scheduled-payments),
+which lists the rows of the newest published page before the date beside
+the card statements, with their due dates, never added, matched or counted
+as a liability ([ADR 0019, scheduled payments amendment](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)).
+Upcoming obligations as adopted state remain a limit, not a design.
 
 ## Non-card families: unsupported today
 

@@ -6,6 +6,7 @@ import {
   useCardSettlementStatements,
   useRelatedCardSettlements,
   useStatementCandidates,
+  CARD_SETTLEMENT_REVIEW_READS,
   type CardSettlementReview,
   type CardSettlementStatementGroup,
 } from "../reconciliation-api.ts";
@@ -18,9 +19,15 @@ import {
   SettlementQuantity,
   settlementReason,
 } from "../reconciliation-display.tsx";
-import { postCommand, type ChangePlanView } from "../command-api.ts";
+import { postCommand, StalePlanError, type ChangePlanView } from "../command-api.ts";
+import {
+  PlanRefreshNotice,
+  PlanRefreshScope,
+  PlanRefusal,
+  usePlanRefresh,
+} from "../plan-refresh.tsx";
 import { Link, navigate } from "../router.tsx";
-import { Badge, EmptyState, Loading, Notice, Nullable, QueryBoundary } from "../ui.tsx";
+import { Badge, EmptyState, Loading, Nullable, QueryBoundary } from "../ui.tsx";
 import { UnmatchedStatements } from "../unmatched-statements.tsx";
 import { CardDebitAccounts } from "../card-debit-accounts.tsx";
 import { UpcomingCardBills } from "../upcoming-card-bills.tsx";
@@ -29,7 +36,9 @@ import { BusyButton } from "../busy-button.tsx";
 function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode {
   const features = useFeatures();
   const [reason, setReason] = useState("");
+  const refresh = usePlanRefresh();
   const plan = useMutation({
+    ...refresh,
     mutationFn: async (action: "accept" | "reject" | "withdraw") => {
       const response = await postCommand<{ plan: ChangePlanView }>(
         "plan",
@@ -44,7 +53,9 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
       if (
         response.plan.expectedRevisions[`card-settlement:${review.proposalId}`] !== review.revision
       )
-        throw new Error("候補が更新されています。一覧を更新して、内容を確認し直してください。");
+        throw new StalePlanError(
+          "候補が更新されています。表示を読み直すので、内容を確認し直してください。",
+        );
       return response.plan;
     },
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
@@ -102,11 +113,7 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
           </BusyButton>
         ) : null}
       </div>
-      {plan.isError ? (
-        <Notice tone="bad" inline role="alert">
-          {plan.error.message}
-        </Notice>
-      ) : null}
+      <PlanRefusal error={plan.error} />
       {review.status === "accepted" ? (
         <p className="footnote">
           対応が誤っている場合は、採用を解除してから、同じ請求・出金の正しい候補を採用します。解除しても、この判断と原本は履歴に残ります。
@@ -335,7 +342,7 @@ export function ReconciliationPage(): ReactNode {
   const query = useCardSettlementStatements(offset);
   if (!features.known) return <Loading label="照合機能" />;
   return (
-    <>
+    <PlanRefreshScope queryKeys={CARD_SETTLEMENT_REVIEW_READS}>
       <div className="page-head">
         <h1>カード請求と引落の照合</h1>
         <p className="lede">
@@ -345,6 +352,7 @@ export function ReconciliationPage(): ReactNode {
           対象は取得済みの請求・銀行明細です。候補がないことは、未払がないことや照合が完了したことを意味しません。請求ごとにまとめ、採用済みまたは採用できる候補を先頭に表示します。
         </p>
       </div>
+      <PlanRefreshNotice />
       {!features.cardSettlementReconciliation ? (
         <EmptyState>この接続先はカード決済の照合候補を提供していません。</EmptyState>
       ) : (
@@ -395,7 +403,7 @@ export function ReconciliationPage(): ReactNode {
       {features.cardSettlementReconciliation ? <UpcomingCardBills /> : null}
       {features.cardSettlementReconciliation ? <CardDebitAccounts /> : null}
       {features.cardSettlementReconciliation ? <UnmatchedStatements /> : null}
-    </>
+    </PlanRefreshScope>
   );
 }
 
@@ -507,7 +515,7 @@ export function ReconciliationReviewPage({ proposalId }: { proposalId: string })
   const query = useCardSettlement(proposalId);
   if (!features.known) return <Loading label="照合候補" />;
   return (
-    <>
+    <PlanRefreshScope queryKeys={CARD_SETTLEMENT_REVIEW_READS}>
       <div className="page-head">
         <div className="breadcrumb">
           <Link to="/reconciliation">照合候補の一覧に戻る</Link>
@@ -517,6 +525,7 @@ export function ReconciliationReviewPage({ proposalId }: { proposalId: string })
           この候補の原本と判断の履歴、同じ請求・出金を対象とする他の候補を確認します。候補は自動採用されません。
         </p>
       </div>
+      <PlanRefreshNotice />
       {!features.cardSettlementReconciliation ? (
         <EmptyState>この接続先はカード決済の照合候補を提供していません。</EmptyState>
       ) : (
@@ -536,6 +545,6 @@ export function ReconciliationReviewPage({ proposalId }: { proposalId: string })
           }
         </QueryBoundary>
       )}
-    </>
+    </PlanRefreshScope>
   );
 }

@@ -134,7 +134,12 @@ knowledge mode: `current` reads the parses `published_parse_runs` names now;
 `publication_events` row of the claim's artifact and parser at or before K
 adopted, so a later re-parse or a rollback is seen as it stood at K. K may
 carry at most three fractional digits, the precision SQLite compares at, and
-the domain re-checks each price's `recorded_at` against K exactly. One read
+an offset a zone uses, -12:00 to +14:00, and must not be after
+9999-12-31T23:59:59.999Z; any other K is refused as an invalid request
+(SQLite's `julianday` reads no offset of 15 hours or more and no later
+instant, so a K at `+15:00` would match no row and every key would read
+`missing`), and the domain re-checks each price's `recorded_at` against K
+exactly. One read
 (`selectPriceCandidates`, two SQL texts `PRICE_CANDIDATES_SQL` and
 `PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key every row in a coarse window
 around the freshness span, the rows of the newest instant before it and every
@@ -176,11 +181,16 @@ date built on it (§2), so no valuation cell, route or page uses them yet. No ma
 shipped, so a business-day rule refuses with `calendar_missing`. A price is
 keyed by the provider-scoped base reference, so another source's price for the
 same instrument is never used. Exclusion counts cover only the rows the read
-returns. The row that explains `stale` is the newest before the window
-whatever its rule, kind, basis or effective-time shape (a date-only row, or
-one the domain cannot read), so such a key reads `missing` rather than
-`stale`. In `known-at` mode a row whose `recorded_at` SQLite cannot read as a
-time is not read. Nothing fetches a price or rate from an external source.
+returns. Before the window the read returns only the rows of the newest
+instant (`before-window`), whatever their rule, kind, amount, basis or
+effective-time shape (a date-only row, or one the domain cannot read). When
+every one of them is excluded (by the policy, a non-positive amount, an
+unreadable effective time or, in `known-at` mode, a `recorded_at` after K) and
+no other row read is eligible, no older row is read, so a key whose older
+price would have been usable reads `missing` rather than `stale`, and the age
+of that price is not reported; no amount is taken as zero. In `known-at` mode
+a row whose `recorded_at` SQLite cannot read as a time is not read. Nothing
+fetches a price or rate from an external source.
 The candidate read reaches each key by index but reads that key's whole
 history (the window bounds what it returns, not what it reads): 13 currencies
 four times a day took about 90 ms over 1,000 boards and 360–500 ms over 4,380
@@ -522,7 +532,10 @@ The list returns catalogue columns only (id, context, purpose, schema,
 digest, creator, creation time), newest first by `created_at` then id, 50 per
 page with `nextCursor` and no total. It reads no body and derives no
 replayability; those come from re-displaying one report. Only one `offset`
-is accepted, and the route answers 404 where `report_artifacts` is absent.
+is accepted. Where `report_artifacts` is absent, every report path (the list,
+a report, its explanation and its export) answers 404 before it reads a
+parameter, as `reportArtifacts` on `/api/meta` is then false; it never queries
+the missing table (`readReportRoute` in `services/app/src/reports-api.ts`).
 
 The report job stores a report whose positions it cut at `maxRows` (500 by
 default; `coverage.truncated`) as `partial-verified-scope` even when every

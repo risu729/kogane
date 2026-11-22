@@ -223,6 +223,7 @@ export function adoptInstrument(
 
 /**
  * More current identity observations than the candidate read may walk. The
- * scheduler records the class name as the lane's failure code.
+ * scheduler records this class, matched by identity, as the lane's failure
+ * code `IdentityObservationBoundExceeded` (`LANE_ERROR_CLASSES`, worker.ts).
  */
 export class IdentityObservationBoundExceeded extends Error {}

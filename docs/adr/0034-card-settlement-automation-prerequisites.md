@@ -1,6 +1,10 @@
 # ADR 0034: Account evidence before automatic card settlement
 
-- Status: accepted; self-declared ownership amendment accepted (merged 2026-10-10 in #677)
+- Status: accepted (merged 2026-10-04 in #414); the
+  [read-cost amendment](#read-cost-amendment-repeated-due-dates) is accepted
+  (merged 2026-10-04 in #416); the
+  [self-declared ownership amendment](#self-declared-ownership-amendment-2026-10-10)
+  is accepted (merged 2026-10-10 in #677)
 - Date: 2026-10-04
 - Related: ADR 0032, ADR 0001 INV07, card-settlements.md
 

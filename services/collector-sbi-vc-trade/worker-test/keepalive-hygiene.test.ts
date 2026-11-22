@@ -133,3 +133,33 @@ test("a server error can be probed again without invalidating the session", asyn
     expect(fetched).toHaveBeenCalledTimes(2);
   });
 });
+
+test("a code-shaped message from a failed request is stored and logged as unexpected_error", async () => {
+  // Lowercase and code-shaped, yet not one of the collector's own codes: it
+  // stands in for text a provider or a library chose.
+  const shaped = "private_gateway_marker_7f3a";
+  const stub = env.SESSION_STATE.getByName("keepalive-code-shaped");
+  const { health, stored, lines } = await runInDurableObject(stub, async (instance, state) => {
+    Object.assign((instance as unknown as { env: Env }).env, {
+      SESSION_SEED: SEED,
+      SESSION_ENCRYPTION_KEY: KEY,
+    });
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error(shaped));
+    const lines: string[] = [];
+    for (const level of ["log", "warn", "error"] as const)
+      vi.spyOn(console, level).mockImplementation((...values: unknown[]) => {
+        lines.push(values.map(String).join(" "));
+      });
+    const health = await instance.runKeepAlive();
+    const stored = await state.storage.get<HealthState>("health");
+    return { health, stored, lines };
+  });
+  expect(health).toMatchObject({
+    lastErrorCode: "fetch_gateway_unexpected_error",
+    consecutiveFailures: 1,
+  });
+  expect(stored).toEqual(health);
+  expect(JSON.stringify(stored)).not.toContain(shaped);
+  expect(lines.length).toBeGreaterThan(0);
+  expect(lines.join("\n")).not.toContain(shaped);
+});
