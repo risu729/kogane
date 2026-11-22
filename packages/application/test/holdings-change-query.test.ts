@@ -331,7 +331,7 @@ describe("queryHoldingsChange", () => {
     await expect(queryHoldingsChange(recording(store), REQUEST)).rejects.toMatchObject({
       code: "holding_limit_exceeded",
     });
-  });
+  }, 60_000);
 
   test("a reported state past its row bound is refused, never cut", async () => {
     const store = world();

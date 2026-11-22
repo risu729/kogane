@@ -139,7 +139,7 @@ writer or command is added, and no candidate's eligibility changes.
 
 ## Amendment 2026-11-18: a statement total that is not exact keeps its reason
 
-- Status: proposed
+- Status: accepted (merged 2026-11-20 in [#1424](https://github.com/risu729/kogane/pull/1424))
 - Date: 2026-11-18
 - Owner approval: required before merge. The published answer of
   `kogane.card-settlements.debit-accounts` changes for a non-exact total, and
@@ -220,10 +220,146 @@ the page renders the total through `SettlementQuantity` only.
 - `apps/web/test/card-settlement.browser.test.ts`: the section shows
   `不明（stored:unparsed） · JPY` and refuses a `null` total before it renders.
 
+## Amendment 2026-11-21: a null due or debit date carries its reason
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. The published answers of
+  `kogane.card-settlements.debit-accounts` and
+  `kogane.card-settlements.unmatched` gain a field, and both tool
+  descriptions change; a change to a published tool's answer is the owner's
+  to approve ([ADR 0081](0081-ui-parity-through-mcp.md)'s `nextPage`
+  amendment). The unmatched list is
+  [ADR 0074](0074-card-statement-allocation-planner.md)'s view; it is
+  recorded here because both reads take the due date from the same stored
+  field through one domain function.
+
+### Context
+
+Three dates on these answers were null with no reason (INV05):
+`latestStatement.paymentDate` on each card, `statement.paymentDate` on a
+statement without a candidate, and the debit date of a settlement candidate
+(`settled[].latest.debitDate`, `proposed[].latest.debitDate` and an
+`accepted-settlement` answer's `debitDate`). The page could only say what was
+missing (年月日として読める記録なし), and an agent got a bare `null`.
+
+What the stored data can say:
+
+- The due date is `card_statement_facts.payment_date`, the stored
+  `_kogane.paymentDate`. It is null when nothing is recorded there (no key,
+  or JSON null), or it is a value that is not a civil `YYYY-MM-DD` date. The
+  store records no reason for either; the two parsers the view reads
+  (`vpass-statement-page`, `myjcb-credit-statement-total`) always write a
+  civil date or refuse the page.
+- The debit date is the candidate's stored `bankDebit.occurred`. The only
+  candidate writer (`cardSettlementCandidate`, through the settlement sweep)
+  makes a candidate only when both dates are civil local dates, so no stored
+  candidate has an `unknown` time or a `reasonCode` to carry. The candidates
+  read takes the date only from a `local-date` (`CARD_DEBIT_ACCOUNT_CANDIDATES_SQL`),
+  so a row the writer did not make reads null whatever it holds.
+
+### Options considered
+
+1. **Keep `null`; the page names what is missing.** An agent still gets no
+   reason, and the page cannot tell absent from unreadable. Rejected.
+2. **Pass the stored `reasonCode` through.** No stored value has one: the
+   writer never stores an `unknown` time. Reading one would change the
+   candidates SQL, which needs the query-rewrite proof (frozen legacy SQL,
+   differential tests, plan checks), for a value nothing writes. Rejected.
+3. **Replace `null` with an `unknown` time** (`{kind: "unknown",
+   reasonCode}`, the shape the card purchase read gives a statement link's
+   `paymentDate`). It changes an existing field: a client that tests
+   `paymentDate === null` would read an unknown time as present, and the
+   debit dates are plain text with no unknown shape, so the two would differ.
+   Rejected for this change.
+4. **Fail the read on a debit date that is not civil,** as on other
+   malformed rows. One such row would hide every card's answer, though the
+   rest of that row (its card, bank account and candidate) is still readable;
+   and a null due date already answers its statement, never fails the read.
+   Rejected.
+5. **An optional reason beside each nullable date (chosen),** from closed
+   lists in the domain, present exactly when the date is null, so every
+   dated answer is unchanged byte for byte.
+
+### Decision
+
+`packages/domain/src/card-settlement.ts` holds the closed lists and the one
+reading of each date:
+
+- `STATEMENT_DUE_DATE_REASONS`, from `statementDueDate`:
+  `payment_date_absent` when nothing is recorded (the code the card purchase
+  read already gives the same field), `payment_date_invalid` when a value
+  that is not a civil date is;
+- `SETTLEMENT_DEBIT_DATE_REASONS`, from `settlementDebitDate`:
+  `debit_date_invalid` when the stored debit is not a civil local date (the
+  code the unmatched planner input already gives such a debit).
+
+`reviewCardDebitAccounts` answers `latestStatement.paymentDateReason` and
+`latest.debitDateReason` (in `settled` and `proposed`), and an
+`accepted-settlement` answer carries its settlement's `debitDateReason`
+(`answerCardDebitAccount`). `reviewUnmatchedCardStatements` answers
+`statement.paymentDateReason`. Each reason is a key only beside a null date.
+The wire contracts (`validCardDebitAccountsReview`,
+`validUnmatchedCardStatementsReview`) require the reason exactly when the
+date is null, from its closed list, and require an answer's reason to equal
+its settlement's. The page shows a null date as `不明（<code>）` through
+`NullableDate`. Both tool descriptions name the field and its codes. No SQL
+changes; `schemaVersion` stays `kogane-card-debit-accounts-v1` and
+`kogane-card-statements-unmatched-v1`.
+
+The reason says only what is stored: neither code says why the provider page
+or the parser left the date so (ADR 0004).
+
+### Consequences
+
+- The route bodies and both tool results gain `paymentDateReason` and
+  `debitDateReason` beside a null date; every answer whose dates are present
+  is unchanged. The tools' names and input schemas are unchanged, and the
+  catalogue is not touched. Client and Worker deploy together, so the
+  browser never meets a null date without its reason from an older Worker.
+- The `upcoming` view keeps its own `payment_date_not_published` for a card
+  whose due date is null, whichever of the two reasons it has, and the card
+  purchase read keeps `payment_date_absent` for a stored due date that is not
+  a civil date. Both are left as they are.
+- The 基準日の保有状況 payable list, a separate read, shows a payable with no
+  due date recorded as 引落予定日未記録 instead of a bare 不明; its answer
+  is unchanged (a value that is not a civil date is shown as stored, with
+  the status `payment_date_unknown`).
+
+### Verification
+
+- `packages/domain/test/card-settlement.test.ts`: each stored shape gives
+  its date or its reason; the writer refuses a debit that is not a local
+  date. `packages/domain/test/card-debit-account-answer.test.ts`: an
+  accepted-settlement answer carries its settlement's reason, and a dated
+  one has no reason key.
+- `packages/application/test/card-debit-accounts-contract.test.ts`: the
+  random stores now include absent and non-text due dates, and every reason
+  is reached and passes the contract; a candidate row whose read gave no
+  date answers `debit_date_invalid` in `settled` and in the answer.
+  `packages/application/test/card-statements-unmatched-total.test.ts`: a null
+  due date gives its reason and stays `statement_not_comparable`.
+- `packages/observation-shared/test/card-debit-accounts-contract.test.ts`
+  and `card-statements-unmatched-contract.test.ts`: the contracts refuse a
+  bare null, a reason outside the list, a reason beside a date, and an
+  answer that drops its settlement's reason.
+- `services/app/test/card-debit-accounts-api.test.ts` and
+  `card-statements-unmatched-api.test.ts`: on the real migrations, a
+  statement with no `_kogane.paymentDate` and one with `2099-02-30` give
+  `payment_date_absent` and `payment_date_invalid`, alike on the route and
+  through the tool; `ui-mcp-parity.test.ts` and the unmatched test check the
+  descriptions name the fields and codes, and `mcp-client.test.ts` that every
+  description stays within 2,048 characters.
+- `apps/web/test/card-settlement.browser.test.ts`: the sections show
+  `不明（payment_date_absent）`, `不明（debit_date_invalid）` and
+  `不明（payment_date_invalid）`, and refuse a null date without its reason
+  before rendering. `apps/web/test/reported-state.browser.test.ts`: a payable
+  with no due date reads 引落予定日未記録.
+
 ## Amendment 2026-11-19: the `upcoming` view answers each card's next bill and whether its account covers it
 
-- Status: proposed. It changes the published input schema and answers of
-  `kogane.card-settlements.debit-accounts`, so it needs the owner's approval
+- Status: accepted (merged 2026-11-20 in [#1456](https://github.com/risu729/kogane/pull/1456)). It changes the published input schema and answers of
+  `kogane.card-settlements.debit-accounts`, so it needed the owner's approval
   before merge (decision D3 of the 2026-11-19 MCP proposal v2). No catalogue
   operation is added.
 - Date: 2026-11-19
@@ -405,7 +541,7 @@ command or catalogue operation is added.
   accounts: the price of reusing its snapshot rules rather than restating
   them.
 - The published schema of `kogane.card-settlements.debit-accounts` gains an
-  optional `view` and its description a paragraph. This is an owner approval
+  optional `view` and its description a paragraph. This was an owner approval
   item before merge (D3); no catalogue entry changes.
 
 ### Verification
@@ -443,9 +579,79 @@ command or catalogue operation is added.
   shows the bills, lines and reasons, offers no action, passes the
   accessibility audit, and refuses a `covers` its figures do not carry.
 
-## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
+## Amendment 2026-11-21: bills in two units are `unit_mismatch`, not `bill_not_exact`
+
+This amendment changes the 2026-11-19 `upcoming` amendment directly above, so
+it sits next to it rather than at the end of the file.
 
 - Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. It adds a code to the closed
+  `covers` reasons that `kogane.card-settlements.debit-accounts` with
+  `view: "upcoming"` publishes, and a change to a published tool's answer is
+  the owner's to approve (the 2026-11-18 amendment above).
+
+### Context
+
+Decision 3 of the `upcoming` amendment sums a line's bills with
+`sumQuantities`, and any failure of the sum was reported as
+`bill_not_exact`. `sumQuantities` also refuses bills in more than one unit
+(`unit_mismatch`, INV03), for example a card billed in yen and another in
+dollars debited from one account. Such a line said a bill was not exact when
+every bill was exact. `covers` was `unknown`, so no wrong figure was shown,
+but the reason did not say what happened.
+
+### Options considered
+
+1. **Keep `bill_not_exact` and widen its words.** Rejected: one code for two
+   causes, and a reader cannot tell which holds.
+2. **Use the code `sumQuantities` refuses mixed units with, `unit_mismatch`.**
+   Chosen. It is the existing closed code for this cause in `values.ts` (and
+   in `scope.ts`, `rewards.ts` and `lots.ts`), so the line says the same as
+   the sum.
+3. **A new code of this view, such as `bills_unit_mismatch`.** Not chosen: a
+   second spelling of an existing cause.
+
+### Decision
+
+`COVERS_UNKNOWN_REASONS` gains `unit_mismatch`, between
+`debit_account_unknown` and `bill_not_exact`: the bills a line counts are in
+more than one unit (the line's first bill's unit and another). Each reason
+that holds is named, so a line with bills in two units and a bill that is not
+exact lists both. `cardBills` stays `missing` in the line's first bill's
+unit, with the reason `unit_mismatch` when the units differ, else
+`bill_not_exact`. Which lines are `unknown` does not change, only their
+reasons; the rule and schema versions stay (the view is computed on each
+read and stores nothing, and the 2026-11-18 amendment likewise kept its
+schema version). The page labels the code, and the tool description lists
+it.
+
+### Consequences
+
+- A reader of a line in two units sees `unit_mismatch` and not a claim that a
+  bill is not exact.
+- The closed list grows by one code. The wire check
+  (`packages/observation-shared/src/card-upcoming-bills-contract.ts`) reads
+  the domain list and the page's words for every code are a typed record, so
+  the page built with this change accepts and labels it. A page loaded
+  before the deploy refuses an answer with the code (its wire check knows
+  only the old list) until it is reloaded, and an MCP client that pinned the
+  old list sees a code it did not know.
+- Bills in two units are still never converted or added (INV03).
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: a yen and a dollar bill
+  on one account make the later line `unit_mismatch` (fails before the
+  change: `bill_not_exact`), the earlier yen-only line still compares, and a
+  line with two units and a bill that is not exact lists both reasons.
+- `services/app/test/ui-mcp-parity.test.ts`: the published description names
+  every code of `COVERS_UNKNOWN_REASONS`; `services/app/test/mcp-client.test.ts`:
+  it stays within 2,048 characters.
+
+## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
+
+- Status: accepted (merged 2026-11-20 in [#1438](https://github.com/risu729/kogane/pull/1438))
 - Date: 2026-11-19
 - Owner approval: required before merge. No field or type changes, but for
   the cards it affects the published answer of
@@ -531,3 +737,63 @@ before; only the `proposed` filter changes.
   scaled store without statistics, the same equality (the store draws no
   such proposal, so the shipped rows too), and a plan whose only whole read of
   a base table is the one candidate scan.
+
+## Amendment 2026-11-21: a balance captured on a bill's own due date is not compared with it
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge. No field, code or type changes, but
+  on a bill's due date the published answer of
+  `kogane.card-settlements.debit-accounts` with `view: "upcoming"` can read
+  `unknown` with `balance_before_previous_debit` where it read `yes` or `no`
+  (the 2026-11-18 amendment above: a change to a published tool's answer is
+  the owner's to approve).
+
+### Context
+
+The 2026-11-19 amendment counts a statement due on the date itself as a bill
+and adds it to its account's lines. Its `balance_before_previous_debit`
+looked only at debits already due before the date (and accepted settlement
+debits), so on a bill's own due date a balance captured that day was
+compared with the bill. The bank may have taken the bill before the capture:
+the balance then already shows the debit, the line subtracts it a second
+time, and `covers` could read `no` for a bill the account had paid (INV06).
+
+### Options considered
+
+1. **Leave it.** Rejected: a confident `no` (or `yes`) built on a debit
+   counted twice.
+2. **Treat a bill due on the date as a previous debit.** Rejected: every
+   capture on or before the date is then refused, including yesterday's,
+   which cannot show today's debit and is exactly the balance to compare.
+3. **A capture on the due date of a bill the line counts is `unknown`.**
+   Chosen. Captures are never later than the date, so only a bill due on the
+   date itself can share its capture's day.
+4. **A new reason code for it.** Not chosen here: it would change the closed
+   list the wire contract, the page and the tool description carry. The
+   existing code's words already cover a capture "on or before" a debit's
+   date; an own code is an owner item.
+
+### Decision
+
+`balance_before_previous_debit` also holds when the balance's Asia/Tokyo
+capture date is the due date of a bill the line counts. Nothing else
+changes: the rule version, the reasons' order and the wire contract stay.
+The page's words for the code now say the balance was captured on or before
+a card debit's day, so whether it shows the debit is unknown.
+
+### Consequences
+
+- On a bill's due date, its account's lines read `unknown` when the balance
+  was captured that day; a capture of the day before is compared as before.
+- A bank that debits later than the due date (a holiday) is still not
+  modelled (docs/card-settlements.md, Limits).
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: a capture on the bill's
+  own day makes both of the account's lines `unknown`; one of the evening
+  before is compared (fails before the change).
+- `packages/application/test/card-upcoming-bills.test.ts`: on card-002's due
+  date, bank B captured that day reads `unknown`, captured the day before
+  reads `no` (fails before the change).

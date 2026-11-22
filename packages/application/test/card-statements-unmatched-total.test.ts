@@ -3,7 +3,8 @@
 // Statements without a candidate; ADR 0074, amendment 2026-11-19): it keeps its
 // decimal-v1 status and reason, never null or zero (INV05), and still takes
 // the code the sweep counts it under, with no window read. A row CORE 0024's
-// CHECK never stores fails the read. The statement page is answered from
+// CHECK never stores fails the read. A due date that is null carries its
+// closed reason (ADR 0114, amendment 2026-11-21). The statement page is answered from
 // rows shaped as `UNMATCHED_STATEMENTS_SQL` returns them; any other read
 // fails the test. Every value is invented.
 import { expect, test } from "bun:test";
@@ -115,4 +116,23 @@ test("an exact total without its decimal-v1 columns, or an unknown status, fails
     statementRow({ value_status: "estimated", coefficient: null, scale: null }),
   ])
     await expect(pageOf(row)).rejects.toThrow("card_statements_unmatched_row_invalid");
+});
+
+test("a null due date says whether nothing is recorded or the value is not a civil date (INV05)", async () => {
+  for (const [stored, reason] of [
+    [null, "payment_date_absent"],
+    ["2098-02-30", "payment_date_invalid"],
+    ["", "payment_date_invalid"],
+  ] as const) {
+    const outcome = await pageOf(statementRow({ payment_date: stored }));
+    if (!outcome.ok) throw new Error(outcome.error.code);
+    const item = outcome.review.items[0]!;
+    expect(item.statement.paymentDate).toBeNull();
+    expect(item.statement.paymentDateReason).toBe(reason);
+    // No due date, so no window is read: the sweep's own code.
+    expect(item.code).toBe("statement_not_comparable");
+    expect(validUnmatchedCardStatementsReview(JSON.parse(JSON.stringify(outcome.review)))).toBe(
+      true,
+    );
+  }
 });

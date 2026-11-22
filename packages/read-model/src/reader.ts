@@ -32,6 +32,15 @@ export interface TransactionQuery {
   offset: number;
 }
 
+/** The scope of `undatedTransactions`: a transaction query without a window or page. */
+export type UndatedTransactionQuery = Pick<TransactionQuery, "source" | "account" | "q">;
+/** Current transactions of one source account whose `as_of` starts with no calendar date. */
+export interface UndatedTransactionCount {
+  source_id: string;
+  source_account: string;
+  row_count: number;
+}
+
 export interface LatestBalanceQuery {
   source?: string;
   account?: string;
@@ -141,6 +150,13 @@ export interface ObservationReader {
    */
   globalPassEmptyMonths(): Promise<GlobalPassEmptyMonths>;
   listTransactions(query: TransactionQuery): Promise<TransactionRow[]>;
+  /**
+   * Per source account, how many current transactions in scope a `from`/`to`
+   * window of `listTransactions` leaves out because their `as_of` starts with
+   * no calendar date (null, a year-month, an impossible day or other text).
+   * Only accounts with such rows are listed.
+   */
+  undatedTransactions(query: UndatedTransactionQuery): Promise<UndatedTransactionCount[]>;
   listLatestBalances(query: LatestBalanceQuery): Promise<BalanceRow[]>;
   listBalanceHistory(query: BalanceHistoryQuery): Promise<BalanceHistoryRow[]>;
   /** Latest complete full-retention provider payment/sale facts; no economic adoption. */

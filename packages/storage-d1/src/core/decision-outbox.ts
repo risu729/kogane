@@ -11,7 +11,8 @@
 // with backoff, and a `processed_at` that makes a second delivery a no-op. The
 // processors themselves are idempotent, so even a lost lease cannot double a
 // projection. The receipt turns `published` only when every row of its
-// operation is processed — accepted is never published (addendum 10 §5).
+// operation is processed — accepted is never published (addendum 10 §5) —
+// and in the same batch as the completion that closes the last of them.
 //
 // What changed with migration 0038: a processor no longer returns "some
 // outcome" that the dispatcher treats as done. It returns one of four
@@ -28,7 +29,7 @@
 //
 // `building`, an unregistered processor, a flag that is off and "the job was
 // enqueued" are therefore never `completed` (05 §6, contracts/stages.json).
-import type { D1Like } from "../d1.ts";
+import type { D1Like, D1StatementLike } from "../d1.ts";
 import { resolveIdentity } from "../../../identity/src/index.ts";
 import { identitySweep } from "./identity-store.ts";
 
@@ -159,6 +160,30 @@ function backoffMs(attempts: number): number {
 }
 
 /**
+ * `accepted` becomes `published` only for an operation whose every outbox
+ * row is processed. The statement is the second of the batch that completes
+ * one of the operation's rows, so whichever batch closes the operation's last
+ * row publishes its receipt in the same transaction. Unchanged in text from
+ * the end-of-pass loop it replaces; a receipt already published, or an
+ * operation with a row still open, is left as it is.
+ */
+function publishStatement(
+  db: D1Like,
+  nowIso: string,
+  principal: string,
+  operationId: string,
+): D1StatementLike {
+  return db
+    .prepare(
+      `UPDATE operation_receipts SET status='published',published_at=?1
+       WHERE principal=?2 AND operation_id=?3 AND status='accepted'
+       AND EXISTS(SELECT 1 FROM decision_outbox o WHERE o.principal=?2 AND o.operation_id=?3)
+       AND NOT EXISTS(SELECT 1 FROM decision_outbox o WHERE o.principal=?2 AND o.operation_id=?3 AND o.processed_at IS NULL)`,
+    )
+    .bind(nowIso, principal, operationId);
+}
+
+/**
  * One bounded pass. Called once per scheduled run; a failure of one row never
  * stops the others, and nothing here retries in a loop inside one invocation.
  */
@@ -214,7 +239,6 @@ export async function dispatchDecisionOutbox(
     published: 0,
     outcomes: {},
   };
-  const operations = new Map<string, { principal: string; operationId: string }>();
   const count = (key: string) => {
     result.outcomes[key] = (result.outcomes[key] ?? 0) + 1;
   };
@@ -232,32 +256,34 @@ export async function dispatchDecisionOutbox(
     }
     if (outcome.status === "completed") {
       // The `processed_at IS NULL` condition is what makes a duplicate
-      // delivery a no-op instead of a rewrite.
-      const done = await db
-        .prepare(
-          `UPDATE decision_outbox SET processed_at=?1,outcome=?2,last_error_code=NULL,
+      // delivery a no-op instead of a rewrite. The receipt's publication is
+      // the second statement of the same batch, so an invocation that ends
+      // after this row closes cannot leave the operation's receipt
+      // `accepted` with nothing left to claim: no later pass would reach it.
+      const [done, publish] = await db.batch([
+        db
+          .prepare(
+            `UPDATE decision_outbox SET processed_at=?1,outcome=?2,last_error_code=NULL,
             progress_code=NULL,evidence_ref=?5,applied_source_revision=?6,
             lease_token=NULL,lease_until_ms=0 WHERE id=?3 AND lease_token=?4 AND processed_at IS NULL`,
-        )
-        .bind(
-          nowIso,
-          outcome.evidence.code,
-          row.id,
-          token,
-          outcome.evidence.ref.slice(0, 256),
-          row.required_source_revision,
-        )
-        .run();
-      if (done.meta.changes === 1) {
+          )
+          .bind(
+            nowIso,
+            outcome.evidence.code,
+            row.id,
+            token,
+            outcome.evidence.ref.slice(0, 256),
+            row.required_source_revision,
+          ),
+        publishStatement(db, nowIso, row.principal, row.operation_id),
+      ]);
+      if (done?.meta.changes === 1) {
         result.processed++;
         count(outcome.evidence.code);
-        operations.set(`${row.principal} ${row.operation_id}`, {
-          principal: row.principal,
-          operationId: row.operation_id,
-        });
       } else {
         count("already_processed");
       }
+      result.published += publish?.meta.changes ?? 0;
       continue;
     }
     if (outcome.status === "pending") {
@@ -297,20 +323,6 @@ export async function dispatchDecisionOutbox(
       )
       .bind(outcome.code.slice(0, 64), nowMs + backoffMs(row.attempts), row.id, token)
       .run();
-  }
-  // `accepted` becomes `published` only for operations whose every outbox row
-  // is processed. Bounded to the operations this pass touched.
-  for (const { principal, operationId } of operations.values()) {
-    const publish = await db
-      .prepare(
-        `UPDATE operation_receipts SET status='published',published_at=?1
-         WHERE principal=?2 AND operation_id=?3 AND status='accepted'
-         AND EXISTS(SELECT 1 FROM decision_outbox o WHERE o.principal=?2 AND o.operation_id=?3)
-         AND NOT EXISTS(SELECT 1 FROM decision_outbox o WHERE o.principal=?2 AND o.operation_id=?3 AND o.processed_at IS NULL)`,
-      )
-      .bind(nowIso, principal, operationId)
-      .run();
-    result.published += publish.meta.changes;
   }
   return result;
 }

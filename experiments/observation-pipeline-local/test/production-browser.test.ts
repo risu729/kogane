@@ -254,7 +254,7 @@ describe.if(runnable)("combined production client", () => {
       page.waitForResponse(
         (response) => {
           const url = new URL(response.url());
-          return url.pathname === "/api/balances" && url.search === "?view=summaries";
+          return url.pathname === "/api/balances" && url.search === "?view=summaries&detail=full";
         },
         { timeout: 10_000 },
       ),
@@ -324,7 +324,7 @@ describe.if(runnable)("combined production client", () => {
         if (path === "/summaries") {
           expect(
             requests.slice(before).filter((request) => request.startsWith("/api/balances")),
-          ).toEqual(["/api/balances?view=summaries"]);
+          ).toEqual(["/api/balances?view=summaries&detail=full"]);
         }
       } finally {
         await page
@@ -616,7 +616,7 @@ describe.if(runnable)("combined production client", () => {
     try {
       const central = await observe("central-store");
       const renamed = await observe("archive-store");
-      expect(central.requests).toEqual(["/api/balances?view=summaries"]);
+      expect(central.requests).toEqual(["/api/balances?view=summaries&detail=full"]);
       expect({ ...renamed, status: "" }).toEqual({ ...central, status: "" });
       expect(central.serverControls).toBe(1);
       expect(central.clientControls).toBe(0);
@@ -645,16 +645,18 @@ describe.if(runnable)("combined production client", () => {
     // Page idleness can precede metadata delivery and the query it enables.
     // Arm the exact response waiter before releasing metadata, then keep the
     // original count, parameters and ordering assertions over server requests.
-    const balancesResponse = page.waitForResponse(origin + "/api/balances?view=balances");
+    const balancesResponse = page.waitForResponse(
+      origin + "/api/balances?view=balances&detail=full",
+    );
     release();
     await balancesResponse;
     await page.waitForLoadState("networkidle");
     const observed = requests.slice(before);
     expect(observed.filter((path) => path.startsWith("/api/balances"))).toEqual([
-      "/api/balances?view=balances",
+      "/api/balances?view=balances&detail=full",
     ]);
     expect(observed.indexOf("/api/meta")).toBeLessThan(
-      observed.indexOf("/api/balances?view=balances"),
+      observed.indexOf("/api/balances?view=balances&detail=full"),
     );
     await page.close();
   });

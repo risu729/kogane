@@ -32,7 +32,7 @@ import { daysFromCivil, parseLocalDate, validInstantText } from "../../../domain
 import { EconomicSelectorError } from "../../../read-model/src/economic-selector.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, grantAllows, narrowedScopeRefs } from "../grants.ts";
 import { DatedStateLimitError } from "./dated-state.ts";
 import {
   queryReconstructedState,
@@ -362,10 +362,7 @@ export async function readReconstructedState(input: {
       refusal: "capability_missing",
       refs: [`capability:${RECONSTRUCTED_STATE_CAPABILITY}`],
     };
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
+  const narrowed = narrowedScopeRefs(grant);
   if (narrowed.length > 0) return { ok: false, refusal: "scope_restricted", refs: narrowed };
   const parsed = parseReconstructedStateRequest(body, now);
   if (!parsed.ok) return parsed;

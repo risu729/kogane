@@ -362,6 +362,20 @@ function isCardSource(value: string): value is CardPurchaseSourceId {
 }
 
 /**
+ * The event state a source's status maps to, or null. Only the table's own
+ * keys count: a status such as `constructor` or `__proto__` names a property
+ * every object inherits, not a status the source was observed to use.
+ */
+function providerState(
+  sourceId: string,
+  providerStatus: string | null,
+): "captured" | "authorized" | null {
+  if (!isCardSource(sourceId) || providerStatus === null) return null;
+  const states = PROVIDER_STATES[sourceId];
+  return Object.hasOwn(states, providerStatus) ? states[providerStatus]! : null;
+}
+
+/**
  * The per-source single-payment rule: the Vpass web family's code
  * (`VPASS_WEB_SINGLE_PAYMENT_CODE`), the Vpass customized family's
  * `bunkatsuYaku` (`VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE`), and MyJCB's
@@ -396,10 +410,8 @@ export function classifyCardUsage(fact: CardUsageFact): CardUsageClassification 
     reasonCode,
   });
   if (!fact.newestRepresentation) return fail("superseded_representation");
-  const state = isCardSource(fact.sourceId)
-    ? PROVIDER_STATES[fact.sourceId][fact.providerStatus ?? ""]
-    : undefined;
-  if (state === undefined) return fail("status_unsupported");
+  const state = providerState(fact.sourceId, fact.providerStatus);
+  if (state === null) return fail("status_unsupported");
   if (fact.accountId === null || fact.accountId.length === 0) return fail("account_not_resolved");
   if (
     fact.externalId === null ||
