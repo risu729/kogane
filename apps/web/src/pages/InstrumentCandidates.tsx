@@ -31,6 +31,7 @@ import {
   IdentifierSide,
 } from "../instrument-candidate-display.tsx";
 import { displayLabel } from "../labels.ts";
+import { BusyButton } from "../busy-button.tsx";
 import { Link, navigate } from "../router.tsx";
 import { Badge, EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -76,8 +77,9 @@ function DecisionActions({
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
   if (candidate.commands === null) return null;
-  const canPlan =
-    features.known && features.commands && reason.trim().length > 0 && !plan.isPending;
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
+  const canPlan = features.known && features.commands && reason.trim().length > 0;
   const id = `reason-${candidate.candidateId.replace(/[^A-Za-z0-9_-]/gu, "-")}`;
   return (
     <div className="settlement-decision">
@@ -95,23 +97,21 @@ function DecisionActions({
       </div>
       <div className="button-row">
         {candidate.hold !== null || candidate.commands.adopt === null ? null : (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("adopt")}
           >
             同じ銘柄として採用する内容を確認
-          </button>
+          </BusyButton>
         )}
-        <button
-          className="button"
-          type="button"
+        <BusyButton
+          busy={plan.isPending}
           disabled={!canPlan}
           onClick={() => plan.mutate("keepApart")}
         >
           別の銘柄として扱う内容を確認
-        </button>
+        </BusyButton>
       </div>
       <PlanRefusal error={plan.error} />
       {features.known && !features.commands ? (

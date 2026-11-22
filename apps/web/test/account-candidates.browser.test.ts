@@ -267,9 +267,12 @@ describe.if(runnable)("account candidate review", () => {
     );
     const card = tab.locator(".identity-card").first();
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await card
-      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
-      .click();
+    const button = card.getByRole("button", {
+      name: "この連携に含まれる口座として採用する内容を確認",
+      exact: true,
+    });
+    await button.focus();
+    await tab.keyboard.press("Enter");
     // The pair left 確認待ち: the list is read again without it, and the
     // refusal its card can no longer show is shown, and focused, at the top.
     const notice = tab.getByRole("alert").filter({ hasText: "読み直した表示には" });

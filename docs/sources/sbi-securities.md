@@ -1161,3 +1161,12 @@ null is still refused. The parsers move to 0.1.3, and migration 0103 moves the
 two snapshot-policy pins from 0.1.2 to 0.1.3 so their parses can become current. The
 parser already publishes US payments in USD from the `Lc` fields, so nothing
 it emits changes. Tracked under #1236.
+
+## 2026-11-22: domestic trade dates are read only as calendar dates
+
+No provider data was read for this entry. The collector turns the execution
+page's `YY/MM/DD` cell into `20YY-MM-DD` without checking the calendar.
+Parser `sbi-domestic-trade-records` 0.2.2 reads only a calendar `YYYY-MM-DD`
+date as a record's `as_of`; any other stated value is a warning and no `as_of`,
+the value staying in the record's `extra`
+([release note](../observations.md#sbi-securities-a-domestic-trade-date-that-is-not-a-date-is-no-as_of-trade-records-022)).
