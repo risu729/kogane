@@ -106,8 +106,9 @@ changes with their own test runs.
 
 Each row is a dependency that packages here declare and resolve to different versions. The root
 `bun.lock` keeps one bare entry per name and scopes any other version under the workspace that
-pins it, and the isolated linker installs that version in the workspace's own `node_modules`; a
-`container/` package resolves from its own `package-lock.json`. Aligning them is a separate change.
+asks for it, and the isolated linker links each workspace's version from the shared
+`node_modules/.bun` store into that workspace's own `node_modules`; a `container/` package
+resolves from its own `package-lock.json`. Aligning them is a separate change.
 
 | dependency | resolved versions | by package (declared range → resolved) |
 | --- | --- | --- |
@@ -619,9 +620,10 @@ Lockfile: `bun.lock`.
 
 ## Transitive packages that resolve to more than one version
 
-Nothing here declares these directly; they differ because a parent package asks for a range or
-pin the bare entry does not satisfy, and the root `bun.lock` scopes that version under the
-parent. A `container/` package resolves its own from its `package-lock.json`.
+Nothing here declares these directly; they differ because the root `bun.lock` resolved a parent's
+range or pin to a version other than the bare entry (one the bare entry does not satisfy, or a
+newer one that also matches) and scopes that version under the parent. A `container/` package
+resolves its own from its `package-lock.json`.
 
 | package | versions | resolved by |
 | --- | --- | --- |
