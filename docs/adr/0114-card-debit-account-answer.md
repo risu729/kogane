@@ -797,3 +797,70 @@ a card debit's day, so whether it shows the debit is unknown.
 - `packages/application/test/card-upcoming-bills.test.ts`: on card-002's due
   date, bank B captured that day reads `unknown`, captured the day before
   reads `no` (fails before the change).
+
+## Amendment 2026-11-23: a card's earlier statement is a previous debit
+
+- Status: proposed
+- Date: 2026-11-23
+- Owner approval: required before merge. No field, code or type changes, but
+  the published answer of `kogane.card-settlements.debit-accounts` with
+  `view: "upcoming"` can read `unknown` with `balance_before_previous_debit`
+  where it read `yes` or `no` (as for the 2026-11-21 amendment above).
+
+### Context
+
+Decision 5 of the 2026-11-19 amendment takes `balance_before_previous_debit`
+from the latest card debit from the account due on or before the date: an
+accepted settlement's debit, or the due date of a statement already due. The
+service read only each card's newest statement, so a card whose newest
+statement is a bill had its earlier statement left out unless an accepted
+settlement paid it. A balance captured before that earlier statement's due
+date was compared with the bill as if it showed that debit: with a statement
+of 60,000 due before the date and unsettled, a bill of 20,000 and a balance
+of 70,000 captured before the 60,000 was due, the line read `yes`.
+
+### Options considered
+
+1. **Leave it as a stated limit.** Rejected: a confident `yes` built on a
+   balance that may still hold a debit the bank has taken (INV05).
+2. **Widen the debit-account cards read to return every statement.**
+   Rejected: a change to a shipped query that the debit-account read also
+   serves, for one date per card.
+3. **One keyed read per answered card (chosen):** the latest due date on or
+   before the date among the card's current statements of other months than
+   its newest.
+4. **A new reason code for it.** Not needed: the existing code's words
+   already name the latest card debit from the account.
+
+### Decision
+
+For each card whose debit account is answered, the service also reads
+`EARLIER_STATEMENT_DUE_SQL`: the latest civil due date on or before the date
+among the card's `card_statement_facts` rows of other months than its newest
+statement's, settled or not, and counts it as a card debit from the account
+the card's answer names. The newest statement's month is left out because
+it is a bill when due on or after the date (the 2026-11-21 amendment covers a
+capture on its due date, and counting it would refuse yesterday's capture);
+when already due it is counted as before. The rule version, the reasons'
+order and the wire contract stay.
+
+### Consequences
+
+- A balance captured on or before a card's earlier statement's due date
+  reads `unknown` (`balance_before_previous_debit`) where it was compared.
+- One more read per answered card, keyed: the card's source and source
+  account are pushed into the view's ranking (docs/card-settlements.md, Cost).
+- A statement with no readable due date is still not taken as debited; only
+  a card's newest one makes lines `unknown` (`cards_with_unknown_due_date`).
+
+### Verification
+
+- `packages/application/test/card-upcoming-bills.test.ts`: the unsettled
+  August statement before a September bill makes the line `unknown`, and a
+  capture after its due date is compared (fails before the change); on random
+  stores no line is compared while a statement of a card answered to its
+  bank is due between the capture and the date; the read is issued once per
+  answered card and, on the complete CORE schema without table statistics,
+  reaches only that card's statement totals by key.
+- `services/processor/test/card-debit-accounts.test.ts`: on D1's SQLite the
+  source account is pushed into the ranking.

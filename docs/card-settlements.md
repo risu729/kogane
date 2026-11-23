@@ -526,14 +526,26 @@ statements before the payable window nor the scheduled payments is read.
   code),
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
-  due by the date, among the debits the read knows of (limits below), so it
-  may not show it; or on the due date of a bill the
+  due by the date, so it may not show it; or on the due date of a bill the
   line counts, so it may already show it, and comparing it with that bill
   would count the debit twice), `cards_with_unknown_account` (a bill with no known
   account is due by the line's date) or `cards_with_unknown_due_date` (a card
   of this account, or of an unknown one, has a newest statement with no
   readable due date that no accepted settlement pays, so its total may be
   debited by then: it is never left out as if it were zero).
+- The latest card debit from an account is the latest of: the debit date of
+  each card's newest accepted settlement per bank account; the due date of
+  each card's newest statement when it is due before the date; and, for each
+  card whose debit account is answered, the latest due date on or before the
+  date among its current statements of other months than its newest
+  (`EARLIER_STATEMENT_DUE_SQL`), settled or not. So a card whose newest
+  statement is a bill still has its earlier statement's debit counted: a
+  balance captured on or before that statement's due date reads `unknown`,
+  never compared with the bill as if it showed that debit. A card's
+  statements are taken as debited from the account its answer names now. A
+  statement with no readable due date (absent, or not a civil date) is not
+  taken as debited; only a card's newest one makes lines `unknown`
+  (`cards_with_unknown_due_date`).
 - An account entity's balance comes from the newest capture among its
   references; two references captured together that disagree are
   `conflict` / `balances_disagree`, and references are never added.
@@ -579,15 +591,6 @@ Limits:
   date (`no_statement_due`). A bank that debits it later, for example on the
   next business day, is not modelled; `balance_before_previous_debit` only
   covers a balance captured on or before the due date itself.
-- The previous debit from an account is the latest of two dates only: the
-  debit date of each card's newest accepted settlement per bank account, and
-  the due date of each card's newest statement when it is already due. A
-  card whose newest statement is a bill has its earlier statement left out
-  unless an accepted settlement pays it, so a balance captured before that
-  earlier statement's due date is compared with the bill as if it showed
-  that debit, and can read `yes` though the bank has since taken it. ADR
-  0114's decision names the latest card debit from the account; the read
-  does not look at a card's older statements.
 
 ## Candidate and decision lifecycle
 
@@ -1384,14 +1387,24 @@ count and the scheduled payments (four reads: positions, balances and
 statements, each bounded by `DATED_STATE_ROW_BOUND`, the snapshots, one row
 per perimeter container and chosen snapshot and not bounded, and its
 settlement read), and `ACCOUNT_LABELS_SQL`, one primary-key lookup per
-account entity named. `packages/application/test/card-upcoming-bills.test.ts` checks that the
+account entity named, and `EARLIER_STATEMENT_DUE_SQL` once per card with a
+statement whose debit account is answered (at most `CARD_DEBIT_ACCOUNTS_CARDS_MAX`,
+100, issued together): the card's source and source account are partition
+columns of `card_statement_facts`' ranking, so SQLite pushes them into it and
+ranks only that card's statement totals, found through
+`idx_bal_obs_account (source_account, metric)`, with every other table by key;
+it returns one row. `packages/application/test/card-upcoming-bills.test.ts` checks that the
 view issues only those reads, never `DATED_STATEMENTS_BEFORE_WINDOW_SQL` or
 `DATED_SCHEDULED_PAYMENTS_SQL`; that its answer is byte-identical to the one
 over the full state, on a synthetic store where both skipped reads find rows
 and on random stores; that scheduled payments past the row bound, which
 refused the full state and left every balance `missing`, no longer do; and,
-without table statistics, that labels are reached by `accounts`' key. Not
-measured on the scale store or on D1.
+without table statistics, that labels are reached by `accounts`' key and, on
+the complete CORE schema, that a card's earlier statements are reached as
+above with no scan but of that card's own ranked rows and no automatic index.
+`services/processor/test/card-debit-accounts.test.ts` checks on D1's SQLite
+that the source account is pushed into the ranking there too. Not measured
+on the scale store or on D1.
 
 ### Readiness
 

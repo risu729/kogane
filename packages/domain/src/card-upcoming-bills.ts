@@ -147,11 +147,11 @@ export interface UpcomingAccountInput {
   /** When the reported balance was captured; null when there is none. */
   capturedAt: string | null;
   /**
-   * The latest card debit from the account due on or before the date that
-   * the caller knows of, or null. The service takes it from each card's
-   * newest accepted settlement per bank account and each card's newest
-   * statement already due, not from a card's older statements
-   * (docs/card-settlements.md, Upcoming bills, limits).
+   * The latest card debit from the account due on or before the date, or
+   * null. The service takes it from each card's newest accepted settlement
+   * per bank account, each card's newest statement already due, and each
+   * answered card's latest statement of an earlier month due by the date
+   * (docs/card-settlements.md, Upcoming bills).
    */
   previousDebit: string | null;
 }
