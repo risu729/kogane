@@ -762,7 +762,11 @@ the plan includes per month):
 The sum is what D1 reports: a statement read with `first()` returns no
 metadata and is not counted (`d1RowsRead.missing`). A failed budget read
 throttles nothing; a failed write loses that invocation's count and logs
-`read_budget_record_failed`.
+`read_budget_record_failed`. A tick is counted when it ends, so two ticks that
+overlap at the start of an hour, or a first tick whose record failed, both run
+as the hour's first. While throttled, an accepted decision's projection
+rebuild (`decision_outbox`) waits up to an hour, and the throttled lanes leave
+gaps of up to an hour in `processor_lane_ticks`.
 
 ### 6.1 Tick records
 

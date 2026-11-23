@@ -404,7 +404,11 @@ The draft's open questions, as the accepted design answers them:
   decision 5's inputs, the gate also requires the cutoff to be at or after the
   stored build's (an earlier cutoff can exclude what the build included), and
   a report cut at its row bound or one whose cutoff dropped a later-recorded
-  position is never gated. A gated run reads 3 rows on either harness store.
+  position is never gated. The gate id also digests the text of every
+  statement that decides what the job reads (positions, valuations, the cut
+  check, decimals, the cutoff and boundary lookups, the two price queries and
+  the gate read), so a deploy that changes one builds again without a
+  release bump. A gated run reads 3 rows on either harness store.
 - Guard: `processor_read_budget_hours` (migration 0106) sums every metered
   invocation's reported rows read per hour. "At most once an hour" is the
   first scheduled tick of each hour, which also logs the error line once.

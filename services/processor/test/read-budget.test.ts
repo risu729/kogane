@@ -178,3 +178,34 @@ test("under the budget every lane runs on every tick", async () => {
   // Both ticks were recorded; real D1 reports rows read for their statements.
   expect((await hours()).map((row) => row.ticks)).toEqual([2]);
 });
+
+test("without its table the budget throttles nothing and the invocation still succeeds", async () => {
+  await env.DB.prepare(
+    "ALTER TABLE processor_read_budget_hours RENAME TO processor_read_budget_hours_away",
+  ).run();
+  try {
+    expect(await readBudgetState(env.DB, NOW, 0)).toBeNull();
+    const ran: string[] = [];
+    const lines: string[] = [];
+    await meteredInvocation(
+      "scheduled",
+      env,
+      (metered, context) =>
+        runScheduled(metered, stagesThatRecord(ran), () => {}, context, {
+          now: () => NOW,
+          budget: 0,
+          alert: () => ran.push("alert"),
+        }),
+      (line) => lines.push(line),
+      () => NOW,
+    );
+    expect(ran).toContain("balance_projection");
+    expect(ran).not.toContain("alert");
+    // The failed record does not displace the probe as the invocation's last line.
+    expect((JSON.parse(lines.at(-1)!) as { event: string }).event).toBe("invocation_budget");
+  } finally {
+    await env.DB.prepare(
+      "ALTER TABLE processor_read_budget_hours_away RENAME TO processor_read_budget_hours",
+    ).run();
+  }
+});
