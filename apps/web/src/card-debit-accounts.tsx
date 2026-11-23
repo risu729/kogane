@@ -25,7 +25,7 @@ import {
 import { Link } from "./router.tsx";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
-export function useCardDebitAccounts() {
+function useCardDebitAccounts() {
   const features = useFeatures();
   return useQuery({
     queryKey: ["card-settlements", "debit-accounts"],

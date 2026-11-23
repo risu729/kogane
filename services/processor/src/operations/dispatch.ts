@@ -57,9 +57,9 @@ import { maintenanceForSchedule } from "../schedule-store.ts";
 export { collectorDispatchConnections, connectionFor, opsDispatchEnabled };
 
 /** Requests taken per tick. */
-export const DEFAULT_DISPATCH_LIMIT = 5;
+const DEFAULT_DISPATCH_LIMIT = 5;
 /** How long a collector request whose connection is not enabled waits before the next look. */
-export const COLLECTOR_RETRY_MS = 3_600_000;
+const COLLECTOR_RETRY_MS = 3_600_000;
 const RETRY_MS = 300_000;
 /** A request waiting for a held lease or this tick's start budget looks again after this. */
 const COLLECTOR_WAIT_MS = 300_000;
@@ -237,8 +237,10 @@ async function dispatchOne(
       return dispatchCollector(env, store, receipt, at, collectors);
     case "projection":
       // The projection lane runs every tick from CORE; handing the request
-      // over is all there is to do. `projected` is completed by whoever
-      // publishes the snapshot (U11), never here.
+      // over is all there is to do. Nothing records this request's
+      // `projected` stage, here or where the snapshot is published, so it
+      // stays `pending`: a rebuild request is still not traced
+      // (docs/ops-api.md#projected-read, ADR 0048).
       await recordDispatch({
         store,
         operationId: receipt.operationId,

@@ -1619,22 +1619,30 @@ test("the economic-event kinds are refused at every command route for every prin
     });
     return { status: response.status, json: (await response.json()) as Record<string, unknown> };
   };
-  const counts = async () =>
-    Object.fromEntries(
-      await Promise.all(
-        [
-          "change_plans",
-          "approvals",
-          "operation_receipts",
-          "decision_outbox",
-          "decision_revisions",
-          "economic_commit_log",
-        ].map(async (table) => [
-          table,
-          (await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<{ n: number }>())!.n,
-        ]),
-      ),
+  // Every table's count is a column of one statement: a statement per table
+  // cost a round trip to workerd each, 144 in this case and most of its time.
+  const tables = [
+    "change_plans",
+    "approvals",
+    "operation_receipts",
+    "decision_outbox",
+    "decision_revisions",
+    "economic_commit_log",
+  ];
+  const counting = db.prepare(
+    "SELECT " + tables.map((table) => `(SELECT count(*) FROM ${table}) AS ${table}`).join(),
+  );
+  const counts = async () => {
+    const row = (await counting.first<Record<string, number>>())!;
+    return Object.fromEntries(
+      tables.map((table) => {
+        // A count read under the wrong column would compare equal before and
+        // after any write, so it fails here instead.
+        if (typeof row[table] !== "number") throw new Error(`no row count for ${table}`);
+        return [table, row[table]];
+      }),
     );
+  };
   for (const [index, kind] of ECONOMIC_EVENT_COMMAND_KINDS.entries()) {
     const refused = { status: 400, json: { error: "unsupported_semantics", refs: [kind] } };
     const before = await counts();
@@ -1741,10 +1749,16 @@ test("migration 0031 applies on a seeded 0017-0035 schema and touches no existin
   try {
     const local1 = (await local.getD1Database("DB")) as unknown as D1Database;
     await local1.exec(LAYER_A_SQL);
+    // One batch per migration file, its statements in file order: a
+    // statement at a time cost a round trip to workerd each, about 500 here
+    // and most of this case's time.
     const apply = async (names: string[]) => {
       for (const name of names)
-        for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
-          await local1.prepare(sql).run();
+        await local1.batch(
+          splitSql(readFileSync(new URL(name, migrationDir), "utf8")).map((sql) =>
+            local1.prepare(sql),
+          ),
+        );
     };
     const migrations = layerBMigrations();
     expect(migrations).toContain("0031_operations.sql");

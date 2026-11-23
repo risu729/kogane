@@ -22,7 +22,7 @@ import { bankSourceLabel } from "./reconciliation-display.tsx";
 import { formatDecimalText } from "./money.ts";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
-export function useUpcomingCardBills() {
+function useUpcomingCardBills() {
   const features = useFeatures();
   return useQuery({
     queryKey: ["card-settlements", "debit-accounts", "upcoming"],

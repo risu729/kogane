@@ -1,10 +1,19 @@
 // Read stored, checksum-verified captures only. No source network requests,
 // raw text, account identifiers, amounts or HTML are logged or written.
+//
+// Replays every artifact with a failed `global-pass-activity` job at one
+// release: the one the parser registry of this checkout declares, or the one
+// `--parser-version MAJOR.MINOR.PATCH` names (`globalPassParserVersion`).
 import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { parse } from "parse5";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import {
+  GLOBAL_PASS_ACTIVITY,
+  globalPassFailedJobsSql,
+  globalPassParserVersion,
+} from "./diagnose-selection.ts";
 function isChallengeScript(value: string): boolean {
   try {
     const url = new URL(value, "https://diagnostic.invalid");
@@ -19,25 +28,25 @@ type Node = {
   attrs?: { name: string; value: string }[];
   childNodes?: Node[];
 };
+// Refused before any binding is opened when the argument is malformed.
+const parserVersion = globalPassParserVersion(process.argv.slice(2));
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({
   configPath: fileURLToPath(new URL("../wrangler.diagnostic.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });
-const parser = PARSERS.find((p) => p.name === "global-pass-activity")!;
+const parser = PARSERS.find((p) => p.name === GLOBAL_PASS_ACTIVITY)!;
 try {
-  const { results } =
-    await proxy.env.DB.prepare(`SELECT a.*,o.blob_key,o.byte_size FROM observation_fetch_artifacts a JOIN raw_objects o ON o.sha256=a.sha256
- JOIN observation_parse_jobs j ON j.fetch_artifact_id=a.id WHERE j.parser_name='global-pass-activity' AND j.parser_version='1.0.0' AND j.last_error_code IS NOT NULL ORDER BY a.id`).all<{
-      id: number;
-      artifact_key: string;
-      fetched_at: string;
-      mime: string;
-      dataset: string;
-      sha256: string;
-      blob_key: string;
-      byte_size: number;
-    }>();
+  const { results } = await proxy.env.DB.prepare(globalPassFailedJobsSql(parserVersion)).all<{
+    id: number;
+    artifact_key: string;
+    fetched_at: string;
+    mime: string;
+    dataset: string;
+    sha256: string;
+    blob_key: string;
+    byte_size: number;
+  }>();
   const summaries: Record<string, number> = {};
   let representativePrinted = false;
   for (const row of results) {

@@ -173,9 +173,9 @@ function Refusal({ error, onRestart }: { error: ApiError; onRestart: () => void 
         </p>
       </div>
     );
-  // The cursor names a row of this list, and rows are never deleted, so a 404
-  // with that code is a store that changed under the page: start again.
-  if (error.status === 404 && error.code === "receipt_not_found")
+  // The cursor names a row of this list, and rows are never deleted, so a
+  // cursor the list refuses is a store that changed under the page: start again.
+  if (error.status === 400 && error.code === "invalid_cursor")
     return (
       <div className="state state-error" role="alert">
         <span className="state-title">このページの続きを読み込めません</span>

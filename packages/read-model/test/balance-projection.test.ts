@@ -1000,7 +1000,7 @@ describe("balance projection builder", () => {
     expect(build.rows.every((row) => row.reasonCode === "adoption_target_oversized")).toBe(true);
   });
 
-  test("two full targets with shared entities and the relation budget build well under a second", () => {
+  test("two full targets with shared entities and the relation budget build within seconds", () => {
     // 2 × 250 subjects, entities shared in pairs, and 5,000 accepted
     // decisions (the relation read's bound) over them and 4,000 scopes with
     // no candidate: the scope order and its lower sets stay cheap beside the
@@ -1032,8 +1032,11 @@ describe("balance projection builder", () => {
     const build = buildBalanceProjection(candidates, decisions);
     const elapsed = performance.now() - started;
     expect(build.rows).toHaveLength(2 * ADOPTION_SUBJECT_BOUND);
-    expect(elapsed).toBeLessThan(1000);
-  });
+    // About 150 ms alone; CI runs every package's tests at once, where it took
+    // 1,188 ms against a 1 s bound. 5 s keeps the guard against a much slower
+    // walk without failing on a loaded runner.
+    expect(elapsed).toBeLessThan(5000);
+  }, 60_000);
 
   test("temporal references keep the precision of the stored value", () => {
     expect(temporalReferenceFor("2026-09-08", null)).toEqual({

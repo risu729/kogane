@@ -822,6 +822,51 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     }
   });
 
+  it("records nothing for the protocol's own answers in the 2026-07-28 revision either", async () => {
+    // The 2026-07-28 revision answers a method the server does not serve
+    // (`ping` among them: that revision has no `ping`) with -32601 under
+    // HTTP 404, where the initialize-based revisions answer it inside a 200.
+    // It is the same JSON-RPC answer, so it is recorded as there: not at all.
+    let id = 0;
+    const modern = (method: string, params: Record<string, unknown> = {}) =>
+      call("/mcp", {
+        via: "mcp",
+        subject: AGENT,
+        body: {
+          jsonrpc: "2.0",
+          id: ++id,
+          method,
+          params: {
+            ...params,
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientInfo": { name: "synthetic-client", version: "0" },
+              "io.modelcontextprotocol/clientCapabilities": {},
+            },
+          },
+        },
+        headers: {
+          ...MCP_CLIENT_HEADERS,
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": method,
+          ...(typeof params["name"] === "string" ? { "mcp-name": params["name"] } : {}),
+        },
+      });
+    for (const [method, params, status] of [
+      ["server/discover", {}, 200],
+      ["tools/list", {}, 200],
+      ["tools/call", { name: "kogane.nothing", arguments: {} }, 200],
+      ["resources/list", {}, 404],
+      ["ping", {}, 404],
+    ] as const) {
+      const answered = await modern(method, params);
+      expect(answered.response.status, method).toBe(status);
+      const message = (await answered.response.json()) as { error?: { code: number } };
+      if (status === 404) expect(message.error?.code, method).toBe(-32601);
+      expect(await recordsOf(answered.requestId), method).toEqual([]);
+    }
+  });
+
   it("records a tool that throws on /mcp once, as failed, though the transport rethrows it", async () => {
     // Every statement but the audit log's own fails, so the tool throws
     // inside the MCP SDK, which answers its JSON-RPC error and then rethrows.
@@ -1106,12 +1151,23 @@ describe("the operator's read and the never-recorded list", () => {
     expect(body.records.length).toBeGreaterThan(0);
     expect(body.records.length).toBeLessThanOrEqual(50);
     expect(body.records.every((record) => record.result === "refused")).toBe(true);
-    expect(Object.keys(body).sort()).toEqual(["cursor", "records", "schemaVersion"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "cursor",
+      "next",
+      "paging",
+      "records",
+      "schemaVersion",
+    ]);
     // Reading the log is a page load: it is not recorded.
     expect(await recordsOf(page.requestId)).toEqual([]);
     if (body.cursor !== null) {
+      // A cursor of other filters is the paging family's mismatch (ADR 0128).
       const stale = await call(`/api/v2/audit?result=read&cursor=${body.cursor}`);
-      expect(stale.response.status).toBe(409);
+      expect(stale.response.status).toBe(400);
+      expect(await stale.response.json()).toMatchObject({
+        error: "cursor_mismatch",
+        mustMatch: ["operation", "path", "principalKind", "result", "from", "to"],
+      });
     }
   });
 

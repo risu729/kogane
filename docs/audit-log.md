@@ -265,14 +265,25 @@ counts `counters` and `written`.
 the whole store, newest first, 50 records a page:
 
 ```json
-{ "schemaVersion": "kogane-audit-page-v1", "records": [ … ], "cursor": "…" }
+{
+  "schemaVersion": "kogane-audit-page-v1",
+  "records": [ … ],
+  "cursor": "…",
+  "next": { "arguments": { "cursor": "…" } },
+  "paging": { "limit": 50, "returned": 50, "hasMore": true, "stoppedBy": "limit" }
+}
 ```
 
 Query parameters, each at most once: `operation`, `path`, `principalKind`,
 `result`, `from` and `to` (UTC days, inclusive) and `cursor`; anything else is
 `400 invalid_query`. The filters are in the SQL `WHERE` before the `LIMIT`, no
-total is computed, and the cursor binds the filters it was issued under (a
-cursor presented with other filters is `409 stale_context`). Reading the log is
+total is computed, and the cursor binds the filters it was issued under: a
+cursor presented with other filters is `400 cursor_mismatch` with `mustMatch`
+naming the six filter parameters, and a cursor this read did not issue is
+`400 invalid_cursor` ([ADR 0128](adr/0128-one-paging-contract.md)). `next` and
+`paging` carry the paging contract; the result's `cursor` is the same value,
+deprecated for one release. `kogane.audit.search` answers the same codes, with
+`mustMatch: ["filters"]`. Reading the log is
 a page load and is not recorded. Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
 `kogane.audit.search` and `kogane.audit.get`, require `audit.read` and whole
 account scope. Their source predicates precede the page window and cursor,
@@ -313,7 +324,8 @@ provider text or body.
 - **Paging** follows the server's cursor: next, previous (the cursors already
   read) and a restart from the newest record. The page shows its page number
   and the records on that page, never a total. A cursor the server refuses
-  (`409 stale_context`) is reported, with the restart offered.
+  (`400 cursor_mismatch` or `400 invalid_cursor`) is reported, with the
+  restart offered.
 - **Validation.** The browser checks every page before rendering it
   (`packages/observation-shared/src/audit-contract.ts`, through
   `validApiResponse`): the schema version, at most 50 records newest first,
@@ -424,7 +436,10 @@ occurrence of that job.
   protocol's own messages (`initialize`, `tools/list`, `ping`, an accepted
   notification) —
   including a JSON-RPC error `/mcp` answers inside a `200` (an unknown method,
-  `-32601`). Everything `/mcp` refuses with an HTTP status before a message
+  `-32601`), and the same `-32601` the 2026-07-28 revision answers under
+  `404` for a method the server does not serve (`ping` among them: that
+  revision has no `ping`); no other `/mcp` answer is a `404`.
+  Everything `/mcp` refuses with an HTTP status before a message
   reaches a tool is recorded once as `mcp.request`: the App's own refusals (a
   method other than POST, a query string, a cross-origin request, no grant)
   and the MCP SDK's (`400 invalid_body` for a body that is not JSON, not a

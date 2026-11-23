@@ -21,7 +21,7 @@ import {
 } from "./reconciliation-display.tsx";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
-export function useUnmatchedCardStatements(offset: number) {
+function useUnmatchedCardStatements(offset: number) {
   const features = useFeatures();
   return useQuery({
     queryKey: ["card-settlements", "unmatched", offset],

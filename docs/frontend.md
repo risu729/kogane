@@ -62,8 +62,8 @@ refresh failures retain previously authorized records with an explicit warning:
 ("could not refresh; showing the {label} loaded earlier") with a retry, or under its
 offline 前回読み込んだ notice while a read is paused. A retry button, in that warning or in
 the alert of a load that has no answer yet, waits while its read is in flight: it says
-再試行中…, is `aria-disabled` and ignores a press rather than `disabled`, so the focus
-stays on it, and a failed first load keeps its alert through the retry instead of
+再試行中…, is `aria-disabled` and ignores a press rather than `disabled` (`BusyButton`), so
+the focus stays on it, and a failed first load keeps its alert through the retry instead of
 turning back into the loading state (`test/query-boundary.browser.test.ts`). `収集スケジュール`
 ("collection schedules") renders through it, and so do the two correction
 histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
@@ -75,7 +75,9 @@ there shows no total and no earlier lines (INV05). It uses the shared states dir
 (a status) while the first read waits, and `ErrorState` (an alert with
 `判断待ちの件数を再試行`) once a read fails. The alert stays, its button saying 再試行中…,
 while that retry or a refresh after an earlier answer is in flight; a refresh that starts
-on its own after a failed first read shows `Loading` again.
+on its own after a failed first read shows `Loading` again. The panel and `QueryBoundary`
+keep the failure a pressed retry repeats through one hook, `useRepeatedFailure`
+(`apps/web/src/repeated-failure.ts`).
 
 ## Design tokens and stylesheet layout
 
@@ -142,10 +144,10 @@ A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
 `Pagination`): its buttons say 前のページ and 次のページ, its status says
 続きがあります or 最後のページです unless the page passes its own, and its
 buttons, its read-again action included, wait while a read of the list is in
-flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`,
-so a button the owner pressed, or sits on during a background read, keeps the
-focus; a button with nowhere to go (no earlier page, no more rows) is
-`disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
+flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`
+(`BusyButton`, as for the plan buttons and the retries), so a button the owner
+pressed, or sits on during a background read, keeps the focus; a button with
+nowhere to go (no earlier page, no more rows) is `disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
 use it.
 
 The 口座・銘柄 lists the server pages by offset name the rows a page shows

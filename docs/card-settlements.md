@@ -27,6 +27,43 @@ from a statement, or calculate net assets.
   Other banks and aggregator copies are not implicitly interchangeable with
   these adapters; see [Bank adapters](#bank-adapters).
 
+### A statement's capture
+
+`card_statement_facts` (migration 0044) keeps one capture per statement key
+(source, producer, external-id namespace, source account and period). Of the
+published `credit_statement_payment_amount` totals of `vpass-statement-page`
+(Vpass) and `myjcb-credit-statement-total` (MyJCB) under one key, it keeps the
+newest capture (`fetched_at`); among captures with the same `fetched_at`, one
+with a `_kogane.paymentDate` before one without; then the highest observation
+id. The dated state's statement facts (`DATED_STATEMENT_FACTS_CTE`,
+`packages/read-model/src/dated-state.ts`) and the readiness check's
+`ready_statements` (`packages/read-model/src/card-settlement-readiness.ts`)
+rank the same way.
+
+Limit: the second key asks only whether a date is present, not whether it
+names a calendar day. If two captures of one statement had the same
+`fetched_at` and one carried a date that names no day, such as 2026-09-31, it
+could win on id over one with a real date. The statement's due date would then
+be unreadable: the [reported state](reported-state.md) gives it
+`payment_date_unknown`, the [debit account answer](#debit-account-per-card)
+gives `paymentDateReason: payment_date_invalid`, and the settlement sweep
+counts it unmatched and proposes nothing for it. An unknown is disclosed, and
+no wrong due date is read.
+
+No store can hold such a date today. Only these two parsers feed the
+rankings, and every release of both since they first emitted the statement
+total (#213) refuses a payment date that is not a calendar day: Vpass in
+`statementPaymentDate` (`vpass.ts`), MyJCB through `normalizedDate`
+(`sbi-strict.ts`). The parse fails and publishes nothing.
+`packages/read-model/test/statement-payment-date-guard.test.ts` pins this: it
+reads the parsers out of the three ranking texts, requires them to be exactly
+these two, and parses synthetic pages with 2026-02-30, 2026-09-31 and
+2026-13-01 through each release in the parser registry, failing if one
+publishes any of them as a date (a release may refuse or leave the date out).
+A parser release that starts to publish such dates, or a ranking that reads
+another parser, fails that test, and the tie-break above would then need a
+calendar check.
+
 ### Bank adapters
 
 | Adapter                                | Rows admitted                                                                                                                                                                                                                       | Provider key          | `debit_date`                                                         |
@@ -323,8 +360,13 @@ card with a current statement total, a stated reading with evidence or a
 settlement candidate is listed, by source and source account, at most 100
 (`cardsTruncated` says when more exist). Per card:
 
-- `latestStatement`: its newest current statement total (by period, then due
-  date), with the provider's total and due date, so a card whose last
+- `latestStatement`: its newest current statement total: of its
+  `card_statement_facts` rows, the latest period (compared as its `YYYY-MM`
+  text), then the latest due date (compared as the stored
+  `_kogane.paymentDate` text, not as a calendar date), then the highest
+  observation id, a row without a period or due date after one with it
+  (`CARD_DEBIT_ACCOUNT_CARDS_SQL`). It carries the provider's total and due
+  date, so a card whose last
   statement is zero still shows how old its answer is. The total is always a
   quantity: one that is not exact keeps its decimal-v1 status with the reason
   `stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with

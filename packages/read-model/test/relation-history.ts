@@ -12,8 +12,8 @@
 // is synthetic. Shared by the read-model, application and processor tests.
 import type { Database } from "bun:sqlite";
 
-export const RELATION_STATUSES = ["proposed", "accepted", "rejected", "released"] as const;
-export type RelationStatus = (typeof RELATION_STATUSES)[number];
+const RELATION_STATUSES = ["proposed", "accepted", "rejected", "released"] as const;
+type RelationStatus = (typeof RELATION_STATUSES)[number];
 
 export interface HistoryRow {
   id: string;
