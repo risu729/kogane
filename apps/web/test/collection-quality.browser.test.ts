@@ -344,7 +344,7 @@ describe.if(runnable)("collection quality browser", () => {
       await page.goto(`${origin}/collection-quality?source=vpass`);
       const read = page.locator("p", { hasText: "表示を読んだ時刻:" });
       await read.waitFor();
-      expect(await read.textContent()).toBe("表示を読んだ時刻: 2099/01/02 0:30");
+      expect(await read.textContent()).toBe("表示を読んだ時刻: 2099/01/02 0:30（日本時間）");
       expect(await read.locator("time").getAttribute("datetime")).toBe("2099-01-01T15:30:00.000Z");
     } finally {
       await page.close();

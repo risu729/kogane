@@ -342,6 +342,7 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
           {query.dataUpdatedAt ? (
             <p>
               表示を読んだ時刻: <Time value={new Date(query.dataUpdatedAt).toISOString()} />
+              （日本時間）
             </p>
           ) : null}
           {data.cells.length === 0 ? (
