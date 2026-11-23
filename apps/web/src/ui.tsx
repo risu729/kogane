@@ -23,10 +23,10 @@ import { useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { amountSign, formatAmount } from "./money.ts";
 import { Link, type ObservationKind } from "./router.tsx";
+import { BusyButton } from "./busy-button.tsx";
 import { ApiError, rawUrl } from "./api.ts";
 import { CommandError } from "./command-api.ts";
 import { displayLabel } from "./labels.ts";
-import { BusyButton } from "./busy-button.tsx";
 
 // ── values ───────────────────────────────────────────────────────────
 

@@ -88,18 +88,20 @@ page passes when:
   user would meet the answer, a refusal included, back at the top of the
   page. One component, `BusyButton` (`apps/web/src/busy-button.tsx`), does
   this for the review pages' plan buttons (口座の対応候補, 銘柄の同一性の候補,
-  請求と引落の照合候補, 口座の保有者を確認 and カード利用の説明), the pager
-  buttons and the cursor pagers' read-again buttons (監査ログ, 依頼の一覧, the
-  latest balances and the evidence browser's lists), and a failed read's
-  再試行 (`ErrorState` and `QueryBoundary`'s 前回読み込んだ warning). A button
+  請求と引落の照合候補, 口座の保有者を確認 and カード利用の説明), every
+  `Pagination` button (the cursor pagers on 監査ログ, 依頼の一覧, the latest
+  balances and the evidence browser's lists, their read-again buttons, and
+  the offset pagers built on it), and a failed read's 再試行 (`ErrorState` and
+  `QueryBoundary`'s 前回読み込んだ warning). A button
   with nowhere to go or nothing to act on (no earlier page, missing input) is
   `disabled`. The shell's 表示を更新 follows the same rule with its own
   markup. The review pages' browser tests check that focus stays after a
   refusal, and the retry and latest-balances pager tests that it stays
   through a read. Open limit: these still become `disabled` while their
   request is in flight and drop focus: the operation page's
-  最新の状態を読み直す, the schedules page's writes, and the confirmation
-  screen's 承認する, 確定する and 反映状況を再確認.
+  最新の状態を読み直す, the ホーム 最近の変化 panel's 続きを読み込む, the
+  schedules page's writes, and the confirmation screen's 承認する, 確定する
+  and 反映状況を再確認.
 - Every visible table has a caption (visually hidden when the panel title
   already says it) and every header cell a `scope`; every `.table-scroll` is
   a named `role="region"` with `tabIndex={0}` at every width. Anything else

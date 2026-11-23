@@ -144,8 +144,8 @@ A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
 buttons, its read-again action included, wait while a read of the list is in
 flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`
 (`BusyButton`, as for the plan buttons and the retries), so a button the owner
-pressed, or sits on during a background read, keeps the focus; a button with nowhere to go (no earlier page, no more rows) is
-`disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
+pressed, or sits on during a background read, keeps the focus; a button with
+nowhere to go (no earlier page, no more rows) is `disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
 use it.
 
 The 口座・銘柄 lists the server pages by offset name the rows a page shows
