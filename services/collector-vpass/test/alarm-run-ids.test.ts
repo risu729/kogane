@@ -27,8 +27,11 @@ const cardRun = (n: number) => `${SESSION_RUN}-card-${String(n).padStart(3, "0")
  * persists a successful run; a card without one fails and persists a failed run.
  */
 async function alarmOver(cards: number, withMonths: boolean) {
+  const records: Array<Record<string, unknown>> = [];
   for (const method of ["log", "error"] as const) {
-    const spy = spyOn(console, method).mockImplementation(() => {});
+    const spy = spyOn(console, method).mockImplementation((value) => {
+      records.push(JSON.parse(String(value)) as Record<string, unknown>);
+    });
     restores.push(() => spy.mockRestore());
   }
   const authSpies = [
@@ -105,7 +108,18 @@ async function alarmOver(cards: number, withMonths: boolean) {
   const result = await alarmCollection(env, "0 21 * * *", Date.parse("2026-09-05T00:00:00Z"));
   expect(responses).toHaveLength(0);
   const terminals = [...data.entries.keys()].filter((key) => key.endsWith("/terminal.json"));
-  return { result, terminals };
+  // What the persisted terminals list: the objects the collection stored.
+  const listedObjects = terminals.reduce(
+    (total, key) =>
+      total +
+      (
+        JSON.parse(new TextDecoder().decode(data.entries.get(key)!.bytes)) as {
+          artifacts: unknown[];
+        }
+      ).artifacts.length,
+    0,
+  );
+  return { result, terminals, records, listedObjects };
 }
 
 test("a collection of at most 100 runs completes and names every card run once", async () => {
@@ -137,4 +151,17 @@ test("a failed collection of more than 100 cards keeps its code and lists the fi
   const first = runs(cards).slice(0, MAX_RUN_IDS);
   expect(result).toEqual({ status: "failed", runIds: first, failureCode: "collection_failed" });
   expect(collectorOperationResult(result)).toEqual(result);
+});
+
+// Like every collector's persist log (`objects.length` of each persist
+// result), the daily summary counts the objects its runs' terminals list: a
+// successful card's credit and statement artifacts, none for a failed run.
+test.each([
+  ["successful", true],
+  ["failed", false],
+])("the daily summary counts the objects the %s cards' runs stored", async (_label, withMonths) => {
+  const { records, listedObjects } = await alarmOver(3, withMonths);
+  const summary = records.filter((record) => record.event === "vpass-daily-collection-complete");
+  expect(summary).toHaveLength(1);
+  expect(summary[0]!.objectCount).toBe(listedObjects);
 });
