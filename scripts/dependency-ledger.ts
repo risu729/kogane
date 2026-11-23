@@ -159,8 +159,42 @@ export function workspaceResolvedVersions(
   return resolved;
 }
 
+/**
+ * The root `bun.lock` text, after checking that it parses as a Bun text lockfile.
+ *
+ * The per-directory fallback in `readPackages` is for a directory this lockfile
+ * does not cover (an npm-managed `container/` image, or a manifest with no
+ * lockfile at all). It is not a fallback for the lockfile itself: a lockfile
+ * that cannot be read or parsed would otherwise render every package as
+ * "No lockfile" and write a ledger that looks complete, so it stops the run.
+ */
+function readRootLockfile(root: string): string {
+  let text: string;
+  try {
+    text = readFileSync(join(root, "bun.lock"), "utf8");
+  } catch (error) {
+    throw new Error("Cannot read the root bun.lock that the dependency ledger is generated from", {
+      cause: error,
+    });
+  }
+  let lock: unknown;
+  try {
+    lock = parseJsonc(text, "bun.lock");
+  } catch (error) {
+    throw new Error("Cannot read the root bun.lock: it does not parse as JSONC", { cause: error });
+  }
+  const isMap = (value: unknown): boolean =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!isMap(object(lock)["workspaces"]) || !isMap(object(lock)["packages"]))
+    throw new Error(
+      "The root bun.lock lacks its `workspaces` or its `packages` map, so it is not a Bun text lockfile",
+    );
+  return text;
+}
+
 export function readPackages(root: string): PackageRecord[] {
   const records: PackageRecord[] = [];
+  const lockText = readRootLockfile(root);
   const candidates: string[] = [];
   for (const workspace of WORKSPACES) {
     const base = join(root, workspace);
@@ -190,13 +224,11 @@ export function readPackages(root: string): PackageRecord[] {
     let resolved: Record<string, string> = {};
     let lockfile: PackageRecord["lockfile"] = "none";
     try {
-      // One root lockfile for the whole workspace since U03; a directory that
-      // still carries its own (the npm-managed container images) is read below.
-      resolved = workspaceResolvedVersions(
-        readFileSync(join(root, "bun.lock"), "utf8"),
-        relativeDirectory,
-        "bun.lock",
-      );
+      // One root lockfile for the whole workspace since U03, read and checked
+      // once above; only a directory it does not cover lands in the catch. A
+      // directory that still carries its own (the npm-managed container
+      // images) is read below.
+      resolved = workspaceResolvedVersions(lockText, relativeDirectory, "bun.lock");
       if (Object.keys(resolved).length === 0 && Object.keys(declared).length > 0)
         throw new Error("not a workspace member");
       lockfile = "bun.lock";

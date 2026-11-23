@@ -98,6 +98,15 @@ release. The comments stay until a parser release is bumped for a real reason.
 - the statement splitter round-trips: replaying each split statement rebuilds the same set of
   schema objects, which is what makes the seed/backfill inventory of 06 §1 trustworthy.
 
+`scripts/dependency-ledger.test.ts`
+
+- the migration note has exactly one home, and the linter rejects a duplicate top-level
+  declaration, so a merge that re-adds it cannot land quietly (U15);
+- a root `bun.lock` that is missing, unreadable, not JSONC, or lacks its `workspaces` or its
+  `packages` map stops `mise run ledger:deps` with a non-zero exit and writes nothing. "No
+  lockfile" in the ledger therefore only means a directory the root lockfile does not cover and
+  whose own `package-lock.json` is absent, unreadable or does not parse.
+
 ## Reading the classification
 
 Chapter 04 §2 splits the CORE tables four ways, and `infra/schema/core-ledger.md` uses the same
