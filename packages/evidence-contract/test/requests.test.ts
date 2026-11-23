@@ -191,6 +191,37 @@ describe("request parsers", () => {
     ).toThrow(new ContractError("attempt_count_invalid"));
   });
 
+  test("an instant range value has a four-digit year, so text order is time order", () => {
+    const range = (startValue: string | null, endValue: string | null) =>
+      parseAddRunRangeRequest({
+        rangeKey: "r",
+        rangeKind: "requested",
+        precision: "instant",
+        startValue,
+        endValue,
+        basis: "request",
+      });
+    expect(range("0001-01-01T00:00:00.000Z", "9999-12-31T23:59:59.999Z")).toMatchObject({
+      startValue: "0001-01-01T00:00:00.000Z",
+      endValue: "9999-12-31T23:59:59.999Z",
+    });
+    // Year 10000 after year 2026: reversed in time, yet "+" sorts before "2",
+    // so a text comparison let it through.
+    expect(() => range("+010000-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z")).toThrow(
+      new ContractError("invalid_start_value"),
+    );
+    expect(() => range("2026-01-01T00:00:00.000Z", "+010000-01-01T00:00:00.000Z")).toThrow(
+      new ContractError("invalid_end_value"),
+    );
+    // Year -5 before year -1, which a text comparison read as reversed.
+    expect(() => range("-000005-01-01T00:00:00.000Z", null)).toThrow(
+      new ContractError("invalid_start_value"),
+    );
+    expect(() => range(null, "-000001-01-01T00:00:00.000Z")).toThrow(
+      new ContractError("invalid_end_value"),
+    );
+  });
+
   test("inventory items are sorted by artifactKey in binary order and must be unique", () => {
     const items = [
       { artifactKey: "b", sha256: SHA, descriptorSha256: SHA },

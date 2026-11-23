@@ -85,6 +85,14 @@ Worker answered HTTP 400. Database-dependent checks (routes, scope rules,
 template policies, parent rows, conflicts) stay in
 `packages/application/src/ingest/`.
 
+A range (run or artifact) states at least one bound (`empty_range`). A bound
+is `YYYY-MM` at month precision, a calendar `YYYY-MM-DD` at date precision,
+and at instant precision the exact `toISOString` text of an instant with a
+four-digit year (`invalid_start_value`, `invalid_end_value`). Because every
+bound has a four-digit year, text order is time order: a start after its end
+is refused (`reversed_range`), and D1's `start_value <= end_value` check
+compares the same text.
+
 The inventory digest (`inventory_digest_version` v1) is
 `sha256(canonicalJsonV1(items sorted by artifactKey))` over
 `{artifactKey, sha256, descriptorSha256}` and is unchanged.
