@@ -204,6 +204,37 @@ const nullableText = nullable(text);
 const nullableNumber = nullable(number);
 const nullableIdentifier = nullable(identifier);
 const minorUnit = nullable(isDecimalMinorUnit);
+/** The digits and the scale decimal-v1 holds at most (`validNormalizedDecimal`). */
+const DECIMAL_DIGITS = 4096;
+/**
+ * An integer coefficient at its scale, as decimal-v1 stores one: zero only
+ * unsigned and at scale 0 (INV03).
+ */
+function exactCoefficient(coefficient: unknown, scale: unknown): boolean {
+  return (
+    typeof coefficient === "string" &&
+    coefficient.length <= DECIMAL_DIGITS + 1 &&
+    /^(?:0|-?[1-9][0-9]*)$/u.test(coefficient) &&
+    identifier(scale) &&
+    scale <= DECIMAL_DIGITS &&
+    (coefficient !== "0" || scale === 0)
+  );
+}
+/**
+ * Exact decimal text as `decimalToString` writes such a coefficient at
+ * `scale`: an optional minus, the integer digits, and exactly `scale`
+ * fraction digits. Anything else is not an amount and is refused, never
+ * shown as one (INV03).
+ */
+function exactText(value: unknown, scale: unknown): boolean {
+  // A sign, a leading `0`, the point and DECIMAL_DIGITS fraction digits at most.
+  if (typeof value !== "string" || value.length > DECIMAL_DIGITS + 3 || !identifier(scale))
+    return false;
+  const match = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/u.exec(value);
+  if (match === null || (match[3] ?? "").length !== scale) return false;
+  const digits = (match[2]! + (match[3] ?? "")).replace(/^0+(?=[0-9])/u, "");
+  return exactCoefficient(match[1]! + digits, scale);
+}
 const observationKind = literal<ObservationKind>("transaction", "balance", "position", "valuation");
 const organizationAccountFields = {
   referenceId: text,
@@ -841,7 +872,7 @@ const snapshotCoverage = object<SnapshotDataCoverage>({
   stale: boolean,
   reasons: array(text),
 });
-const subtotals = object<KnownAssetsSubtotals>({
+const subtotalsShape = object<KnownAssetsSubtotals>({
   policyRelease: text,
   knownAssetsSubtotal: nullable(
     array(
@@ -856,6 +887,16 @@ const subtotals = object<KnownAssetsSubtotals>({
   liabilitiesCoverage: literal("unknown"),
   reasonCode: nullableText,
 });
+/**
+ * Each unit's figure an integer coefficient at its scale (INV03), and a
+ * subtotal left out exactly when it names why (INV05).
+ */
+const subtotals: Check<KnownAssetsSubtotals> = (value): value is KnownAssetsSubtotals =>
+  subtotalsShape(value) &&
+  (value.knownAssetsSubtotal === null) === (value.reasonCode !== null) &&
+  (value.knownAssetsSubtotal ?? []).every((entry) =>
+    exactCoefficient(entry.coefficient, entry.scale),
+  );
 const latestItem: Check<LatestBalanceItem> = (value): value is LatestBalanceItem =>
   object<LatestBalanceItem>({
     observationId: identifier,
@@ -905,8 +946,9 @@ const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceH
   value.items.length <= value.page.limit;
 
 // The summary detail of the same pages (ADR 0123): one line per row, the page,
-// coverage and subtotals as the full page has them. A value that is not exact
-// carries no value and no scale, only its status (INV05).
+// coverage and subtotals as the full page has them. An exact value is decimal
+// text at its scale (INV03); a value that is not exact carries no value and no
+// scale, only its status (INV05).
 const summaryAmount: Check<SummaryAmount> = (value): value is SummaryAmount =>
   object<SummaryAmount>({
     value: nullableText,
@@ -915,7 +957,7 @@ const summaryAmount: Check<SummaryAmount> = (value): value is SummaryAmount =>
     scale: nullable(identifier),
   })(value) &&
   (value.status === "exact"
-    ? value.value !== null && value.scale !== null
+    ? exactText(value.value, value.scale)
     : value.value === null && value.scale === null);
 const summaryAccount: Check<SummaryAccount> = (value): value is SummaryAccount =>
   object<SummaryAccount>({
@@ -1040,7 +1082,7 @@ const cashAmount: Check<CashAmount> = (value): value is CashAmount =>
     reasons: array(text),
   })(value) &&
   (value.status === "exact"
-    ? value.value !== null && value.scale !== null
+    ? exactText(value.value, value.scale)
     : value.value === null && value.scale === null) &&
   (!value.counted || (value.adoption === "adopted" && value.status === "exact")) &&
   (value.counted || value.reasons.length > 0);
@@ -1072,7 +1114,7 @@ function cashSubtotalSound(value: CashSubtotal): boolean {
   return (
     (value.counted === 0
       ? value.value === null && value.scale === null
-      : value.value !== null && value.scale !== null) &&
+      : exactText(value.value, value.scale)) &&
     (value.status === "complete" || value.reasons.length > 0) &&
     (value.notCounted === 0 || value.reasons.length > 0)
   );
