@@ -181,7 +181,7 @@ describe("holdings over the READ database", () => {
     for (const table of await readTables())
       await env.READ.prepare(`DROP TABLE IF EXISTS ${table}`).run();
     for (const migration of env.READ_TEST_MIGRATIONS)
-      for (const query of migration.queries) await env.READ.prepare(query).run();
+      await env.READ.batch(migration.queries.map((query) => env.READ.prepare(query)));
     const revision = (await env.DB.prepare(
       "SELECT source_revision, visibility_revision, core_epoch FROM core_source_revision WHERE id=1",
     ).first<{ source_revision: number; visibility_revision: number; core_epoch: string }>())!;

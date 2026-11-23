@@ -23,15 +23,15 @@ async function fixture() {
   );
   try {
     const db = await mf.getD1Database("DB");
+    // One batch per migration file, as Wrangler applies one; a failure names
+    // the file. A statement at a time cost a round trip to workerd each.
     for (const file of migrationFiles(CORE_MIGRATIONS_URL))
-      for (const [index, sql] of splitSqlStatements(
-        migrationSql(CORE_MIGRATIONS_URL, file),
-      ).entries()) {
-        try {
-          await db.prepare(sql).run();
-        } catch (cause) {
-          throw new Error(file + ":" + index, { cause });
-        }
+      try {
+        await db.batch(
+          splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)).map((sql) => db.prepare(sql)),
+        );
+      } catch (cause) {
+        throw new Error(file, { cause });
       }
     await db.prepare(readFileSync(new URL("../setup.sql", import.meta.url), "utf8")).run();
     return { mf, db };
