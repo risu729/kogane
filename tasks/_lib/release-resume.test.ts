@@ -45,12 +45,18 @@ import { REPO_ROOT } from "./repo-root.ts";
 // scratch: that compilation was about a third of the file's run time, and the
 // part that grows first when the machine is loaded. Node's on-disk compile
 // cache (keyed by each module's source) lets the processes share it; it
-// changes how fast a module loads, not what it does.
-const nodeCompileCache = mkdtempSync(resolve(tmpdir(), "kogane-resume-node-cache-"));
-afterAll(() => {
-  rmSync(nodeCompileCache, { recursive: true, force: true });
+// changes how fast a module loads, not what it does. The directory is made in
+// a hook, not at import, so a run whose filter selects none of these cases
+// (and so runs neither hook) leaves nothing behind.
+let nodeCompileCache = "";
+let nodeEnv: Record<string, string | undefined> = {};
+beforeAll(() => {
+  nodeCompileCache = mkdtempSync(resolve(tmpdir(), "kogane-resume-node-cache-"));
+  nodeEnv = { ...process.env, NODE_COMPILE_CACHE: nodeCompileCache };
 });
-const nodeEnv = { ...process.env, NODE_COMPILE_CACHE: nodeCompileCache };
+afterAll(() => {
+  if (nodeCompileCache !== "") rmSync(nodeCompileCache, { recursive: true, force: true });
+});
 
 const sha = "a".repeat(40),
   trustedSha = "b".repeat(40);
