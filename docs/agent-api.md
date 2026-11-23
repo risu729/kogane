@@ -1566,7 +1566,12 @@ and explanation are the operator route's answer with one difference, ADR
 run and without its body, is `403 evidence_restricted` on both views, and a
 report whose body has left R2 is `404 not_found`, the codes `/export`
 answers; the operator page re-displays the first and shows the second as
-`unavailable`. No argument reaches `/export`. The detail carries `partition`
+`unavailable`. A cached explanation node that is not JSON is
+`503 report_explanation_invalid` on the route and both agent paths (an
+`isError: true` result on `/mcp`), as a stored body that cannot be read is
+`503 report_body_invalid`; nothing of the stored text is answered or logged
+([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-a-cached-explanation-that-is-not-json-is-refused-as-such-2026-11-21)).
+No argument reaches `/export`. The detail carries `partition`
 beside the stored `body`, the partition the page shows: a body stored
 `complete` with `truncated: true` is answered `partial-verified-scope`
 ([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).

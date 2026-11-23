@@ -557,3 +557,69 @@ test fails. Its plan check on the complete CORE schema without table statistics
 finds no scan the page read does not make besides the JSON argument, the
 bound row searched by key, and the id lists and the bound each evaluated
 once.
+
+## Amendment: a cached explanation that is not JSON is refused as such (2026-11-21)
+
+- Status: proposed
+- Date: 2026-11-21
+
+### Context
+
+The report reader `readReportRoute` (`services/app/src/reports-api.ts`)
+answers `GET /api/v2/reports/{id}/explanation` and `kogane.reports.read`
+with `view: "explanation"`. It parsed the cached explanation node
+(`reports/<digest>.explanation`) with no refusal of its own, while the body
+view refuses a stored body that does not parse with
+`503 report_body_invalid`. An unparsable node therefore threw an exception
+the reader did not name; the Worker's `catalogue` wrap answered it
+`503 catalogue_read_failed` on the route, `/api/agent/v1/reports.read` and
+`/mcp`, and the request log and audit record carried that code. That code
+says the store could not be read, which is not what happened: the store
+answered, and the cached node beside an intact body is not JSON. A bare call
+of the reader, outside the wrap, ended in an unhandled exception.
+
+### Options considered
+
+1. Leave it. Rejected: an agent or operator reading `catalogue_read_failed`
+   looks for a store outage and may retry, and the log cannot tell a corrupt
+   cache from an unreadable store.
+2. Reuse `report_body_invalid`. Rejected: that code is not generic. It says
+   the report's own body cannot be served, and the web page shows it as
+   such (保存された内容が、レポートの形式として読み取れません). Here the body
+   is intact and still served by the detail view; only a node of retention
+   class `cache` is bad.
+3. A closed code of the explanation's own, raised exactly as the body view
+   raises its parse failure.
+
+### Decision
+
+Option 3. The reader reads the cached node's text, parses it in a `try`, and
+refuses a parse failure with `HttpError(503, "report_explanation_invalid")`.
+The status is the body view's `503`; the code names the explanation. As
+every `HttpError` of a read, it is the route's `{error, requestId}`, the
+agent paths' `{error}` (an `isError: true` result on `/mcp`), the request
+log's `errorCode` and the audit record's `result_code`, and none of the
+stored text.
+
+### Consequences
+
+- The status is unchanged (`503`); the closed code a client sees for this
+  fault changes from `catalogue_read_failed` to `report_explanation_invalid`.
+- The node is still served as cached when it parses: the reader adds no
+  shape check (the body view checks `validReportBody`). The web client's
+  contract (`validReportExplanationNode`) refuses a malformed node it
+  receives; an agent receives it as stored. A shape check in the reader
+  would refuse more, and is not decided here.
+- Limit: an explanation node over the size bound is still refused with
+  `503 report_body_too_large`, the body's code.
+
+### Verification
+
+`services/app/test/page-read-reports.test.ts` stores a report whose body is
+intact and whose cached explanation is not JSON. The operator route answers
+`503` with `{error: "report_explanation_invalid", requestId}`,
+`/api/agent/v1/reports.read` and `/mcp` answer the same code (`isError: true`
+on `/mcp`), the request log carries that `errorCode`, every audit record of
+the reads is `failed` with that `result_code`, the stored text appears in
+none of them, and the body view still answers `200`. Without the reader's
+refusal the test fails: the route answers `catalogue_read_failed`.

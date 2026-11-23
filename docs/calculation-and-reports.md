@@ -561,7 +561,15 @@ observation pages, and each price with its source claim) is requested only
 when the report says it may be explained; a restricted or unavailable report
 says why it is not, and a missing cached node is shown as missing. A body
 whose digest no longer matches, or that is gone, is never shown as the
-report. The page has no recompute or share control. Amounts are formatted by
+report. The reader refuses a stored body it cannot serve with a closed
+`503`: `report_digest_mismatch`, `report_body_invalid` (not JSON, or not a
+report body) or `report_body_too_large`. It refuses a cached explanation
+node that is not JSON with `503 report_explanation_invalid`; the node is
+served as cached otherwise, without a shape check of its own (the web
+client's contract checks it), and one over the size bound is refused with
+`report_body_too_large`. No stored text reaches the answer or the log
+([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-a-cached-explanation-that-is-not-json-is-refused-as-such-2026-11-21)).
+The page has no recompute or share control. Amounts are formatted by
 the shared exact formatter; a decimal with more places than its unit's minor
 unit, or in a unit with no known minor unit, is shown with every place
 through `formatDecimal` (integer digits grouped in threes), never rounded.
@@ -774,6 +782,10 @@ would discard later collection and later decisions (docs/operations.md).
   method gates, refusal of explanation and export under a restriction, the
   decimal policy selection contract, the list's order, paging and query
   refusals, and the real answers checked against the client contract.
+- `services/app/test/page-read-reports.test.ts` — `kogane.reports.read`
+  answers as the routes do, including `503 report_explanation_invalid` for
+  a cached explanation that is not JSON, with that code in the request log
+  and the audit record and none of the stored text.
 - `apps/web/test/report-artifacts-contract.test.ts` — refusals of the list,
   detail and explanation contract, the capability, the routes and the exact
   amount formatting; `apps/web/test/reports.browser.test.ts` — both pages in
