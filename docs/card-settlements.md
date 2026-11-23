@@ -581,13 +581,14 @@ Limits:
   covers a balance captured on or before the due date itself.
 - The previous debit from an account is the latest of two dates only: the
   debit date of each card's newest accepted settlement per bank account, and
-  the due date of each card's newest statement when it is already due. A
-  card whose newest statement is a bill has its earlier statement left out
-  unless an accepted settlement pays it, so a balance captured before that
-  earlier statement's due date is compared with the bill as if it showed
-  that debit, and can read `yes` though the bank has since taken it. ADR
-  0114's decision names the latest card debit from the account; the read
-  does not look at a card's older statements.
+  the due date of the newest statement of each card the account answers for,
+  when it is already due. A card whose newest statement is a bill has its
+  earlier statement left out unless an accepted settlement pays it, so a
+  balance captured on or before that earlier statement's due date is
+  compared with the bill as if it showed that debit, and can read `yes`
+  though the bank has since taken it. ADR 0114's decision names the latest
+  card debit from the account; the read does not look at a card's older
+  statements.
 
 ## Candidate and decision lifecycle
 
