@@ -541,11 +541,7 @@ statements before the payable window nor the scheduled payments is read.
   (`EARLIER_STATEMENT_DUE_SQL`), settled or not. So a card whose newest
   statement is a bill still has its earlier statement's debit counted: a
   balance captured on or before that statement's due date reads `unknown`,
-  never compared with the bill as if it showed that debit. A card's
-  statements are taken as debited from the account its answer names now. A
-  statement with no readable due date (absent, or not a civil date) is not
-  taken as debited; only a card's newest one makes lines `unknown`
-  (`cards_with_unknown_due_date`).
+  never compared with the bill as if it showed that debit.
 - An account entity's balance comes from the newest capture among its
   references; two references captured together that disagree are
   `conflict` / `balances_disagree`, and references are never added.
@@ -591,6 +587,17 @@ Limits:
   date (`no_statement_due`). A bank that debits it later, for example on the
   next business day, is not modelled; `balance_before_previous_debit` only
   covers a balance captured on or before the due date itself.
+- A card's earlier statements are taken as debited from the account its
+  answer names now. One the bank took from another account before the card
+  moved counts for that account only through the debit date of the card's
+  newest accepted settlement from it, when there is one. A card whose debit
+  account is unknown has no statement's due date taken as any account's
+  previous debit (only its accepted settlements' debit dates count), so a
+  balance captured before such a card's statement already due is still
+  compared; only its bill (`cards_with_unknown_account`) or an undated newest
+  statement (`cards_with_unknown_due_date`) makes lines `unknown`. An earlier
+  statement with no readable due date (absent, or not a civil date) is not
+  taken as debited.
 
 ## Candidate and decision lifecycle
 
