@@ -336,6 +336,20 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 60000);
+  test("the time the page read its answer is shown in Japan time, not as a UTC instant", async () => {
+    const page = await browser.newPage();
+    try {
+      // 15:30 UTC on 01-01 is 00:30 on 01-02 in Tokyo.
+      await page.clock.setFixedTime(new Date("2099-01-01T15:30:00Z"));
+      await page.goto(`${origin}/collection-quality?source=vpass`);
+      const read = page.locator("p", { hasText: "表示を読んだ時刻:" });
+      await read.waitFor();
+      expect(await read.textContent()).toBe("表示を読んだ時刻: 2099/01/02 0:30");
+      expect(await read.locator("time").getAttribute("datetime")).toBe("2099-01-01T15:30:00.000Z");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("the account view lists a source's periods per account and the records no account names", async () => {
     const page = await browser.newPage();
     try {
