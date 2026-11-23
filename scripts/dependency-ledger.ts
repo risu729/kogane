@@ -5,7 +5,7 @@
 // isolated linker (U03), so a workspace's resolution is the closure the root
 // lockfile gives it, not a lockfile of its own. The text lockfile scopes a
 // conflicting pin under the requesting package (`"<parent>/<name>"`), which is
-// how two TypeScript and five Wrangler versions coexist; resolving a name
+// how the TypeScript 6 and 7 pins coexist; resolving a name
 // therefore means walking those prefixes before falling back to the bare
 // entry.
 //
