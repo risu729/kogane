@@ -207,7 +207,8 @@ beforeAll(() => {
   const files = migrationFiles(CORE_MIGRATIONS_URL);
   expect(files).toContain(MIGRATION);
   beforeImage = migrated(files.filter((file) => file < MIGRATION));
-  afterImage = migrated(files);
+  // Through 0105 only: later migrations add their own objects.
+  afterImage = migrated(files.filter((file) => file <= MIGRATION));
 }, 120_000);
 
 describe("before 0105", () => {
