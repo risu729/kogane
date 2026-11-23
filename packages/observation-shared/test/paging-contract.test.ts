@@ -103,6 +103,32 @@ describe("paging", () => {
     expect(validPagedFields({ ...walked, next: null })).toBe(false);
   });
 
+  test("a page the byte bound ended (bytes) is short, and a full page says limit", () => {
+    expect(validPaging({ limit: 25, returned: 24, hasMore: true, stoppedBy: "bytes" })).toBe(true);
+    expect(validPaging({ limit: 25, returned: 1, hasMore: true, stoppedBy: "bytes" })).toBe(true);
+    // With only a byte bound there is no full page to compare with.
+    expect(validPaging({ limit: null, returned: 0, hasMore: true, stoppedBy: "bytes" })).toBe(true);
+    // A full page says `limit`, even when the byte bound ended it at the same
+    // row: `bytes`, like `walk`, always means fewer than `limit` items.
+    expect(validPaging({ limit: 25, returned: 25, hasMore: true, stoppedBy: "bytes" })).toBe(false);
+    expect(validPaging({ limit: 25, returned: 26, hasMore: true, stoppedBy: "bytes" })).toBe(false);
+    expect(validPaging({ limit: 25, returned: 9, hasMore: false, stoppedBy: "bytes" })).toBe(false);
+    expect(() =>
+      pagedFields({
+        limit: 25,
+        returned: 25,
+        next: { cursor: "synthetic-token" },
+        stoppedBy: "bytes",
+      }),
+    ).toThrow(RangeError);
+    expect(
+      validPagedFields({
+        next: { arguments: { cursor: "synthetic-token" } },
+        paging: { limit: 25, returned: 25, hasMore: true, stoppedBy: "bytes" },
+      }),
+    ).toBe(false);
+  });
+
   test("exact keys only", () => {
     expect(validPaging({ limit: 10, returned: 1, hasMore: false, stoppedBy: null, total: 1 })).toBe(
       false,

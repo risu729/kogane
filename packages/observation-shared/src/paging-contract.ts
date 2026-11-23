@@ -27,7 +27,8 @@ export type ContinuationArgument = (typeof CONTINUATION_ARGUMENTS)[number];
 export const PAGING_STOPS = [
   // The page holds `limit` items.
   "limit",
-  // The answer reached its byte bound before `limit`.
+  // The answer reached its byte bound before `limit`: `returned` is below
+  // `limit` when the page has one, and `hasMore` is true.
   "bytes",
   // Items follow, but this grant's row budget withholds the next page.
   "budget",
@@ -125,9 +126,13 @@ export function validPaging(value: unknown): value is Paging {
   if (value.limit !== null && value.returned > value.limit) return false;
   // A page the limit stopped is full.
   if (value.stoppedBy === "limit" && value.returned !== value.limit) return false;
-  // A page the walk ended is not full: a full page says `limit`, whatever
-  // else ended the walk at the same row.
-  if (value.stoppedBy === "walk" && value.limit !== null && value.returned >= value.limit)
+  // A page the walk or the byte bound ended is not full: a full page says
+  // `limit`, whatever else ended the page at the same row.
+  if (
+    (value.stoppedBy === "walk" || value.stoppedBy === "bytes") &&
+    value.limit !== null &&
+    value.returned >= value.limit
+  )
     return false;
   return value.hasMore === (value.stoppedBy !== null);
 }
@@ -213,7 +218,9 @@ export function continuationOf(
  * - `withheld`: items follow but the grant's row budget refuses the next page;
  *   `next` must then be null, and the page says `stoppedBy: "budget"`.
  * - `stoppedBy`: what ended a page that has a continuation (`limit` unless
- *   the byte bound (`bytes`) or a scan bound (`walk`) ended it first).
+ *   the byte bound (`bytes`) or a scan bound (`walk`) ended it first, with
+ *   fewer than `limit` items: a full page is `limit`, and a full page given
+ *   `bytes` or `walk` throws).
  */
 export function pagedFields(input: {
   limit: number | null;

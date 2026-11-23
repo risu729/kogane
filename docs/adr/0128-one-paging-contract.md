@@ -96,7 +96,7 @@ paging: {
 Invariants, checked by one shared validator: `hasMore` is false exactly when `stoppedBy` is null;
 `next` is non-null exactly when `hasMore` is true and `stoppedBy` is not `budget`; `returned <= limit`
 when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`; `returned < limit` when
-`stoppedBy` is `walk` and `limit` is a number.
+`stoppedBy` is `walk` or `bytes` and `limit` is a number.
 
 - **Why `paging`, not `page`.** `page` already names an input (`store.read`, `evidence.read`) and two
   versioned result shapes with exact keys: `snapshot-page-v1`'s page info (balances, reward expiry,
@@ -110,6 +110,15 @@ when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`; `retu
 - **Why `stoppedBy`.** It separates "the page is full" (`limit`), "the answer reached its byte bound"
   (`bytes`, `purchases.explain` `view: lines`) and "rows follow but this grant may not read them"
   (`budget`, today `nextPage: "budget_exceeded"`, and today silent on the candidate reads).
+- **A full page says `limit`** (`bytes` held to it on 2026-11-21, in review; it needs the owner's
+  approval with the rest of this ADR). `bytes` means what `walk` means for a short page: the byte
+  bound ended the page before it held `limit` items, so `returned` is below `limit` when the page
+  has one. A page that holds `limit` items says `limit`, even when the byte bound would have ended
+  it at the same row, so `limit` always means "full" and `bytes` and `walk` always mean "short and
+  continuing". The validator refuses `bytes` on a full page as it refuses `walk`. The one read
+  that answers `bytes`, `kogane.purchases.explain` `view: lines`, already says `bytes` only for a
+  page shorter than its 25 lines. With only a byte bound (`limit: null`) no page is full, and `bytes`
+  holds for any `returned`.
 - **`walk`** (added 2026-11-20 in review, for the events-filters branch; the owner asked for one
   paging contract, not for this value, which needs the owner's approval with the rest of this ADR):
   a scan bound ended the page before it was full. A filtered read that walks at most so many rows
@@ -335,6 +344,12 @@ what it waits for.
 - `services/app/test/ui-mcp-parity.test.ts`: every published tool that takes a continuation argument
   is walked or waiting for a named slice; each walked tool's description names `next.arguments` and
   `paging`.
+- The `bytes` stop: `packages/observation-shared/test/paging-contract.test.ts` refuses `bytes` on a
+  full page, in the validator and in `pagedFields`; `packages/application/test/purchases-explain.test.ts`
+  walks `view: lines` to the end in both sorts on 16 seeded stores of up to 80 lines whose
+  counterparties run from none to past the line's cut: every page is valid, a page that says
+  `bytes` is short, a full page that continues says `limit`, a short page that continues says
+  `bytes`, both stops are reached, and every line is listed once.
 - The existing parity tests (route, `/api/agent/v1/*` and `/mcp` give one answer) cover the new fields
   on every converted page read; each converted read's own test checks `next` and `paging` against its
   old fields on a first, middle and last page.

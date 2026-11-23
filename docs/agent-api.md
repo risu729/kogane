@@ -2116,13 +2116,14 @@ whatever their cursor kind:
   with every other argument repeated as it was. `cursor` is an opaque token or
   an id the read minted; `offset` a position.
 - `paging.stoppedBy` is `limit` (the page is full), `bytes` (the answer
-  reached its byte bound first), `budget` (rows follow but the grant's
-  `maxRows` withholds the next page: `next` is null, `hasMore` true) or
+  reached its byte bound before the page was full: it holds fewer than
+  `limit` items, and `next` continues it), `budget` (rows follow but the
+  grant's `maxRows` withholds the next page: `next` is null, `hasMore` true) or
   `walk` (a scan bound ended the page before it was full: it holds fewer than
-  `limit` items, perhaps none, and `next` continues it; a full page says
-  `limit`). No converted read in S1 answers `walk` yet. It says
-  nothing about whether the data behind the page is complete; each read's own
-  reasons do.
+  `limit` items, perhaps none, and `next` continues it). A full page says
+  `limit`, even when the byte bound or a scan bound ended it at the same row.
+  No converted read in S1 answers `walk` yet. It says nothing about whether
+  the data behind the page is complete; each read's own reasons do.
 - A refused continuation is `400 invalid_cursor` (not a token this read
   issued), `400 cursor_mismatch` with `mustMatch` (issued for other
   arguments), `410 context_expired` (its fixed context is gone) or
