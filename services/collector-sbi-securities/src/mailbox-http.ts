@@ -101,6 +101,7 @@ type MailboxRefusal =
   | "post-redirect"
   | "too-many-hops"
   | "request-url"
+  | "request-failed"
   | "response-url"
   | "cookie-pair"
   | "cookie-attribute"
@@ -329,7 +330,10 @@ export class MailboxHttp {
     let current = initial;
     const visited = new Set<string>();
     for (let hop = 0; hop < 5; hop++) {
+      // A hop that never answers must not carry the previous hop's answer.
       this.diagnosis.hop = hop;
+      delete this.diagnosis.status;
+      delete this.diagnosis.contentType;
       if (visited.has(current)) this.refuse("redirect-loop");
       visited.add(current);
       const response = await this.request(
@@ -452,7 +456,7 @@ export class MailboxHttp {
       if (this.leaseSignal.aborted) throw new MailboxError("sbi_mailbox_lease_lost");
       if (error instanceof MailboxError) throw error;
       if (Date.now() >= this.deadline) bound();
-      fail();
+      this.refuse("request-failed");
     }
   }
 }

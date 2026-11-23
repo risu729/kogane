@@ -530,10 +530,19 @@ test("a refusal at the hand-off names the rule that refused, never the provider'
       await expect(client.open()).rejects.toThrow("sbi_mailbox_transport_failed");
       expect(client.lastDiagnosis).toEqual({ step: "landing", hop: 1, status, ...expected });
     }
+    // A hand-off request that never answers carries no status from the hop before it.
+    const unanswered = new MailboxHttp([], async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+      if (url === MAILBOX_MAIN_LINK)
+        return new Response(null, { status: 302, headers: { location: HANDOFF } });
+      throw new TypeError("synthetic-secret network failure");
+    });
+    await expect(unanswered.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(unanswered.lastDiagnosis).toEqual({ step: "landing", hop: 1, reason: "request-failed" });
   } finally {
     console.log = original;
   }
-  expect(logged).toHaveLength(9);
+  expect(logged).toHaveLength(10);
   expect(logged.join("\n")).not.toMatch(/synthetic|secret/iu);
 });
 

@@ -496,17 +496,24 @@ host, else on the observed `site4` host. A failed sign-in logs
 `sbi-mailbox-refused` with step `session`.
 
 The 2026-11-23 21:00 UTC run, the first with that sign-in, passed it and the
-report link: the refusal moved to step `landing`, hop 1, status 302, with no
-refused host. So the mobile hand-off answered a redirect, and a rule other
-than the redirect target refused it: a missing or unparsable `Location`, a
-response URL that differs from the request, or a `Set-Cookie` the jar refuses.
-The refusal line now also carries `reason`, the name of the rule that refused
-(`status`, `unexpected-page`, `no-location`, `bad-location`,
-`redirect-target`, `redirect-loop`, `post-redirect`, `too-many-hops`,
-`request-url`, `response-url`, or `cookie-pair`, `cookie-attribute`,
-`cookie-domain`, `cookie-path`, `cookie-name`, `cookie-header` for a refused
-cookie), and for a repeated cookie attribute its name when it is a standard
-one (else `other`). Still no header value, cookie name or provider text.
+report link: the refusal moved to step `landing`, hop 1 (the mobile
+hand-off), status 302, with no refused host. The status could be the hand-off's
+own redirect or the report link's, because a hop kept the previous hop's
+status until its own response arrived. So the hand-off either failed to answer
+(a network failure or the per-request timeout), or answered a redirect that a
+rule other than the redirect target refused: a missing or unparsable
+`Location`, a response URL that differs from the request, or a `Set-Cookie`
+the jar refuses. Each hop now starts without a status, and a refusal by the
+navigation's own rules also carries `reason`, the name of the rule (`status`,
+`unexpected-page`, `no-location`, `bad-location`, `redirect-target`,
+`redirect-loop`, `post-redirect`, `too-many-hops`, `request-url`,
+`request-failed` for a request that never answered, `response-url`, or
+`cookie-pair`, `cookie-attribute`, `cookie-domain`, `cookie-path`,
+`cookie-name`, `cookie-header` for a refused cookie), and for a repeated cookie
+attribute its name when it is a standard one (else `other`). Refusals outside
+the navigation (a page's media type or form, an API answer, the response
+bound, a lost lease) still carry no `reason`. Still no header value, cookie
+name or provider text.
 
 ## Assessment scale
 
