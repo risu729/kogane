@@ -77,6 +77,7 @@ import {
   readRunUnitReportKeys,
   readRunUnits,
 } from "../../../storage-d1/src/core/structure.ts";
+import { rememberingRunLookups } from "../ingest/access.ts";
 import { IngestError, type IngestEnv } from "../ingest/contract.ts";
 import { directRegistrationPort, type RunRegistrationPort } from "../ingest/port.ts";
 import {
@@ -255,11 +256,13 @@ export async function registerTerminal(
   }
   budget.started += 1;
   const meter = budget.meter;
-  const env: IngestEnv = {
+  // A fresh env per call: the fetch run is looked up once for this
+  // registration, never across registrations (`rememberingRunLookups`).
+  const env: IngestEnv = rememberingRunLookups({
     ...input.env,
     DB: meterD1(input.env.DB, meter),
     EVIDENCE: meterBucket(input.env.EVIDENCE, meter),
-  };
+  });
   const context: Registration = {
     input,
     env,
