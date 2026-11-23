@@ -7,7 +7,7 @@
 // without it (the local evidence browser) is never probed. The route is the
 // operator's; for anyone else the panel is not shown.
 import { ownEntry } from "./labels.ts";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getJson, useFeatures } from "./api.ts";
 import type {
@@ -17,6 +17,7 @@ import type {
 } from "../../../packages/domain/src/pending-decisions.ts";
 import { PENDING_DECISIONS_PATH } from "../../../packages/observation-shared/src/pending-decisions-contract.ts";
 import { Link } from "./router.tsx";
+import { useRepeatedFailure } from "./repeated-failure.ts";
 import { Badge, ErrorState, Loading, Panel } from "./ui.tsx";
 
 function usePendingDecisions(advertised: boolean) {
@@ -88,24 +89,10 @@ function Line({ line }: { line: PendingDecisionLine }): ReactNode {
 export function PendingDecisionsPanel(): ReactNode {
   const features = useFeatures();
   const query = usePendingDecisions(features.pendingDecisions);
-  // The failure a pressed retry repeats. React Query clears the error of a
-  // query that holds no answer as soon as a refetch starts, which would swap
-  // the alert, and the retry the owner pressed, for the loading status. Until
-  // that read settles the alert stays, its button waiting (再試行中…).
-  const [repeating, setRepeating] = useState<{ error: Error; at: number } | null>(null);
-  const failure =
-    query.error ??
-    (repeating !== null &&
-    query.data === undefined &&
-    query.fetchStatus === "fetching" &&
-    query.errorUpdatedAt === repeating.at
-      ? repeating.error
-      : null);
-  const retry = (): void => {
-    if (query.isFetching) return;
-    if (query.error !== null) setRepeating({ error: query.error, at: query.errorUpdatedAt });
-    void query.refetch();
-  };
+  // The failure a pressed retry repeats stays until that read settles, so the
+  // alert and its waiting button (再試行中…) are not swapped for the loading
+  // status (repeated-failure.ts).
+  const { failure, retry, retrying } = useRepeatedFailure(query);
   // A store that does not advertise the route (the local evidence browser),
   // or not the operator (the route is theirs): the panel is not shown.
   if (!features.pendingDecisions) return null;
@@ -139,12 +126,7 @@ export function PendingDecisionsPanel(): ReactNode {
           first: a read in flight after it, a pressed retry or a refresh of an
           earlier answer, leaves the failure standing. */}
       {failure ? (
-        <ErrorState
-          error={failure}
-          label="判断待ちの件数"
-          onRetry={retry}
-          retrying={query.isFetching}
-        />
+        <ErrorState error={failure} label="判断待ちの件数" onRetry={retry} retrying={retrying} />
       ) : query.data === undefined ? (
         <Loading label="判断待ちの件数" />
       ) : (
