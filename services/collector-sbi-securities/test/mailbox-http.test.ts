@@ -442,6 +442,7 @@ test("a refusal logs its step, hop, status and refused redirect target in closed
         status: 302,
         refusedHost: host,
         refusedRoute: route,
+        reason: "redirect-target",
       });
     }
     const { fetcher } = sequence();
@@ -487,6 +488,62 @@ test("a refusal logs its step, hop, status and refused redirect target in closed
     ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "api"],
   ]);
   expect(logged.join("\n")).not.toMatch(/synthetic|secret|jsessionid|token|evil/iu);
+});
+
+test("a refusal at the hand-off names the rule that refused, never the provider's header", async () => {
+  const logged: string[] = [];
+  const original = console.log;
+  console.log = (line: string) => logged.push(line);
+  const handingOff = (headers: Record<string, string>, status = 302) =>
+    new MailboxHttp([], async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+      return url === MAILBOX_MAIN_LINK
+        ? new Response(null, { status: 302, headers: { location: HANDOFF } })
+        : new Response(null, { status, headers });
+    });
+  const onward = { location: "/switchnaviMain" };
+  try {
+    for (const [headers, status, expected] of [
+      [{}, 302, { reason: "no-location" }],
+      [onward, 404, { reason: "status" }],
+      [{ location: "https://[synthetic-secret" }, 302, { reason: "bad-location" }],
+      [{ ...onward, "set-cookie": "synthetic-secret" }, 302, { reason: "cookie-pair" }],
+      [
+        { ...onward, "set-cookie": "secret=synthetic; Path=/; Secure; Secure" },
+        302,
+        { reason: "cookie-attribute", cookieAttribute: "secure" },
+      ],
+      [
+        { ...onward, "set-cookie": "secret=synthetic; X-Synthetic-Secret=1; x-synthetic-secret=2" },
+        302,
+        { reason: "cookie-attribute", cookieAttribute: "other" },
+      ],
+      [
+        { ...onward, "set-cookie": "secret=synthetic; Domain=synthetic-secret.invalid" },
+        302,
+        { reason: "cookie-domain" },
+      ],
+      [{ ...onward, "set-cookie": "secret=synthetic; Path=" }, 302, { reason: "cookie-path" }],
+      [{ ...onward, "set-cookie": "secret(1)=synthetic; Path=/" }, 302, { reason: "cookie-name" }],
+    ] as const) {
+      const client = handingOff(headers, status);
+      await expect(client.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+      expect(client.lastDiagnosis).toEqual({ step: "landing", hop: 1, status, ...expected });
+    }
+    // A hand-off request that never answers carries no status from the hop before it.
+    const unanswered = new MailboxHttp([], async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+      if (url === MAILBOX_MAIN_LINK)
+        return new Response(null, { status: 302, headers: { location: HANDOFF } });
+      throw new TypeError("synthetic-secret network failure");
+    });
+    await expect(unanswered.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(unanswered.lastDiagnosis).toEqual({ step: "landing", hop: 1, reason: "request-failed" });
+  } finally {
+    console.log = original;
+  }
+  expect(logged).toHaveLength(10);
+  expect(logged.join("\n")).not.toMatch(/synthetic|secret/iu);
 });
 
 test("calls the fetcher unbound, as the Workers runtime's fetch requires", async () => {
