@@ -43,13 +43,14 @@ and back and forward as the URL does, and a list read sends only those the
 advertised capabilities allow (`listRequestSearch`). Without `collectionFilters`
 (the local store), client record controls take their place: transaction filters
 and search, balance source/account, currency/unit and kind filters, and position
-filters. Those controls, the transaction sort (offered while a response is the
-complete set rather than one server page) and the 50-row page selection on 取引
-and 保有資産 are in-memory state that survives visits to detail pages within the
-current tab. A page selection belongs to the server window it was chosen in: the
-next 500 rows or a changed server filter open at their first page. In-memory
-state resets on reload and is never written to URL parameters, browser history
-state, localStorage, or sessionStorage. Route changes update the document title
+filters. Those controls, the zero-row toggle on 残高 and 期間実績・請求 (残高0を除外,
+0の実績・請求を除外; shown with either store), the transaction sort (offered while a
+response is the complete set rather than one server page) and the 50-row page
+selection on 取引 and 保有資産 are in-memory state that survives visits to detail
+pages within the current tab. A page selection belongs to the server window it
+was chosen in: the next 500 rows or a changed server filter open at their first
+page. In-memory state resets on reload and is never written to URL parameters,
+browser history state, localStorage, or sessionStorage. Route changes update the document title
 and focus the new heading; typing and API refreshes do not move focus.
 
 Response validation requires decimal-integer minor units, safe nonnegative
