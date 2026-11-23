@@ -39,7 +39,7 @@ On 2026-08-30, the following were verified with the owner's real account using a
 - `manifest.json`: R2 key, SHA-256, bytes and success/failure per artifact.
 
 The same session then reads two supplements, each persisted as its own terminal
-run with the core run's ID as `acquisitionSessionRef` (`collectSonyBank` and
+run with the core run's ID as `acquisitionSessionRef` and `attemptId` (`collectSonyBank` and
 `runSharedCollection`, `src/sony-bank.ts` and `src/worker.ts`):
 
 - Realised gains: `realised-gains-response.json` (the raw current/previous-year
