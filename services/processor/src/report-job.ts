@@ -49,10 +49,7 @@ import {
   POSITION_VALUATIONS_SQL,
   positionsSql,
 } from "../../../packages/read-model/src/sql";
-import {
-  CORE_REVISION_SQL,
-  type CoreRevisionRow,
-} from "../../../packages/read-model/src/source-revision";
+import type { CoreRevisionRow } from "../../../packages/read-model/src/source-revision";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
 const INPUT_MANIFEST_VERSION = "report-inputs-v2";
@@ -380,7 +377,7 @@ FROM ranked WHERE rank_in_key=1`;
  * instants, both of which the clock alone carries past the cutoff. NULL when
  * no such price exists. The skip gate holds the stored report only until then.
  */
-export const NEXT_PRICE_INSTANT_SQL = `WITH wanted AS (
+const NEXT_PRICE_INSTANT_SQL = `WITH wanted AS (
  SELECT DISTINCT json_extract(value,'$[0]') AS base, json_extract(value,'$[1]') AS position_id
  FROM json_each(?1)
 )
