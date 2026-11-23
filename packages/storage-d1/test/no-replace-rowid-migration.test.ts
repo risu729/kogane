@@ -150,6 +150,7 @@ const UNGUARDED = [
   "collection_runs",
   "collection_schedule_revisions",
   "conversion_offers",
+  "core_snapshot_input_revision",
   "core_source_revision",
   "evidence_use_restrictions",
   "expiry_rules",

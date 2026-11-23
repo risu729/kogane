@@ -619,12 +619,16 @@ test("reward candidate plan on real CORE views preserves indexed probes without 
       windowScan(totalWindow, totals.id),
     ];
     expect(named("SCAN h").parent).toBe(historyWindow.id);
-    expect(scans(fresh).filter((step) => !derivedScans.includes(step))).toEqual([
-      "SCAN b",
-      "SCAN unit_policy",
-      "SCAN unit_policy",
-      "SCAN unit_policy",
-    ]);
+    // The unit-scope policy probes search by (source_id, dataset) since
+    // migration 0108's index; only the balance walk scans.
+    expect(scans(fresh).filter((step) => !derivedScans.includes(step))).toEqual(["SCAN b"]);
+    expect(
+      fresh.filter((step) =>
+        step.startsWith(
+          "SEARCH unit_policy USING INDEX idx_dataset_snapshot_policies_source_dataset",
+        ),
+      ),
+    ).toHaveLength(3);
     expect(fresh.filter((step) => /USING AUTOMATIC/u.test(step))).toEqual([
       "SEARCH h USING AUTOMATIC PARTIAL COVERING INDEX (parse_run_id=? AND history_rank=?)",
       "SEARCH t USING AUTOMATIC PARTIAL COVERING INDEX (total_rank=? AND reported_total=? AND fetch_run_id=? AND holding_account=?)",

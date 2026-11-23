@@ -141,6 +141,14 @@ export const REVISION_EXCLUDED_TABLES = [
   // is keyed on this very revision, so a bump from it would never let it hold.
   "processor_read_budget_hours",
   "report_job_gates",
+  // ADR 0129's snapshot memo (migration 0108): the snapshot-input counter, the
+  // container registry and the stored current snapshot sets. All are derived
+  // from tables the ledger covers, and the memo is keyed on the counter, so a
+  // bump from a memo write would make every memo stale as it was written.
+  "core_snapshot_input_revision",
+  "snapshot_selection_containers",
+  "snapshot_selection_keys",
+  "snapshot_selection_members",
 ] as const;
 
 export type LedgerTable =
@@ -154,6 +162,35 @@ export function revisionTriggerNames(): string[] {
   return [...SOURCE_REVISION_LEDGER, ...VISIBILITY_REVISION_LEDGER]
     .flatMap((table) => TRIGGER_EVENTS.map((event) => `${table}_bump_revision_${event}`))
     .sort();
+}
+
+/**
+ * The snapshot-input ledger (migration 0108, ADR 0129): the tables that decide
+ * which capture of a container is current. Every write of one moves
+ * `core_snapshot_input_revision.revision`, which keys the Processor's stored
+ * snapshot sets (snapshot-memo.ts). Each is also in a CORE ledger above, so
+ * the snapshot revision never moves without the CORE revision.
+ *
+ * The acquisition tables (`fetch_runs`, `fetch_artifacts`, `fetch_units` and
+ * their reports, `acquisition_sessions`) are not here: a run's rows are
+ * written before its seal and migration 0001 refuses any change after it, and
+ * the selections read only sealed runs, so the seal's own bump covers them.
+ */
+export const SNAPSHOT_INPUT_REVISION_LEDGER = [
+  "parse_runs",
+  "published_parse_runs",
+  "publication_events",
+  "parse_coverage_claims",
+  "dataset_snapshot_policies",
+  "fetch_run_seals",
+  "fetch_run_annotations",
+] as const satisfies readonly LedgerTable[];
+
+/** Every snapshot-input bump trigger migration 0108 declares, sorted. */
+export function snapshotInputTriggerNames(): string[] {
+  return SNAPSHOT_INPUT_REVISION_LEDGER.flatMap((table) =>
+    TRIGGER_EVENTS.map((event) => `${table}_bump_snapshot_input_${event}`),
+  ).sort();
 }
 
 export interface CoreRevisionRow {

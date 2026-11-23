@@ -7,8 +7,9 @@
 // complete CORE schema (every migration, Layer A included) or on the READ
 // baseline, the way D1 plans it: never analyzed, so no `sqlite_stat*` table
 // exists. A step that reads a growing table from end to end fails the test
-// unless it is listed below with the reason it is bounded or the document that
-// accepts it. A statement a tick does not reach on this store (work this store
+// unless it is listed below, either with the reason it is bounded or as an
+// exception that names the issue removing it and an expiry date (ADR 0129,
+// decision 8). A statement a tick does not reach on this store (work this store
 // does not have) is not checked here: the Vpass binding insert of the identity
 // sweep's empty-parse batch is one.
 //
@@ -45,7 +46,10 @@ const PRODUCTION_FLAGS = {
 
 /**
  * Tables a tick may read whole: configuration and operational singletons of a
- * handful of rows that no capture adds to.
+ * handful of rows that no capture adds to. The snapshot memo's keys (migration
+ * 0108) are the current revision's, one per deployed build, and its container
+ * registry gains a row only when a new container (source, parser, dataset,
+ * unit) first publishes, never per capture.
  */
 const SMALL = new Set([
   "active_releases",
@@ -54,76 +58,112 @@ const SMALL = new Set([
   "economic_identity_epochs",
   "expiry_rules",
   "price_promotion_cursor",
+  "snapshot_selection_containers",
+  "snapshot_selection_keys",
 ]);
 
 /**
  * Whole reads of growing tables a tick makes, each matched by a fragment of
- * its statement (whitespace collapsed) and the plan step, with where it is
- * bounded or accepted.
+ * its statement (whitespace collapsed) and the plan step.
+ *
+ * A `bounded` entry says why the step does not read history: a partial index,
+ * a walk that stops at its LIMIT, a CTE named like a table. Anything else is
+ * an `exception` (ADR 0129, decision 8): a scheduled statement whose rows read
+ * grow with history, allowed only with the issue that removes it and a date
+ * after which this test fails, so an exception is revisited rather than
+ * accepted for ever.
  */
-const ACCEPTED: readonly { statement: string; step: RegExp; reason: string }[] = [
+type PlanEntry = { statement: string; step: RegExp } & (
+  | { kind: "bounded"; reason: string }
+  | { kind: "exception"; reason: string; issue: number; expires: string }
+);
+
+/** ADR 0129's later slices (the card sweeps, the history parsers) and its open limits. */
+const SLICES_3_4 = { issue: 1491, expires: "2027-03-31" } as const;
+
+const ACCEPTED: readonly PlanEntry[] = [
   {
+    kind: "bounded",
     statement: "UPDATE parse_runs SET status='error',error='parse_interrupted'",
     step: /^SCAN parse_runs USING COVERING INDEX parse_runs_pending$/u,
     reason: "the partial index holds pending runs only (migration 0083, ADR 0079)",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "WITH identity_page AS MATERIALIZED",
     step: /^SCAN p( USING COVERING INDEX idx_parse_runs_success)?$/u,
     reason:
-      "the identity sweep's candidate page orders every successful parse run; an open limit (docs/observation-lanes.md, Lanes)",
+      "the identity sweep's candidate page orders every successful parse run; an open limit (ADR 0129 owner decision 8, docs/observation-lanes.md, Lanes)",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "AS published_high_water",
     step: /^SCAN (t USING COVERING INDEX idx_fetch_run_reports_one_terminal|entity_relations|decision_revisions USING COVERING INDEX decision_revisions_operation)$/u,
     reason: "the operational counts logged with each build (docs/projection-input.md)",
   },
   {
-    statement: "snapshot_policies(parser_name, dataset, required_version",
-    step: /^SCAN (a USING INDEX idx_fetch_artifacts_source_dataset_time|t USING INDEX idx_fetch_run_reports_one_terminal)$/u,
+    kind: "bounded",
+    statement: "INSERT OR IGNORE INTO snapshot_selection_members",
+    step: /^SCAN report USING COVERING INDEX idx_fetch_run_reports_terminal_completion$/u,
     reason:
-      "the latest-state reads group the whole active set first (docs/read-model.md, Queries). Not once per artifact: the latest balances read scans every artifact three times (its active chain, eligible_snapshots, eligible_artifact_containers) and walks every terminal run report twice more (MyJCB past months, V Point runs), the positions read walks every terminal report and scans twice, each pass probing the run, units, parse, claim and warnings per artifact, so rows read grow linearly with history (docs/read-model.md, Rows read by the latest-state reads; tick-rows-read.test.ts)",
+      "the V Point run walk reads terminal reports newest first and stops at the first eligible run of each source (migration 0108, ADR 0129); it runs once per snapshot-input revision",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "WITH ranked_myjcb_snapshots AS",
     step: /^SCAN a USING INDEX (idx_fetch_artifacts_source_dataset_time|sqlite_autoindex_fetch_artifacts_1)$/u,
     reason:
       "not once per artifact: the card usage read scans every artifact twice (Vpass statement eligibility, MyJCB ledger ranking), probing each one's run, units and parse, so rows read grow linearly with history (docs/read-model.md, Rows read by the latest-state reads; tick-rows-read.test.ts)",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "WITH current_keys AS MATERIALIZED",
     step: /^SCAN k USING INDEX sqlite_autoindex_card_purchase_recognition_keys_1$/u,
     reason:
       "the stale-key read runs only while the retirement proof is dirty (ADR 0037, docs/economic-events.md), and every move of the CORE revision and every new capture dirties it (migration 0064); besides this walk of every live key, the card usage CTEs it composes walk every terminal run report twice through an automatic index, so rows read grow linearly with history (docs/read-model.md, Rows read by the latest-state reads; tick-rows-read.test.ts)",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "WITH page AS MATERIALIZED ( SELECT * FROM card_statement_facts",
     step: /^SCAN b USING INDEX idx_bal_obs_parse_run$/u,
     reason:
       "card_statement_facts ranks every statement total once a tick (docs/card-settlements.md, Cost)",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.source_account,b.metric",
     step: /^SCAN b$/u,
     reason:
       "the reward candidate page walks balance ids from the first row; an open limit (docs/observation-lanes.md, Lanes)",
   },
   {
+    kind: "bounded",
     statement: "ranked AS MATERIALIZED ( SELECT o.*,p.id parse_run_id",
     step: /^SCAN o$/u,
     reason: "`o` is the `ranked` CTE here (FROM ranked o); identities are reached by key",
   },
   {
+    kind: "bounded",
     statement: "FROM parse_coverage_claims c",
     step: /^SCAN c USING INDEX parse_coverage_claims_parse_run$/u,
     reason: "walks claims newest first and stops at its LIMIT",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "FROM reward_bucket_claims_v2 c",
     step: /^SCAN c USING INDEX reward_bucket_claims_v2_holding$/u,
     reason: "the reward read projection builds from every current claim (docs/rewards.md)",
   },
   {
+    kind: "exception",
+    ...SLICES_3_4,
     statement: "FROM membership_state_claims m",
     step: /^SCAN m USING INDEX membership_state_claims_holding$/u,
     reason: "the reward read projection builds from every current claim (docs/rewards.md)",
@@ -215,4 +255,14 @@ test("every accepted whole read is still made, so none is accepted silently", ()
   core.close();
   read.close();
   expect(stale).toEqual([]);
+});
+
+test("every exception names an issue and has not expired", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const expired = ACCEPTED.flatMap((entry) =>
+    entry.kind === "exception" && !(entry.issue > 0 && today <= entry.expires)
+      ? [`${entry.statement} (#${entry.issue}, ${entry.expires})`]
+      : [],
+  );
+  expect(expired).toEqual([]);
 });
