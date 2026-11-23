@@ -244,7 +244,7 @@ export function statementDueDate(stored: unknown): StatementDueDate {
  * never stores one, so a candidate it made always has its date.
  */
 export const SETTLEMENT_DEBIT_DATE_REASONS = ["debit_date_invalid"] as const;
-export type SettlementDebitDateReason = (typeof SETTLEMENT_DEBIT_DATE_REASONS)[number];
+type SettlementDebitDateReason = (typeof SETTLEMENT_DEBIT_DATE_REASONS)[number];
 /** A candidate's debit date, or null with the reason; the reason is there exactly when the date is not. */
 export type SettlementDebitDate =
   | { debitDate: string }

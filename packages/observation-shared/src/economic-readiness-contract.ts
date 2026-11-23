@@ -26,7 +26,7 @@ export const SECURITY_GENERATION_GATES = [
 export type EconomicGenerationGate =
   | (typeof BANK_GENERATION_GATES)[number]
   | (typeof SECURITY_GENERATION_GATES)[number];
-export interface EconomicReadinessRow extends EconomicRowEvaluation {
+interface EconomicReadinessRow extends EconomicRowEvaluation {
   ref: EconomicRowRef;
   pinsDigest: string;
   keyDigest: string | null;

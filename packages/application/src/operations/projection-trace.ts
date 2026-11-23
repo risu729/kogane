@@ -105,7 +105,7 @@ export function projectionRequirement(evidenceRef: string | null): ProjectionReq
 interface ReadInstance {
   contract_version: string;
 }
-export interface ReadPointer {
+interface ReadPointer {
   snapshot_id: string;
   source_revision: number;
   core_epoch: string;

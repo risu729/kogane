@@ -393,9 +393,7 @@ export const CARD_PURCHASE_LINE_COUNTERPARTY_MAX = 64;
  * for an event in state `unknown` (which has no leg), `missing` with the
  * event's unknown reason and no unit. Never a zero (INV05).
  */
-export type CardPurchaseLineAmount =
-  | CompactAmount
-  | { unit: null; status: "missing"; reason: string };
+type CardPurchaseLineAmount = CompactAmount | { unit: null; status: "missing"; reason: string };
 
 /** One recognised purchase or refund as the line view lists it. */
 export interface CardPurchaseLine {

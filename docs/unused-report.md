@@ -56,36 +56,55 @@ report it.
 
 ## Findings
 
-Checked on 2026-11-07 against `de86e9d2`. The command above is authoritative as
-the tree changes.
+Checked on 2026-11-22 against `b1066a98e` with the 2026-11-22 cleanup below
+applied. The command above is authoritative as the tree changes.
 
-No unresolved imports, undeclared dependencies, unused files or unused
-dependencies are reported. The 2026-11-07 cleanup removed the files nothing
-imported (the legacy `storage.ts` of the Money Forward and MyJCB collectors,
-the retired GLOBAL PASS `browser-probe.ts`, and V Point's
-`vpoint-pay-reconcile.ts`), the dependencies only those used or nothing used
-(`@cloudflare/puppeteer` in GLOBAL PASS, `wrangler` in `packages/collection`,
-`ws` in St.George, `@types/set-cookie-parser` in V Point), and made module-private
-or deleted the unused exports outside files that open pull requests were
-changing at the time.
+No unresolved imports, undeclared dependencies or unused dependencies are
+reported. Knip reports two unused files, the `container/chrome-install.mjs`
+copies in GLOBAL PASS and SBI Shinsei: `tasks/_lib/pinned-chrome/` holds the
+canonical source, and each Dockerfile copies and runs its copy, which Knip does
+not read. It also lists `dpkg-deb`, `fc-match`, `ldd` and `openssl` as unlisted
+binaries; `tasks/_lib/pinned-chrome/` runs them inside the Container image, and
+none is an npm dependency.
 
-Unused exports and types remain in files those pull requests change, and in
+The 2026-11-07 cleanup removed the files nothing imported (the legacy
+`storage.ts` of the Money Forward and MyJCB collectors, the retired GLOBAL PASS
+`browser-probe.ts`, and V Point's `vpoint-pay-reconcile.ts`), the dependencies
+only those used or nothing used (`@cloudflare/puppeteer` in GLOBAL PASS,
+`wrangler` in `packages/collection`, `ws` in St.George,
+`@types/set-cookie-parser` in V Point), and made module-private or deleted the
+unused exports outside files that open pull requests were changing at the
+time. The 2026-11-22 cleanup did the same for the unused exports and types that
+had accumulated since, again outside files that open pull requests change.
+
+Unused exports and types remain in files open pull requests change, and in
 these, kept on purpose:
 
 - `packages/parsers/src/` and the `packages/domain/src/` modules a parser
   imports. Their bytes are code-digested (`src/parsers/digests.ts`), and
   registering a parser name and version with a different digest is refused
   ([release adoption](release-adoption.md)), so even removing an `export`
-  keyword needs a parser version bump.
-- `collectInBankPage` in `services/collector-sbi-shinsei/src/browser-page.ts`
-  has no caller, but ADR 0029 and the next-milestone plan cite the file as the
-  in-page collection logic; removing it needs those documents revised.
-- `SCHEDULES_PATH` in `services/app/src/schedules-api.ts`, which an open pull
-  request imports.
+  keyword needs a parser version bump. `packages/parsers/src/snapshot-query.ts`
+  is not digested, but `UNIT_SCOPES` and `UnitScope` there name the closed
+  `dataset_snapshot_policies.unit_scope` values, and only `UnitScope` reads
+  `UNIT_SCOPES`, so making them module-private would mean deleting them; they
+  are kept.
+- Exports a document names: `collectInBankPage` in
+  `services/collector-sbi-shinsei/src/browser-page.ts` (ADR 0029 and the
+  next-milestone plan cite the file as the in-page collection logic),
+  `LEASE_TIMING`, `cardPurchaseDecisionId`, `REWARD_READ_PAGE_LIMITS`,
+  `DEFAULT_SCAN_CONTINUATION_READS`, `agentApi`, and the
+  `legacyWarningCompatMembership` and `coverageV1Membership` snapshot
+  policies.
 - `useBalanceHistory` in `apps/web/src/api.ts`. No page calls it, but it holds
   the only `/api/v2/balances/history` literal in `apps/web/src`, and an open
   pull request's UI/MCP parity test scans those literals and lists that route
   as one the UI names; it is tagged `@public` until that is settled.
+- The Container sources under `services/*/container/`, where any byte change
+  releases a new Container image.
+- `ACCOUNT_SUMMARY_BYTES`, reported as a duplicate of
+  `COLLECTION_QUALITY_SUMMARY_BYTES`: ADR 0123 names both, and the account
+  summary's bound is defined as the collection-quality one.
 
 An unused finding alone is still not a deletion decision; the review below
 applies to every removal.

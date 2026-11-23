@@ -646,7 +646,7 @@ const DATASETS_BY_VERSION: Readonly<
 };
 
 /** The dataset the first matching rule names, or null. */
-export function datasetByRules(
+function datasetByRules(
   rules: readonly ArtifactDatasetRule[],
   artifact: Pick<TerminalArtifact, "artifactKey" | "role" | "mediaType">,
 ): string | null {

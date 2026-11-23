@@ -57,9 +57,9 @@ import { maintenanceForSchedule } from "../schedule-store.ts";
 export { collectorDispatchConnections, connectionFor, opsDispatchEnabled };
 
 /** Requests taken per tick. */
-export const DEFAULT_DISPATCH_LIMIT = 5;
+const DEFAULT_DISPATCH_LIMIT = 5;
 /** How long a collector request whose connection is not enabled waits before the next look. */
-export const COLLECTOR_RETRY_MS = 3_600_000;
+const COLLECTOR_RETRY_MS = 3_600_000;
 const RETRY_MS = 300_000;
 /** A request waiting for a held lease or this tick's start budget looks again after this. */
 const COLLECTOR_WAIT_MS = 300_000;

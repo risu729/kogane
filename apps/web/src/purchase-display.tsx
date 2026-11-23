@@ -94,7 +94,7 @@ export const EXCLUSION_LABELS: Record<CardUsageExclusion, string> = {
 };
 
 /** Why a current provider row is outside the list: the exclusions, or not yet reached. */
-export const UNRECOGNIZED_REASON_LABELS: Record<CardUsageUnrecognizedReason, string> = {
+const UNRECOGNIZED_REASON_LABELS: Record<CardUsageUnrecognizedReason, string> = {
   ...EXCLUSION_LABELS,
   recognition_pending: "対象の利用だが、まだ処理していない",
 };
