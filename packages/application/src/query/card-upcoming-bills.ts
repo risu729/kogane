@@ -277,10 +277,11 @@ export async function reviewUpcomingCardBillsWith(
     }),
   );
 
-  // The latest card debit from each account due on or before the date: an
-  // accepted settlement's debit, a statement already due from a card the
-  // account answers for, or a card's statement of an earlier month due by
-  // then. A balance captured on or before it may not show it.
+  // The latest card debit from each account due on or before the date: each
+  // card's newest accepted settlement's debit per bank account, the newest
+  // statement, when already due, of a card the account answers for, or that
+  // card's latest statement of another month due by then. A balance captured
+  // on or before it may not show it.
   const previous = new Map<string, string>();
   const debited = (key: string, value: string | null) => {
     if (value === null || value > date) return;
