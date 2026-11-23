@@ -1037,4 +1037,13 @@ test("a stored candidate keeps the ambiguity codes of the tick that proposed it 
   expect(byPending.sort((a, b) => Number(a[0]) - Number(b[0])).map(([, marked]) => marked)).toEqual(
     [false, true],
   );
+  // Both are heuristic pairs: each carries the rejection condition, marked or not.
+  const conditions = await w.all<{ rejection_conditions_json: string }>(
+    "SELECT rejection_conditions_json FROM reconciliation_proposals ORDER BY id",
+  );
+  expect(
+    conditions.map((row) =>
+      (JSON.parse(row.rejection_conditions_json) as string[]).includes("candidate_not_unique"),
+    ),
+  ).toEqual([true, true]);
 }, 120_000);
