@@ -21,7 +21,7 @@ export const DECIMAL_POLICY_PROJECTIONS: Readonly<Record<string, { policyVersion
   [DECIMAL_POLICY_RELEASE]: { policyVersion: DECIMAL_POLICY_RELEASE },
 };
 
-export const DEFAULT_DECIMAL_POLICY = DECIMAL_POLICY_RELEASE;
+const DEFAULT_DECIMAL_POLICY = DECIMAL_POLICY_RELEASE;
 
 /** Release identifier shape shared with the API schema; not a guarantee a projection exists. */
 const RELEASE = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/u;

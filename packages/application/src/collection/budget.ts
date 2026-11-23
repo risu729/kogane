@@ -64,12 +64,12 @@ export const REGISTRATION_OPERATION_BUDGET = 500;
 /** The per-run preamble: the terminal read, the run row, the conflict and refusal checks (measured 8). */
 export const PREAMBLE_RESERVE = 16;
 
-/** A structure step: the run, a unit, a range, the inventory declaration or a unit report (measured 5-6). */
+/** A structure step: the run, a unit, a range, the inventory declaration or a unit report (measured 4-6). */
 export const STRUCTURE_STEP_RESERVE = 16;
 
 /**
- * An inventory chunk: a fixed part and a part per item (measured 7 plus 3 per
- * item, 97 for a full chunk of `MAX_INVENTORY_CHUNK_ITEMS`).
+ * An inventory chunk: a fixed part and a part per item (measured 6 plus 3 per
+ * item, 96 for a full chunk of `MAX_INVENTORY_CHUNK_ITEMS`).
  */
 const INVENTORY_CHUNK_BASE = 16;
 const INVENTORY_ITEM_RESERVE = 4;
@@ -77,7 +77,7 @@ const INVENTORY_ITEM_RESERVE = 4;
 /**
  * The final step: the run report, the seal — direct, of at most
  * `DIRECT_SEAL_ARTIFACTS` items, or staged — and the link and completion that
- * record it (measured 32 at the direct-seal maximum, 16 staged). They are one
+ * record it (measured 30 at the direct-seal maximum, 14 staged). They are one
  * step so that no yield separates them; an invocation that ends inside it is
  * finished by the next, which finds the report and the seal already recorded.
  */
@@ -85,7 +85,7 @@ export const FINAL_STEP_RESERVE = 64;
 
 /**
  * An artifact step: the object's R2 head, its adoption and its catalogue row
- * cost a fixed part (measured 19), plus one statement per transformation step
+ * cost a fixed part (measured 17), plus one statement per transformation step
  * and two per relation (a parent read and the relation row). Its reserve is
  * computed from its descriptor so a derived artifact with many parents is not
  * squeezed under a fixed number.

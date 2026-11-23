@@ -13,8 +13,21 @@ export type {
   CardSettlementStatementGroup,
   CardSettlementStatementPage,
 };
-export const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
-export const CARD_SETTLEMENT_STATEMENTS_PATH = `${CARD_SETTLEMENT_PATH}/statements`;
+const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
+const CARD_SETTLEMENT_STATEMENTS_PATH = `${CARD_SETTLEMENT_PATH}/statements`;
+
+/**
+ * The reads that show a settlement candidate under review: the grouped list,
+ * one statement's candidates, one candidate, and the candidates it competes
+ * with. A stale plan refusal reads these again (`PlanRefreshScope`); the debit
+ * accounts, the upcoming bills and the unmatched statements show no candidate.
+ */
+export const CARD_SETTLEMENT_REVIEW_READS = [
+  ["card-settlements", "statements"],
+  ["card-settlements", "statement"],
+  ["card-settlements", "detail"],
+  ["card-settlements", "related"],
+] as const;
 
 /** The review list grouped by statement, lead candidate first. */
 export function useCardSettlementStatements(offset: number) {

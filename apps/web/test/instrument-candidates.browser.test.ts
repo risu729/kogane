@@ -5,6 +5,7 @@
 // page never builds one of its own and never approves.
 import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { ERROR_STATUS } from "../../../packages/application/src/errors.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -51,7 +52,7 @@ describe.if(runnable)("instrument candidate review", () => {
   let store: World;
   let commands = true;
   let stale = false;
-  /** The history route answers 503 while set, as an unavailable read would. */
+  /** The history route answers 503 `catalogue_read_failed` while set, as a failed store read would. */
   let historyDown = false;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
@@ -119,7 +120,10 @@ describe.if(runnable)("instrument candidate review", () => {
         }
         if (url.pathname === "/api/identity/instrument-history") {
           read.push(url);
-          if (historyDown) return Response.json({ error: "unavailable" }, { status: 503 });
+          // As the App answers a read whose store failed (the route runs in
+          // `catalogue`).
+          if (historyDown)
+            return Response.json({ error: "catalogue_read_failed" }, { status: 503 });
           const outcome = await readInstrumentHistoryForGrant({
             grant: GRANT,
             sql: store.sql,
@@ -127,7 +131,7 @@ describe.if(runnable)("instrument candidate review", () => {
           });
           return outcome.ok
             ? Response.json(outcome.history)
-            : Response.json(outcome.error, { status: 403 });
+            : Response.json(outcome.error, { status: ERROR_STATUS[outcome.error.code] });
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
@@ -216,8 +220,15 @@ describe.if(runnable)("instrument candidate review", () => {
   test("a later page the open list no longer reaches never says no candidate is waiting", async () => {
     // A decided candidate leaves the open view, so a later page can come back
     // empty while the first still lists candidates. The world holds one page;
-    // its first page is served as if a second followed.
-    reshape = (review) => (review.query.offset === 0 ? { ...review, nextOffset: 50 } : review);
+    // its first page is served as if a second followed, by `nextOffset` alone
+    // as a server before ADR 0128 S6 answered it: the page reads only
+    // `nextOffset`, and a `next` or `paging` that disagreed with it would be
+    // refused by the shared validator (a short page cannot honestly continue).
+    reshape = (review) => {
+      if (review.query.offset !== 0) return review;
+      const { next: _next, paging: _paging, ...older } = review;
+      return { ...older, nextOffset: 50 };
+    };
     const first = await page("open", 0);
     const tab = await open();
     const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
@@ -515,4 +526,66 @@ describe.if(runnable)("instrument candidate review", () => {
     expect(await auditView(tab)).toEqual([]);
     await tab.close();
   }, 60_000);
+
+  test("a plan the server refuses as stale reads the list again and keeps the refusal on the card", async () => {
+    const tab = await open();
+    const first = (await page("open", 0)).items[0] as ReviewCandidate;
+    // As the server answers a candidate whose pins moved after the read before planning.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status: 409,
+        json: { error: "stale_context", refs: [first.candidateId] },
+      }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = tab.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/identity/instrument-candidates" &&
+        !url.searchParams.has("identifierId")
+      );
+    });
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "対象が変更されました" }).waitFor();
+    await reread;
+    // The candidate is still listed: its refusal stays on its card, and focus
+    // stays on the card (on the pressed button, or on the refusal when the
+    // button had let it go while the plan was in flight).
+    await card.getByRole("alert").filter({ hasText: "対象が変更されました" }).waitFor();
+    await tab.waitForFunction(() =>
+      document.querySelector(".identity-card")?.contains(document.activeElement),
+    );
+    expect(await tab.getByRole("alert").count()).toBe(1);
+    expect(tab.url()).toContain("/identities/instrument-candidates");
+    await tab.close();
+  });
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const tab = await open();
+    const lists: string[] = [];
+    tab.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === "/api/identity/instrument-candidates" &&
+        !url.searchParams.has("identifierId")
+      )
+        lists.push(url.search);
+    });
+    // As the App answers a subject this deployment grants nothing.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({ status: 403, json: { error: "subject_not_granted" } }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "権限が付与されていません" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(lists).toEqual([]);
+    await tab.close();
+  });
 });

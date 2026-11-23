@@ -2,7 +2,7 @@ import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { parse as parseJavaScript } from "acorn";
 import type { DateRange, ForeignOrdinaryProgress } from "./types";
 
-export const FOREIGN_EMPTY_CODE = "PC-AIFDDT1-00134-E";
+const FOREIGN_EMPTY_CODE = "PC-AIFDDT1-00134-E";
 export const FOREIGN_BALANCE_UNIT = "foreign-ordinary-aud-balance";
 export const FOREIGN_HISTORY_UNIT = "foreign-ordinary-aud-history";
 

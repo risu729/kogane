@@ -180,7 +180,7 @@ describe("writing a build", () => {
   });
 
   test("a writer whose lease was taken writes nothing and cannot seal (G2-09)", async () => {
-    const { db, instanceId } = await claimed();
+    const { db, sqlite, instanceId } = await claimed();
     const { snapshotId } = (await beginSnapshot(db, instanceId, await plan(), NOW))!;
     await claimWriterLease(db, snapshotId, "lease-1", 1_000, 60_000);
     // The lease expires and a second invocation takes the build over.
@@ -194,6 +194,19 @@ describe("writing a build", () => {
         rowsWritten: 0,
       }),
     ).toBe("lease_lost");
+    // Nothing means no row either: the rows are fenced on the lease like the
+    // checkpoint, not only reported as lost.
+    expect(
+      await writeScopeRelations(db, snapshotId, [decisionRelation("decision-1")], {
+        lease: "lease-1",
+        fence: 1,
+        now: NOW,
+      }),
+    ).toBe("lease_lost");
+    for (const table of ["current_balance_projection", "scope_relations", "read_build_checkpoints"])
+      expect(
+        sqlite.query(`SELECT count(*) AS n FROM ${table} WHERE snapshot_id=?1`).get(snapshotId),
+      ).toEqual({ n: 0 });
     expect(await writerFence(db, snapshotId, "lease-1")).toBeNull();
     const sealed = await sealAndPublish(
       db,
@@ -459,6 +472,101 @@ describe("sealing and publishing", () => {
       { snapshot_id: second.snapshotId, status: "retired" },
       { snapshot_id: third.snapshotId, status: "complete" },
     ]);
+  });
+
+  // A D1 batch that fails (a subrequest error, a Worker that hits its limit)
+  // must not leave a build retired with its rows: no later call selects a
+  // retired build again, so those rows would stay for ever.
+  test("a retirement whose batch fails keeps the build and its rows for the next pass", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const first = await published(db, instanceId, 10);
+    const second = await published(db, instanceId, 20);
+    let failing = true;
+    const flaky: D1Like = {
+      prepare: (sql) => db.prepare(sql),
+      batch: async (statements) => {
+        if (failing) throw new Error("synthetic batch failure");
+        return await db.batch(statements);
+      },
+    };
+    await expect(retireOldSnapshots(flaky, second.snapshotId, NOW, 1)).rejects.toThrow(
+      "synthetic batch failure",
+    );
+    const state = () =>
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM current_balance_projection p
+            WHERE p.snapshot_id=s.snapshot_id) AS rows FROM balance_read_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(first.snapshotId);
+    expect(state()).toEqual({ status: "complete", rows: 2 });
+    failing = false;
+    expect(await retireOldSnapshots(flaky, second.snapshotId, NOW, 1)).toBe(1);
+    expect(state()).toEqual({ status: "retired", rows: 0 });
+  });
+
+  // Another writer advances the watermark onto a retained build of the same
+  // content after this call selected it: the pointer now names it, so it stays.
+  test("a build the pointer is switched to after the selection is not retired", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const first = await published(db, instanceId, 10);
+    const second = await published(db, instanceId, 20);
+    const outputDigest = (
+      sqlite
+        .query("SELECT output_digest FROM balance_read_snapshots WHERE snapshot_id=?1")
+        .get(first.snapshotId) as { output_digest: string }
+    ).output_digest;
+    let raced = false;
+    const racing: D1Like = {
+      prepare: (sql) => db.prepare(sql),
+      batch: async (statements) => {
+        if (!raced) {
+          raced = true;
+          const switched = await activePointerStatement(
+            db,
+            {
+              snapshotId: first.snapshotId,
+              readInstanceId: instanceId,
+              sourceRevision: 21,
+              visibilityRevision: 3,
+              coreEpoch: "core-epoch-1",
+              outputDigest,
+            },
+            NOW,
+          ).run();
+          expect(switched.meta.changes).toBe(1);
+        }
+        return await db.batch(statements);
+      },
+    };
+    expect(await retireOldSnapshots(racing, second.snapshotId, NOW, 1)).toBe(0);
+    expect((await activePointer(db))?.snapshot_id).toBe(first.snapshotId);
+    expect(
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM current_balance_projection p
+            WHERE p.snapshot_id=s.snapshot_id) AS rows FROM balance_read_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(first.snapshotId),
+    ).toEqual({ status: "complete", rows: 2 });
+  });
+
+  test("abandoning a build another writer sealed leaves it published with its rows", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const { snapshotId } = await published(db, instanceId, 10);
+    await abandonSnapshot(db, snapshotId);
+    expect((await activePointer(db))?.snapshot_id).toBe(snapshotId);
+    expect(
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM current_balance_projection p
+            WHERE p.snapshot_id=s.snapshot_id) AS rows FROM balance_read_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(snapshotId),
+    ).toEqual({ status: "complete", rows: 2 });
   });
 });
 

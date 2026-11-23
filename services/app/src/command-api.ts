@@ -30,8 +30,8 @@ import { principalFor } from "./grants";
 import { assertMethod, assertOwnOrigin, boundedText, HttpError, json, WRITE_METHODS } from "./http";
 
 const PREFIX = "/api/command/v1/";
-export const COMMAND_OPERATIONS = ["plan", "simulate", "approve", "commit", "operation"] as const;
-export type CommandOperation = (typeof COMMAND_OPERATIONS)[number];
+const COMMAND_OPERATIONS = ["plan", "simulate", "approve", "commit", "operation"] as const;
+type CommandOperation = (typeof COMMAND_OPERATIONS)[number];
 /** Operations that accept a judgement; agents never reach these. */
 const ACCEPTING: readonly string[] = ["approve", "commit"];
 const BODY_LIMIT = 16 * 1024;

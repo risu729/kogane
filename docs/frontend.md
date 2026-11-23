@@ -60,12 +60,24 @@ response is required. Connection metadata gates observation pages as well. Other
 refresh failures retain previously authorized records with an explicit warning:
 `QueryBoundary` shows them under `更新できませんでした。前回読み込んだ{label}を表示しています。`
 ("could not refresh; showing the {label} loaded earlier") with a retry, or under its
-offline 前回読み込んだ notice while a read is paused. `収集スケジュール`
+offline 前回読み込んだ notice while a read is paused. A retry button, in that warning or in
+the alert of a load that has no answer yet, waits while its read is in flight: it says
+再試行中…, is `aria-disabled` and ignores a press rather than `disabled` (`BusyButton`), so
+the focus stays on it, and a failed first load keeps its alert through the retry instead of
+turning back into the loading state (`test/query-boundary.browser.test.ts`). `収集スケジュール`
 ("collection schedules") renders through it, and so do the two correction
 histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
 on an account candidate), which are read again when reopened. While the schedules page shows an earlier
 answer it also holds 依頼を送信 and the re-survey 採用/却下, which decide from what
 it shows ([schedules](schedules.md#schedule-administration)).
+The ホーム page's `判断待ち` panel does not go through `QueryBoundary`: a failed read
+there shows no total and no earlier lines (INV05). It uses the shared states directly: `Loading`
+(a status) while the first read waits, and `ErrorState` (an alert with
+`判断待ちの件数を再試行`) once a read fails. The alert stays, its button saying 再試行中…,
+while that retry or a refresh after an earlier answer is in flight; a refresh that starts
+on its own after a failed first read shows `Loading` again. The panel and `QueryBoundary`
+keep the failure a pressed retry repeats through one hook, `useRepeatedFailure`
+(`apps/web/src/repeated-failure.ts`).
 
 ## Design tokens and stylesheet layout
 
@@ -132,10 +144,10 @@ A list paged by an opaque cursor uses `CursorPager` (in `pagination.tsx`, over
 `Pagination`): its buttons say 前のページ and 次のページ, its status says
 続きがあります or 最後のページです unless the page passes its own, and its
 buttons, its read-again action included, wait while a read of the list is in
-flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`,
-so a button the owner pressed, or sits on during a background read, keeps the
-focus; a button with nowhere to go (no earlier page, no more rows) is
-`disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
+flight. Waiting is `aria-disabled` and ignores a press rather than `disabled`
+(`BusyButton`, as for the plan buttons and the retries), so a button the owner
+pressed, or sits on during a background read, keeps the focus; a button with
+nowhere to go (no earlier page, no more rows) is `disabled`. The 監査ログ, 依頼の一覧, latest balance and evidence browser lists
 use it.
 
 The 口座・銘柄 lists the server pages by offset name the rows a page shows
@@ -167,6 +179,46 @@ empty, never a dash.
 
 The application frame is `AppShell`, used by both the observation client and
 the evidence-only client; navigation entries come from one list with icons.
+
+### Plan refusals
+
+A review page plans a decision with `postCommand("plan")` and shows a
+refusal in the item that asked for it (`PlanRefusal`). A refusal that says the
+item changed since the page read it (`planRefusedAsStale` in
+`command-api.ts`) makes the page read that item again: the server's
+`stale_context` (409: the candidate is no longer in the state the plan needs,
+a pinned revision moved, or another holder claimed the debit) and
+`target_missing` (400: the candidate is gone), the two codes the plan route
+answers about its target, and the page's own `StalePlanError` (the candidate
+read again before planning differs from the one shown, or the plan pinned
+another revision than the one shown). The page's `PlanRefreshScope`
+invalidates exactly the reads that show the reviewed items, so the ones on
+screen are fetched again:
+
+| Page                                                    | Reads again                                                                                                                                                       |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `カード照合` and one candidate (`/reconciliation/<id>`) | `card-settlements` statements, one statement's candidates, one candidate, its competitors; not the debit accounts, the upcoming bills or the unmatched statements |
+| `口座の保有者を確認`                                    | that candidate's `card-ownership` read                                                                                                                            |
+| `カード利用の説明`                                      | every `card-purchases` read: a pending-to-posted candidate shows on both its purchases and on the list                                                            |
+| `口座の対応候補`, `銘柄の同一性の候補`                  | every view and page of that candidate list                                                                                                                        |
+
+Every other refusal (a missing grant, an invalid payload, evidence or scope
+that is not ready, unsupported semantics, a budget) reads nothing again: it
+says nothing about whether the page is current. `plan_not_open` and the other
+lifecycle codes are answers to simulate, approve and commit on the
+confirmation screen, not to plan. A read again that fails keeps the earlier
+answer under `QueryBoundary`'s warning, as any read does.
+
+The refusal stays visible. While the item read again still shows it, it
+stays in the item. When the item no longer does (it left the list or view,
+its form started over for a new revision, it offers no decision any more, or
+it sits in a disclosure that closed when its status changed), the page shows
+the refusal once below its head (`PlanRefreshNotice`) until the next plan is
+sent. Focus stays where it is, on the pressed button while that button is
+still there; only when the page read again removed or hid the focused
+element does focus move, to wherever the refusal is shown. The review pages'
+browser tests check each page's reads, the refusals that read nothing, and
+where the refusal and focus end up.
 
 ## API metadata and capabilities
 
@@ -250,6 +302,29 @@ The hand-off in both directions is by reference, never by number or prose:
   allows — computed for that grant, not the page's numbers filtered down.
 
 See [Agent API](agent-api.md) for the grants, tools and result contract.
+
+### Recent changes on ホーム
+
+The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) reads
+`GET /api/v2/changes`, the service of `kogane.changes.since`
+([ADR 0127, amendment of 2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)).
+It sends `since` as the browser's clock minus the chosen window (24時間 by
+default, 7日間, 30日間), taken again on each first read (a refetch on focus or
+a retry included), and a continuation sends its first answer's `since`; the
+retry of a continuation the route refused (`400`) reads the answer again.
+While a window whose continuation failed is read again (that retry, a
+refocus, a return to the window), its answer read and the continuation's
+error stay on screen until the read settles; a continuation refused for
+authentication (`401`) withdraws the answer read, and the panel shows its
+error state. It
+checks every answer with `validChangesSince`, and
+shows the digest's counts per source by closed state, with labels typed by the
+domain's closed lists. A count the digest cut, and every count of an
+incomplete events line, reads 以上, and the states or kinds such a section or
+line does not list read そのほか 0件以上; unchanged sources and what the digest does
+not cover sit in closed disclosures; 続きを読み込む follows `next.after`. A
+`403` or `404` from the route hides the panel; any other failure, a malformed
+answer included, is the error state with no count.
 
 ## Safe preview
 

@@ -31,6 +31,8 @@ export const COMMAND_ERROR_CODES = [
   "approval_exhausted",
   "approval_scope_mismatch",
   "receipt_not_found",
+  // A list cursor this list did not issue (ADR 0128): 400, like every read's.
+  "invalid_cursor",
   "target_missing",
   "target_ambiguous",
   "commit_failed",

@@ -30,7 +30,7 @@ const PENDING_KEY = "email-challenge";
 const REQUESTING_KEY = "email-requesting";
 const JOB_KEY = "fumi:job";
 // The observed provider email states one minute, not the old two-minute cache TTL.
-export const CHALLENGE_TTL_MS = 60_000;
+const CHALLENGE_TTL_MS = 60_000;
 const WATCHDOG_MS = 2 * 60_000;
 const COLLECTION_WATCHDOG_MS = 15 * 60_000;
 const receiptKey = (operationId: string) => `fumi:receipt:${operationId}`;

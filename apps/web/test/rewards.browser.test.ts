@@ -54,7 +54,11 @@ const holding = (id: string): RewardHoldingRow => ({
   buckets: [],
   qualificationMeasures: [],
   membership: [],
-  valueModel: { netAssetEligible: false, cashLikeRedemptionEstimate: null, reasonCode: "none" },
+  valueModel: {
+    netAssetEligible: false,
+    cashLikeRedemptionEstimate: null,
+    reasonCode: "no_offer_named",
+  },
 });
 /** One rule over two holdings: the rule alone does not tell the panels apart. */
 const legacyExpiry = (id: string): RewardExpiryRow => ({
@@ -97,7 +101,7 @@ const providerSection = (account: string): RewardProviderExpirySection => ({
   holdingRef: `holding:${account}`,
   parentBucketRef: `bucket:${account}`,
   unitRef: "points:synthetic",
-  observedAt: { kind: "unknown", reasonCode: "synthetic_time" },
+  observedAt: { kind: "unknown", reasonCode: "observed_at_unparsed" },
   sourceFactRefs: [`balance:${account}`],
   coverage: "unknown",
   reasonCode: "provider_expiry_unavailable",
@@ -248,7 +252,7 @@ describe.if(runnable)("the rewards page", () => {
               unitRef: "points:synthetic",
               quantity,
               observedExpiry: null,
-              observedAt: { kind: "unknown", reasonCode: "synthetic_time" },
+              observedAt: { kind: "unknown", reasonCode: "observed_at_unparsed" },
               sourceFactRefs: [],
             },
           ],

@@ -35,14 +35,47 @@ export async function requireRoute(
     throw new IngestError(403, "inactive_ingest_route");
 }
 
+/**
+ * The runs one registration has already looked up, by run id. Only an env made
+ * by {@link rememberingRunLookups} has an entry, so an env the HTTP adapter or
+ * any other caller builds never remembers a run.
+ */
+const rememberedRuns = new WeakMap<IngestEnv, Map<number, Readonly<FetchRunRow>>>();
+
+/**
+ * A copy of `env` whose {@link loadRun} reads each fetch run once and answers
+ * later lookups of the same id from memory. Registration makes one per call
+ * (`registerTerminal`), so what is remembered lives exactly as long as that
+ * call and is never shared between registrations or requests.
+ *
+ * What is remembered is `fetch_runs`' id, producer and source, which never
+ * change once the row exists: CORE refuses every update and delete of the
+ * table (`fetch_runs_no_update`, `fetch_runs_no_delete`) and a replacing
+ * insert (`fetch_runs_reject_duplicate_insert`). A run that is not found is
+ * not remembered, so it is looked up again. The client and route checks are
+ * not remembered either: they still run before every operation, so a
+ * revocation takes effect at the next one.
+ */
+export function rememberingRunLookups(env: IngestEnv): IngestEnv {
+  const scoped = { ...env };
+  rememberedRuns.set(scoped, new Map());
+  return scoped;
+}
+
 /** The run this request names, once the caller is allowed on its route. */
 export async function loadRun(
   env: IngestEnv,
   clientId: string,
   runId: number,
 ): Promise<FetchRunRow> {
-  const run = await readFetchRun(env.DB, runId);
-  if (!run) throw new IngestError(404, "run_not_found");
+  const remembered = rememberedRuns.get(env);
+  let run = remembered?.get(runId) ?? null;
+  if (!run) {
+    const read = await readFetchRun(env.DB, runId);
+    if (!read) throw new IngestError(404, "run_not_found");
+    run = Object.freeze({ ...read });
+    remembered?.set(runId, run);
+  }
   await requireRoute(env, clientId, run.producer_id, run.source_id);
   return run;
 }

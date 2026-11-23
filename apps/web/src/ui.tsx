@@ -23,9 +23,11 @@ import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { amountSign, formatAmount } from "./money.ts";
 import { Link, type ObservationKind } from "./router.tsx";
+import { BusyButton } from "./busy-button.tsx";
 import { ApiError, rawUrl } from "./api.ts";
 import { CommandError } from "./command-api.ts";
 import { displayLabel } from "./labels.ts";
+import { useRepeatedFailure } from "./repeated-failure.ts";
 
 // ── values ───────────────────────────────────────────────────────────
 
@@ -198,7 +200,8 @@ export function StatusBadge({ status }: { status: string }): ReactNode {
   );
 }
 
-const KIND_LABELS: Record<ObservationKind, string> = {
+/** The observation kinds, as every page names them. */
+export const OBSERVATION_KIND_LABELS: Record<ObservationKind, string> = {
   transaction: "取引",
   balance: "残高",
   position: "保有資産",
@@ -207,8 +210,8 @@ const KIND_LABELS: Record<ObservationKind, string> = {
 
 export function KindBadge({ kind }: { kind: ObservationKind }): ReactNode {
   return (
-    <Badge className="badge-kind" title={`${KIND_LABELS[kind]}の観測記録`}>
-      {KIND_LABELS[kind]}
+    <Badge className="badge-kind" title={`${OBSERVATION_KIND_LABELS[kind]}の観測記録`}>
+      {OBSERVATION_KIND_LABELS[kind]}
     </Badge>
   );
 }
@@ -267,7 +270,7 @@ export function ObservationLink({
   return (
     <Link
       to={`/observations/${kind}/${String(id)}`}
-      title={`${KIND_LABELS[kind]}の観測記録 ${String(id)}`}
+      title={`${OBSERVATION_KIND_LABELS[kind]}の観測記録 ${String(id)}`}
     >
       {children ?? `#${String(id)}`}
     </Link>
@@ -409,14 +412,15 @@ export function ErrorState({
         // Two failed loads on one page are two alerts: each retry says which
         // load it repeats (docs/ui-guidelines.md#accessibility), its name
         // ending in the words it shows.
-        <button
-          className="button"
+        // While the read is in flight the button waits (`BusyButton`):
+        // aria-disabled, a press ignored, the focus kept.
+        <BusyButton
+          busy={retrying}
           onClick={onRetry}
-          disabled={retrying}
           aria-label={`${label}を${retrying ? "再試行中…" : "再試行"}`}
         >
           {retrying ? "再試行中…" : "再試行"}
-        </button>
+        </BusyButton>
       ) : null}
     </div>
   );
@@ -454,15 +458,13 @@ export function QueryBoundary<T>({
   coverageNotice?: boolean;
   children: (data: T) => ReactNode;
 }): ReactNode {
-  const retry = (): void => {
-    void query.refetch();
-  };
+  // The failure a pressed retry repeats stays until that read settles, so the
+  // alert and its waiting button (再試行中…) keep the focus (repeated-failure.ts).
+  const { failure, retry, retrying } = useRepeatedFailure(query);
   // Authorization failures hide cached records; transient failures keep the
   // previous response with a warning. An empty success replaces old rows.
-  if (query.isError && query.error instanceof ApiError && [401, 403].includes(query.error.status)) {
-    return (
-      <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
-    );
+  if (failure instanceof ApiError && [401, 403].includes(failure.status)) {
+    return <ErrorState error={failure} label={label} onRetry={retry} retrying={retrying} />;
   }
   if (query.data === undefined) {
     if (query.fetchStatus === "paused")
@@ -478,10 +480,8 @@ export function QueryBoundary<T>({
           onRetry={retry}
         />
       );
-    if (query.isError)
-      return (
-        <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
-      );
+    if (failure !== null)
+      return <ErrorState error={failure} label={label} onRetry={retry} retrying={retrying} />;
     return <Loading label={label} />;
   }
   const data = query.data;
@@ -534,14 +534,13 @@ export function QueryBoundary<T>({
       {query.isError ? (
         <div className="query-notice query-warning" role="alert">
           <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>
-          <button
-            className="button"
+          <BusyButton
+            busy={query.isFetching}
             onClick={retry}
-            disabled={query.isFetching}
             aria-label={`${label}を${query.isFetching ? "再試行中…" : "再試行"}`}
           >
             {query.isFetching ? "再試行中…" : "再試行"}
-          </button>
+          </BusyButton>
         </div>
       ) : null}
       {query.isFetching ? (

@@ -326,6 +326,40 @@ test("a corrupt terminal is blocked and the scan keeps going (G1-13)", async () 
   expect(collectionRuns(harness).filter((row) => row.run_id === "run-050")).toHaveLength(1);
 });
 
+test("a terminal whose bytes fail to read once is not blocked, and registers next tick", async () => {
+  // A body read that fails is R2 failing, not a verdict about the terminal.
+  // Before this, the reader's `terminal_unreadable` was recorded as a block
+  // under the digest of the bytes a second read did get: a valid terminal,
+  // blocked for good under its own identity, and never registered.
+  const harness = collectionHarness();
+  await persistSyntheticRun(harness, { run: { runId: "run-001" } });
+  await persistSyntheticRun(harness, { run: { runId: "run-002" } });
+  const key = terminalKey(SOURCE, "run-001");
+  const get = harness.bucket.get.bind(harness.bucket);
+  let failures = 1;
+  harness.bucket.get = async (requested: string) => {
+    const object = await get(requested);
+    if (requested !== key || object === null || failures === 0) return object;
+    failures -= 1;
+    return Object.assign(Object.create(object) as typeof object, {
+      arrayBuffer: async (): Promise<ArrayBuffer> => {
+        throw new Error("synthetic stream reset");
+      },
+    });
+  };
+  const codes: string[] = [];
+  const first = await collectionScan(harness.env, { onFailure: (code) => codes.push(code) });
+  expect(first).toMatchObject({ listed: 2, registered: 1, blocked: 0, failed: 1 });
+  expect(codes).toEqual(["Error"]);
+  // Nothing is recorded for the run whose read failed.
+  expect(collectionRuns(harness).map((row) => row.run_id)).toEqual(["run-002"]);
+
+  const second = await collectionScan(harness.env);
+  expect(second).toMatchObject({ registered: 1, alreadyRegistered: 1, blocked: 0, failed: 0 });
+  expect(collectionRuns(harness).every((row) => row.blocked_code === null)).toBe(true);
+  expect(countOf(harness, "SELECT count(*) AS n FROM fetch_run_seals")).toBe(2);
+});
+
 test("a half-registered run stays unsealed and the next tick finishes it (G1-10)", async () => {
   const harness = collectionHarness();
   await persistSyntheticRun(harness, {

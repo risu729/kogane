@@ -26,7 +26,7 @@ import { RELATION_STATUS_STORAGE, type StoredRelationStatus } from "./decisions.
 export const INSTRUMENT_CANDIDATE_POLICY = "instrument-candidates-v1";
 
 /** Instrument kinds a candidate can pair. Money and reward units are out of scope. */
-export const CANDIDATE_INSTRUMENT_KINDS = ["security", "crypto", "product"] as const;
+const CANDIDATE_INSTRUMENT_KINDS = ["security", "crypto", "product"] as const;
 
 /** Pairs one answer may evaluate; a larger store is refused, never cut. */
 export const CANDIDATE_PAIR_LIMIT = 5_000;
@@ -89,7 +89,7 @@ export interface InstrumentIdentifierFacts {
 
 /** Shared identifier values that make a pair a candidate. A closed list. */
 export const CANDIDATE_EVIDENCE = ["isin-equal", "ric-equal", "security-code-equal"] as const;
-export type CandidateEvidence = (typeof CANDIDATE_EVIDENCE)[number];
+type CandidateEvidence = (typeof CANDIDATE_EVIDENCE)[number];
 
 /** Stated facts on both sides that disagree: the pair is kept apart. */
 export const CANDIDATE_CONFLICTS = [
@@ -102,7 +102,7 @@ export const CANDIDATE_CONFLICTS = [
   "share-class-differs",
   "product-class-differs",
 ] as const;
-export type CandidateConflict = (typeof CANDIDATE_CONFLICTS)[number];
+type CandidateConflict = (typeof CANDIDATE_CONFLICTS)[number];
 
 /** Stated facts on both sides that agree. */
 export const CANDIDATE_AGREEMENTS = [
@@ -113,7 +113,7 @@ export const CANDIDATE_AGREEMENTS = [
   "share-class-agrees",
   "product-class-agrees",
 ] as const;
-export type CandidateAgreement = (typeof CANDIDATE_AGREEMENTS)[number];
+type CandidateAgreement = (typeof CANDIDATE_AGREEMENTS)[number];
 
 /**
  * Facts at least one side does not state (one side or both), so they could
@@ -127,7 +127,7 @@ export const CANDIDATE_GAPS = [
   "share-class-unconfirmed",
   "product-class-unconfirmed",
 ] as const;
-export type CandidateGap = (typeof CANDIDATE_GAPS)[number];
+type CandidateGap = (typeof CANDIDATE_GAPS)[number];
 
 /**
  * Where a candidate stands, read from stored records only:
@@ -139,7 +139,7 @@ export type CandidateGap = (typeof CANDIDATE_GAPS)[number];
  * - `proposed`: neither.
  */
 export const CANDIDATE_STATUSES = ["proposed", "adopted", "rejected"] as const;
-export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
+type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
 
 /**
  * Why a proposed candidate names no adoption, a closed list. Adopting re-maps
@@ -153,7 +153,7 @@ export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
  * the anchor.
  */
 export const CANDIDATE_HOLDS = ["subject-decided-elsewhere", "subject-shares-instrument"] as const;
-export type CandidateHold = (typeof CANDIDATE_HOLDS)[number];
+type CandidateHold = (typeof CANDIDATE_HOLDS)[number];
 
 export interface InstrumentCandidate {
   /** Orientation-free id: `instrument-candidate:<lower id>|<higher id>`. */

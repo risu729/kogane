@@ -83,7 +83,7 @@ writer fencing and captured CORE references; the contract is in
    still reads unknown (scope
    relation release `scope-relations-v3`,
    [ADR 0001's amendment of 2026-11-18](adr/0001-domain-axes.md#amendment-2026-11-18-same-is-an-equivalence-in-adoption)).
-5. **Disjointness policy** (`distinct-identified-accounts-v2`). Within one
+5. **Disjointness policy** (`distinct-identified-accounts-v3`). Within one
    source, two distinct non-aggregate scopes are disjoint, because the
    provider listed them as separate accounts. Across sources, identified
    accounts are disjoint. Also, rank-zero readings resolved by the metric
@@ -93,6 +93,42 @@ writer fencing and captured CORE references; the contract is in
    based on each bank's own deposit readings, not legacy balance labels;
    Sony transaction balances and Prestia term-deposit principals are other
    metrics. No identity mapping is changed ([ADR 0093](adr/0093-direct-bank-deposit-disjointness.md)).
+   None of these rules applies to two scopes whose current account mappings
+   (`account_mappings.account_id`, read by the build as each candidate's
+   `accountEntity`) name one account entity: their overlap stays unknown, so
+   step 7 leaves the worse-ranked side unresolved, or both sides at equal
+   rank, with `account_entity_shared` instead of `overlap_unknown`. Nor do
+   they apply to two scopes that accepted decisions and those mappings force
+   to overlap, with a mapped scope on the way, so a decision cannot carry a
+   shared entity past the policy. The build reads scopes as non-empty sets:
+   an accepted `same` makes two equal, a containment makes its part a
+   subset, and two references of one entity are read as equal. Two scopes
+   are forced to overlap exactly when some scope lies at or below both (two
+   pockets of one account are not), and the policy withholds disjointness
+   when a scope mapped to an entity lies on the way up from that scope to
+   one of the two. Every accepted decision is read, through scopes outside
+   the target too, and a scope's entities come from its candidates in every
+   target. A pair a decision relates directly is read against its own
+   entities. A forced overlap with no mapped scope on the way keeps the v2
+   answer, and a scope known only from a decision carries no entity (the
+   ADR's open limits). The entity is then shown and not counted until a
+   decision accepts the two references as `same_account` (one is adopted,
+   the other is `duplicate_evidence`) or a mapping revision separates them
+   ([ADR 0001's amendment of 2026-11-20](adr/0001-domain-axes.md#amendment-2026-11-20-two-references-of-one-account-entity-are-not-disjoint)).
+   Version 2 declared such pairs disjoint and adopted both. The second rule
+   is not limited to shared entities: every subject keyed by its reference
+   (`source_account:<reference>`) has a current mapping, so in practice it
+   withholds disjointness from every pair of such subjects that accepted
+   decisions alone force to overlap without relating them directly (a
+   sub-account accepted as a part of two accounts, say), shared entity or
+   not. v2 declared such a pair disjoint and adopted both, counting the
+   common part twice. Its unknown overlap keeps `overlap_unknown`
+   (`account_entity_shared` names only a contender that shares the entity,
+   or whose overlap the mapping and not decisions alone forces), and the
+   whole amount of each unresolved side leaves the subtotal. A decision
+   between the pair itself does not clear it while the two keep entities of
+   their own (it contradicts the policy and degrades to unknown, as under
+   v2); revising a decision that forces the overlap does.
 6. **Authority.** `packages/read-model/src/authority.ts`
    (`source-authority-v3`, [ADR 0042](adr/0042-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
    supplies the caller policy `selectAdoptedSet` takes. It names sources by
@@ -119,17 +155,22 @@ writer fencing and captured CORE references; the contract is in
 
 ### States and reason codes
 
-| State        | Meaning                                                                                                                                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `adopted`    | In the adopted set for its metric and unit.                                                                                                                                                                    |
-| `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                    |
-| `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
-| `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                      |
-| `stale`      | The newest published attempt over the same source and dataset did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                        |
+| State        | Meaning                                                                                                                                                                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adopted`    | In the adopted set for its metric and unit.                                                                                                                                                                                             |
+| `excluded`   | Another record explains the same scope (`covered_by_breakdown`, `covered_by_total`, `duplicate_evidence`, `metric_mismatch`, `unit_mismatch`, `conflict_resolved_by_rank`).                                                             |
+| `unresolved` | Neither adopted nor excluded (`overlap_unknown`, `account_entity_shared`, `overlap_declared`, `total_breakdown_mismatch`, `value_not_exact`, `coverage_partial`, `coverage_unknown`, `ownership_unknown`, `adoption_target_oversized`). |
+| `conflict`   | Evidence of one measurement disagrees (`witness_value_conflict`, `conflicting_evidence`).                                                                                                                                               |
+| `stale`      | The newest published attempt over the same source, dataset and fetch unit did not re-observe this scope. The row is kept and the failure is reported next to it (SC15, AT61, AT62).                                                     |
 
 Freshness is recorded separately (`current` / `stale` / `unknown`) with the
 `snapshotEligibility` reason code of the failing claim, so "we could not
-observe" is never rendered as "the balance is gone".
+observe" is never rendered as "the balance is gone". The attempt compared is
+the newest published coverage claim of the candidate's own fetch unit (an
+artifact with no unit is its own group), as the latest-balance query keys a
+measurement by its unit: another card or connection of the same dataset can
+neither re-observe the scope nor fail to, so its newer attempt neither marks
+the row stale nor hides the failure of the row's own unit.
 
 ### Build budgets
 
@@ -195,7 +236,11 @@ Each latest item carries:
   evidence count is the number of witnesses of one measurement, which is not
   the number of balances shown (addendum 11 §4);
 - `temporal` — a `TemporalReference`: a date stays a date, an instant keeps its
-  offset, and anything else is `unknown` with a reason;
+  offset, and anything else is `unknown` with a reason. An instant is named
+  by its fixed-offset zone (`+09:00` is `Etc/GMT-9`) only for a whole-hour
+  offset a zone uses, -12:00 to +14:00; any other offset, `+15:00` say,
+  which the domain parses but no zone uses, is `unknown` with
+  `offset_zone_unsupported`;
 - `freshness` — `{ state, reasonCode }`.
 
 The latest page also carries `subtotals`:
@@ -219,21 +264,37 @@ amounts, period totals, reward units and balances restated after a
 transaction are excluded by their registry entries. The sum is exact integer
 arithmetic outside SQL, over the whole filter scope rather than the page, and
 a subject that appears twice in the same unit makes the subtotal unavailable
-(`subject_reported_twice`) instead of double counting it. A subject that holds
+(`subject_reported_twice`) instead of double counting it. The guard keys on
+the subject, which is a provider reference; two references of one account
+entity are kept apart upstream, where the projection leaves them unresolved
+(`account_entity_shared`, step 5 above), so the subtotal and `holdings`
+never receive two adopted amounts of one entity from one adoption target
+(metric and unit). Adoption compares scopes only within a target, so two
+references of one entity under two different summable metrics of one unit
+are still both counted; that is an open limit. A subject that holds
 several units (an exchange account's cash per asset, a broker's foreign cash
 per currency) counts once in each unit's figure: the subtotal is per unit, so
 that is not a second count of anything. Above 5,000 adopted rows the subtotal
 is `null` with `scope_exceeds_subtotal_bound`. The subject is the provider
-reference: an account entity reached through two references of one source
-that the within-source policy lists apart is added once per reference here
-(an open limit; the cash read below counts neither).
+reference, but an account entity reached through two references of one source
+that the within-source policy lists apart is not added twice: the projection
+leaves both references unresolved (`account_entity_shared`), so neither is
+added here and the cash read below counts neither.
+
+The response validator also refuses a subtotal `coefficient` that is not an
+integer, or that is zero at a `scale` other than 0 (INV03), and a `knownAssetsSubtotal` that is `null`
+without a `reasonCode` or a list beside one (INV05). On the summary and cash
+pages an exact `value` must be decimal text with exactly `scale` fraction
+digits, as `decimalToString` writes it; other text is refused, never shown as
+an amount.
 
 `GET /api/v2/balances/cash` (`kogane.balances.read` `collection: cash`)
 answers the same snapshot's cash per account: one line per account entity
 with its references and amounts, exact subtotals per unit and per source, and
 every other latest measurement counted under a closed reason. Its counted
 amounts are the known-assets subtotal's, except that two adopted amounts of
-one unit on one account entity are both left uncounted with
+one unit on one account entity (the case the projection's per-target closure
+leaves open: two summable metrics of one unit) are both left uncounted with
 `cash:account_reported_twice`. Its lines page under the cursor below, whole
 lines up to `limit` measurements and 8 KB a page; its page and the rules of what is cash are
 in [agent API: UI read pages](agent-api.md#ui-read-pages) and
@@ -294,6 +355,22 @@ publication landing between two pages cannot insert a row into a page already
 read. Its `dataCoverage.completeness` is always `unknown`: a history window is
 not a membership claim. It is not bounded by the 5,000 candidate limit, so it
 routinely holds more rows than the latest list.
+
+The pin is a parse run id, not a moment: `balanceHistoryKeysetSql` keeps the
+rows of the parse runs visible now (`recordedParses`) whose id is at most the
+high-water mark, and visibility is read again on every page. A parse run with
+an id at most the mark that becomes visible after the snapshot was built can
+therefore still add rows between two pages (a snapshot that is behind stays
+pageable): a release activation publishes its candidate runs, a rollback
+publishes the run the activation replaced, and a run still `pending` when the
+snapshot was built that is later marked `error` (an interrupted parse) is
+visible with the observations it had already written. A row that sorts after
+the cursor then appears on a later page, and one that sorts before it is not
+shown on that walk. The run an activation or a rollback moves the pointer
+away from is no longer published, and neither path sets its
+`superseded_by_parse_run_id`, so unless it was already marked superseded it
+stops being visible and its rows drop out of the later pages. That is an open
+limit; dropping the cursor reads the history again from the first page.
 
 ## Capabilities and the v1 route
 
@@ -386,9 +463,14 @@ invocation, committing each chunk with its checkpoint in one batch; after the
 last row the written rows are verified against the build, and the snapshot is
 sealed and published in one further batch, so a reader that selects
 `status='complete'` never observes a partial build. Two complete snapshots are
-retained so a reader with an open cursor survives one rebuild; older builds are
-retired first and only then lose their rows, and the published one is never
-retired.
+retained so a reader with an open cursor survives one rebuild. An older build
+is retired and loses its rows in one batch (`retireOldSnapshots`,
+`abandonSnapshot` in `packages/storage-d1/src/read/writer.ts`): a failed batch
+leaves it as it was (`complete` or `building`) with its rows for the next pass,
+never retired with rows no pass selects again. The published one is never
+retired: the retirement restates that in its own statement, so a build the
+pointer is switched to after the selection read it stays complete, and
+abandoning a build another writer has sealed leaves it as it is.
 
 Rebuild is currently whole-context, not per scope: the snapshot id changes on
 any published parse, and the build recomputes every candidate. That is bounded

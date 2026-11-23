@@ -55,11 +55,11 @@ import {
 export { safeFailureCode } from "./failure-code.ts";
 
 /** Terminals listed in one cron tick. */
-export const DEFAULT_SCAN_PAGE = 25;
+const DEFAULT_SCAN_PAGE = 25;
 /** Runs registered in one cron tick; the rest wait for the next one. */
-export const DEFAULT_SCAN_REGISTRATIONS = 5;
+const DEFAULT_SCAN_REGISTRATIONS = 5;
 /** Staged registrations continued in one cron tick, before the page is listed. */
-export const DEFAULT_SCAN_CONTINUATIONS = 5;
+const DEFAULT_SCAN_CONTINUATIONS = 5;
 /**
  * Pending runs read in one cron tick, oldest first. A continuation whose
  * terminal is missing spends none of the five, so up to this many are tried.

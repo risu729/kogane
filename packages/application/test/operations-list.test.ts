@@ -226,12 +226,14 @@ describe("listOperations", () => {
           },
         ],
         nextCursor: null,
+        next: null,
+        paging: { limit: 20, returned: 1, hasMore: false, stoppedBy: null },
       },
     });
     db.close();
   });
 
-  test("a cursor of another principal pages on; one of no operation is receipt_not_found", async () => {
+  test("a cursor of another principal pages on; one of no operation is invalid_cursor", async () => {
     const db = migratedDatabase();
     const foreign = `op_${hex64(5)}`;
     const older = `op_${hex64(4)}`;
@@ -260,12 +262,15 @@ describe("listOperations", () => {
     if (!first.ok) throw new Error(first.error);
     expect(first.page.operations.map((row) => row.operationId)).toEqual([foreign]);
     expect(first.page.nextCursor).toBe(foreign);
+    expect(first.page.next).toEqual({ arguments: { cursor: foreign } });
+    expect(first.page.paging).toEqual({ limit: 1, returned: 1, hasMore: true, stoppedBy: "limit" });
     const second = await page(foreign);
     if (!second.ok) throw new Error(second.error);
     expect(second.page).toMatchObject({ operations: [{ operationId: older }], nextCursor: null });
+    // A cursor this list did not issue is `invalid_cursor` (ADR 0128).
     expect(await page(`op_${hex64(6)}`)).toEqual({
       ok: false,
-      error: "receipt_not_found",
+      error: "invalid_cursor",
       refs: ["cursor"],
     });
     db.close();

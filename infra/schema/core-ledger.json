@@ -1282,7 +1282,12 @@
     {
       "file": "0095_sbi_vc_classic_unit_eligibility.sql",
       "statementCount": 2,
-      "insertStatements": [],
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
       "sha256": "5cb9b300e1ed17b8b56f27a18164818cccaec856ac5cd01c36cb691ae98875ea"
     },
     {
@@ -22768,6 +22773,7 @@
       "0092_vpass_credit_snapshots.sql",
       "0093_sbi_income_complete_containers.sql",
       "0094_myjcb_jpoint_history.sql",
+      "0095_sbi_vc_classic_unit_eligibility.sql",
       "0096_smbc_foreign_ordinary_unit_eligibility.sql",
       "0097_sbi_vc_document_unit_eligibility.sql",
       "0098_sbi_shinsei_savings_activity.sql",

@@ -57,7 +57,7 @@ export const MAX_MAILBOX_ROWS = 999;
 type JsonObject = Record<string, unknown>;
 export type MailboxRow = Record<(typeof ROW_STRINGS)[number], string> &
   Record<(typeof ROW_NULLS)[number], null>;
-export interface MailboxFile {
+interface MailboxFile {
   readonly sOriFileId: string;
   readonly sIntFileId: string;
 }
@@ -174,7 +174,7 @@ export function mailboxPdfFields(row: MailboxRow, detail: MailboxDetail): Record
 }
 
 /** The stable row id is independent of response order, read state and PDF bytes. */
-export function rowIdentity(row: MailboxRow): string {
+function rowIdentity(row: MailboxRow): string {
   return JSON.stringify([row.busiSys, row.userTokuteiId, row.sCd, row.sBaseDate, row.sCdSeq]);
 }
 
@@ -188,7 +188,7 @@ export async function mailboxDocumentIdentity(
   };
 }
 
-export function validDocumentDate(value: string): boolean {
+function validDocumentDate(value: string): boolean {
   if (!/^\d{8}$/u.test(value) || value.startsWith("0000")) return false;
   const date = new Date(
     `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}T00:00:00.000Z`,

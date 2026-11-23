@@ -276,13 +276,15 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One reconstructed state (of one account or a scope, ADR 0116), when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
-  // The dated reported state: its accounts and its payables. A read past the
-  // route's bound is refused, never cut, so it is never truncated.
+  // The dated reported state: its accounts, its payables and its
+  // scheduled-payment captures. A read past the route's bound is refused,
+  // never cut, so it is never truncated.
   if (operation === "reported-state.read")
     return {
       rows:
         (Array.isArray(value["accounts"]) ? value["accounts"].length : 0) +
-        (Array.isArray(value["payables"]) ? value["payables"].length : 0),
+        (Array.isArray(value["payables"]) ? value["payables"].length : 0) +
+        (Array.isArray(value["scheduledPayments"]) ? value["scheduledPayments"].length : 0),
       truncated: false,
     };
   // One UI page read (`{ schemaVersion, data }`, src/page-read-tools.ts): the
@@ -513,12 +515,17 @@ const MCP_TRANSPORT_CODES: Readonly<Record<number, string>> = {
  * than a JSON-RPC message, once, as `mcp.request`; never throws. JSON-RPC
  * answers (`200`, an unknown method or tool inside the envelope) and an
  * accepted notification (`202`) are the protocol's own and not recorded.
+ * So is `404`: the 2026-07-28 revision answers a method the server does not
+ * serve (an unknown one, or `ping`, which that revision does not have) with
+ * the same `-32601` under that status, where the initialize-based revisions
+ * answer it inside a `200`; no other `/mcp` answer is a `404`, as neither
+ * transport keeps a session that could be missing.
  */
 export async function recordTransportStatus(
   context: ExecuteContext,
   status: number,
 ): Promise<void> {
-  if (status < 400) return;
+  if (status < 400 || status === 404) return;
   const failed = status >= 500;
   const code = MCP_TRANSPORT_CODES[status] ?? (failed ? "internal_error" : "request_refused");
   await executeOperation(context, "mcp.request", () => Promise.resolve(null), {

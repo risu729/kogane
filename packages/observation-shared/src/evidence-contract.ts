@@ -1,4 +1,5 @@
 // Production evidence DTOs. These do not represent parsed financial observations.
+import type { PagedWireFields } from "./paging-contract.ts";
 export const EVIDENCE_API_VERSION = "evidence-v1" as const;
 export const EVIDENCE_PAGE_LIMIT = 50;
 export type EvidenceRunId = `r_${number}`;
@@ -72,11 +73,12 @@ export interface EvidenceRun {
   completedAtBasis: EvidenceTimeBasis | null;
   artifactCount: number;
 }
-export interface EvidenceRunList {
+export interface EvidenceRunList extends PagedWireFields {
   apiVersion: typeof EVIDENCE_API_VERSION;
   sourceId: string;
   coverage: "sealed-only";
   items: EvidenceRun[];
+  /** Deprecated in favour of `next` and `paging` (ADR 0128); kept for one release. */
   nextCursor: string | null;
 }
 export interface EvidenceArtifact {
@@ -90,10 +92,11 @@ export interface EvidenceArtifact {
   byteSize: number;
   recordedAt: string;
 }
-export interface EvidenceArtifactList {
+export interface EvidenceArtifactList extends PagedWireFields {
   apiVersion: typeof EVIDENCE_API_VERSION;
   run: EvidenceRun;
   items: EvidenceArtifact[];
+  /** Deprecated in favour of `next` and `paging` (ADR 0128); kept for one release. */
   nextCursor: string | null;
 }
 export interface EvidenceArtifactDetail {

@@ -3,6 +3,7 @@
 // render through this component; the markup, roles and classes stay identical.
 
 import type { ReactNode } from "react";
+import { BusyButton } from "./busy-button.tsx";
 
 type PageButton = {
   label: string;
@@ -16,20 +17,12 @@ type PageButton = {
   busy?: boolean;
 };
 
-/** One pager button; `busy` waits without taking focus away (aria-disabled). */
+/** One pager button; `busy` waits without taking focus away (`BusyButton`). */
 function PagerButton({ label, disabled, onClick, busy = false }: PageButton): ReactNode {
   return (
-    <button
-      className="button"
-      type="button"
-      disabled={disabled}
-      aria-disabled={!disabled && busy ? true : undefined}
-      onClick={() => {
-        if (!busy) onClick();
-      }}
-    >
+    <BusyButton busy={busy} disabled={disabled} onClick={onClick}>
       {label}
-    </button>
+    </BusyButton>
   );
 }
 

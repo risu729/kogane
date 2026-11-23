@@ -219,7 +219,7 @@ credential_producer |
     --output-dir /home/risu/.local/share/kogane/raw/sbi-shinsei
 ```
 
-Output directories/files use 0700/0600. CLI logs contain only status, artifact counts, balance/transaction counts and destination, excluding credentials, CAFIS material, Authorization, CSRF and account values. The hybrid WSL-fetch implementation remains for diagnostics, outside the main path.
+Output directories/files use 0700/0600. CLI logs contain only status, artifact counts, balance/transaction counts and destination, excluding credentials, CAFIS material, Authorization, CSRF and account values. A failed run prints one `sbi-shinsei-local-failed` line whose `errorType` is the closed code of `safeErrorType` (`src/diagnostics.ts`: the collector's own error classes by constructor, `TypeError`, `SyntaxError`, `Error`, else `UnknownError`), never the thrown `name` or message (`src/local/failure.ts`; until 2026-11-22 the line carried the thrown `name` and a redacted message). The hybrid WSL-fetch implementation remains for diagnostics, outside the main path.
 
 ## Enablement checklist
 

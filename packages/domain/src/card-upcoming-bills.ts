@@ -90,7 +90,7 @@ export const COVERS_UNKNOWN_REASONS = [
 ] as const;
 export type CoversUnknownReason = (typeof COVERS_UNKNOWN_REASONS)[number];
 export const COVERS = ["yes", "no", "unknown"] as const;
-export type Covers = (typeof COVERS)[number];
+type Covers = (typeof COVERS)[number];
 /** Always on a debit-account line: other debits from the account are not known. */
 export const UPCOMING_BILL_NOTES = ["other_debits_not_modelled"] as const;
 /** The answer bases of ADR 0114, and `unknown`. */
@@ -146,11 +146,17 @@ export interface UpcomingAccountInput {
   balance: Quantity;
   /** When the reported balance was captured; null when there is none. */
   capturedAt: string | null;
-  /** The latest card debit from the account due on or before the date, or null. */
+  /**
+   * The latest card debit from the account due on or before the date that
+   * the caller knows of, or null. The service takes it from each card's
+   * newest accepted settlement per bank account and each card's newest
+   * statement already due, not from a card's older statements
+   * (docs/card-settlements.md, Upcoming bills, limits).
+   */
   previousDebit: string | null;
 }
 
-export interface UpcomingBill {
+interface UpcomingBill {
   card: UpcomingCardInput["card"];
   statementPeriod: string | null;
   debitDate: string;
@@ -174,7 +180,7 @@ export interface UpcomingDebitAccountLine {
   notes: (typeof UPCOMING_BILL_NOTES)[number][];
 }
 
-export interface NotListedCard {
+interface NotListedCard {
   card: string;
   source: string;
   reason: NotListedReason;

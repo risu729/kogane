@@ -306,7 +306,7 @@ export class StopConditionError extends Error {
  * check inside it, so a refusal can be placed from the log line
  * `myjcb-credit-past-months-refused` without reading the response.
  */
-export const PAST_MONTHS_REFUSAL_REASONS = [
+const PAST_MONTHS_REFUSAL_REASONS = [
   "request_invalid",
   "http_status",
   "content_type_not_json",

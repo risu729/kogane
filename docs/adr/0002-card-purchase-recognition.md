@@ -89,3 +89,100 @@ Synthetic data only, as listed under
 for the lane, the guards and the merge and split writes. The production
 enablement is recorded in
 [rollout](../rollout.md#production-enablement--2026-09-24-card-purchase-recognition).
+
+## Amendment 2026-11-21: a merged event is retired by its posted row
+
+- Status: proposed
+- Date: 2026-11-21
+- Owner approval: required before merge, as a changed rule of this accepted
+  record. No route, tool or wire shape changes; the captured totals of the
+  purchase pages and `kogane.purchases.explain` stop counting twice the
+  purchase this case counted twice.
+
+### Context
+
+The retire pass retired a live event only when none of its keys was current
+(`staleCardPurchaseKeysSql`): "an event that still holds one current key is
+not stale". The writer, though, treats a merged event (one posted key and its
+pending key, the shape a reviewed or provider-linked pending-to-posted merge
+leaves) as following its posted row: it is revised from that row, and its
+pending row adds nothing. The two rules disagree when the pending row is still
+current and the posted row is not. A MyJCB pending capture stays current
+beside the confirmed one until its position (`credit-ledger-NN`) is captured
+again ([ADR 0016](0016-myjcb-pending-statement-slots.md)), so a reviewed merge
+can hold a current pending key. If the confirmed row is then captured under
+another key (its cells read differently, or a parser release changes the
+external ids and the confirmed ledger is re-parsed first), the new row is
+recognised as a new captured event while the merged event, kept alive by its
+pending key, stays captured with the old leg: the captured total counts one
+purchase twice (INV06). Unmerged, the same change retires the posted event
+and recognises its replacement: churn, never a double count. A synthetic
+reproduction on the deployed parsers showed a captured total of twice the
+purchase; nothing in production was read.
+
+### Options considered
+
+1. **Keep "one current key".** The double count stays until the pending
+   position is captured again. Rejected.
+2. **Decide a revision by its posted keys when it holds one, else by all its
+   keys (chosen).** The retire rule then matches the writer's: a merged event
+   follows its posted row for revision, re-anchoring and retirement. A
+   revision with no posted key is decided as before.
+3. **Retire only the merged event's leg, keeping it captured without one.**
+   A captured event without a leg is a shape no reader handles; rejected.
+
+### Decision
+
+`staleCardPurchaseKeysSql` reports the keys of a live `authorized` or
+`captured` revision none of whose deciding keys is current: its posted keys
+when it holds one, else all its keys. `held_current` keeps a revision found
+through a current key only when that key is posted or the revision holds no
+posted key (probed by the primary key). The retire pass is unchanged: it
+retires the merged event holding both keys, before recognition, so the
+replacement is never counted beside it.
+
+### Consequences
+
+- A merged event whose posted row is gone is retired even while its pending
+  row is current. That pending row stays held by the retired event, so it is
+  neither recognised again nor shown apart as an authorisation; the
+  replacement row is its own captured event, which a reviewer can link to a
+  new pending row as before. If the posted row reappears, the merged event is
+  captured again, as before.
+- Open limit: when the posted row leaves the display with no replacement the
+  writer recognises (the confirmed row withdrawn, or captured again in a shape
+  the writer skips) while the pending row is still current, the purchase is in
+  neither the captured nor the authorized total; it shows only as the merged
+  event, `unknown` (`provider_status_absent`), counted as unresolved. Before
+  this amendment it stayed captured on its pending key alone. Withdrawing the
+  link (`relation.reject` of the accepted link) splits it, and the pending
+  row's own event is authorized again on the next pass.
+- Every other revision is reported exactly as before: the read returns the
+  shipped text's rows plus exactly the keys of revisions holding a posted key,
+  none of them current, and a current pending key.
+- Cost: one primary-key probe per current key that a revision holds; no new
+  scan. The retirement proof (migration 0064) is unchanged: the read depends
+  on the same tables.
+
+### Verification
+
+- `services/processor/test/card-purchase-merged-posted-gone.test.ts`: on the
+  deployed MyJCB parser and the change lifecycle on Miniflare D1, a purchase
+  on both ledgers merged by a reviewed accept, then its confirmed row captured
+  under another key while the pending capture stays current: the merged event
+  is retired holding both keys, the replacement is the one captured event, the
+  captured total is the purchase once, and a second pass writes nothing. It
+  failed before the change (captured total twice the purchase). A second case
+  pins the open limit: the confirmed row gone with no replacement leaves the
+  purchase in neither total, one unresolved event, until a `relation.reject`
+  of the link authorizes the pending row's own event again.
+- `packages/read-model/test/card-purchase-keys.test.ts`: the same shape on the
+  card store fixture, reported stale with both keys.
+- `packages/read-model/test/card-purchase-stale-reference.ts`, used by
+  `card-purchase-keys.test.ts`, `card-usage-differential.test.ts` and
+  `card-usage-scale.test.ts`: every read equals the frozen shipped text
+  (`card-usage-legacy-sql.ts`) plus exactly the revisions the amendment adds,
+  computed in TypeScript from the live keys and the current rows, at every
+  page size; the random seeds draw such a revision (a new drawn state), the
+  scaled store holds none and its plan checks still pass without table
+  statistics.

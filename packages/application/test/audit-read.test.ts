@@ -72,7 +72,7 @@ test("scope precedes the window; 600 denied records change no count, digest or c
       filters: {},
       cursor: after.cursor,
     }),
-  ).toMatchObject({ ok: false, code: "stale_context" });
+  ).toMatchObject({ ok: false, code: "cursor_mismatch" });
   const denied = (await store.first<{ audit_id: string }>(
     "SELECT audit_id FROM audit_records WHERE scope_source='denied-source'",
   ))!.audit_id;

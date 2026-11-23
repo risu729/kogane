@@ -2,7 +2,11 @@
 
 - Status: accepted (merged 2026-09-27 in #276); amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the identity is derived without a key; see
-  [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key))
+  [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key)); the
+  [2026-11-04 amendment](#amendment-2026-11-04-captured-month-ranges-preserve-gaps)
+  is accepted (merged 2026-11-06 in #915); the
+  [2026-11-21 amendment](#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)
+  is accepted (merged 2026-11-22 in [#1540](https://github.com/risu729/kogane/pull/1540))
 - Date: 2026-09-27
 - Carried by:
   `services/collector-moneyforward/src/account-identity.ts`,
@@ -329,7 +333,7 @@ and scoped production acceptance remain separate work in #452.
 
 ## Amendment 2026-11-21: a successful input without its account count fails closed
 
-Status: proposed (accepted when the pull request that adds it merges)
+Status: accepted (merged 2026-11-22 in [#1540](https://github.com/risu729/kogane/pull/1540)).
 
 ### Context and options
 
