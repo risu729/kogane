@@ -1,9 +1,10 @@
 # ADR 0128: One paging contract for every paged tool result: `next.arguments`, `paging` and one refusal family
 
-- Status: proposed. The owner asked for this on 2026-11-20 ("unify the paging method, and fix the other
-  places that are needlessly inconsistent"); that request allows the proposal, not the published
-  changes. Every change below to a published tool's arguments, results or refusals needs **the
-  owner's approval before merge**, as for every published tool change.
+- Status: accepted 2026-11-22 (S1 #1494, S6 and S7 #1496, the `bytes` stop #1500); the owner's
+  decisions on the open questions are in the
+  [amendment of 2026-11-22](#amendment-owner-decisions-2026-11-22). The owner asked for this on
+  2026-11-20 ("unify the paging method, and fix the other places that are needlessly
+  inconsistent").
 - Date: 2026-11-20
 - Plan: [MCP consistency](../plans/2026-11-mcp-consistency.md) (inventory with file and line
   references, and the slices)
@@ -372,3 +373,39 @@ what it waits for.
   `queryResponse` beside its frozen pre-S7 text (`query-response-frozen.ts`) over every intent,
   limits, filters, every page of each walk and three refusals. Every answer without `next` and
   `paging` is byte-identical to the frozen one, and every refusal is identical.
+
+## Amendment: owner decisions (2026-11-22)
+
+- Status: accepted (owner decisions of 2026-11-22). Not implemented yet: #1642 carries them out.
+- Date: 2026-11-22
+
+The owner approved the published changes of S1, S6, S7 and the `bytes` stop, and settled the open
+questions. MCP clients are AI agents that re-list the tools each session, so a renamed argument or a
+changed answer needs no compatibility period: the old name is refused, never kept beside the new
+one.
+
+1. **Selectors (§3).** Every argument that picks which list or page a tool answers is named
+   `view`: `collection` (`identity.read`, `balances.read`, `rewards.read`, `events.read`) and `page`
+   (`store.read`, `evidence.read`) become `view`, with the same values. The measure view that `view`
+   names today (`store.read`, `observations.list`, `balances.read`) becomes `measure`, so `view` has
+   one meaning. `kind` stays where it names a record type (`store.read`, `observations.list`,
+   `observations.get`), because it filters records and does not pick a page. Each route's path
+   segment and query parameters are unchanged; only the tool arguments move.
+2. **`audit.search` (§3).** Its filters become top-level arguments, and its days are Asia/Tokyo
+   calendar days, like every other date the owner reads. The records stay UTC instants; only the
+   day bounds of the filter move.
+3. **`rewards.read` holdings (S1b).** A page counts holdings, not bucket rows: a holding is never
+   split across two pages.
+4. **`financial-error-v1` (§4, S7).** It grows the paging refusals in place, with no
+   `financial-error-v2`: `invalid_cursor` and `cursor_mismatch` at 400 (argument names as
+   `argument:<name>` refs), and `context_expired` at 410. `next` and `paging` stay beside `result`
+   in `kogane-query-response-v1`. The query withholds a page past `maxRows` as the other reads do
+   (`stoppedBy: "budget"`, `next: null`), so it never offers a cursor whose continued call is
+   refused.
+5. **`walk` and `bytes`** are accepted as written in §2.
+
+### Consequences
+
+- One word, `view`, picks what a tool answers, and `measure` names the measure, on every tool.
+- A client that sends `collection`, `page` or the old `view` meaning gets an `invalid_request`
+  naming the argument, and re-reads the tool list.
