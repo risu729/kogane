@@ -1525,7 +1525,7 @@ which `content`'s text serializes):
 
 ## Amendment: every collection quality summary page is held to 8 KB (2026-11-21)
 
-- Status: proposed. **Owner approval is needed before merge**: it changes
+- Status: accepted (merged 2026-11-22 in [#1524](https://github.com/risu729/kogane/pull/1524)). Owner approval was required before merge: it changes
   the published description of `kogane.collection-quality.read`, the
   default answer of the tool without a source and of
   `GET /api/collection-quality` (a `coverage` block, and pages), the queries

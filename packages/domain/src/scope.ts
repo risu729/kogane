@@ -242,14 +242,28 @@ class RelationIndex {
     return this.pairs.get(`${from} ${to}`) ?? "unknown";
   }
 
-  private neighbours(scopeRef: string, relation: PairRelation): string[] {
-    const result: string[] = [];
-    for (const [key, value] of this.pairs) {
-      const separator = key.indexOf(" ");
-      if (key.slice(0, separator) === scopeRef && value === relation)
-        result.push(key.slice(separator + 1));
+  private readonly byRelation = new Map<PairRelation, Map<string, string[]>>();
+
+  /**
+   * Indexed once per relation: the claims are fixed after construction, and
+   * step 7 asks for every unknown pair, which scanned every pair each time.
+   */
+  private neighbours(scopeRef: string, relation: PairRelation): readonly string[] {
+    let index = this.byRelation.get(relation);
+    if (index === undefined) {
+      index = new Map();
+      for (const [key, value] of this.pairs) {
+        if (value !== relation) continue;
+        const separator = key.indexOf(" ");
+        const from = key.slice(0, separator);
+        const list = index.get(from) ?? [];
+        list.push(key.slice(separator + 1));
+        index.set(from, list);
+      }
+      for (const list of index.values()) list.sort();
+      this.byRelation.set(relation, index);
     }
-    return result.sort();
+    return index.get(scopeRef) ?? [];
   }
 
   /** Explicit, or one derivation step: `a ⊂ w` and `w ∩ b = ∅` implies `a ∩ b = ∅`. */

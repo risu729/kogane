@@ -16,7 +16,7 @@ import {
 
 const context: FinancialContext = {
   contextId: "ctx:1",
-  schemaVersion: "financial-context-v1",
+  schemaVersion: "financial-context-v2",
   querySemanticsVersion: "query-semantics-v1",
   perimeterRef: "perimeter:self",
   effectiveTime: { kind: "local-date", value: "2026-08-31", zone: "Asia/Tokyo", basis: "derived" },
@@ -83,7 +83,9 @@ describe("FinancialContext", () => {
     expect(validFinancialContext(context)).toBe(true);
     expect(validFinancialContext({ ...context, extra: 1 })).toBe(false);
     expect(validFinancialContext({ ...context, knowledgeCutoff: "2026-08-31" })).toBe(false);
-    expect(validFinancialContext({ ...context, schemaVersion: "financial-context-v2" })).toBe(
+    // v1's publication marker did not move with an activation, a rollback or
+    // an exclusion (ADR 0091 amendment); a v1 context is not this contract.
+    expect(validFinancialContext({ ...context, schemaVersion: "financial-context-v1" })).toBe(
       false,
     );
     const { calculationPolicyRef: _dropped, ...missing } = context;

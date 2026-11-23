@@ -84,7 +84,6 @@ function listOffset(url: Pick<URL, "searchParams">): number {
  */
 async function listReports(env: Env, url: Pick<URL, "searchParams">): Promise<unknown> {
   const offset = listOffset(url);
-  if (!(await reportArtifactsAvailable(env))) throw new HttpError(404, "not_found");
   const rows = await listReportArtifacts(d1Executor(env.DB), REPORTS_PAGE_SIZE + 1, offset);
   const page = rows.slice(0, REPORTS_PAGE_SIZE);
   return {
@@ -105,8 +104,11 @@ async function listReports(env: Env, url: Pick<URL, "searchParams">): Promise<un
 type ArtifactRow = ReportArtifactRow;
 type RunRow = CalculationRunRow;
 
+/** One report's path: its id, then optionally its explanation or export. */
+const REPORT_PATH = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/;
+
 function reportsRoute(path: string): { reportId: string; view: string } | null {
-  const match = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/.exec(path);
+  const match = REPORT_PATH.exec(path);
   if (!match) return null;
   let reportId: string;
   try {
@@ -143,9 +145,14 @@ export async function readReportRoute(
   options: { refuseRestricted?: boolean } = {},
 ): Promise<unknown> {
   const path = url.pathname;
+  if (path !== PREFIX && !REPORT_PATH.test(path)) throw new HttpError(404, "not_found");
+  // Every report path, the list and each report alike, exists only where the
+  // store has CORE 0034's catalogue, as `reportArtifacts` on `/api/meta` says:
+  // a schema-ahead deployment answers 404 before it reads a parameter, never
+  // a query of a table it does not have.
+  if (!(await reportArtifactsAvailable(env))) throw new HttpError(404, "not_found");
   if (path === PREFIX) return listReports(env, url);
-  const route = reportsRoute(path);
-  if (!route) throw new HttpError(404, "not_found");
+  const route = reportsRoute(path)!;
   for (const key of url.searchParams.keys())
     if (key !== "decimalPolicy" || url.searchParams.getAll(key).length !== 1)
       throw new HttpError(400, "invalid_query");
@@ -200,12 +207,22 @@ export async function readReportRoute(
     const cached = await env.EVIDENCE.get(`${artifact.storage_ref}.explanation`);
     if (!cached) throw new HttpError(404, "not_found");
     if (cached.size > MAX_BODY_BYTES) throw new HttpError(503, "report_body_too_large");
+    // A cached node that is not JSON is refused as a stored body is, with a
+    // closed code of its own: the report body is untouched, only the cache
+    // beside it cannot be read.
+    const text = await cached.text();
+    let explanation: unknown;
+    try {
+      explanation = JSON.parse(text);
+    } catch {
+      throw new HttpError(503, "report_explanation_invalid");
+    }
     return {
       reportId: artifact.report_id,
       contextId: artifact.context_id,
       replayability,
       interpretationContext: interpretation,
-      explanation: JSON.parse(await cached.text()) as unknown,
+      explanation,
     };
   }
 

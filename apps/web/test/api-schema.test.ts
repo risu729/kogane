@@ -145,6 +145,7 @@ describe("shared API schema", () => {
       reconstructedStateOnDate: false,
       reportArtifacts: false,
       pendingDecisions: false,
+      changesSince: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -177,6 +178,7 @@ describe("shared API schema", () => {
       reconstructedStateOnDate: false,
       reportArtifacts: false,
       pendingDecisions: false,
+      changesSince: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -382,6 +384,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       reconstructedStateOnDate: false,
       reportArtifacts: false,
       pendingDecisions: false,
+      changesSince: false,
     });
     expect(clientFeatures(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).balanceReadModel).toBe(
       true,
@@ -411,6 +414,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       reconstructedStateOnDate: false,
       reportArtifacts: false,
       pendingDecisions: false,
+      changesSince: false,
     });
   });
 });

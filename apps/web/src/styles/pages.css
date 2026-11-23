@@ -74,6 +74,27 @@
   }
 }
 
+/* ── recent changes (the 最近の変化 panel) ─────────────────────────── */
+
+.changes-sources {
+  gap: var(--space-5);
+}
+
+.changes-source h3 {
+  margin: 0 0 var(--space-2);
+}
+
+/* A section's state counts wrap as one row of badges. */
+.changes-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.changes-more {
+  margin-top: var(--space-4);
+}
+
 /* ── source cards ──────────────────────────────────────────────────── */
 
 .source-grid {

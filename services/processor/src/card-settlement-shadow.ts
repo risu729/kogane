@@ -2,6 +2,7 @@
 // amounts, account identifiers, labels or financial dates leave this query.
 // This is prerequisite readiness, not permission to adopt a settlement.
 import { cardSettlementReadinessCtes } from "../../../packages/read-model/src/card-settlement-readiness.ts";
+import { SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL } from "./card-debit-account-job.ts";
 
 export const CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL = `WITH
 chosen AS (SELECT id FROM card_settlement_candidates ORDER BY created_at DESC,id DESC LIMIT 1001),
@@ -30,6 +31,6 @@ SELECT
  (SELECT count(*) FROM readiness WHERE statement_current=1 AND bank_current=1 AND allocation_available<>1) AS allocation_blocked,
  (SELECT count(*) FROM current_candidates c JOIN transaction_observations t ON t.id=c.bank_observation_id
    JOIN parse_runs p ON p.id=t.parse_run_id
-   WHERE p.parser_name='smbc-direct-transactions' AND p.parser_version IN ('1.1.0','1.1.1')
+   WHERE p.parser_name='smbc-direct-transactions' AND p.parser_version IN (${SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL})
    AND json_type(t.extra_json,'$._kogane.bankAccount')='object') AS debit_context_present
 `;

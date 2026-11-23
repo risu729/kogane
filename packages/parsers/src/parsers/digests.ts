@@ -151,7 +151,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts":
       "f27648c71d5b6b70045f5742c87c3778af6d5079ec3a515f644e980850a3892f",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
-      "e08364202cfa8bd83465cc2b3a35d7c2acd38af3d1e1bf57cba200618407d34c",
+      "97e663aeb07d8fb12056824f3c51b1111121d7a8de1fc19ffa27e6de693d4c74",
     "poc/observation-pipeline/src/parsers/sony-csv.ts":
       "0ba763384e89a0dbc0fbf5d436e70bf0173ca26e658b77c8ca985efa6c135141",
     "poc/observation-pipeline/src/parsers/sony-document-metadata.ts":
@@ -914,8 +914,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-gross-balance": {
-      version: "1.0.6",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.7",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -929,8 +929,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-csv": {
-      version: "1.0.6",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.7",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -944,8 +944,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-json": {
-      version: "1.0.5",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.6",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -973,8 +973,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-wallet-history": {
-      version: "1.0.7",
-      codeDigest: "ddc17c3a355453601c5b53158181b79b9b207e4490d2fa24b759f2af44208515",
+      version: "1.0.8",
+      codeDigest: "5b97e24904529fcdfe0c74fabcd76df29c1169ade35b850a6725ded77cb79e1e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

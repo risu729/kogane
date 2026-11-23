@@ -808,3 +808,9 @@ row identities. For the other currencies the row identity uses canonical exact
 decimals (`1.50` and `1.5` are the same row), so the CSV and a JSON page name
 one row. No exponent is added to the shared table here: that would change
 other parsers' outputs and is a separate decision.
+
+WALLET 1.0.8 (2026-11-22) applies the same rule to the monthly WALLET HTML:
+a transaction amount or fee in a currency the table does not name keeps its
+exact decimal, and a signed amount is published without `amountMinor`. 1.0.7
+refused the whole month for such a row. See
+[observations](../observations.md#sony-bank-wallet-a-currency-outside-the-minor-unit-table-keeps-its-exact-decimal-wallet-108).
