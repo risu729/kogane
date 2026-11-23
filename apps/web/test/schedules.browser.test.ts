@@ -1829,6 +1829,38 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("a refused survey acceptance leaves the focus on 採用, and a press while it is sent asks nothing more", async () => {
+    oneProposal();
+    writeAnswer = { before: invalid };
+    const page = await browser.newPage();
+    // A press that reached the decision again would ask again before sending.
+    let asked = 0;
+    page.on("dialog", (dialog) => {
+      asked += 1;
+      void dialog.accept();
+    });
+    try {
+      await page.goto(`${origin}/schedules`);
+      const proposal = page
+        .locator('section[aria-labelledby="maintenance-survey"] li')
+        .filter({ hasText: "停止時間の変更" });
+      await refusedInFlight(
+        page,
+        proposal.getByRole("button", { name: "採用", exact: true }),
+        () =>
+          proposal
+            .getByRole("alert")
+            .getByText("入力した時刻・出典・確認日時を確認してください。", { exact: true })
+            .waitFor(),
+        () => writes.length,
+      );
+      expect(writes[0]?.body).toEqual({ decision: "accept" });
+      expect(asked).toBe(1);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("a refused lease release leaves the focus on its button through the read back, and a press meanwhile is ignored", async () => {
     stoppedLease();
     leaseResponse = async () => Response.json({ error: "scheduling_unavailable" }, { status: 503 });

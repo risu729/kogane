@@ -105,15 +105,15 @@ page passes when:
   save ignores a submission while one is in flight. Their browser tests
   check that focus stays on the pressed button while it is in flight and
   after a refusal (続きを読み込む: while in flight), and that a second press
-  sends nothing; 採用 shares 却下's state and has no test of its own. A
-  button that cannot act is `disabled`: 承認する once approved, 確定する
-  once a receipt is shown or the plan reads stale, and the schedules page's
-  やめる while its request is sent. Open limit: focus drops to the document
-  body when the pressed button becomes `disabled` that way, or leaves the
-  page with its answer, since nothing moves focus to what replaces it: a
-  refused 続きを読み込む (its alert and 再試行 take its place),
-  反映状況を再確認 once the receipt reads 反映済み, 依頼を送信 once the
-  request is accepted, 設定を保存 once the saved schedule is read again,
+  sends nothing (採用: nor asks again). A button that cannot act is
+  `disabled`: 承認する once approved, 確定する once a receipt is shown or
+  the plan reads stale, and the schedules page's やめる while its request is
+  sent. Open limit: focus drops to the document body when the pressed button
+  becomes `disabled` that way, or leaves the page with its answer, since
+  nothing moves focus to what replaces it: a refused 続きを読み込む (its
+  alert and 再試行 take its place), 続きを読み込む once the last page is
+  read, 反映状況を再確認 once the receipt reads 反映済み, 依頼を送信 once
+  the request is accepted, 設定を保存 once the saved schedule is read again,
   and a decided proposal's or released run's button.
 - Every visible table has a caption (visually hidden when the panel title
   already says it) and every header cell a `scope`; every `.table-scroll` is
