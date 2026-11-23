@@ -83,6 +83,16 @@ export function reportedStateWorld(): DatedStore {
     minor: 700,
     fetchedAt: "2026-06-03T01:00:00Z",
   });
+  // A skip-payment page with two scheduled payments, one of them a refund,
+  // and another connection's page that listed none.
+  store.scheduledPage({
+    fetchedAt: "2026-09-07T12:00:00Z",
+    payments: [
+      { usageDate: "2026-08-03", dueDate: "2026-10-10", amount: "4500", asOf: "2026-09-07" },
+      { usageDate: "2026-08-20", dueDate: "2026-09-10", amount: "-300", asOf: "2026-09-07" },
+    ],
+  });
+  store.scheduledPage({ fetchedAt: "2026-09-07T12:00:00Z", connection: "conn-2" });
   return store;
 }
 

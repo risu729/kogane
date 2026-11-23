@@ -485,6 +485,16 @@ probably ended there, so the hand-off above was never reached in production.
 The client now calls the fetcher unbound, as the Sony Bank client already
 does, and a test fetcher that refuses a receiver pins it.
 
+With requests leaving, the 2026-11-22 21:00 UTC run logged the refusal at
+step `landing`, hop 0: the report link answered 301 to `login.sbisec.co.jp`.
+The collector had opened it with the assets session alone, which is not
+signed in to the classic site that serves the link. The mailbox now signs in
+to the classic site the same way the history pages do (the `ETGate` site link
+from the domestic session, then its redirects) and opens the report link on
+the classic host that sign-in lands on when it is a `site<n>.sbisec.co.jp`
+host, else on the observed `site4` host. A failed sign-in logs
+`sbi-mailbox-refused` with step `session`.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

@@ -247,7 +247,12 @@ export async function dispatchDecisionOutbox(
     result.outcomes[key] = (result.outcomes[key] ?? 0) + 1;
   };
   for (const row of claimed.results) {
-    const processor = processors[row.target as OutboxTarget];
+    // Own keys only: `target` is stored data, and a name such as
+    // `constructor` must reach the unregistered path, not an inherited member
+    // of `Object.prototype`, whatever the column's CHECK admits.
+    const processor = Object.hasOwn(processors, row.target)
+      ? processors[row.target as OutboxTarget]
+      : undefined;
     let outcome: ProcessorOutcome;
     try {
       outcome = processor ? await processor(db, row) : blockedOutcome("no_processor");

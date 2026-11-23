@@ -109,6 +109,9 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reported-state": ["kogane.reported-state.read"],
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
   "/api/v2/audit": ["kogane.audit.search"],
+  // The ホーム page's 最近の変化 panel: what was recorded since an instant,
+  // per source, from `readChangesSince` (ADR 0127 and its 2026-11-20 amendment).
+  "/api/v2/changes": ["kogane.changes.since"],
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
   "/api/v2/reconciliation/card-debit-accounts": ["kogane.card-settlements.debit-accounts"],
   "/api/v2/decisions/pending": ["kogane.decisions.pending"],
@@ -180,8 +183,6 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
   "kogane.events.read":
     "GET /api/v2/activity and /api/v2/obligations, which no screen reads (ADR 0072); plan D19",
-  "kogane.changes.since":
-    "GET /api/v2/changes, which no screen reads yet (ADR 0127: an agent's everyday question; a page is a later slice)",
   "kogane.audit.get":
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
 };

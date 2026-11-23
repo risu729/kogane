@@ -23,6 +23,8 @@
 // clear fails does the lease stay held (logged) until the tick frees it. Both
 // clear only this call's own reference, so neither can free a lease another
 // execution holds.
+import { loggedErrorName } from "./error-name";
+
 export interface ScheduleLeaseDatabase {
   prepare(sql: string): {
     bind(...values: unknown[]): {
@@ -205,7 +207,7 @@ export async function withCollectionLease<T>(
         JSON.stringify({
           event: "collection_lease_claim_failed",
           source,
-          errorName: error instanceof Error ? error.name : typeof error,
+          errorName: loggedErrorName(error),
         }),
       );
     } catch {

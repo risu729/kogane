@@ -12,6 +12,8 @@ import {
   cardDebitAccountSweep,
   parseCardInformation,
   knownBankAccounts,
+  SMBC_DEBIT_CONTEXT_PARSER_VERSIONS,
+  SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL,
 } from "../src/card-debit-account-job.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../packages/domain/src/myjcb-card-information.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
@@ -565,7 +567,20 @@ test("SMBC supports only the debit whose own published parse records its selecte
   ).toBe(0);
 }, 60000);
 
-test("the shared-helper SMBC release keeps account matching and readiness diagnostics", async () => {
+test("the deployed SMBC transactions release is one whose account context is read", () => {
+  // A parser bump that is not added here would leave every debit it parses
+  // uncomparable and out of the readiness count, with nothing failing.
+  expect<readonly string[]>(SMBC_DEBIT_CONTEXT_PARSER_VERSIONS).toContain(
+    smbcDirectTransactions.version,
+  );
+  for (const version of SMBC_DEBIT_CONTEXT_PARSER_VERSIONS)
+    expect(version).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/u);
+  expect(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL).toContain(
+    `p.parser_version IN (${SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL})`,
+  );
+});
+
+test("the deployed SMBC release keeps account matching and readiness diagnostics", async () => {
   const before = await db
     .prepare(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL)
     .first<Record<string, number>>();
@@ -585,7 +600,7 @@ test("the shared-helper SMBC release keeps account matching and readiness diagno
       branchCode: "123",
       accountNumber: "1234000",
     },
-    "1.1.1",
+    smbcDirectTransactions.version,
   );
   const id = (await db
     .prepare("SELECT id FROM transaction_observations WHERE parse_run_id=910")

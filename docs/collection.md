@@ -1086,7 +1086,15 @@ response — the scope is `unspecified` and no range is stated rather than a
 guessed one.
 
 Run outcome and log: the Durable Object's `runCollection` returns the run's
-manifest, and the `vpoint-pay-collection-persisted` log line carries its
+manifest. Its failure entry is `{operation, errorType, message}` in closed
+codes only: `errorType` is one of the collector's own error names
+(`VPointPayHttpError`, `VPointPayProtocolError`,
+`VPointPayReauthenticationRequiredError`,
+`VPointPayCredentialConfigurationError`) or of the shared set of
+`closedErrorType` (`packages/collector-diagnostics`), else `UnknownError`,
+and `message` is the failure's machine code above. Until 2026-11-22 the entry
+kept the thrown `name` as it was and a redacted provider message. The
+`vpoint-pay-collection-persisted` log line carries its
 status, month bounds, counts and closed codes (artifact and failure counts,
 terminal outcome, key and digest). `transactionMonthCount` and
 `transactionCount` are in both only when the collection finished; a finished
@@ -1497,7 +1505,18 @@ Processor maps it to the CORE source `global-pass`), producer
   the month or any text. A page the sanitizer refuses still counts in its
   month's decision.
 - Failure entries have the keys `operation`, `errorType`, `errorCode`,
-  `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
+  `artifactKey`, and on a sanitizer refusal also `expectationCode`.
+  `errorType` is a closed code, never a thrown `name` as such: a name is
+  whatever its thrower chose, a page script's included. The Worker keeps a
+  name only when it is in the shared set of `closedErrorType`
+  (`packages/collector-diagnostics`) or is its own `CollectionContractError`
+  or `PaginationError`; the container sends `Error`, `TypeError`,
+  `SyntaxError`, `TimeoutError` or `AbortError` (`closedErrorType` in
+  `container/diagnostics.mjs`), and the Worker checks a received name against
+  the same shared set. Any other name, a thrown value that is not an `Error`
+  and a `name` getter that throws are `UnknownError` (until 2026-11-22 any
+  identifier-shaped name was kept; `test/worker-collection.test.ts`,
+  `test/container-collection.test.mjs`). A page
   the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with
   the check's closed code: `globalpass_html_contract_invalid`,
   `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed` or
@@ -1625,6 +1644,28 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   still excludes that whole account unit. Neither another run's successful
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
+- Failure codes: a thrown error becomes a code through `classifyError`
+  (`src/error-code.ts`) for the manifest's failure of the session load and
+  list reads and its `account` and `full-cashflows` units, and for the
+  `reports` failure and `report-year-range` unit when the report step throws
+  as a whole (so the terminal's `safeErrorCode`); for the session health
+  record's
+  `lastErrorCode` (prefixed with the keepalive stage) and
+  `lastReauthErrorCode`; and for the `sbi_vc_keepalive` and `sbi_vc_reauth`
+  log lines. The per-report and leverage units keep their own closed sets,
+  else `report_collection_failed` / `leverage_execution_collection_failed`.
+  `classifyError` keeps a message only when it is one of the collector's own
+  codes (`SBI_VC_ERROR_CODES`, hyphens folded to underscores) or
+  `collector_http_<status>` / `passkey_http_<status>` with a three-digit
+  status from 100 to 599; any other message, however code-shaped, gives
+  `json_parse_failed`, a `crypto_*` code, `type_error` or `unexpected_error`
+  by the error's class. It never throws: a `message` or `name` getter or a
+  prototype read that throws only takes that step away.
+  `test/error-code.test.ts` checks that every error the collector's sources
+  construct takes a whole literal in the set, one of the reviewed message
+  templates the set covers, or the classified crypto code. Until 2026-11-22
+  any lowercase code-shaped message was kept as it was; records written
+  before then are not rewritten.
 - `transformations`: one `redacted` step per JSON dataset
   (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
   is not retained. Each PDF/ZIP document states an `extracted` step instead.

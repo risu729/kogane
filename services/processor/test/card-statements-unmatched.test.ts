@@ -104,44 +104,50 @@ async function seed() {
       .bind(id, id, parser)
       .run();
   }
-  for (const [period, total, due] of STATEMENTS)
-    await db
-      .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+  // One batch per table, in list order: a statement per row cost a round
+  // trip to workerd each.
+  await db.batch(
+    STATEMENTS.map(([period, total, due]) =>
+      db
+        .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
  VALUES(701,'myjcb:synthetic:root','credit_statement_payment_amount',?,?,0,'JPY',?,?,?)`)
-      .bind(
-        Number(total),
-        total,
-        period + "-01",
-        "synthetic-" + period,
-        JSON.stringify({
-          _kogane: {
-            period,
-            ...(due === null ? {} : { paymentDate: due }),
-            snapshotSemantics: "provider-reported-monthly-payment-amount",
-          },
-        }),
-      )
-      .run();
-  for (const [providerId, amount, date] of DEBITS)
-    await db
-      .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,counterparty,as_of,raw_locator,extra_json)
+        .bind(
+          Number(total),
+          total,
+          period + "-01",
+          "synthetic-" + period,
+          JSON.stringify({
+            _kogane: {
+              period,
+              ...(due === null ? {} : { paymentDate: due }),
+              snapshotSemantics: "provider-reported-monthly-payment-amount",
+            },
+          }),
+        ),
+    ),
+  );
+  await db.batch(
+    DEBITS.map(([providerId, amount, date]) =>
+      db
+        .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,counterparty,as_of,raw_locator,extra_json)
   VALUES(702,'smbc-bank:synthetic',?,'posted',?,?,0,'JPY','synthetic',?,?,?)`)
-      .bind(
-        providerId,
-        -Number(amount),
-        "-" + amount,
-        date + "T00:00:00+09:00",
-        "synthetic-" + providerId,
-        JSON.stringify({
-          id: providerId,
-          _kogane: {
-            direction: "outflow",
-            amountSignSource: "direction",
-            identityOrigin: "provider-id",
-          },
-        }),
-      )
-      .run();
+        .bind(
+          providerId,
+          -Number(amount),
+          "-" + amount,
+          date + "T00:00:00+09:00",
+          "synthetic-" + providerId,
+          JSON.stringify({
+            id: providerId,
+            _kogane: {
+              direction: "outflow",
+              amountSignSource: "direction",
+              identityOrigin: "provider-id",
+            },
+          }),
+        ),
+    ),
+  );
   for (const [id, source] of [
     [701, "myjcb"],
     [702, "smbc-bank"],
@@ -180,7 +186,11 @@ const memberIds = (item: UnmatchedCardStatement | undefined) =>
       )
     : null;
 
-/** Rows per table of the store, so a read that writes anything is seen. */
+/** Rows per table of the store, so a read that writes anything is seen. Each
+ * table is a column of one statement (D1 returns at most 100 columns), all in
+ * one batch: a statement per table cost a synchronous round trip to workerd
+ * per `prepare`, about 1 s per call on the CORE schema and up to 1.7 s under
+ * load, twice in the first case (as in card-debit-accounts.test.ts). */
 async function rowCounts(): Promise<Record<string, number>> {
   const tables = (
     await db
@@ -189,20 +199,48 @@ async function rowCounts(): Promise<Record<string, number>> {
       )
       .all<{ name: string }>()
   ).results;
+  const chunks = Array.from({ length: Math.ceil(tables.length / 100) }, (_, n) =>
+    tables.slice(n * 100, n * 100 + 100),
+  );
+  const results = await db.batch<Record<string, number>>(
+    chunks.map((chunk) =>
+      db.prepare(
+        "SELECT " +
+          chunk.map(({ name }, column) => `(SELECT count(*) FROM "${name}") AS c${column}`).join(),
+      ),
+    ),
+  );
   const counts: Record<string, number> = {};
-  for (const { name } of tables)
-    counts[name] = (await db
-      .prepare(`SELECT count(*) AS n FROM "${name}"`)
-      .first<{ n: number }>())!.n;
+  chunks.forEach((chunk, n) =>
+    chunk.forEach(({ name }, column) => {
+      const count = results[n]!.results[0]![`c${column}`];
+      // A count read under the wrong column would compare equal before and
+      // after any write, so it fails here instead.
+      if (typeof count !== "number") throw new Error(`no row count for ${name}`);
+      counts[name] = count;
+    }),
+  );
   return counts;
 }
 
+/** Every seeded debit's row id by provider id, read in one statement on first
+ * use: a lookup per debit cost a round trip to workerd each, 34 in the first
+ * case. Rows are append-only, so the map read once stays true. */
+let debitIds: Promise<Map<string, number>> | undefined;
 async function debitId(providerId: string): Promise<string> {
-  const row = await db
-    .prepare("SELECT id FROM transaction_observations WHERE external_id=?")
-    .bind(providerId)
-    .first<{ id: number }>();
-  return "transaction:" + row!.id;
+  debitIds ??= db
+    .prepare(
+      "SELECT external_id, id FROM transaction_observations WHERE external_id IS NOT NULL ORDER BY id",
+    )
+    .all<{ external_id: string; id: number }>()
+    .then(({ results }) => {
+      const ids = new Map<string, number>();
+      for (const row of results) if (!ids.has(row.external_id)) ids.set(row.external_id, row.id);
+      return ids;
+    });
+  const id = (await debitIds).get(providerId);
+  if (id === undefined) throw new Error(`no debit ${providerId}`);
+  return "transaction:" + id;
 }
 
 test("each statement without a candidate carries its closed code and, where asked, the planner's answer", async () => {

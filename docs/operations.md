@@ -235,7 +235,7 @@ mise run //services/processor:ops status
     {
       "lane": "purchase_recognition",
       "outcome": "ran", // or "skipped-by-flag", or "failed"
-      "errorCode": null, // a safe code when failed: a pipeline code or an error class name
+      "errorCode": null, // a closed code when failed: a pipeline code, a documented lane error class or a built-in error class (processor.md §6.1)
       "startedAt": "2026-09-24T03:05:00.412Z",
       "durationMs": 8412,
       "ageMs": 131000, // since the tick finished
@@ -303,9 +303,25 @@ check it was, as a closed category:
   ([ADR 0005's amendment (i)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-02-i-the-first-stored-skip-payment-page-was-refused)).
 - `services/processor/scripts/diagnose.ts` replays the oldest failed job of
   each parser through `getPlatformProxy` remote bindings, with the same
-  classification.
+  classification. With `--remaining` (the newest failed job per parser) or
+  `--remaining-all` (every failed job) it selects only
+  `sbi-yen-detail-history` and `global-pass-activity` jobs at the release
+  the parser registry of the checkout declares
+  (`scripts/diagnose-selection.ts`), so a parser version bump moves the
+  selection with it. Every selected artifact is replayed through each parser
+  of the checkout that accepts it, so selection and replay are always the
+  same release. It takes no other release: a release the processor has not
+  run yet has no jobs to select, and the script cannot replay the
+  deployed release's failures through a newer parser; for GLOBAL PASS,
+  `diagnose-global-pass.ts --parser-version` does that.
 
-The owner runs it from the repository root, with wrangler signed in to the
+`services/processor/scripts/diagnose-global-pass.ts` replays every artifact
+with a failed `global-pass-activity` job at one release, the registry's
+unless `--parser-version MAJOR.MINOR.PATCH` names another (a malformed value
+is refused before any binding opens), and prints counts-only page shapes and
+the matched parser check. It always parses with the parser of the checkout.
+
+The owner runs them from the repository root, with wrangler signed in to the
 Cloudflare account (`mise exec -- node
 services/processor/node_modules/wrangler/bin/wrangler.js login`, or a
 `CLOUDFLARE_API_TOKEN` that can read D1 and R2):

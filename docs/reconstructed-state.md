@@ -142,10 +142,15 @@ without the count of statements before the payable window, so not the
 state,
 the late part (at the cut of the end capture, when every end balance of the
 scope comes from captures of one instant), and an outer manifest
-(`reconstructed-state-query-v2`) pinning the scope, the releases, the cut, the
+(`reconstructed-state-query-v3`) pinning the scope, the releases, the cut, the
 set version, the identity epoch and pins, alias rule versions, the coverage
-producer, both snapshot contexts and the fold manifest's digest, with its
-`contextId`.
+producer, both snapshot contexts, each account's mapped sources
+(`accountSources`: the `[accountId, sourceId]` pairs `ACCOUNTS_SOURCES_SQL`
+read, which with the perimeter the snapshot contexts pin decide which account
+no reported container lists) and the fold manifest's digest, with its
+`contextId`. A mapping that adds or removes a source of a scope account moves
+the id even when no capture on either date lists it
+([ADR 0116, amendment of 2026-11-21](adr/0116-reconstructed-state-account-scope.md#amendment-the-context-id-pins-each-accounts-mapped-sources-2026-11-21)).
 
 ## HTTP, agent tool and page
 
@@ -356,6 +361,9 @@ an assurance of identical output identities across reader versions.
   about as long as the SMBC account alone (about 0.14 s each on `bun:sqlite`
   locally, not asserted); not measured on workerd or remote D1
   ([ADR 0116](adr/0116-reconstructed-state-account-scope.md)).
+- Which accounts no reported container lists is read from today's account
+  mappings, not as of either date (as the reported state reads its rows);
+  the manifest's `accountSources` names the mapped sources it read.
 - A scope's status and reasons are the scope's: a selector reason (an
   unlogged revision, a conflict, an identity change) does not say which
   account it concerns, an account without a reported container makes the

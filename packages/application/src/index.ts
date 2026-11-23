@@ -388,6 +388,7 @@ export {
   type ExplanationNode,
   EXPLANATION_NODE_KINDS,
   MAX_NODE_DEPTH,
+  organizedExplainReader,
   parseExplainRequest,
 } from "./explain.ts";
 export {

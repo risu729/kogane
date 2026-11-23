@@ -19,8 +19,10 @@
 // row is not a purchase" stay reviewed decisions.
 //
 // One tick:
-//   1. the retire pass: every live recognised event none of whose provider
-//      rows is current any more gets a revision in state `unknown` with no leg
+//   1. the retire pass: every live recognised event none of whose deciding
+//      provider rows is current any more (its posted rows when it holds one,
+//      else its rows: a merged event follows its posted row, ADR 0002's
+//      2026-11-21 amendment) gets a revision in state `unknown` with no leg
 //      (`provider_status_absent`), a merged event (several keys) included. It
 //      runs first so that a key change (a card ordinal change, a parser
 //      fingerprint change, a month's customized capture replaced by its web
@@ -258,9 +260,13 @@ function bounded(value: number | undefined, fallback: number, max: number): numb
 }
 
 /**
- * Retire every live recognised event none of whose provider rows is current
- * any more, a merged event holding a pending and a posted key included: the
- * stale read reports a revision only when none of its keys is current. True
+ * Retire every live recognised event none of whose deciding provider rows is
+ * current any more, a merged event holding a pending and a posted key
+ * included: the stale read reports a revision only when none of its posted
+ * keys is current, or, holding no posted key, none of its keys. A merged
+ * event whose posted row is gone is retired even while its pending row is
+ * still current, so it never stays captured beside the event of the row that
+ * replaced its posted row (ADR 0002, amendment 2026-11-21). True
  * when the page was full and every event on it was retired: more stale keys
  * may be waiting, and nothing on the page was one this pass cannot act on.
  */

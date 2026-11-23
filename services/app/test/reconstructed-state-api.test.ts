@@ -150,7 +150,7 @@ describe("reconstructed state over HTTP", () => {
     // status with its reasons, never a figure of zero.
     expect(body).toMatchObject({
       apiVersion: 2,
-      schemaVersion: "reconstructed-state-query-v2",
+      schemaVersion: "reconstructed-state-query-v3",
       status: "unavailable",
       accounts: [ACCOUNT],
       range: { from: "2026-03-01", to: "2026-03-31" },
