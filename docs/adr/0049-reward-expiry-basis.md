@@ -959,7 +959,8 @@ the date its offset was written in, not its date in any zone.
 inactivity deadline on 2026-09-30, and an instant clock one second after Tokyo
 midnight on the last day of a rule version kept that version in force. Two
 inputs reach it: the evaluation clock (which rule versions and tier claims
-cover the evaluation day) and each qualifying activity's date (the anchor).
+cover the evaluation day, and whether a deadline has passed) and each
+qualifying activity's date (the anchor).
 ADR 0056 makes `civilDateOfInstant` the domain's reader of an instant's civil
 date in a named zone, and `reward-conversion.ts` already reads instants with
 it.
@@ -984,7 +985,11 @@ activities.
    `deadlineCalendar.zone`), the calendar the anchor and deadline are stated
    in, as the goal search reads an instant deadline on its clock's calendar
    (amendment of 2026-11-18 above). When the rule has no readable calendar,
-   read the clock in its own zone; such a rule derives nothing either way.
+   read the clock in its own zone; such a rule computes no date either way,
+   and the clock's day decides only what it decided before #1520's refusal:
+   whether the version is in force (`rule_out_of_force` precedes
+   `deadline_calendar_unreadable` in the refusal order) and whether a
+   provider display has passed (`deadline_passed`).
 
 ### Decision
 
@@ -993,7 +998,9 @@ zone: a `local-date` is read as before; an `instant` is
 `civilDateOfInstant(value, calendarZone ?? value.zone)`; anything else is no
 day. A zone the runtime does not know gives no day, so an activity is
 `activity_date_unknown` and a clock establishes no evaluation day, as an
-unreadable date already did; no closed code is added.
+unreadable date already did: a version with a validity period is
+`rule_out_of_force` and no deadline is `deadline_passed`. No closed code is
+added.
 
 `EXPIRY_DERIVATION_RELEASE` stays `reward-expiry-v3`. A release names a
 derivation that changed for an input it can be given (the rule of #1520).
@@ -1023,6 +1030,9 @@ midnight: a `Z` instant after Tokyo midnight anchors on the Tokyo day; the same
 moment at `+09:00` and the plain date anchor on the same day; one second before
 Tokyo midnight anchors on the previous day; an instant stamped `UTC` still
 counts on the `Asia/Tokyo` calendar; a calendar zone the runtime does not know
-makes an instant `activity_date_unknown` while a plain date still anchors; and
-an instant clock at Tokyo midnight is on the next version's first day. The
-`Z`, `UTC`, unknown-zone and clock cases fail on the slicing reader.
+makes an instant `activity_date_unknown` while a plain date still anchors;
+an instant clock at Tokyo midnight is on the next version's first day; and,
+for a rule without a readable calendar, an instant clock is read in its own
+zone (in force or not, a display passed or not), an unknown clock zone passes
+nothing, and no date is computed. The `Z`, `UTC`, unknown-zone and clock cases
+fail on the slicing reader.
