@@ -114,7 +114,7 @@ export const MCP_TOOLS = [
     name: "kogane.financial.query",
     title: "Run one typed question inside the granted scope",
     description:
-      "Server-side aggregation and paging. Returns a financial-result-v1 object: data, coverage inside the granted scope, five quality dimensions, warnings and a cursor bound to this context.",
+      "Server-side aggregation and paging. Returns a financial-result-v1 object: data, coverage inside the granted scope, five quality dimensions, warnings and a cursor bound to this context. Paging (ADR 0128): an activity or reported-state answer carries `next` and `paging` beside `result`; merge `next.arguments` into the same call until `next` is null; `result.nextCursor` names the same cursor.",
     inputSchema: querySpecSchema(),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
@@ -176,7 +176,7 @@ export const MCP_TOOLS = [
     name: "kogane.instruments.candidates",
     title: "Instrument identity candidates across identifiers",
     description:
-      "One page of the ADR 0055 candidate read: which stored instrument identifiers may denote the same instrument, on which evidence, which pairs are kept apart and why, with closed status, hold, conflict and gap codes. Read-only. A proposed candidate names the identity.assign or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+      'One page of the ADR 0055 candidate read: which stored instrument identifiers may denote the same instrument, on which evidence, which pairs are kept apart and why, with closed status, hold, conflict and gap codes. Read-only. A proposed candidate names the identity.assign or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended, `stoppedBy: "budget"` when the grant\'s maxRows withholds the next page; `nextOffset` is deprecated.',
     inputSchema: {
       type: "object",
       additionalProperties: false,

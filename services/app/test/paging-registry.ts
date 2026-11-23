@@ -22,13 +22,16 @@ export const PAGING_WALKED = {
   // Walked over the pure summary (`packages/collection/test/maintenance-summary.test.ts`):
   // the tool answers that function's page as it is.
   "kogane.schedules.maintenance.read": "packages/collection/test/maintenance-summary.test.ts",
+  // Slice S6: the candidate reviews, with the budget stop their nextOffset hid.
+  "kogane.accounts.candidates": "paging-conformance-candidates.test.ts",
+  "kogane.instruments.candidates": "paging-conformance-candidates.test.ts",
+  // Slice S7, the parts that wait for no decision: `next` and `paging` beside
+  // `result`; financial-error-v1's refusals wait for the owner's decision.
+  "kogane.financial.query": "paging-conformance-query.test.ts",
 } as const;
 
 /** Tools that still page their own way, and the slice that converts each. */
 export const PAGING_WAITING = {
-  "kogane.financial.query": "S7",
-  "kogane.instruments.candidates": "S6",
-  "kogane.accounts.candidates": "S6",
   "kogane.observations.list": "S3",
   "kogane.balances.read": "S3",
   "kogane.collection-quality.read": "S4",

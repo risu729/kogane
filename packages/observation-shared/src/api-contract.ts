@@ -3,6 +3,7 @@
 import { READ_DETAILS } from "../../domain/src/read-detail.ts";
 import type { ObservationOrganization } from "./organization-contract.ts";
 import type { ApiCapabilities } from "./api-schema.ts";
+import type { PagedWireFields } from "./paging-contract.ts";
 export type { ApiCapabilities } from "./api-schema.ts";
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 
@@ -138,7 +139,7 @@ export interface Overview {
  * Only the fields the UI reads are declared; the server validates the whole
  * `financial-result-v1` contract.
  */
-export interface SharedQueryResponse<T = unknown> {
+export interface SharedQueryResponse<T = unknown> extends PagedWireFields {
   schemaVersion: "kogane-query-response-v1";
   contextId: string;
   resultRef: string;

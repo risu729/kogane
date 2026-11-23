@@ -36,7 +36,8 @@ import {
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
-import { validFinancialResult } from "../../domain/src/result.ts";
+import { PAGED_QUERY_INTENTS, validFinancialResult } from "../../domain/src/result.ts";
+import { pagedFieldsSay } from "./paging-contract.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import {
   ACCOUNT_CANDIDATES_PATH,
@@ -1526,7 +1527,34 @@ function validSharedQueryResponse(value: unknown): boolean {
         text(entry.reasonCode),
     ) &&
     validFinancialResult(value.result, record) &&
-    value.result.contextId === value.contextId
+    value.result.contextId === value.contextId &&
+    queryPagedFieldsAgree(value)
+  );
+}
+
+/**
+ * `next` and `paging` (ADR 0128) of a query answer: only a row intent's
+ * answer carries them, beside `result`, and they say what `result.nextCursor`
+ * says: the same cursor, the resolved `limit`, and the rows listed. An answer
+ * without them passes until slice S9; one of an intent that answers whole
+ * must not carry them.
+ */
+function queryPagedFieldsAgree(value: Record<string, unknown>): boolean {
+  const result = value["result"] as {
+    resolvedQuery: { intent: string; limit: number | null };
+    data: unknown;
+    nextCursor: string | null;
+  };
+  if (!(PAGED_QUERY_INTENTS as readonly string[]).includes(result.resolvedQuery.intent))
+    return !Object.hasOwn(value, "next") && !Object.hasOwn(value, "paging");
+  const rows = record(result.data) ? result.data["rows"] : undefined;
+  return (
+    Array.isArray(rows) &&
+    pagedFieldsSay(value, {
+      next: result.nextCursor === null ? null : { cursor: result.nextCursor },
+      limit: result.resolvedQuery.limit,
+      returned: rows.length,
+    })
   );
 }
 
