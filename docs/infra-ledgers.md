@@ -102,10 +102,10 @@ release. The comments stay until a parser release is bumped for a real reason.
 
 - the migration note has exactly one home, and the linter rejects a duplicate top-level
   declaration, so a merge that re-adds it cannot land quietly (U15);
-- a root `bun.lock` that is missing, unreadable, not JSONC, or has no `workspaces` and `packages`
-  maps stops `mise run ledger:deps` with a non-zero exit and writes nothing. "No lockfile" in the
-  ledger only ever means a directory the root lockfile does not cover and that carries no
-  `package-lock.json` of its own.
+- a root `bun.lock` that is missing, unreadable, not JSONC, or lacks its `workspaces` or its
+  `packages` map stops `mise run ledger:deps` with a non-zero exit and writes nothing. "No
+  lockfile" in the ledger therefore only means a directory the root lockfile does not cover and
+  whose own `package-lock.json` is absent, unreadable or does not parse.
 
 ## Reading the classification
 

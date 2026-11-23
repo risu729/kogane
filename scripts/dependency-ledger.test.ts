@@ -184,6 +184,7 @@ describe("the root lockfile is read or the run fails", () => {
   test.each([
     ["is not JSONC", '{ "workspaces": {', /Cannot read the root bun\.lock/u],
     ["is not a Bun text lockfile", '{ "lockfileVersion": 1 }', /root bun\.lock .*workspaces/u],
+    ["has no packages map", '{ "workspaces": {}, "packages": [] }', /root bun\.lock .*packages/u],
     ["is a directory", "directory", /Cannot read the root bun\.lock/u],
     ["is missing", "absent", /Cannot read the root bun\.lock/u],
   ] as const)("a root bun.lock that %s fails the run", async (_case, lockfile, message) => {

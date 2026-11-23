@@ -187,7 +187,7 @@ function readRootLockfile(root: string): string {
     typeof value === "object" && value !== null && !Array.isArray(value);
   if (!isMap(object(lock)["workspaces"]) || !isMap(object(lock)["packages"]))
     throw new Error(
-      "The root bun.lock has no `workspaces` and `packages` maps, so it is not a Bun text lockfile",
+      "The root bun.lock lacks its `workspaces` or its `packages` map, so it is not a Bun text lockfile",
     );
   return text;
 }
