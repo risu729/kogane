@@ -59,10 +59,10 @@ import { REWARD_READ_RELEASE } from "../../../packages/read-model/src/rewards";
 
 /** Rows per page; the same shape of limit the v2 balance routes accept. */
 export const REWARD_READ_PAGE_LIMITS = [25, 50, 100, 200] as const;
-export const DEFAULT_REWARD_READ_PAGE_LIMIT = 50;
+const DEFAULT_REWARD_READ_PAGE_LIMIT = 50;
 
 /** The READ binding, when this deployment has one. */
-export function rewardReadBinding(env: Env): D1Like | null {
+function rewardReadBinding(env: Env): D1Like | null {
   return (env as unknown as { READ?: D1Like }).READ ?? null;
 }
 

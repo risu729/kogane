@@ -413,7 +413,20 @@ export async function readObservationRoute(
               organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
             })),
           })),
-          interpretationContext: organizationContext(identityRead, organizations.values()),
+          // The rows the page returns, as on the transaction and balance
+          // lists: the reader's row past the page (its truncation probe) is
+          // cut by `boundedPage` and names no release here.
+          interpretationContext: organizationContext(
+            identityRead,
+            entries
+              .slice(0, 500)
+              .flatMap((entry) => [
+                organizations.get(organizationKey({ kind: "position", id: entry.position.id })),
+                ...entry.valuations.map(({ id }) =>
+                  organizations.get(organizationKey({ kind: "valuation", id })),
+                ),
+              ]),
+          ),
         },
         offset,
       ),

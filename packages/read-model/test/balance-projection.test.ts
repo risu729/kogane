@@ -62,6 +62,7 @@ function deposit(
     authorityRank: AUTHORITY_RANKS.direct,
     measureView: "balances",
     latestInGroup: true,
+    accountEntity: null,
     ...options,
   };
 }
@@ -397,6 +398,524 @@ describe("balance projection builder", () => {
       expect(buildBalanceProjection([smbc, ...witnesses], []).relations).toHaveLength(0);
   });
 
+  describe("two references identity maps to one account entity (ADR 0001's amendment of 2026-11-20)", () => {
+    // Eight provider-local references of one source, each its own entity,
+    // and a ninth reference whose current mapping names the entity of the
+    // first. v2 declared all nine listed apart and adopted nine amounts.
+    const smbc = (index: number, entity = `account:synthetic:${String(index)}`) =>
+      deposit(`m-smbc-${String(index)}`, `source_account:smbc:${String(index)}`, "1000", {
+        subjectStatus: "provider-local",
+        accountEntity: entity,
+      });
+    const eight = Array.from({ length: 8 }, (_, index) => smbc(index));
+    const second = deposit("m-smbc-second", "source_account:smbc:second", "1000", {
+      subjectStatus: "provider-local",
+      accountEntity: "account:synthetic:0",
+    });
+    const adopted = (build: ReturnType<typeof buildBalanceProjection>) =>
+      build.rows.filter((row) => row.state === "adopted").map((row) => row.scopeKey);
+
+    test("references of different entities still count separately", () => {
+      const build = buildBalanceProjection(eight, []);
+      expect(adopted(build)).toHaveLength(8);
+      expect(build.completeness).toBe("complete");
+      // 8 choose 2 policy relations, every one of them `disjoint`.
+      expect(build.relations).toHaveLength(28);
+    });
+
+    test("a second reference of one entity is neither adopted nor declared disjoint", () => {
+      for (const order of [
+        [...eight, second],
+        [second, ...[...eight].reverse()],
+      ]) {
+        const build = buildBalanceProjection(order, []);
+        // The entity's two references stay unresolved with the closed reason;
+        // the seven other accounts are adopted exactly as before.
+        expect([...adopted(build)].sort()).toEqual(
+          [1, 2, 3, 4, 5, 6, 7].map((index) => `m-smbc-${String(index)}`),
+        );
+        for (const scopeKey of ["m-smbc-0", "m-smbc-second"])
+          expect(stateOf(build, scopeKey)).toMatchObject({
+            state: "unresolved",
+            reasonCode: "account_entity_shared",
+          });
+        expect(build.reasons).toEqual(["unresolved:account_entity_shared"]);
+        expect(build.completeness).toBe("partial");
+        expect(
+          build.relations.filter((relation) =>
+            [relation.fromScopeKey, relation.toScopeKey].every((key) =>
+              ["source_account:smbc:0", "source_account:smbc:second"].includes(key),
+            ),
+          ),
+        ).toEqual([]);
+        expect(
+          build.relations.every(
+            (relation) => relation.release === "distinct-identified-accounts-v3",
+          ),
+        ).toBe(true);
+      }
+    });
+
+    test("an input captured before the field existed builds as v2 did", () => {
+      const legacy = [...eight, second].map((candidate) => {
+        const { accountEntity: _omitted, ...rest } = candidate;
+        return rest as ProjectionCandidate;
+      });
+      expect(adopted(buildBalanceProjection(legacy, []))).toHaveLength(9);
+    });
+
+    test("an accepted same_account between the two references bundles them into one", () => {
+      const relations = scopeRelationsFromEntityRelations([
+        {
+          id: "relation:synthetic:same",
+          kind: "same_account",
+          from_ref: "source_account:smbc:second",
+          to_ref: "source_account:smbc:0",
+          status: "accepted",
+          decision_revision_id: "rev:synthetic:same",
+        },
+      ]);
+      const build = buildBalanceProjection([...eight, second], relations);
+      expect(adopted(build)).toHaveLength(8);
+      expect(stateOf(build, "m-smbc-0").state).toBe("adopted");
+      expect(stateOf(build, "m-smbc-second")).toMatchObject({
+        state: "excluded",
+        reasonCode: "duplicate_evidence",
+      });
+      expect(build.completeness).toBe("complete");
+    });
+
+    test("cross-source identified references of one entity are not disjoint", () => {
+      // Two direct banks' own deposit readings, both identified and at two
+      // listed institutions: v2 declared them disjoint twice over.
+      const mizuho = (entity: string) =>
+        deposit("m-mizuho", "source_account:mizuho:ordinary", "1000", {
+          sourceId: "mizuho-bank",
+          sourceAccount: "mizuho-bank:ordinary:synthetic",
+          parser: "mizuho-account-list@1.0.0",
+          parserName: "mizuho-account-list",
+          accountEntity: entity,
+        });
+      const own = deposit("m-smbc", "source_account:smbc:ordinary", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const apart = buildBalanceProjection([own, mizuho("account:synthetic:other")], []);
+      expect(adopted(apart)).toEqual(["m-mizuho", "m-smbc"]);
+      const shared = buildBalanceProjection([own, mizuho("account:synthetic:shared")], []);
+      expect(shared.relations).toEqual([]);
+      expect(adopted(shared)).toEqual([]);
+      for (const scopeKey of ["m-mizuho", "m-smbc"])
+        expect(stateOf(shared, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // A lower-authority route of the same entity: authority keeps the
+      // direct reading adopted and names the route's reason.
+      const route = deposit("m-route", "source_account:route:ordinary", "1000", {
+        sourceId: "sbi-shinsei-bank",
+        parser: "sbi-shinsei-top-balances-and-activity@1",
+        parserName: "sbi-shinsei-top-balances-and-activity",
+        sourceAccount: "synthetic:route",
+        authorityRank: AUTHORITY_RANKS.aggregator,
+        accountEntity: "account:synthetic:shared",
+      });
+      const ranked = buildBalanceProjection([own, route], []);
+      expect(adopted(ranked)).toEqual(["m-smbc"]);
+      expect(stateOf(ranked, "m-route")).toMatchObject({
+        state: "unresolved",
+        reasonCode: "account_entity_shared",
+      });
+    });
+
+    test("aggregates beside members are unchanged", () => {
+      // SC01's shape with an entity on every scope: the breakdown is adopted,
+      // the bank's total is covered by it and the second route stays an
+      // unknown overlap with its v2 reason.
+      const candidates = [
+        deposit("m-bank-savings", "scope:bank:savings", "60000", {
+          accountEntity: "account:synthetic:savings",
+        }),
+        deposit("m-bank-linked", "scope:bank:linked", "100000", {
+          accountEntity: "account:synthetic:linked",
+        }),
+        deposit("m-bank-total", "scope:bank:total", "160000", {
+          subjectStatus: "aggregate",
+          accountEntity: "account:synthetic:total",
+        }),
+        deposit("m-route-total", "scope:route:bank-total", "160000", {
+          subjectStatus: "unresolved",
+          sourceId: "sbi-shinsei-bank",
+          parser: "sbi-shinsei-top-balances-and-activity@1",
+          parserName: "sbi-shinsei-top-balances-and-activity",
+          sourceAccount: "synthetic:route",
+          authorityRank: AUTHORITY_RANKS.aggregator,
+          accountEntity: "account:synthetic:route",
+        }),
+      ];
+      const relations = [
+        relation("scope:bank:savings", "scope:bank:total", "subset"),
+        relation("scope:bank:linked", "scope:bank:total", "subset"),
+      ];
+      const outcome = (build: ReturnType<typeof buildBalanceProjection>) =>
+        build.rows.map((row) => [row.scopeKey, row.state, row.reasonCode]);
+      const withEntities = buildBalanceProjection(candidates, relations);
+      const without = buildBalanceProjection(
+        candidates.map((candidate) => ({ ...candidate, accountEntity: null })),
+        relations,
+      );
+      expect(outcome(withEntities)).toEqual(outcome(without));
+      expect([...adopted(withEntities)].sort()).toEqual(["m-bank-linked", "m-bank-savings"]);
+      expect(stateOf(withEntities, "m-bank-total").reasonCode).toBe("covered_by_breakdown");
+      expect(stateOf(withEntities, "m-route-total").reasonCode).toBe("overlap_unknown");
+    });
+
+    test("an unknown overlap with no shared entity keeps its own reason", () => {
+      // The second reference shares an entity, but the aggregate line beside
+      // them does not: its overlap is still `overlap_unknown`.
+      const total = deposit("m-total", "source_account:smbc:total", "9000", {
+        subjectStatus: "aggregate",
+        accountEntity: "account:synthetic:total",
+      });
+      const build = buildBalanceProjection([...eight, second, total], []);
+      expect(stateOf(build, "m-total")).toMatchObject({
+        state: "unresolved",
+        reasonCode: "overlap_unknown",
+      });
+      expect(stateOf(build, "m-smbc-second").reasonCode).toBe("account_entity_shared");
+    });
+
+    // A lower-authority route at another source, provider-local, so no policy
+    // rule relates it to the bank's references by itself.
+    const routeLine = (scopeKey: string, subject: string, entity: string) =>
+      deposit(scopeKey, subject, "1000", {
+        subjectStatus: "provider-local",
+        sourceId: "sbi-shinsei-bank",
+        parser: "sbi-shinsei-top-balances-and-activity@1",
+        parserName: "sbi-shinsei-top-balances-and-activity",
+        sourceAccount: `synthetic:${scopeKey}`,
+        authorityRank: AUTHORITY_RANKS.aggregator,
+        accountEntity: entity,
+      });
+
+    test("a decided part that shares an entity keeps its whole from being declared disjoint", () => {
+      // The route line is decided a part of the bank's first account and
+      // shares the second account's entity. Declaring the two bank accounts
+      // disjoint made the part disjoint from the second account through
+      // step 7's one-step derivation, and both were adopted.
+      const whole = deposit("m-whole", "source_account:smbc:whole", "1000", {
+        accountEntity: "account:synthetic:whole",
+      });
+      const other = deposit("m-other", "source_account:smbc:other", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const part = routeLine("m-part", "source_account:route:part", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [whole, other, part],
+        [relation("source_account:route:part", "source_account:smbc:whole", "subset")],
+      );
+      expect(adopted(build)).toEqual(["m-other"]);
+      expect(stateOf(build, "m-whole").reasonCode).toBe("covered_by_breakdown");
+      expect(stateOf(build, "m-part")).toMatchObject({
+        state: "unresolved",
+        reasonCode: "account_entity_shared",
+      });
+      expect(build.relations.filter((entry) => entry.source === "policy")).toEqual([]);
+    });
+
+    test("a scope decided the same as one that shares an entity is not declared disjoint", () => {
+      // The bank's first account is decided the same account as a route line,
+      // and the route line shares the second account's entity. Declaring the
+      // two bank accounts disjoint adopted both.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        accountEntity: "account:synthetic:first",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const line = routeLine("m-line", "source_account:route:line", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [first, second, line],
+        [relation("source_account:smbc:first", "source_account:route:line", "same")],
+      );
+      expect(adopted(build)).toEqual([]);
+      expect(stateOf(build, "m-line").reasonCode).toBe("duplicate_evidence");
+      for (const scopeKey of ["m-first", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // Only a shared entity withholds the policy: beside a third bank
+      // account of its own entity, the first stays declared disjoint from it.
+      const third = deposit("m-third", "source_account:smbc:third", "1000", {
+        accountEntity: "account:synthetic:third",
+      });
+      expect(
+        buildBalanceProjection(
+          [first, third, line],
+          [relation("source_account:smbc:first", "source_account:route:line", "same")],
+        ).relations.filter((entry) => entry.source === "policy"),
+      ).toHaveLength(1);
+    });
+
+    test("a decided part lies inside its whole's entity", () => {
+      // A route line shares the bank account's entity and is decided to hold
+      // the bank's pocket. The pocket covers the line, and declaring the
+      // pocket and the account disjoint (listed apart) adopted both: the
+      // pocket's money inside the account, counted twice.
+      const pocket = deposit("m-pocket", "source_account:smbc:pocket", "1000", {
+        accountEntity: "account:synthetic:pocket",
+      });
+      const account = deposit("m-account", "source_account:smbc:account", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const line = routeLine("m-line", "source_account:route:line", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [pocket, account, line],
+        [relation("source_account:smbc:pocket", "source_account:route:line", "subset")],
+      );
+      expect(stateOf(build, "m-line").reasonCode).toBe("covered_by_breakdown");
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-pocket", "m-account"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // Two pockets of one entity are not shared by that alone.
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:second",
+      });
+      expect(
+        buildBalanceProjection(
+          [pocket, second, line],
+          [
+            relation("source_account:smbc:pocket", "source_account:route:line", "subset"),
+            relation("source_account:smbc:second", "source_account:route:line", "subset"),
+          ],
+        ).relations.filter((entry) => entry.source === "policy"),
+      ).toHaveLength(1);
+    });
+
+    test("a part two decisions deep still keeps its outer whole from being declared disjoint", () => {
+      // part ⊂ middle ⊂ outer, and the part shares the second account's
+      // entity. The middle covers nothing once the part covers it, so the
+      // outer stands alone, and declaring it disjoint from the second account
+      // adopted both.
+      const outer = deposit("m-outer", "source_account:smbc:outer", "1000", {
+        accountEntity: "account:synthetic:outer",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      // The middle is the route's aggregate line, so the policy does not
+      // declare it disjoint from the part it is decided to hold.
+      const middle = {
+        ...routeLine("m-middle", "source_account:route:middle", "account:synthetic:mid"),
+        subjectStatus: "aggregate" as const,
+      };
+      const part = routeLine("m-part", "source_account:route:part", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [outer, second, middle, part],
+        [
+          relation("source_account:route:part", "source_account:route:middle", "subset"),
+          relation("source_account:route:middle", "source_account:smbc:outer", "subset"),
+        ],
+      );
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-outer", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+    });
+
+    test("a same chain through scopes outside the target still carries the entity", () => {
+      // first ≡ x ≡ y ≡ line, x and y have no candidate here, and the line
+      // shares the second account's entity. The target's relations alone
+      // missed x ≡ y, and declaring the two bank accounts disjoint adopted
+      // both.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        accountEntity: "account:synthetic:first",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const line = routeLine("m-line", "source_account:route:line", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [first, second, line],
+        [
+          relation("source_account:smbc:first", "source_account:other:x", "same"),
+          relation("source_account:other:x", "source_account:other:y", "same"),
+          relation("source_account:other:y", "source_account:route:line", "same"),
+        ],
+      );
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-first", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+    });
+
+    test("a chain that passes through an entity still carries it", () => {
+      // The route's pocket line shares the bank pocket's entity and is
+      // decided a part of the route's account line, which shares the bank
+      // account's entity. No decision touches the bank pocket or the bank
+      // account, and the closure read only their own decisions, so the two
+      // were declared disjoint (listed apart) and both adopted: the pocket's
+      // money inside the account, counted twice.
+      const pocket = deposit("m-pocket", "source_account:smbc:pocket", "1000", {
+        accountEntity: "account:synthetic:pocket",
+      });
+      const account = deposit("m-account", "source_account:smbc:account", "3000", {
+        accountEntity: "account:synthetic:account",
+      });
+      const pocketLine = routeLine(
+        "m-pocket-line",
+        "source_account:route:pocket",
+        "account:synthetic:pocket",
+      );
+      const accountLine = routeLine(
+        "m-account-line",
+        "source_account:route:account",
+        "account:synthetic:account",
+      );
+      const build = buildBalanceProjection(
+        [pocket, account, pocketLine, accountLine],
+        [relation("source_account:route:pocket", "source_account:route:account", "subset")],
+      );
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-pocket", "m-account"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      expect(
+        build.relations.some(
+          (entry) =>
+            entry.source === "policy" &&
+            [entry.fromScopeKey, entry.toScopeKey].sort().join(" ") ===
+              "source_account:smbc:account source_account:smbc:pocket",
+        ),
+      ).toBe(false);
+    });
+
+    test("a common part no entity marks still keeps an entity's references apart", () => {
+      // A sub-account with no candidate and no entity is decided a part of
+      // the route's line for the bank pocket and of the bank account. The
+      // pocket and the line share an entity, so the pocket overlaps the
+      // account in that sub-account. The closure read entities only on a
+      // common part or between the pair, so the pocket and the account were
+      // declared disjoint (listed apart) and both adopted.
+      const pocket = deposit("m-pocket", "source_account:smbc:pocket", "1000", {
+        accountEntity: "account:synthetic:pocket",
+      });
+      const account = deposit("m-account", "source_account:smbc:account", "3000", {
+        accountEntity: "account:synthetic:account",
+      });
+      const line = routeLine("m-line", "source_account:route:pocket", "account:synthetic:pocket");
+      const decisions = [
+        relation("source_account:other:sub", "source_account:route:pocket", "subset"),
+        relation("source_account:other:sub", "source_account:smbc:account", "subset"),
+      ];
+      const build = buildBalanceProjection([pocket, account, line], decisions);
+      expect(adopted(build)).toEqual([]);
+      for (const scopeKey of ["m-pocket", "m-account", "m-line"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // Without the shared entity the pocket's line is its own account: the
+      // sub-account lies in the line and in the bank account, and the
+      // pocket stays declared disjoint from the account.
+      const apart = buildBalanceProjection(
+        [pocket, account, { ...line, accountEntity: "account:synthetic:line" }],
+        decisions,
+      );
+      expect(adopted(apart)).toEqual(["m-account", "m-pocket"]);
+    });
+
+    test("a scope measured only in another target carries its entity", () => {
+      // A route line seen only in dollars shares the second account's entity
+      // and is decided the same account as the first. Its entity was read
+      // only from the yen target's own candidates, where it has none, so the
+      // two bank accounts were declared disjoint and both adopted.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        accountEntity: "account:synthetic:first",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const dollars = {
+        ...routeLine("m-line-usd", "source_account:route:line", "account:synthetic:shared"),
+        instrument: "USD",
+      };
+      const build = buildBalanceProjection(
+        [first, second, dollars],
+        [relation("source_account:smbc:first", "source_account:route:line", "same")],
+      );
+      for (const scopeKey of ["m-first", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      expect(stateOf(build, "m-line-usd").state).toBe("adopted");
+    });
+
+    test("a common part decisions alone give is withheld but not named a shared entity", () => {
+      // Two bank accounts, each mapped to an entity of its own (as every
+      // organized reference is), and a sub-account with no candidate accepted
+      // as a part of both. The decisions force the two to overlap and a
+      // mapped scope lies on the way, so the policy no longer declares them
+      // disjoint (v2 did, and adopted both). No entity is shared, so the
+      // reason stays `overlap_unknown`; it was `account_entity_shared`.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        subjectStatus: "provider-local",
+        accountEntity: "account:synthetic:first",
+      });
+      const other = deposit("m-other", "source_account:smbc:other", "1000", {
+        subjectStatus: "provider-local",
+        accountEntity: "account:synthetic:other",
+      });
+      const decisions = [
+        relation("source_account:other:sub", "source_account:smbc:first", "subset"),
+        relation("source_account:other:sub", "source_account:smbc:other", "subset"),
+      ];
+      const build = buildBalanceProjection([first, other], decisions);
+      expect(build.relations.filter((entry) => entry.source === "policy")).toEqual([]);
+      for (const scopeKey of ["m-first", "m-other"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "overlap_unknown",
+        });
+      expect(build.reasons).toEqual(["unresolved:overlap_unknown"]);
+      // With the second account sharing the first's entity, the mapping is
+      // what makes them one account, and the reason names it.
+      const shared = buildBalanceProjection(
+        [first, { ...other, accountEntity: "account:synthetic:first" }],
+        decisions,
+      );
+      expect(shared.reasons).toEqual(["unresolved:account_entity_shared"]);
+      // A decision between the pair itself does not clear it while the two
+      // keep their own entities: the policy, read against their own
+      // entities, declares them disjoint, and the contradiction degrades the
+      // pair to unknown as under v2. Revising a decision that forces the
+      // overlap does.
+      for (const kind of ["same", "subset"] as const)
+        expect(
+          buildBalanceProjection(
+            [first, other],
+            [
+              ...decisions,
+              relation("source_account:smbc:first", "source_account:smbc:other", kind),
+            ],
+          ).reasons,
+        ).toEqual(["unresolved:overlap_unknown"]);
+      const revised = buildBalanceProjection([first, other], decisions.slice(1));
+      expect(revised.rows.map((row) => row.state)).toEqual(["adopted", "adopted"]);
+      expect(revised.relations.filter((entry) => entry.source === "policy")).toHaveLength(1);
+    });
+  });
+
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {
     const outcomes = sc15.cases.map((entry) => snapshotEligibility(entry.claim as CoverageClaim));
     expect(
@@ -481,6 +1000,44 @@ describe("balance projection builder", () => {
     expect(build.rows.every((row) => row.reasonCode === "adoption_target_oversized")).toBe(true);
   });
 
+  test("two full targets with shared entities and the relation budget build within seconds", () => {
+    // 2 × 250 subjects, entities shared in pairs, and 5,000 accepted
+    // decisions (the relation read's bound) over them and 4,000 scopes with
+    // no candidate: the scope order and its lower sets stay cheap beside the
+    // pairwise adoption itself.
+    let state = 7;
+    const next = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 2 ** 32;
+    };
+    const candidates = ["JPY", "USD"].flatMap((instrument) =>
+      Array.from({ length: ADOPTION_SUBJECT_BOUND }, (_, index) =>
+        deposit(`m-${instrument}-${String(index)}`, `scope:${String(index)}`, "1", {
+          instrument,
+          accountEntity: `account:synthetic:${String(index >> 1)}`,
+        }),
+      ),
+    );
+    const scopes = [
+      ...Array.from({ length: ADOPTION_SUBJECT_BOUND }, (_, index) => `scope:${String(index)}`),
+      ...Array.from({ length: 4000 }, (_, index) => `outside:${String(index)}`),
+    ];
+    const decisions = Array.from({ length: 5000 }, () => {
+      const [a, b] = [Math.floor(next() * scopes.length), Math.floor(next() * scopes.length)];
+      return a === b
+        ? relation(scopes[a]!, scopes[(a + 1) % scopes.length]!, "same")
+        : relation(scopes[Math.max(a, b)]!, scopes[Math.min(a, b)]!, "subset");
+    });
+    const started = performance.now();
+    const build = buildBalanceProjection(candidates, decisions);
+    const elapsed = performance.now() - started;
+    expect(build.rows).toHaveLength(2 * ADOPTION_SUBJECT_BOUND);
+    // About 150 ms alone; CI runs every package's tests at once, where it took
+    // 1,188 ms against a 1 s bound. 5 s keeps the guard against a much slower
+    // walk without failing on a loaded runner.
+    expect(elapsed).toBeLessThan(5000);
+  }, 60_000);
+
   test("temporal references keep the precision of the stored value", () => {
     expect(temporalReferenceFor("2026-09-08", null)).toEqual({
       role: "effective",
@@ -507,6 +1064,38 @@ describe("balance projection builder", () => {
       kind: "unknown",
       reasonCode: "no_recorded_time",
     });
+  });
+
+  test("an offset no zone uses is unknown, never a zone name that does not exist", () => {
+    // The span real zones use, -12:00 to +14:00, names the IANA zones at its ends.
+    const ends = [
+      ["2026-09-08T23:00:00+14:00", "Etc/GMT-14"],
+      ["2026-09-07T21:00:00-12:00", "Etc/GMT+12"],
+    ] as const;
+    for (const [value, zone] of ends) {
+      expect(temporalReferenceFor(value, null).time).toEqual({
+        kind: "instant",
+        value,
+        zone,
+        basis: "provider",
+      });
+      expect(() => new Intl.DateTimeFormat("en", { timeZone: zone })).not.toThrow();
+    }
+    // The domain reads offsets up to ±18:59; past the span the fixed-offset
+    // name the offset would get does not exist, so the time is unknown.
+    const outside = [
+      ["2026-09-09T00:00:00+15:00", "Etc/GMT-15"],
+      ["2026-09-09T03:00:00+18:00", "Etc/GMT-18"],
+      ["2026-09-07T20:00:00-13:00", "Etc/GMT+13"],
+      ["2026-09-07T19:00:00-14:00", "Etc/GMT+14"],
+    ] as const;
+    for (const [value, zone] of outside) {
+      expect(() => new Intl.DateTimeFormat("en", { timeZone: zone })).toThrow(RangeError);
+      expect(temporalReferenceFor(value, null).time).toEqual({
+        kind: "unknown",
+        reasonCode: "offset_zone_unsupported",
+      });
+    }
   });
 
   test("the source authority policy ranks aggregators below direct sources", () => {

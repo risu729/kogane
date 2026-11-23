@@ -12,6 +12,7 @@
 // not-computable body can never present a whole-portfolio subtotal; and the
 // capabilities a report states must be the ones its replayability implies,
 // so a restricted report cannot claim it may still be explained.
+import { pagedFieldsSay, type PagedWireFields } from "./paging-contract.ts";
 import type { ResultPartition } from "../../domain/src/calculation.ts";
 import { REPLAYABILITY, type Replayability } from "../../domain/src/context.ts";
 import { PRICE_KINDS, type PriceKind } from "../../domain/src/metrics.ts";
@@ -52,10 +53,13 @@ export interface ReportListItem {
   createdAt: string;
 }
 
-export interface ReportListPage {
+export interface ReportListPage extends PagedWireFields {
   apiVersion: 2;
   items: ReportListItem[];
-  /** The next page's offset as a decimal string, or null on the last page. No total. */
+  /**
+   * The next page's offset as a decimal string, or null on the last page. No
+   * total. Deprecated in favour of `next` and `paging` (ADR 0128); kept for one release.
+   */
   nextCursor: string | null;
 }
 
@@ -233,14 +237,20 @@ function validListItem(value: unknown): value is ReportListItem {
 function validReportListPage(value: unknown): value is ReportListPage {
   return (
     record(value) &&
-    exactKeys(value, ["apiVersion", "items", "nextCursor"]) &&
+    (exactKeys(value, ["apiVersion", "items", "nextCursor"]) ||
+      exactKeys(value, ["apiVersion", "items", "nextCursor", "next", "paging"])) &&
     value.apiVersion === 2 &&
     Array.isArray(value.items) &&
     value.items.length <= LIST_BOUND &&
     value.items.every(validListItem) &&
     new Set(value.items.map((item) => item.reportId)).size === value.items.length &&
     (value.nextCursor === null ||
-      (typeof value.nextCursor === "string" && /^[1-9][0-9]{0,15}$/u.test(value.nextCursor)))
+      (typeof value.nextCursor === "string" && /^[1-9][0-9]{0,15}$/u.test(value.nextCursor))) &&
+    // `next` and `paging` (ADR 0128) agree with the deprecated `nextCursor`.
+    pagedFieldsSay(value, {
+      next: value.nextCursor === null ? null : { offset: Number(value.nextCursor) },
+      returned: value.items.length,
+    })
   );
 }
 

@@ -75,7 +75,8 @@ import {
   queryCardPurchases,
   readCardPurchaseLines,
 } from "./card-purchases.ts";
-import { pageBeyondBudget } from "./page-budget.ts";
+import { budgetPagedFields, pageBeyondBudget } from "./page-budget.ts";
+import { pagedFields, type PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 
 /** The capability the explanation needs. */
 export const PURCHASES_EXPLAIN_CAPABILITY: AgentCapability = "records.read";
@@ -111,7 +112,8 @@ export const PURCHASES_EXPLAIN_MAX_OFFSET = 1_000_000;
 /** Errors of this service carry this request id: no context is opened for it. */
 const REQUEST_ID = "purchases.explain";
 
-export interface PurchasesExplanation {
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `nextPage` and `data.nextOffset`. */
+export interface PurchasesExplanation extends PagedFields {
   schemaVersion: "kogane-card-purchases-v1";
   /** The request as the server resolved it. */
   query: { period: string | null; eventId: string | null; offset: number };
@@ -160,7 +162,8 @@ export interface PurchasesCardsAnswer {
  * page this grant would be refused is withheld (`data.nextCursor` null) and
  * said (`nextPage: "budget_exceeded"`), as on the page of events.
  */
-export interface PurchasesLinesAnswer {
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `nextPage` and `data.nextCursor`. */
+export interface PurchasesLinesAnswer extends PagedFields {
   schemaVersion: "kogane-card-purchases-lines-v1";
   /** The request as the server resolved it; the cursor is not repeated. */
   query: {
@@ -454,6 +457,9 @@ export async function explainCardPurchaseLines(input: {
       : pageBeyondBudget(before + data.lines.length, CARD_PURCHASE_LINES_MAX, grant)
         ? "budget_exceeded"
         : "offered";
+  // A page shorter than the line bound with lines after it was ended by the
+  // answer's byte bound.
+  const stoppedBy = data.lines.length < CARD_PURCHASE_LINES_MAX ? "bytes" : "limit";
   return {
     ok: true,
     explanation: {
@@ -461,6 +467,14 @@ export async function explainCardPurchaseLines(input: {
       ...linesQuery(request),
       decisions: "operator-only",
       nextPage,
+      ...pagedFields({
+        limit: CARD_PURCHASE_LINES_MAX,
+        returned: data.lines.length,
+        next:
+          nextPage === "offered" && data.nextCursor !== null ? { cursor: data.nextCursor } : null,
+        withheld: nextPage === "budget_exceeded",
+        stoppedBy,
+      }),
       data: nextPage === "budget_exceeded" ? { ...data, nextCursor: null } : data,
     },
   };
@@ -548,6 +562,11 @@ export async function explainCardPurchases(input: {
       },
       decisions: "operator-only",
       nextPage,
+      ...budgetPagedFields(
+        { nextOffset: nextPage === "offered" ? page.nextOffset : null, nextPage },
+        CARD_PURCHASE_PAGE_SIZE,
+        page.items.length,
+      ),
       data: nextPage === "budget_exceeded" ? { ...agentPage, nextOffset: null } : agentPage,
     },
   };

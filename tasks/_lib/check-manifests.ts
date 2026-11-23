@@ -25,6 +25,9 @@
 //   * no Wrangler `types` output (`worker-configuration.d.ts`) is tracked:
 //     each workspace's `types` task writes it before every check, so a
 //     committed copy drifts and leaves the working tree dirty.
+//   * a test task that lists its files or a shell glob leaves no test file
+//     beside them that no command of the `checks` graph runs: a file added
+//     next to a list is otherwise never run, and nothing fails.
 //
 // It validates what this repository declares, never what a dependency ships:
 // node_modules is out of scope because git does not track it.
@@ -426,6 +429,117 @@ export function trackedGeneratedFiles(
     );
 }
 
+/** Bun's default test file names, and the Node test runner files tasks name. */
+const TEST_FILE =
+  /(?:[._](?:test|spec)\.(?:js|jsx|ts|tsx|mjs|cjs|mts|cts)|\.node(?:-test)?\.mjs)$/u;
+/**
+ * `bun test` flags whose value is the next argument rather than a path.
+ * `--bail` and `--parallel` take a value only after `=`: a separate next
+ * argument stays a path or filter.
+ */
+const VALUE_FLAGS = new Set([
+  "--timeout",
+  "--shard",
+  "--seed",
+  "--rerun-each",
+  "--retry",
+  "--max-concurrency",
+  "--coverage-dir",
+  "--coverage-reporter",
+  "--reporter",
+  "--reporter-outfile",
+  "--test-name-pattern",
+  "-t",
+  "--path-ignore-patterns",
+  "--parallel-delay",
+  "--timings",
+  "--preload",
+  "-r",
+]);
+
+/** The path arguments of a `bun test` or `node --test` command, or undefined for any other. */
+export function testCommandArguments(command: string): string[] | undefined {
+  let words = command.trim().split(/\s+/u);
+  // The coverage wrapper runs the command that follows it unchanged.
+  const wrapper = words.findIndex((word) => word.endsWith("coverage-run.mjs"));
+  if (wrapper >= 0) words = words.slice(wrapper + 1).filter((word) => word !== "--baseline");
+  const runner = `${words[0] ?? ""} ${words[1] ?? ""}`;
+  if (runner !== "bun test" && runner !== "node --test") return undefined;
+  const paths: string[] = [];
+  for (let index = 2; index < words.length; index += 1) {
+    const word = words[index] as string;
+    if (!word.startsWith("-")) paths.push(word.replace(/^\.\//u, ""));
+    else if (!word.includes("=") && VALUE_FLAGS.has(word)) index += 1;
+  }
+  return paths;
+}
+
+/**
+ * Tracked test files beside the files a test command names that no command of
+ * the local `checks` graph runs.
+ *
+ * A task that lists its test files (`bun test test/a.test.ts …`) or a shell
+ * glob (`bun test ./test/*.test.ts`) runs exactly those, so a file added next
+ * to them is never run and nothing fails. Every test file under the directory
+ * such a list or glob names must be run by some command of the graph: the same
+ * list, a glob, a directory argument, a plain `bun test` of the workspace or a
+ * Bun path filter. A Vitest `include` is not read: a file only Vitest runs
+ * counts as unrun when a list or glob names its directory. Today no list or
+ * glob names a directory a Vitest suite reads (`worker-test/`, and the
+ * default include of `services/app`).
+ */
+export function unselectedTestFiles(
+  tasks: readonly TaskRecord[],
+  tracked: readonly string[],
+  root: string = REPO_ROOT,
+): string[] {
+  const byName = new Map(tasks.map((task) => [task.name, task]));
+  const tests = tracked.filter((file) => TEST_FILE.test(file));
+  const selected = new Set<string>();
+  /** Test file -> the task whose list or glob names its directory. */
+  const listedBeside = new Map<string, string>();
+  for (const name of [...dependencyClosure("//:checks", byName)].sort()) {
+    const task = byName.get(name);
+    if (task?.dir == null) continue;
+    const directory = relative(root, task.dir);
+    const prefix = directory === "" ? "" : `${directory}/`;
+    const own = tests.filter((file) => file.startsWith(prefix));
+    const local = (file: string): string => file.slice(prefix.length);
+    for (const command of task.run ?? []) {
+      const paths = testCommandArguments(command);
+      if (paths === undefined) continue;
+      const pick = (matches: (file: string) => boolean): void => {
+        for (const file of own) if (matches(local(file))) selected.add(file);
+      };
+      if (paths.length === 0) pick(() => true);
+      for (const path of paths) {
+        const named = path.includes("*") || own.some((file) => local(file) === path);
+        if (path.includes("*")) {
+          const glob = new Bun.Glob(path);
+          pick((file) => glob.match(file));
+        } else if (named) pick((file) => file === path);
+        else if (own.some((file) => local(file).startsWith(`${path}/`)))
+          pick((file) => file.startsWith(`${path}/`));
+        // Bun reads any other argument as a filter on the file path.
+        else pick((file) => file.includes(path));
+        if (!named) continue;
+        const literal = path.split("*")[0] as string;
+        const beside = literal.slice(0, literal.lastIndexOf("/") + 1);
+        for (const file of own)
+          if (local(file).startsWith(beside) && !listedBeside.has(file))
+            listedBeside.set(file, name);
+      }
+    }
+  }
+  return [...listedBeside]
+    .filter(([file]) => !selected.has(file))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(
+      ([file, task]) =>
+        `${file}: ${task} lists the test files beside it, but no check runs this one; add it to that command`,
+    );
+}
+
 /** The file `wrangler types` writes beside a workspace's Wrangler config. */
 export const WRANGLER_TYPES_OUTPUT = "worker-configuration.d.ts";
 
@@ -561,6 +675,7 @@ export function check(): string[] {
     ),
     ...generatedInputViolations(generated, sources, directories, tasks),
     ...trackedWorkerTypes(trackedFiles(WRANGLER_TYPES_OUTPUT, `**/${WRANGLER_TYPES_OUTPUT}`)),
+    ...unselectedTestFiles(tasks, trackedFiles()),
   );
   return errors;
 }

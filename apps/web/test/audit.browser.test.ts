@@ -69,7 +69,10 @@ describe.if(runnable)("the operator's audit log page", () => {
             return Response.json({ error: "authentication_required" }, { status: 401 });
           if (!operator) return Response.json({ error: "operator_required" }, { status: 403 });
           if (staleCursor && url.searchParams.has("cursor"))
-            return Response.json({ error: "stale_context" }, { status: 409 });
+            return Response.json(
+              { error: "cursor_mismatch", mustMatch: ["operation"] },
+              { status: 400 },
+            );
           const { status, body } = await fixture.answer(url.searchParams);
           if (malformed && status === 200) {
             const page = body as { records: { result: string }[] };

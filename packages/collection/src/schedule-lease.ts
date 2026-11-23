@@ -23,6 +23,8 @@
 // clear fails does the lease stay held (logged) until the tick frees it. Both
 // clear only this call's own reference, so neither can free a lease another
 // execution holds.
+import { loggedErrorName } from "./error-name";
+
 export interface ScheduleLeaseDatabase {
   prepare(sql: string): {
     bind(...values: unknown[]): {
@@ -62,7 +64,7 @@ export class CollectionLeaseAbort extends Error {
 }
 
 /** The lease timestamp format, `YYYY-MM-DDTHH:MM:SS.sssZ`, taken on D1's clock. */
-export const D1_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+const D1_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 const RELEASE_OWN =
   "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND lease_ref=?";
@@ -205,7 +207,7 @@ export async function withCollectionLease<T>(
         JSON.stringify({
           event: "collection_lease_claim_failed",
           source,
-          errorName: error instanceof Error ? error.name : typeof error,
+          errorName: loggedErrorName(error),
         }),
       );
     } catch {

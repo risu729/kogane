@@ -3,9 +3,10 @@
 // beside `currentCardUsageSql`:
 //
 //   * `staleCardPurchaseKeysSql` — the keys of each live, still-recognised
-//     (authorized or captured) purchase/refund revision none of whose provider
-//     rows is current any more. The writer retires those events (state
-//     `unknown`, no legs).
+//     (authorized or captured) purchase/refund revision none of whose deciding
+//     provider rows is current any more: its posted rows when it holds one,
+//     else its rows. The writer retires those events (state `unknown`, no
+//     legs).
 //   * `unrecognizedCardUsageCountSql` — current usage rows no live revision
 //     holds: rows the writer skipped (an unsupported shape, an unresolved
 //     account, no external id) or has not reached yet.
@@ -42,17 +43,28 @@ const ALL_PAGES = [0, -1] as const;
  * `?3` is the page size. A retired revision (`unknown`) keeps its keys and is
  * never reported, so the page cannot fill up with events that are already
  * retired; a key whose row is current again is the writer's to revise, not to
- * retire. A revision that still holds one current key is not reported either:
- * the event is still displayed (a merged pending key whose posted row is
- * current), so its other keys can never occupy the page. Ordered by event and
- * key so one event's keys stay together.
+ * retire. A revision that still holds one of its deciding keys current is not
+ * reported either: the event is still displayed, so its other keys can never
+ * occupy the page. Ordered by event and key so one event's keys stay
+ * together.
+ *
+ * A revision's deciding keys are its posted keys when it holds one, else all
+ * its keys (ADR 0002, amendment 2026-11-21). A merged event follows its posted
+ * row (the writer revises it from that row, and its pending row adds
+ * nothing), so it is stale once its posted row is gone, even while its pending
+ * row is still current: a MyJCB pending capture stays current beside the
+ * confirmed one until its position is captured again. Kept captured, it would
+ * count the purchase a second time beside the event of the row that replaced
+ * its posted row. A pending key decides only a revision with no posted key.
  *
  * `held_current` names, once per call, every revision that holds a current
- * key, found from the current keys through the recognition key index, and each
- * live key is then checked against it. Asked per live key instead ("does this
- * revision hold a key IN the current keys?"), D1's statistics-free planner
- * probes the revision's key index once for every current key, for every live
- * key: seconds at a few thousand events (docs/read-model.md, "Cost").
+ * deciding key, found from the current keys through the recognition key
+ * index (a current pending key counts only when its revision holds no posted
+ * key, probed by the primary key), and each live key is then checked against
+ * it. Asked per live key instead ("does this revision hold a key IN the
+ * current keys?"), D1's statistics-free planner probes the revision's key
+ * index once for every current key, for every live key: seconds at a few
+ * thousand events (docs/read-model.md, "Cost").
  */
 export const STALE_CARD_PURCHASE_KEYS_SQL = `WITH current_keys AS MATERIALIZED (
          SELECT recognition_key FROM ${ALL_CURRENT_USAGE}
@@ -62,6 +74,11 @@ export const STALE_CARD_PURCHASE_KEYS_SQL = `WITH current_keys AS MATERIALIZED (
          FROM current_keys
          CROSS JOIN card_purchase_recognition_keys held
            ON held.recognition_key = current_keys.recognition_key
+         WHERE held.role = 'posted'
+            OR NOT EXISTS (SELECT 1 FROM card_purchase_recognition_keys posted
+                            WHERE posted.event_id = held.event_id
+                              AND posted.revision = held.revision
+                              AND posted.role = 'posted')
        )
        SELECT k.event_id, k.revision, k.recognition_key, k.role, k.observation_id,
               k.parse_run_id, c.kind, c.state,

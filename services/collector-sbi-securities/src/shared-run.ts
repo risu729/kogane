@@ -61,7 +61,7 @@ const SUPPLEMENTAL_UNITS = [
 export type SupplementalUnit = (typeof SUPPLEMENTAL_UNITS)[number];
 
 /** Closed dataset membership: retained inputs and outputs share completeness. */
-export function supplementalUnit(dataset: string): SupplementalUnit | undefined {
+function supplementalUnit(dataset: string): SupplementalUnit | undefined {
   switch (dataset) {
     case "yen-detail-history":
     case "yen-detail-history-page-source":

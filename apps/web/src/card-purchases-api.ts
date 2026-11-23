@@ -15,6 +15,13 @@ import {
 export type { CardPurchaseCandidate, CardPurchaseView, PendingPostedAction };
 const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
 
+/**
+ * Every card purchase read: a pending-to-posted candidate shows on the
+ * purchases of both its sides and on the list, so a stale plan refusal reads
+ * them all again (`PlanRefreshScope`).
+ */
+export const CARD_PURCHASE_READS = [["card-purchases"]] as const;
+
 /** One page of recognised purchases; `period` is a statement month (`YYYY-MM`) or none. */
 export function useCardPurchases(offset: number, period: string | null) {
   const features = useFeatures();

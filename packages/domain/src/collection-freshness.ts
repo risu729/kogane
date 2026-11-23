@@ -30,7 +30,7 @@ export const COLLECTION_FRESHNESS_STATES = [
   "disabled",
   "no-capture",
 ] as const;
-export type CollectionFreshnessState = (typeof COLLECTION_FRESHNESS_STATES)[number];
+type CollectionFreshnessState = (typeof COLLECTION_FRESHNESS_STATES)[number];
 
 /** What a source waits on, from its stored settings and receipts; null when nothing. */
 export type CollectionWait = "human-required" | "disabled" | null;

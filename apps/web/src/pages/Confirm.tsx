@@ -32,6 +32,7 @@ import {
 } from "../purchase-display.tsx";
 import { useCardSettlement } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
+import { BusyButton } from "../busy-button.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, Kv, KvRow, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -318,8 +319,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     },
   });
 
-  // One re-check at a time: the button is disabled while one is outstanding,
-  // so a slower earlier answer can never replace a newer receipt on screen.
+  // One re-check at a time: the button ignores a press while one is
+  // outstanding, so a slower earlier answer can never replace a newer receipt
+  // on screen.
   const [checkingReceipt, setCheckingReceipt] = useState(false);
   const refreshReceipt = useCallback(() => {
     if (operationId === null) return;
@@ -705,10 +707,12 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
             >
               <div className="panel-body">
                 <div className="button-row">
-                  <button
-                    className="button"
-                    type="button"
-                    disabled={!canAct || approveMutation.isPending || approval !== null}
+                  {/* In flight, each waits (`BusyButton`): a refusal leaves the
+                      focus on it. Once approved, 承認する cannot be pressed again,
+                      nor 確定する once a receipt is shown: those are disabled. */}
+                  <BusyButton
+                    busy={approveMutation.isPending}
+                    disabled={!canAct || approval !== null}
                     onClick={() => approveMutation.mutate(data.planDigest)}
                   >
                     {approveMutation.isPending
@@ -716,16 +720,11 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                       : approval === null
                         ? "承認する"
                         : "承認済み"}
-                  </button>
-                  <button
-                    className="button"
-                    type="button"
+                  </BusyButton>
+                  <BusyButton
+                    busy={commitMutation.isPending}
                     disabled={
-                      !canAct ||
-                      approval === null ||
-                      operationId === null ||
-                      commitMutation.isPending ||
-                      receipt !== null
+                      !canAct || approval === null || operationId === null || receipt !== null
                     }
                     onClick={() =>
                       approval !== null && operationId !== null
@@ -734,7 +733,7 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     }
                   >
                     {commitMutation.isPending ? "確定中…" : "確定する"}
-                  </button>
+                  </BusyButton>
                 </div>
                 {approveMutation.isError ? (
                   <Notice tone="bad" inline role="alert">
@@ -800,14 +799,9 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   ) : null}
                   {receipt.status === "accepted" ? (
                     <div className="button-row">
-                      <button
-                        className="button"
-                        type="button"
-                        disabled={checkingReceipt}
-                        onClick={refreshReceipt}
-                      >
+                      <BusyButton busy={checkingReceipt} onClick={refreshReceipt}>
                         {checkingReceipt ? "反映状況を確認中…" : "反映状況を再確認"}
-                      </button>
+                      </BusyButton>
                     </div>
                   ) : null}
                 </div>

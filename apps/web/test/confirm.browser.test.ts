@@ -407,9 +407,10 @@ describe.if(runnable)("change confirmation screen", () => {
     stale = false;
     published = false;
     posted.length = 0;
-    // The decision is written, then the answer is a gateway fault: a re-read
-    // now would be answered stale and block the resend.
-    commitFailure = { status: 502, error: "bad_gateway", written: true };
+    // The decision is written, then the Processor's answer is lost on the way
+    // back (the App answers 500 internal_error): a re-read now would be
+    // answered stale and block the resend.
+    commitFailure = { status: 500, error: "internal_error", written: true };
     const page = await open();
     await page.getByRole("button", { name: "承認する" }).click();
     await page.getByRole("button", { name: "承認済み" }).waitFor();

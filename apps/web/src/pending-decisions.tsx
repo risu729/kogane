@@ -17,7 +17,8 @@ import type {
 } from "../../../packages/domain/src/pending-decisions.ts";
 import { PENDING_DECISIONS_PATH } from "../../../packages/observation-shared/src/pending-decisions-contract.ts";
 import { Link } from "./router.tsx";
-import { Badge, Panel } from "./ui.tsx";
+import { useRepeatedFailure } from "./repeated-failure.ts";
+import { Badge, ErrorState, Loading, Panel } from "./ui.tsx";
 
 function usePendingDecisions(advertised: boolean) {
   return useQuery({
@@ -88,6 +89,10 @@ function Line({ line }: { line: PendingDecisionLine }): ReactNode {
 export function PendingDecisionsPanel(): ReactNode {
   const features = useFeatures();
   const query = usePendingDecisions(features.pendingDecisions);
+  // The failure a pressed retry repeats stays until that read settles, so the
+  // alert and its waiting button (再試行中…) are not swapped for the loading
+  // status (repeated-failure.ts).
+  const { failure, retry, retrying } = useRepeatedFailure(query);
   // A store that does not advertise the route (the local evidence browser),
   // or not the operator (the route is theirs): the panel is not shown.
   if (!features.pendingDecisions) return null;
@@ -96,7 +101,7 @@ export function PendingDecisionsPanel(): ReactNode {
   // A read that failed after an earlier answer keeps that answer in the
   // query, but the body then says the count could not be read: the heading
   // shows no total, rather than the earlier one as if it were current (INV05).
-  const shown = query.error ? undefined : query.data;
+  const shown = failure ? undefined : query.data;
   const waiting =
     shown?.kinds.reduce(
       (sum, line) => sum + (line.state === "counted" ? (line.count ?? 0) : 0),
@@ -116,10 +121,14 @@ export function PendingDecisionsPanel(): ReactNode {
       count={waiting === null ? undefined : `${waiting}件${atLeast ? "以上" : ""}`}
       note="提案された対応や変更のうち、まだ判断していないものです。判断は各ページで行います。"
     >
-      {query.isPending ? (
-        <p className="dim">読み込んでいます…</p>
-      ) : query.error ? (
-        <p className="dim">判断待ちの件数を読み込めませんでした。</p>
+      {/* The shared loading status and error alert, with a retry named for
+          this read (docs/ui-guidelines.md#accessibility). The failure comes
+          first: a read in flight after it, a pressed retry or a refresh of an
+          earlier answer, leaves the failure standing. */}
+      {failure ? (
+        <ErrorState error={failure} label="判断待ちの件数" onRetry={retry} retrying={retrying} />
+      ) : query.data === undefined ? (
+        <Loading label="判断待ちの件数" />
       ) : (
         <ul>
           {query.data.kinds.map((line) => (

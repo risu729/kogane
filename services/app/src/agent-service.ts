@@ -28,6 +28,7 @@ import {
   type Grant,
   grantAllowsSource,
   openContext,
+  organizedExplainReader,
   parseExplainRequest,
   parseProposalRequest,
   parsePurchasesExplainRequest,
@@ -43,6 +44,7 @@ import {
   parseInstrumentCandidatesRequest,
   reviewInstrumentCandidates,
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
+import { financialQueryPaging } from "../../../packages/application/src/query/query-paging.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
@@ -129,14 +131,19 @@ function failure(
 /**
  * Everything the context pins, read from the shared read model once per call,
  * **inside the grant's source scope** (SC18). `visibleSources` is the granted
- * sources the store holds; `publicationHighWater` is the highest visible
- * parse run of those sources — what "current" means for this answer; and
- * `parserBuildDigest` covers the builds of the newest visible parse runs of
- * those sources, bounded by the read model's page limit. For a grant over
- * every source (`"*"`, which is also the browser reader's) the window is the
- * overview's own; for a listed grant it is read for the listed sources only,
- * so a source outside the grant can neither be named in a context nor move
- * its publication or parser digests.
+ * sources the store holds; `publicationHighWater` is what "current" means for
+ * this answer: the highest visible parse run of those sources, the newest
+ * publication event, the number of runs excluded from financial views and a
+ * digest of the dataset snapshot and eligibility policies
+ * (`publicationMarks`). The last three move with an activation, a rollback,
+ * an exclusion or a policy update, which change the rows a page reads without
+ * recording a newer parse run (INV09, ADR 0091 amendment). `parserBuildDigest` covers the
+ * builds of the newest visible parse runs of those sources, bounded by the
+ * read model's page limit. For a grant over every source (`"*"`, which is
+ * also the browser reader's) the window and the marks are the whole store's;
+ * for a listed grant they are read for the listed sources only, so a source
+ * outside the grant can neither be named in a context nor move its
+ * publication or parser digests.
  */
 async function contextInputs(context: ToolContext, overview: Overview): Promise<ContextInputs> {
   const grant = context.grant;
@@ -148,12 +155,15 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
     grant.scopes.sources === "*"
       ? overview.parseRuns
       : await context.reader.sourceParseRuns(visibleSources);
+  const marks = await context.reader.publicationMarks(
+    grant.scopes.sources === "*" ? null : visibleSources,
+  );
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
   return {
     now: context.now,
-    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}`,
+    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}+publication-events@${String(marks.publicationEvent)}+exclusions@${String(marks.exclusions)}+snapshot-policies@${await canonicalDigest(marks.snapshotPolicies)}`,
     parserBuildDigest: await canonicalDigest(builds),
     visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),
@@ -255,10 +265,13 @@ async function agentRead(
       if (!parsed.ok) return failure(parsed.code, "explain", parsed.refs);
       const overview = await context.reader.overview();
       const opened = await openContext(context.grant, await contextInputs(context, overview));
+      // The organization is the observation detail route's read, under the
+      // context's identity mode (always `latest` here), so a served graph has
+      // the adopted-claim and identity-decision levels.
       const outcome = await explain({
         grant: context.grant,
         opened,
-        reader: context.reader,
+        reader: organizedExplainReader(context.reader, d1Executor(context.db)),
         request: parsed.value,
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
@@ -352,6 +365,9 @@ export async function queryResponse(
       }),
       unresolvedInputs: opened.unresolvedInputs,
       result: outcome.result,
+      // `next` and `paging` (ADR 0128) of a row page, beside `result` and
+      // saying what its `nextCursor` says; `coverage` and `holdings` do not page.
+      ...financialQueryPaging(outcome.result),
     },
   };
 }

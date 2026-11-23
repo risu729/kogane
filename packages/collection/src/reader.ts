@@ -12,6 +12,7 @@ import { type R2BucketLike, type R2ObjectLike } from "./bucket";
 import { sha256Hex, terminalDigest } from "./digest";
 import { parseTerminalKey, runPrefix, terminalKey } from "./keys";
 import { tryParseTerminalManifest, type TerminalManifest } from "./manifest";
+import { digestOfStream } from "./stream-digest";
 import { verifyStoredObject, type ObjectProblemCode } from "./verify";
 
 export const DEFAULT_TERMINAL_PAGE_LIMIT = 100;
@@ -104,6 +105,7 @@ export async function readTerminalAt(
   const body = await bucket.get(key);
   if (!body) return { outcome: "missing", key };
   if (body.size > MAX_TERMINAL_BYTES) {
+    await body.body.cancel();
     return { outcome: "blocked", key, reasonCode: "terminal_too_large" };
   }
   let bytes: Uint8Array;
@@ -206,8 +208,10 @@ export interface VerifyReferencedObjectsResult {
 export interface VerifyReferencedObjectsOptions {
   /**
    * Read and hash the body when R2 metadata cannot prove the digest (for
-   * example a multipart object written without custom metadata). Off by
-   * default because it costs a full read of every artifact.
+   * example a multipart object written without custom metadata). The body
+   * is hashed as it streams (`digestOfStream`), so memory stays at one chunk
+   * whatever the object's size. Off by default because it still costs a full
+   * read of every such artifact, and that time grows with its size.
    */
   readonly streamHash?: boolean;
   /** Stop after this many problems; the scan still reports `blocked`. */
@@ -234,14 +238,17 @@ export async function verifyReferencedObjects(
     const head = await bucket.head(key);
     let problem = verifyStoredObject(head, expected);
     if (problem === "object_digest_unverifiable" && options.streamHash) {
-      const body = await bucket.get(key);
-      if (!body) problem = "object_missing";
+      const object = await bucket.get(key);
+      if (!object) problem = "object_missing";
       else {
-        const bytes = new Uint8Array(await body.arrayBuffer());
+        // Hashed as it streams, never read whole: a raw artifact can be
+        // larger than a Worker's memory. The size is the bytes the body
+        // yielded, the digest the `sha256Hex` of those same bytes.
+        const streamed = await digestOfStream(object.body);
         problem =
-          bytes.byteLength !== artifact.byteSize
+          streamed.byteSize !== artifact.byteSize
             ? "object_size_mismatch"
-            : (await sha256Hex(bytes)) === artifact.sha256
+            : streamed.sha256 === artifact.sha256
               ? null
               : "object_hash_mismatch";
       }

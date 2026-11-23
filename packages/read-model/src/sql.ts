@@ -97,6 +97,46 @@ export const SOURCE_PARSE_RUNS_SQL = `SELECT p.id, p.parser_name, p.parser_versi
  WHERE a.source_id IN (SELECT value FROM json_each(?1))
  ORDER BY p.id DESC LIMIT ${PAGE_LIMIT}`;
 
+/**
+ * The columns of a `dataset_snapshot_policies` row the current lists read
+ * (the snapshot CTEs and the unit eligibility scope), as one JSON array per
+ * row. The table is operational state an operator may update in place
+ * (docs/parser-coverage.md), so the rows themselves are the mark.
+ */
+const SNAPSHOT_POLICY_ROW = `json_array(source_id, parser_name, dataset, policy_id,
+    required_parser_version, replaces_previous_on_complete_empty, unit_scope, snapshot_selection)`;
+
+/**
+ * `publicationMarks` over every source: the newest publication event, the
+ * number of runs excluded from financial views, and the dataset snapshot and
+ * eligibility policies. The first two tables are append-only (migrations 0026
+ * and 0003), so each mark moves with every pointer change and every
+ * exclusion, including the ones that record no newer parse run; the policy
+ * rows move with every update of the policy columns the lists read.
+ */
+export const PUBLICATION_MARKS_SQL = `SELECT
+  (SELECT coalesce(max(id), 0) FROM publication_events) AS publication_event,
+  (SELECT count(*) FROM fetch_run_annotations
+    WHERE annotation_kind = 'exclude_from_financial_views') AS exclusions,
+  (SELECT json_group_array(${SNAPSHOT_POLICY_ROW})
+     FROM dataset_snapshot_policies) AS snapshot_policies`;
+
+/**
+ * `publicationMarks` over the listed sources only: no other source's change
+ * moves them. A policy row counts for the source it names (`source_id`).
+ */
+export const SOURCE_PUBLICATION_MARKS_SQL = `SELECT
+  (SELECT coalesce(max(e.id), 0) FROM publication_events e
+    JOIN fetch_artifacts a ON a.id = e.fetch_artifact_id
+   WHERE a.source_id IN (SELECT value FROM json_each(?1))) AS publication_event,
+  (SELECT count(*) FROM fetch_run_annotations n
+    JOIN fetch_runs r ON r.id = n.fetch_run_id
+   WHERE n.annotation_kind = 'exclude_from_financial_views'
+     AND r.source_id IN (SELECT value FROM json_each(?1))) AS exclusions,
+  (SELECT json_group_array(${SNAPSHOT_POLICY_ROW})
+     FROM dataset_snapshot_policies
+    WHERE source_id IN (SELECT value FROM json_each(?1))) AS snapshot_policies`;
+
 export const OVERVIEW_PARSE_RUNS_SQL = `SELECT id, fetch_artifact_id, parser_name, parser_version, parsed_at, status,
        error, warnings_json, superseded_by_parse_run_id
   FROM ${visibleEvidence.parseRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;

@@ -7,6 +7,7 @@
 // asked for. Synthetic identifiers only.
 import { describe, expect, test } from "bun:test";
 import { validApiResponse } from "../src/api-validation.ts";
+import { pagedFields } from "../src/paging-contract.ts";
 import {
   OPERATION_LIST_MAX_ROWS,
   OPERATION_LIST_PATH,
@@ -44,9 +45,30 @@ const page = (
   statusFilterMatches: "storedStatus",
   operations,
   nextCursor,
+  // The page's `next` and `paging` (ADR 0128) say what `nextCursor` says;
+  // a shape no server sends (a cursor after no row) carries the old field only.
+  ...(operations.length === 0 && nextCursor !== null
+    ? {}
+    : pagedFields({
+        limit: Math.max(1, operations.length),
+        returned: operations.length,
+        next: nextCursor === null ? null : { cursor: nextCursor },
+      })),
 });
 
 describe("operation list contract", () => {
+  test("next and paging agree with the deprecated nextCursor, and may be absent for one release", () => {
+    const value = page([summary(1), summary(2)], id(2));
+    expect(validOperationListPage(value)).toBe(true);
+    const { next: _next, paging: _paging, ...old } = value;
+    expect(validOperationListPage(old)).toBe(true);
+    expect(validOperationListPage({ ...value, next: { arguments: { cursor: id(1) } } })).toBe(
+      false,
+    );
+    expect(validOperationListPage({ ...value, next: null })).toBe(false);
+    expect(validOperationListPage({ ...old, next: null })).toBe(false);
+  });
+
   test("accepts a page in the list's order, by its own path", () => {
     const value = page([summary(1), summary(2), summary(3)], id(3));
     expect(validOperationListPage(value)).toBe(true);

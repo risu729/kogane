@@ -27,6 +27,8 @@ function leaseStore() {
     heartbeatSql: [] as string[],
     failClaimAfterCommit: false,
     failClaimBeforeCommit: false,
+    /** What a claim that fails before its commit throws, when not the default error. */
+    claimError: null as unknown,
     failReleases: 0,
   };
   const db: ScheduleLeaseDatabase = {
@@ -47,7 +49,8 @@ function leaseStore() {
                 return { meta: { changes: 1 } };
               }
               if (sql.includes("lease_ref IS NULL")) {
-                if (state.failClaimBeforeCommit) throw new Error("synthetic d1 failure");
+                if (state.failClaimBeforeCommit)
+                  throw state.claimError ?? new Error("synthetic d1 failure");
                 if (state.ref !== null) return { meta: { changes: 0 } };
                 state.ref = String(values[0]);
                 state.startedAt = String(values[1]);
@@ -105,6 +108,35 @@ test("a claim whose answer is lost clears its own lease and contacts nobody", as
     calls += 1;
   });
   expect(calls).toBe(1);
+  expect(state.ref).toBeNull();
+});
+
+test("a failed claim logs its error's name only as a closed code", async () => {
+  const { db, state } = leaseStore();
+  state.failClaimBeforeCommit = true;
+  // A name its thrower chose, a provider's text for all the lease knows.
+  state.claimError = Object.assign(new Error("synthetic d1 failure"), {
+    name: "synthetic provider text",
+  });
+  await expect(
+    withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => undefined),
+  ).rejects.toThrow("synthetic d1 failure");
+  // A thrown value that is not an Error has no name of its own.
+  state.claimError = "synthetic thrown string";
+  await expect(
+    withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => undefined),
+  ).rejects.toBe("synthetic thrown string");
+  // A runtime error keeps its name.
+  state.claimError = new TypeError("synthetic d1 failure");
+  await expect(
+    withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => undefined),
+  ).rejects.toThrow(TypeError);
+  expect(logged.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "other" },
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "non_error" },
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "TypeError" },
+  ]);
+  expect(logged.join("\n")).not.toContain("synthetic provider text");
   expect(state.ref).toBeNull();
 });
 

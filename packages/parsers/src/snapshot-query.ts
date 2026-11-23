@@ -67,7 +67,7 @@ export const FOREIGN_POSITION_SNAPSHOT_VERSION = "0.3.1";
  * kept only as a migration adapter; `coverage-v1` reads the parse's stored
  * coverage claim and nothing else.
  */
-export const SNAPSHOT_POLICY_IDS = ["legacy-warning-compat-v1", "coverage-v1"] as const;
+const SNAPSHOT_POLICY_IDS = ["legacy-warning-compat-v1", "coverage-v1"] as const;
 export type SnapshotPolicyId = (typeof SNAPSHOT_POLICY_IDS)[number];
 export const LEGACY_SNAPSHOT_POLICY: SnapshotPolicyId = "legacy-warning-compat-v1";
 export const COVERAGE_SNAPSHOT_POLICY: SnapshotPolicyId = "coverage-v1";
@@ -98,7 +98,7 @@ export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
   publishedParseRuns: "published_parse_runs",
 };
 
-export const COVERAGE_CLAIMS_TABLE = "parse_coverage_claims";
+const COVERAGE_CLAIMS_TABLE = "parse_coverage_claims";
 export const SNAPSHOT_POLICIES_TABLE = "dataset_snapshot_policies";
 export const ARTIFACT_UNITS_RELATION = "observation_fetch_artifact_units";
 
@@ -149,7 +149,7 @@ export function unitScopePolicySql(
 }
 
 /** The pre-PR-14 rule and the default: the whole parent fetch run succeeded. */
-export function runScopeSuccessSql(fetchRun: string): string {
+function runScopeSuccessSql(fetchRun: string): string {
   return `${fetchRun}.status = 'success' AND ${fetchRun}.failure_count = 0`;
 }
 

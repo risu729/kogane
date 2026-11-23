@@ -76,7 +76,7 @@ function relayed(upstream: Response, body: BodyInit | null = upstream.body): Res
  * The schedules page's snapshot as the Processor answers it, relayed with no
  * actor: the page's GET and `kogane.schedules.read` (ADR 0081) both read it.
  */
-export function relayScheduleSnapshot(env: Env): Promise<Response> {
+function relayScheduleSnapshot(env: Env): Promise<Response> {
   return relay(new Request("https://kogane.invalid/", { method: "GET" }), env, "");
 }
 

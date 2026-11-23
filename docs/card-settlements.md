@@ -27,6 +27,43 @@ from a statement, or calculate net assets.
   Other banks and aggregator copies are not implicitly interchangeable with
   these adapters; see [Bank adapters](#bank-adapters).
 
+### A statement's capture
+
+`card_statement_facts` (migration 0044) keeps one capture per statement key
+(source, producer, external-id namespace, source account and period). Of the
+published `credit_statement_payment_amount` totals of `vpass-statement-page`
+(Vpass) and `myjcb-credit-statement-total` (MyJCB) under one key, it keeps the
+newest capture (`fetched_at`); among captures with the same `fetched_at`, one
+with a `_kogane.paymentDate` before one without; then the highest observation
+id. The dated state's statement facts (`DATED_STATEMENT_FACTS_CTE`,
+`packages/read-model/src/dated-state.ts`) and the readiness check's
+`ready_statements` (`packages/read-model/src/card-settlement-readiness.ts`)
+rank the same way.
+
+Limit: the second key asks only whether a date is present, not whether it
+names a calendar day. If two captures of one statement had the same
+`fetched_at` and one carried a date that names no day, such as 2026-09-31, it
+could win on id over one with a real date. The statement's due date would then
+be unreadable: the [reported state](reported-state.md) gives it
+`payment_date_unknown`, the [debit account answer](#debit-account-per-card)
+gives `paymentDateReason: payment_date_invalid`, and the settlement sweep
+counts it unmatched and proposes nothing for it. An unknown is disclosed, and
+no wrong due date is read.
+
+No store can hold such a date today. Only these two parsers feed the
+rankings, and every release of both since they first emitted the statement
+total (#213) refuses a payment date that is not a calendar day: Vpass in
+`statementPaymentDate` (`vpass.ts`), MyJCB through `normalizedDate`
+(`sbi-strict.ts`). The parse fails and publishes nothing.
+`packages/read-model/test/statement-payment-date-guard.test.ts` pins this: it
+reads the parsers out of the three ranking texts, requires them to be exactly
+these two, and parses synthetic pages with 2026-02-30, 2026-09-31 and
+2026-13-01 through each release in the parser registry, failing if one
+publishes any of them as a date (a release may refuse or leave the date out).
+A parser release that starts to publish such dates, or a ranking that reads
+another parser, fails that test, and the tie-break above would then need a
+calendar check.
+
 ### Bank adapters
 
 | Adapter                                | Rows admitted                                                                                                                                                                                                                       | Provider key          | `debit_date`                                                         |
@@ -123,6 +160,14 @@ combine, 1 to 3; no defaults), it answers per statement:
 Contests between statements and competing refused debits are judged within
 one run only, so a caller that splits overlapping windows across runs would
 lose them.
+
+A refused debit competes only for a statement whose own exact sums it could
+complete. When it could instead complete another statement's exact sum
+together with a debit of this statement's single candidate, this statement
+stays `proposed`, although, had the refused debit been admitted, the shared
+debit would have made both statements `needs_review`
+(`debit_in_other_statement_allocation`). In that case the refusal does pick
+which statement the shared debit pays.
 
 A debit given twice, two debits sharing a key or alias class, a debit whose
 key or alias class is held, and a debit without an admitted identity take no
@@ -286,7 +331,13 @@ Limits:
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
   artifacts; parser releases 1.1.0 and 1.1.1 preserve this context, and both
-  qualify for account matching and readiness diagnostics. Policy v3 compares only the
+  qualify for account matching and readiness diagnostics
+  (`SMBC_DEBIT_CONTEXT_PARSER_VERSIONS` in
+  `services/processor/src/card-debit-account-job.ts`, read by both). A debit
+  parsed by any other release is uncomparable, so
+  `card-debit-account.test.ts` fails while the deployed
+  `smbc-direct-transactions` release is not listed: a parser bump adds it
+  there once it is known to keep the context. Policy v3 compares only the
   candidate debit's own published transaction/parse context and cites that
   observation. A later balance or another capture never supplies missing
   historical digits (ADR 0034). Unenriched account lists are cached once per
@@ -317,8 +368,13 @@ card with a current statement total, a stated reading with evidence or a
 settlement candidate is listed, by source and source account, at most 100
 (`cardsTruncated` says when more exist). Per card:
 
-- `latestStatement`: its newest current statement total (by period, then due
-  date), with the provider's total and due date, so a card whose last
+- `latestStatement`: its newest current statement total: of its
+  `card_statement_facts` rows, the latest period (compared as its `YYYY-MM`
+  text), then the latest due date (compared as the stored
+  `_kogane.paymentDate` text, not as a calendar date), then the highest
+  observation id, a row without a period or due date after one with it
+  (`CARD_DEBIT_ACCOUNT_CARDS_SQL`). It carries the provider's total and due
+  date, so a card whose last
   statement is zero still shows how old its answer is. The total is always a
   quantity: one that is not exact keeps its decimal-v1 status with the reason
   `stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
@@ -440,7 +496,10 @@ rule `card-upcoming-bills-v1` in `packages/domain/src/card-upcoming-bills.ts`)
 answers, for today in Asia/Tokyo, each card's next bill, the account it is
 debited from and whether that account's reported balance covers it. It reads
 the per-card answer above and the [reported state](reported-state.md) for the
-date, and nothing else but the account entities' labels.
+date, and nothing else but the account entities' labels. It uses only the
+state's accounts and pins no reported-state context id, so it reads the state
+with `includeStatementsBeforeWindow: false`: neither the count of the
+statements before the payable window nor the scheduled payments is read.
 
 - A bill is a card's newest current statement whose provider due date is on
   or after the date and whose total is not an exact zero or below. Any other
@@ -467,7 +526,8 @@ date, and nothing else but the account entities' labels.
   code),
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
-  due by the date, so it may not show it; or on the due date of a bill the
+  due by the date, among the debits the read knows of (limits below), so it
+  may not show it; or on the due date of a bill the
   line counts, so it may already show it, and comparing it with that bill
   would count the debit twice), `cards_with_unknown_account` (a bill with no known
   account is due by the line's date) or `cards_with_unknown_due_date` (a card
@@ -519,6 +579,16 @@ Limits:
   date (`no_statement_due`). A bank that debits it later, for example on the
   next business day, is not modelled; `balance_before_previous_debit` only
   covers a balance captured on or before the due date itself.
+- The previous debit from an account is the latest of two dates only: the
+  debit date of each card's newest accepted settlement per bank account, and
+  the due date of the newest statement of each card the account answers for,
+  when it is already due. A card whose newest statement is a bill has its
+  earlier statement left out unless an accepted settlement pays it, so a
+  balance captured on or before that earlier statement's due date is
+  compared with the bill as if it showed that debit, and can read `yes`
+  though the bank has since taken it. ADR 0114's decision names the latest
+  card debit from the account; the read does not look at a card's older
+  statements.
 
 ## Candidate and decision lifecycle
 
@@ -1310,12 +1380,19 @@ each one (`allocation_available` is 0), and the scale test on the scaled
 store, which draws none, so the two texts agree there. Not timed on the
 scale store or on D1.
 
-Upcoming bills cost that read, the reported state for the date (its four
-reads, each bounded by `DATED_STATE_ROW_BOUND`, and its settlement read), and
-`ACCOUNT_LABELS_SQL`, one primary-key lookup per account entity named.
-`packages/application/test/card-upcoming-bills.test.ts` checks that the view
-issues only those reads and, without table statistics, that labels are
-reached by `accounts`' key. Not measured on the scale store or on D1.
+Upcoming bills cost that read, the reported state for the date without the
+count and the scheduled payments (four reads: positions, balances and
+statements, each bounded by `DATED_STATE_ROW_BOUND`, the snapshots, one row
+per perimeter container and chosen snapshot and not bounded, and its
+settlement read), and `ACCOUNT_LABELS_SQL`, one primary-key lookup per
+account entity named. `packages/application/test/card-upcoming-bills.test.ts` checks that the
+view issues only those reads, never `DATED_STATEMENTS_BEFORE_WINDOW_SQL` or
+`DATED_SCHEDULED_PAYMENTS_SQL`; that its answer is byte-identical to the one
+over the full state, on a synthetic store where both skipped reads find rows
+and on random stores; that scheduled payments past the row bound, which
+refused the full state and left every balance `missing`, no longer do; and,
+without table statistics, that labels are reached by `accounts`' key. Not
+measured on the scale store or on D1.
 
 ### Readiness
 
