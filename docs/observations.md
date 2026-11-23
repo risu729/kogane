@@ -1182,12 +1182,16 @@ in `extra_json`, the first payment month the page names. Every other shape
 refuses the page with one closed code from
 `SKIP_PAYMENT_SCHEDULE_PARSER_CODES`; an empty ledger is zero rows.
 
-The kind is not a transaction or a balance, and nothing reads the new table:
-no read path, purchase recognition or settlement matching sees a scheduled
-payment, so nothing is counted twice. It is declared outside the parser
+The kind is not a transaction or a balance: no purchase recognition,
+settlement matching or transaction or balance read sees a scheduled payment,
+so nothing is counted twice (the reported state on a date only lists the
+rows, adding nothing). It is declared outside the parser
 contract's `types.ts` so that no deployed parser's digest changes. Limits:
-the rows' meaning beyond "a payment still due" is not confirmed; no read
-model shows them; skip pages stored before this change keep the old name and
+the rows' meaning beyond "a payment still due" is not confirmed; the only
+read that shows them is the reported state on a date, which lists them
+unmatched and unadded
+([ADR 0019](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21));
+skip pages stored before this change keep the old name and
 stay unread; release adoption does not compare this table. Tests:
 `packages/parsers/test/myjcb-skip-payment-schedule.test.ts`,
 `services/collector-myjcb/test/parsers.test.ts`,
@@ -2888,7 +2892,9 @@ production CORE schema has a fifth observation table,
 `scheduled_payment_observations` (migration 0061), for payments a provider
 says are still due (the MyJCB ショッピングスキップ払い page,
 [ADR 0005 amendment (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)).
-It is append-only like the four above and is read by nothing yet.
+It is append-only like the four above; only the reported state on a date
+reads it, listing its rows and adding nothing
+([ADR 0019, scheduled payments amendment](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)).
 
 The `source_account` comment is reproduced from `schema.sql` as it stands
 and is, as described above, not what the parsers do. The

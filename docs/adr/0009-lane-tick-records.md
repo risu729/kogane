@@ -1,6 +1,8 @@
 # ADR 0009: Lane tick records are bounded operational state
 
 - Status: accepted; the
+  [2026-11-07 amendment](#amendment-2026-11-07-refund-and-zero-totals-get-their-own-code)
+  is accepted (merged 2026-11-07 in [#1029](https://github.com/risu729/kogane/pull/1029)), and the
   [2026-11-06 amendment](#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)
   is accepted (#947); the
   [2026-11-22 amendment](#amendment-2026-11-22-a-failed-ticks-code-is-from-a-closed-set)
@@ -135,6 +137,8 @@ tick row holds closed codes and integers only.
 closed set is dropped from the row and from `/status`.
 
 ## Amendment 2026-11-07: refund and zero totals get their own code
+
+- Status: accepted (merged 2026-11-07 in [#1029](https://github.com/risu729/kogane/pull/1029))
 
 The settlement sweep's `unmatched` map gains a fourth closed code,
 `statement_total_refund_or_zero`, for a statement whose exact total is zero

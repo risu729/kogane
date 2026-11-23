@@ -29,6 +29,13 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   ranked. Gaps G1 (per-card spending, ADR 0125), G2 (compact purchase lines, its
   amendment), G3 (without an event-date filter), G4, G5, G6 and G9 are merged; G7 and G8 remain proposals.
 
+- [2026-11 one paging contract and consistent arguments across the MCP tools](2026-11-mcp-consistency.md):
+  proposed on 2026-11-20 at the owner's request; an inventory of how every published tool pages,
+  refuses and names its arguments, with file and line references, and the slices of
+  [ADR 0128](../adr/0128-one-paging-contract.md). Slice S1 is implemented with the plan; S6 and
+  the part of S7 that needs no decision are implemented on a branch stacked on it, and S7's
+  `financial-error-v1` refusals wait for the owner's decision.
+
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production
   verification pending. The seeded schedule remains disabled.

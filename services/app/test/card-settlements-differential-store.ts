@@ -9,6 +9,7 @@ import { seedRegistry, seedRun, publishParse } from "./fixtures";
 import { cardSettlementsApi } from "../src/card-settlements-api";
 import { HttpError } from "../src/http";
 import { frozenCardSettlementsApi } from "./card-settlements-api-frozen";
+import { validNextPage } from "../../../packages/observation-shared/src/card-settlement-contract";
 
 export const PATH = "/api/v2/reconciliation/card-settlements";
 const SUBJECT = "synthetic-operator";
@@ -125,11 +126,36 @@ export async function answer(
     if (response === null) return null;
     const body = await response.text();
     const parsed = response.status >= 400 ? (JSON.parse(body) as { code?: string }) : null;
-    return { status: response.status, code: parsed?.code ?? null, body };
+    return {
+      status: response.status,
+      code: parsed?.code ?? null,
+      body: handler === frozenCardSettlementsApi ? body : withoutPagedFields(url, response, body),
+    };
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
     return { status: error.status, code: error.code, body: "" };
   }
+}
+
+/**
+ * The shipped list page without its `next` and `paging` (ADR 0128), after
+ * checking that it carries them and that they say what its `nextOffset` and
+ * `nextPage` say: the one change to every page beside the recorded three, so
+ * every other byte is still compared with the frozen handler's.
+ */
+function withoutPagedFields(url: URL, response: Response, body: string): string {
+  const size = url.pathname === PATH ? 50 : url.pathname === `${PATH}/statements` ? 10 : undefined;
+  if (response.status !== 200 || size === undefined || body === "") return body;
+  const page = JSON.parse(body) as Record<string, unknown>;
+  if (url.pathname === PATH && url.searchParams.has("proposalId") && !("nextPage" in page))
+    return body;
+  expect({ query: `${url.pathname}${url.search}`, agrees: validNextPage(page, size) }).toEqual({
+    query: `${url.pathname}${url.search}`,
+    agrees: true,
+  });
+  expect(Object.keys(page).slice(-2)).toEqual(["next", "paging"]);
+  const { next: _next, paging: _paging, ...rest } = page;
+  return JSON.stringify(rest);
 }
 
 /** What the shipped route must answer, given what the frozen one answered. */

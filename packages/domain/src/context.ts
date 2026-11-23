@@ -4,7 +4,7 @@
 import { hasExactKeys, isOneOf, isRecord, isStringRecord, isText, isTextOrNull } from "./guards.ts";
 import { validInstantText, validTemporalValue, type TemporalValue } from "./time.ts";
 
-export const FINANCIAL_CONTEXT_SCHEMA_VERSION = "financial-context-v1";
+export const FINANCIAL_CONTEXT_SCHEMA_VERSION = "financial-context-v2";
 export interface FinancialContext {
   contextId: string;
   schemaVersion: typeof FINANCIAL_CONTEXT_SCHEMA_VERSION;

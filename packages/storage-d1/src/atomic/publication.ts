@@ -225,10 +225,13 @@ export interface PublishInput {
  * run ok (born superseded when a numerically newer success is already current),
  * supersede older successes if this run is current, move the publication
  * projection and record its event (0026, same decision), then close the job.
- * Every statement that writes is fenced on the live lease, not only the
- * first: an expired lease changes nothing, and replaying the whole batch for
- * a run that is already published changes nothing either, because the effect
- * the later statements would otherwise key on is already committed.
+ * The first four statements are each fenced on the live lease (this token,
+ * `running`, unexpired), not only the first: a writer whose lease expired, or
+ * whose job was closed or taken over, changes no run, pointer or event, and
+ * replaying the whole batch for a run that is already published changes
+ * nothing either, because the effect the later statements would otherwise
+ * key on is already committed. The job close is fenced on this token and
+ * `status='running'`, not on the lease's expiry.
  * Candidate results (`parse_run_candidates`, migration 0028) are excluded from
  * supersession in both directions: a candidate must not be turned into
  * replaced history by a later normal publish, and a candidate at a higher
@@ -258,14 +261,18 @@ export function publishBatch(db: D1Like, input: PublishInput): D1StatementLike[]
         ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
       )
       .bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
+    // Fenced on the live lease like the first statement. Without the fence a
+    // writer that lost its lease still superseded the older successes of a
+    // run that was already `ok` and current; with it, a writer that holds the
+    // lease supersedes exactly what it did before (test/publish-batch-lease.test.ts).
     db
       .prepare(
-        `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=parse_runs.id) AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`, // gate:writer
+        `UPDATE parse_runs SET superseded_by_parse_run_id=?1 WHERE fetch_artifact_id=?2 AND parser_name=?5 AND id<>?1 AND status='ok' AND superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=parse_runs.id) AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=?1 AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL) AND ${LIVE_LEASE}`, // gate:writer
       )
-      .bind(parseId, artifactId, parserName, parseId, parseId),
+      .bind(parseId, artifactId, token, now, parserName),
     ...publicationStatements(db, parseId, publishedAt, token, now),
-    // Fenced on the live lease like the first statement: a replayed batch
-    // must not touch a job another attempt has already closed.
+    // Fenced on this token and `status='running'`: a replayed batch must not
+    // touch a job another attempt has already closed.
     db
       .prepare(
         `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND status='running' AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,

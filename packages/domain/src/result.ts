@@ -33,6 +33,15 @@ export const QUERY_INTENTS = [
   "reward-forecast",
 ] as const;
 export type QueryIntent = (typeof QUERY_INTENTS)[number];
+/**
+ * The intents whose answer is one page of rows (`data.rows`, at most the
+ * resolved `limit`, continued by `nextCursor`); the others answer whole. The
+ * agent query answer carries `next` and `paging` (ADR 0128) for these only.
+ */
+export const PAGED_QUERY_INTENTS = [
+  "activity",
+  "reported-state",
+] as const satisfies readonly QueryIntent[];
 
 /** Server-resolved query; never an LLM paraphrase. */
 export interface QuerySpec {

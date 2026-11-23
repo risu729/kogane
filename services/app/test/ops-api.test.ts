@@ -754,12 +754,14 @@ describe("stage progress is evidence, not a guess", () => {
     const accepted = await ops("/projections", { reason: "stage progress fixture" });
     const operationId = accepted.json.operationId as string;
     const store = d1CommandStore(env.DB);
+    // Short of completion, a rebuild's `projected` stage is only ever `pending`
+    // with no code: no executor records another state for it, and READ is
+    // consulted only for kinds that reach `adopted` (docs/ops-api.md).
     await recordOperationStage({
       store,
       operationId,
       stage: "projected",
-      state: "retryable",
-      failureCode: "snapshot_incomplete",
+      state: "pending",
       now: "2026-09-07T00:00:00Z",
     });
     let receipt = (await (
@@ -768,14 +770,14 @@ describe("stage progress is evidence, not a guess", () => {
     expect(receipt.stages).toEqual([
       {
         stage: "projected",
-        state: "retryable",
+        state: "pending",
         evidenceRef: null,
-        failureCode: "snapshot_incomplete",
+        failureCode: null,
         attempts: 1,
         updatedAt: "2026-09-07T00:00:00Z",
       },
     ]);
-    // A retryable stage is not completion: the operation is still accepted.
+    // A pending stage is not completion: the operation is still accepted.
     expect(receipt.status).toBe("accepted");
     await recordOperationStage({
       store,
@@ -1401,9 +1403,10 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     // A cursor of another principal pages on; one of no operation is refused.
     const peer = await request("/projections", { reason: REASON }, LISTER_PEER);
     expect((await list(`?cursor=${peer}`)).status).toBe(200);
+    // A cursor this list did not issue is the paging family's (ADR 0128).
     const refused = await list(`?cursor=op_${"0".repeat(64)}`);
-    expect(refused.status).toBe(404);
-    expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
+    expect(refused.status).toBe(400);
+    expect(refused.json).toMatchObject({ error: "invalid_cursor", refs: ["cursor"] });
   });
 
   it("refuses an agent and a stranger on the route, and is absent while the flag is off", async () => {

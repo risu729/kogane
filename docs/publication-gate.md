@@ -111,14 +111,18 @@ and the run is not already the pointer of its key — so:
   recorded and its rows are queryable as history, but the pointer stays on
   the newer run and no event is written;
 - a lost lease leaves status `pending`, and therefore no pointer move and no
-  event. The lease fence is repeated on every statement rather than inherited
-  from the first: a batch replayed after a successful publish finds that
-  first effect already committed, so a statement that keys only on it would
-  fire again;
+  event. The lease fence is repeated on the first four statements (mark `ok`,
+  supersede older successes, event, pointer) rather than inherited from the
+  first: a batch replayed after a successful publish finds that first effect
+  already committed, so a statement that keys only on it would fire again.
+  In particular a writer that lost its lease supersedes nothing, even for a
+  run that is already `ok` and current next to an older success nothing
+  superseded;
 - re-executing the whole batch for a run that is already published changes
   nothing: no second `normal` event (which would name the run as replacing
   itself), no rewritten `published_at`, and the job-close statement is fenced
-  on `status='running'` so it does not touch a job another attempt closed;
+  on its token and `status='running'` (not on the lease's expiry) so it does
+  not touch a job another attempt closed;
 - after every publish the legacy predicate equals the projection, which is
   what a reader that predates the gate needs during a mixed deployment.
 
@@ -286,6 +290,17 @@ production Worker rollback.
   0036 trigger rejects a hand-written self-referencing event and the repair
   route adds nothing on a consistent key: same file
   ("re-executing the publish batch for an already published run").
+- The supersede statement is fenced on the live lease like the mark-`ok`,
+  event and pointer statements: a writer whose lease expired, whose job was
+  closed or whose job another attempt took over supersedes nothing, where the
+  unfenced statement (frozen verbatim in
+  `packages/storage-d1/test/publish-batch-legacy-sql.ts`) superseded the older
+  success; for a writer that holds the lease the fenced batch leaves every
+  written table and every statement's change count equal to the unfenced one
+  on 400 random stores and on scaled stores of up to 300 keys; and without
+  table statistics the fence adds only one uncorrelated lease lookup through
+  the index the first statement already uses:
+  `packages/storage-d1/test/publish-batch-lease.test.ts`.
 - Operator signals read the projection, not `parse_runs.status='ok'`: the
   replay-plan `already_parsed` estimate and `/status`
   `freshness.latestParsedAt` (`lanes.test.ts`, and the shape assertions in

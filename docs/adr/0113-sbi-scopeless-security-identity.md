@@ -3,7 +3,7 @@
 - Status: accepted (merged 2026-11-18 in [#1385](https://github.com/risu729/kogane/pull/1385))
 - Date: 2026-11-18
 - Amended by: [ADR 0117](0117-sbi-foreign-account-discriminator-identity.md)
-  (proposed, 2026-11-18): the SBI Securities module now requires policy 3
+  (accepted, merged 2026-11-20 in [#1416](https://github.com/risu729/kogane/pull/1416)): the SBI Securities module now requires policy 3
   for foreign trade, positions and cash balances captures, evidence
   `sbiForeignDiscriminatedArtifact`, fallback
   `not-a-discriminated-foreign-capture`. This ADR's security rule applies

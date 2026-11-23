@@ -72,7 +72,10 @@ order is its recording order.
    authority, any signed-in subject, as the evidence browser's GET routes), the
    agent HTTP route and the MCP tool are adapters over it (ADR 0081 point 2).
    No screen reads the route yet, so the parity guard lists the tool among the
-   tools without a UI route; a page is a later slice.
+   tools without a UI route; a page is a later slice. (Amended
+   2026-11-20: the ホーム page's 最近の変化 panel reads the route, and the
+   guard maps it to the tool;
+   [amendment below](#amendment-2026-11-20-the-ホーム-panel-reads-the-route).)
 2. **What "new" means.** Recorded in the store at or after `since`: a fetch run
    by its first recording, a capture with its run, a parse run by its parse
    time, an observation row with its parse run, an event revision by its
@@ -181,7 +184,8 @@ order is its recording order.
   current event with no date, account or source filter, so an agent cannot yet
   list only the new ones.
 - New published tool and route: one more adapter each; the parity guard lists
-  the tool with the route no screen reads.
+  the tool with the route no screen reads. (Since the 2026-11-20 amendment, the
+  guard maps the route to the tool.)
 - The runs and captures handlers list items only for the configured evidence
   source: `kogane.evidence.read` answers `404 not_found` for any other source
   (decision 4). Another source's new captures are listed by
@@ -196,7 +200,8 @@ The filters rewrite a shipped query, so they need what a rewrite needs
 ([read model: cost](../read-model.md#cost)): the shipped text frozen, a
 differential test against it on scaled and random stores, and plan checks
 without table statistics. A ホーム panel reading the route would also take the
-tool off the parity guard's list of tools without a UI route.
+tool off the parity guard's list of tools without a UI route (done by the
+2026-11-20 amendment).
 
 ## Verification
 
@@ -291,3 +296,208 @@ kind arguments) is in its tool's published input schema, and calling
 `kogane.events.read` with the events handler's arguments and `since` lists
 exactly the revisions recorded since. The contract test holds `handlers`
 equal to `CHANGES_SINCE_HANDLERS`, so the published answer carries the new key.
+
+## Amendment 2026-11-20: the ホーム panel reads the route
+
+- Status: proposed (accepted when its pull request merges)
+- Date: 2026-11-20
+- Revises: decision 1 (no screen reads the route) and the parity consequence
+- Owner approval: required before merge. The ホーム page gains a panel; the
+  owner approves additions to the UI. The route, the service, the MCP tool,
+  its description and the catalogue are unchanged.
+
+### Context
+
+Decision 1 left `GET /api/v2/changes` without a screen, so the UI/MCP parity
+guard (`services/app/test/ui-mcp-parity.test.ts`) listed `kogane.changes.since`
+among the published tools without a UI route, and the next slice above named
+a ホーム panel as the way to take it off. The operator answered "what changed
+since yesterday?" on the web only by reading the ホーム page's newest-runs
+table and the parse history, which are the newest windows across every
+source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
+(pull request 1457, merged) is the same pattern for another read.
+
+### Options considered
+
+1. **A ホーム panel over the route, with three fixed windows (chosen).** The
+   panel reads the route only, shows its answer as it is, and takes the tool
+   off the guard's list.
+2. **A page of its own.** It would need a navigation entry and a URL state
+   for the window. The answer is one screen at today's scale (ADR 0127's
+   size test: twenty busy sources in one answer), so ホーム holds it.
+3. **Keep the guard entry.** ADR 0081 point 1 makes a read the UI offers an
+   MCP read too, not the reverse, so the entry was allowed. This amendment
+   proposes the panel instead, so the operator reads on the web the answer
+   an agent reads; the owner has not asked for it, and it stands only if the
+   owner approves the UI addition.
+
+### Decision
+
+1. **Panel.** 最近の変化 on the ホーム page, after the summary counts and
+   the 判断待ち panel (ADR 0126) and before the source cards
+   (`apps/web/src/changes-since.tsx`). It reads `GET /api/v2/changes` only, through `useInfiniteQuery` and `getJson`, so
+   every answer is checked by `validChangesSince` before it renders, and a
+   malformed answer is an error, never a partial panel. It writes nothing.
+2. **Window.** Three fixed windows, 24時間 (the default), 7日間 and 30日間,
+   each sent as `since` = the browser's clock minus the window, in the
+   canonical form the digest echoes. 24 hours is the default because it
+   answers "since yesterday" the same way at any hour; "since 00:00 in
+   Asia/Tokyo" would show a few minutes just after midnight. 30 days, not 31,
+   leaves a day for a browser clock behind the server's before
+   `since:too_old`. Each first read of a window (choosing it, a refetch on
+   focus, a retry) takes the instant from the clock at that read, and the
+   panel's note shows the instant the answer on screen was read for
+   (Asia/Tokyo), as the digest echoes it.
+3. **Shown, per source.** Its name from the overview's source list beside the
+   id; new runs by state (the evidence pages' outcome labels, and 結果未確定
+   for `open`), captures, parse runs by state (現行の解析, 旧解析（置換済み）,
+   未採用の解析, 解析失敗, 解析待ち), observation rows by kind (the app's
+   取引, 残高, 保有資産, 評価額), the newest run and parse times, and a link to
+   the newest parse's artifact. Only non-zero states are listed; a section
+   with none says なし. Each label map is typed by the domain's closed list,
+   so a code added to a list fails the web typecheck until it has a label.
+   A section the grant cannot read (`sections.runs: unauthorized`) is not
+   shown and the panel says it was not counted.
+4. **Lower bounds (INV05).** Every count of a section in a line's `cut`, and
+   every count of an events line that is not `complete`, is shown with 以上
+   and an 上限で打ち切り badge; a cut section with no count reads 0件以上, not
+   なし. A cut section that lists some states adds そのほか 0件以上, and an
+   incomplete events line that lists some kinds adds そのほかの種類: 0件以上,
+   because a state or kind read as 0 may have new records past the bound; an
+   unlisted state reads as exactly none only in a section that is not cut.
+   The panel's header count (sources listed) and the unchanged count read 以上
+   while the answer continues.
+5. **The rest of the answer.** `unchanged` sources in a closed disclosure,
+   with a link to 収集の状況 (the collection-quality page, the handler of an
+   unchanged source); the events line per kind as 新規 and 更新 counts, or
+   its `unavailable` reason (この環境では提供されていません for
+   `not_served`); `notCovered` in a closed disclosure, each kind with its
+   reason.
+6. **Continuation.** When `next` is not null the panel says the list
+   continues and offers 続きを読み込む, which sends the same `since` with
+   `after` = `next.after` and appends that answer's sources and unchanged
+   sources. The events line and `notCovered` are the first answer's. A failed
+   continuation is an error beside the button, and the answers already read
+   stay. Its retry sends the continuation again, except after a `400`: the
+   same request would be refused again (its `since` past the digest's bound,
+   say, after the page stayed open a day without a refetch), so the retry
+   reads the answer again from the clock (decision 2). Any read again of a
+   window whose continuation failed (that retry, a refocused tab, a return
+   to the window) keeps the answers already read and the error until it
+   settles: the panel remembers the failed continuation's error itself,
+   which the query holds until a read settles, so a read that fails anew
+   shows the panel's error state. A continuation refused for authentication
+   (`401`, or a redirect to sign in) withdraws the answers already read (the
+   client drops the records of any read so refused), so with nothing left to
+   keep it shows the panel's error state.
+7. **Refusals.** A `403` (the grant refusals, `unauthorized` and
+   `evidence_restricted`) or `404` (a deployment without the route, such as
+   the local store) shows no panel. Any other failure (`400`, `413
+   budget_exceeded`, a server error, a timeout, a malformed answer) shows the
+   app's error state in the panel with a retry, and no count.
+8. **Parity.** The guard maps `/api/v2/changes` to `kogane.changes.since` and
+   no longer lists the tool among the tools without a UI route.
+
+### Consequences
+
+- Opening ホーム, choosing a window and each continuation read the route once
+  each. The route records no audit read (decision 9 records one per agent
+  call, not per route read), so the panel adds no audit rows.
+- Each continuation is a fresh read (decision 8): a source registered between
+  two reads before `after` appears only on a new first read, as for an agent.
+- A page left open and refetched (on focus) reads its window from the clock
+  again, so the window keeps its length and a 30-day window is not refused
+  as `since:too_old` a day later. A continuation sends its first answer's
+  `since`, and a refetch reads every page again from the new first answer,
+  so the pages on screen always share one instant.
+- The panel links only to the artifact of the newest parse and to 収集の状況.
+  The runs handler (`kogane.evidence.read`) serves only the configured
+  evidence source, and the observation lists take no recorded-time filter, so
+  the panel offers no per-count link to the items behind it.
+
+### Verification
+
+- `apps/web/test/changes-since.browser.test.ts`, against a synthetic server
+  whose answers the contract admits (checked in the file): per-source labels
+  and counts and the artifact link; the default 24-hour `since` and the
+  7-day window; a refetch a day later that reads the 30-day window from the
+  clock again, with its continuation on the same `since`; cut counts and the
+  events line as 以上 with the badge, the states and kinds they do not list
+  as そのほか 0件以上, and なし only for uncut sections; unchanged sources
+  collapsed until opened;
+  `notCovered` with its reasons; a continued answer with `after`, its header
+  and unchanged counts as 以上 until the last answer; a failed continuation
+  that keeps the answer read, with no header count; a continuation refused
+  as too old a day later, whose retry keeps the answer read and the error
+  beside the button while it reads the 30-day window from the clock again,
+  and then continues on the new `since`; a window whose continuation failed,
+  read again on a return to it, that keeps the answer read and the error
+  beside the button until the reread settles; a continuation refused with
+  `401` that withdraws the answer and shows the panel's error state, never a
+  loading state; the unauthorized run
+  sections and an events line that is not served; no panel on `403` and on
+  `404`; the error state, with no count, on a server error and on an answer
+  the contract refuses; the accessibility audit at 1280px and 390px with the
+  disclosures open, on the first and on a continued answer.
+- `services/app/test/ui-mcp-parity.test.ts`: the web sources name
+  `/api/v2/changes`, the guard maps it to `kogane.changes.since`, and the
+  tool is not listed among the tools without a UI route.
+
+## Amendment: a `since` in the years 0000 to 0099 is too old, not malformed (2026-11-21)
+
+- Status: proposed. The refusal ref is part of `kogane.changes.since`'s
+  published answer, and it changes from `since:format` to `since:too_old` for
+  a `since` written in the years 0000 to 0099: **the owner's approval is
+  needed before merge**.
+- Date: 2026-11-21
+
+### Context
+
+`checkedSince` checked that `since` is a real calendar time by rebuilding it
+with `Date.UTC`, which reads the years 0 to 99 as 1900 to 1999. A real time
+written in those years, such as `0050-01-01T00:00Z`, failed that check and was
+`since:format`, though the window of point 6 refuses it as `since:too_old`.
+Nothing it reads changed; only the refusal's ref was wrong. The activity
+list's `since` and `before`
+([ADR 0081's amendment of 2026-11-20](0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20))
+carried a second copy of the same rule that sets the year as written.
+
+### Options considered
+
+1. **Fix `checkedSince` in place.** Two copies of one rule stay, and the next
+   change to one of them may miss the other.
+2. **One pure parser in `packages/domain` both read (chosen):**
+   `parseQueryInstant` in `query-instant.ts`.
+
+### Decision
+
+`parseQueryInstant(text)` takes a date, a time to the minute or the second
+with at most three fraction digits, and `Z` or an offset up to ±23:59, by
+arithmetic on the written fields (years 0000 to 9999 as written; no 24:00, no
+second 60, no rolled-over date). It answers the ISO form when the UTC form is
+within the years 0000 to 9999, `format` when the text is no such time, and
+`range` with the instant when it is a real time outside those years.
+
+- `kogane.changes.since` refuses `format` as `since:format`, and checks every
+  real time, `range` included, against the window: a `since` in the years 0000
+  to 0099 is now `since:too_old`, as is one whose UTC form is before year 0000.
+  Every other `since` is answered or refused as before.
+- The activity list refuses `format` and `range` as `since:format` or
+  `before:format`, as before.
+
+### Consequences
+
+- `since:format` means the value is no real time of this form; a real time
+  outside the 31 days is `since:future` or `since:too_old`, whatever its year.
+- One rule for both reads: a change to the accepted form changes both.
+
+### Verification
+
+`packages/domain/test/query-instant.test.ts` pins leap years (0000-02-29
+taken, 0100-02-29 refused), 24:00, 23:59:60, offsets to ±23:59 and the edges
+of the years 0000 and 9999. `packages/domain/test/query-instant.differential.test.ts`
+freezes both shipped checks and compares them with the rewrites on 40,000
+seeded random strings, well formed and malformed: the activity answer is equal
+on every one, and `changes.since` differs only where a real time written in
+the years 0 to 99 went from `since:format` to `since:too_old`.
+`packages/application/test/changes-since.test.ts` holds that refusal.

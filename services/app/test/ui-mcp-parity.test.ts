@@ -30,6 +30,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
+import { CONTINUATION_INPUTS, PAGING_WAITING, PAGING_WALKED } from "./paging-registry";
 import { HOLDING_CHANGE_STATUSES } from "../../../packages/domain/src/holdings-change.ts";
 import { HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES } from "../../../packages/domain/src/holdings-change-summary.ts";
 import { VALUE_STATUSES } from "../../../packages/domain/src/values.ts";
@@ -108,6 +109,9 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reported-state": ["kogane.reported-state.read"],
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
   "/api/v2/audit": ["kogane.audit.search"],
+  // The ホーム page's 最近の変化 panel: what was recorded since an instant,
+  // per source, from `readChangesSince` (ADR 0127 and its 2026-11-20 amendment).
+  "/api/v2/changes": ["kogane.changes.since"],
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
   "/api/v2/reconciliation/card-debit-accounts": ["kogane.card-settlements.debit-accounts"],
   "/api/v2/decisions/pending": ["kogane.decisions.pending"],
@@ -179,8 +183,6 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
   "kogane.events.read":
     "GET /api/v2/activity and /api/v2/obligations, which no screen reads (ADR 0072); plan D19",
-  "kogane.changes.since":
-    "GET /api/v2/changes, which no screen reads yet (ADR 0127: an agent's everyday question; a page is a later slice)",
   "kogane.audit.get":
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
 };
@@ -486,6 +488,42 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       names.filter((name) => !tools.has(name)).map((name) => `${route} -> ${name}`),
     );
     expect(unpublished).toEqual([]);
+  });
+});
+
+describe("one paging contract across the published tools (ADR 0128)", () => {
+  it("keeps every published description within what a client shows, 2,048 characters", async () => {
+    const long = (await publishedDefinitions())
+      .filter((tool) => tool.description.length > 2048)
+      .map((tool) => `${tool.name}: ${tool.description.length}`);
+    expect(long).toEqual([]);
+  });
+
+  it("classes every tool that takes a continuation argument as walked or waiting for its slice", async () => {
+    const tools = (await publishedDefinitions()) as unknown as {
+      name: string;
+      description: string;
+      inputSchema: { properties?: Record<string, unknown> };
+    }[];
+    const paged = tools
+      .filter((tool) =>
+        CONTINUATION_INPUTS.some((name) => Object.hasOwn(tool.inputSchema.properties ?? {}, name)),
+      )
+      .map((tool) => tool.name)
+      .sort();
+    const walked = Object.keys(PAGING_WALKED);
+    const waiting = Object.keys(PAGING_WAITING);
+    expect(walked.filter((name) => waiting.includes(name))).toEqual([]);
+    expect(paged).toEqual([...walked, ...waiting].sort());
+  });
+
+  it("tells each converted tool's caller to continue by next.arguments", async () => {
+    const tools = await publishedDefinitions();
+    for (const name of Object.keys(PAGING_WALKED)) {
+      const tool = tools.find((entry) => entry.name === name)!;
+      expect(tool.description, name).toContain("`next.arguments`");
+      expect(tool.description, name).toContain("`paging`");
+    }
   });
 });
 

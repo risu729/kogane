@@ -11,11 +11,13 @@ import {
   ledgerMismatches,
   manifestViolations,
   scriptInvocations,
+  testCommandArguments,
   toolDownloads,
   trackedGeneratedFiles,
   trackedWorkerTypes,
   unaccountedConfigs,
   uncoveredWorkspaces,
+  unselectedTestFiles,
   workspaceDirectories,
   workspaceTaskPrefixes,
 } from "./check-manifests.ts";
@@ -400,6 +402,135 @@ describe("Wrangler types output", () => {
 
   test("nothing tracked, nothing reported", () => {
     expect(trackedWorkerTypes([])).toEqual([]);
+  });
+});
+
+describe("test files a listing command leaves out", () => {
+  const checks = (...names: string[]) => ({ name: "//:checks", depends: names, dir: "/repo" });
+  const task = (name: string, dir: string, ...run: string[]) => ({
+    name,
+    dir: `/repo/${dir}`,
+    run,
+  });
+
+  test("the path arguments of bun test and node --test, through the coverage wrapper", () => {
+    expect(
+      testCommandArguments(
+        "node ../../tasks/_lib/coverage-run.mjs bun test --timeout 60000 ./test/*.test.ts",
+      ),
+    ).toEqual(["test/*.test.ts"]);
+    expect(
+      testCommandArguments("node ../../tasks/_lib/coverage-run.mjs bun test --shard=1/2"),
+    ).toEqual([]);
+    // Bun reads a value for --bail and --parallel only after `=`.
+    expect(testCommandArguments("bun test --bail test/a.test.ts")).toEqual(["test/a.test.ts"]);
+    expect(testCommandArguments("bun test --parallel test/a.test.ts")).toEqual(["test/a.test.ts"]);
+    expect(testCommandArguments("bun test --preload ./setup.ts test/a.test.ts")).toEqual([
+      "test/a.test.ts",
+    ]);
+    expect(testCommandArguments("node --test a.node-test.mjs")).toEqual(["a.node-test.mjs"]);
+    expect(
+      testCommandArguments("node ../../tasks/_lib/coverage-run.mjs vitest run"),
+    ).toBeUndefined();
+    expect(testCommandArguments("./node_modules/.bin/tsc --noEmit")).toBeUndefined();
+  });
+
+  test("a file beside an explicit list that nothing runs is reported", () => {
+    const tasks = [
+      checks("//services/x:test"),
+      task(
+        "//services/x:test",
+        "services/x",
+        "node ../../tasks/_lib/coverage-run.mjs bun test test/a.test.ts",
+        "node --test test/relay.node.mjs",
+      ),
+    ];
+    expect(
+      unselectedTestFiles(
+        tasks,
+        [
+          "services/x/test/a.test.ts",
+          "services/x/test/b.test.ts",
+          "services/x/test/relay.node.mjs",
+          "services/x/test/helper.ts",
+          "services/x/worker-test/w.test.ts",
+        ],
+        "/repo",
+      ),
+    ).toEqual([
+      "services/x/test/b.test.ts: //services/x:test lists the test files beside it, but no check runs this one; add it to that command",
+    ]);
+  });
+
+  test("a shell glob leaves out other suffixes and nested directories", () => {
+    const tasks = [
+      checks("//services/x:test"),
+      task("//services/x:test", "services/x", "bun test ./test/*.test.ts"),
+    ];
+    expect(
+      unselectedTestFiles(
+        tasks,
+        [
+          "services/x/test/a.test.ts",
+          "services/x/test/b.test.mjs",
+          "services/x/test/sub/c.test.ts",
+        ],
+        "/repo",
+      ).map((line) => line.split(":")[0]),
+    ).toEqual(["services/x/test/b.test.mjs", "services/x/test/sub/c.test.ts"]);
+  });
+
+  test("a file another command of the graph runs is not reported, and a task outside it does not count", () => {
+    const tracked = ["services/x/test/a.test.ts", "services/x/test/b.test.ts"];
+    const listing = task("//services/x:test", "services/x", "bun test test/a.test.ts");
+    expect(
+      unselectedTestFiles(
+        [
+          checks("//services/x:test", "//:root:test"),
+          listing,
+          task("//:root:test", "", "bun test services/x/test"),
+        ],
+        tracked,
+        "/repo",
+      ),
+    ).toEqual([]);
+    expect(
+      unselectedTestFiles(
+        [
+          checks("//services/x:test", "//:root:test"),
+          listing,
+          task("//:root:test", "", "bun test b.test"),
+        ],
+        tracked,
+        "/repo",
+      ),
+    ).toEqual([]);
+    expect(
+      unselectedTestFiles(
+        [
+          checks("//services/x:test"),
+          listing,
+          task("//services/x:extra", "services/x", "bun test"),
+        ],
+        tracked,
+        "/repo",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("a plain bun test and a directory argument list nothing", () => {
+    const tasks = [
+      checks("//services/x:test", "//services/y:test"),
+      task("//services/x:test", "services/x", "bun test"),
+      task("//services/y:test", "services/y", "bun test ./test"),
+    ];
+    expect(
+      unselectedTestFiles(
+        tasks,
+        ["services/x/test/a.test.ts", "services/y/other/b.test.ts"],
+        "/repo",
+      ),
+    ).toEqual([]);
   });
 });
 
