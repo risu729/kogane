@@ -9,6 +9,7 @@ import {
 } from "./file-store";
 import { WindowsChromeContextCollector } from "./windows-chrome-collector";
 import { liveReadsEnabled } from "../read-allowlist";
+import { localFailureLine } from "./failure";
 
 interface CliOptions {
   dryRun: boolean;
@@ -131,24 +132,7 @@ function log(value: Record<string, unknown>): void {
   console.log(JSON.stringify(value));
 }
 
-function publicError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return message
-    .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [redacted]")
-    .replace(
-      /(password|accountNumber|branchNumber|nationalId|authorization|cookie|csrf|jsc|token)=?[^\s,;]*/giu,
-      "$1=[redacted]",
-    )
-    .slice(0, 300);
-}
-
 main().catch((error: unknown) => {
-  console.error(
-    JSON.stringify({
-      event: "sbi-shinsei-local-failed",
-      errorType: error instanceof Error ? error.name : "UnknownError",
-      message: publicError(error),
-    }),
-  );
+  console.error(JSON.stringify(localFailureLine(error)));
   process.exitCode = 1;
 });

@@ -7,10 +7,13 @@
   [Amendment: ADR 0029](#amendment-adr-0029-the-token-needs-no-key)); noted
   on 2026-09-27 that both stated-total fields are on the live site (see
   [Note](#note-2026-09-27-both-stated-total-fields-are-on-the-live-site));
+  a counts-only statement shape diagnostic added (accepted, merged 2026-10-10
+  in [#676](https://github.com/risu729/kogane/pull/676); see
+  [Counts-only shape diagnostic amendment](#counts-only-shape-diagnostic-amendment-2026-10-10));
   the hold released by [ADR 0083](0083-release-vpass-collector-statement-pages.md)
   (2026-11-07, see its amendment); option 8 amended to leave a finalized
-  page's `45` and `4C` header rows out of the count (proposed 2026-11-19,
-  owner decision D1; see
+  page's `45` and `4C` header rows out of the count (accepted, merged
+  2026-11-20 in [#1448](https://github.com/risu729/kogane/pull/1448); owner decision D1; see
   [Amendment (2026-11-19)](#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted))
 - Date: 2026-09-26
 - Carried by:

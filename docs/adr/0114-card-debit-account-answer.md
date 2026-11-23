@@ -222,7 +222,7 @@ the page renders the total through `SettlementQuantity` only.
 
 ## Amendment 2026-11-21: a null due or debit date carries its reason
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1534](https://github.com/risu729/kogane/pull/1534))
 - Date: 2026-11-21
 - Owner approval: required before merge. The published answers of
   `kogane.card-settlements.debit-accounts` and
@@ -584,7 +584,7 @@ command or catalogue operation is added.
 This amendment changes the 2026-11-19 `upcoming` amendment directly above, so
 it sits next to it rather than at the end of the file.
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1526](https://github.com/risu729/kogane/pull/1526))
 - Date: 2026-11-21
 - Owner approval: required before merge. It adds a code to the closed
   `covers` reasons that `kogane.card-settlements.debit-accounts` with
@@ -740,7 +740,7 @@ before; only the `proposed` filter changes.
 
 ## Amendment 2026-11-21: a balance captured on a bill's own due date is not compared with it
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1522](https://github.com/risu729/kogane/pull/1522))
 - Date: 2026-11-21
 - Owner approval: required before merge. No field, code or type changes, but
   on a bill's due date the published answer of

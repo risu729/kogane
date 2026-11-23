@@ -276,13 +276,15 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One reconstructed state (of one account or a scope, ADR 0116), when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
-  // The dated reported state: its accounts and its payables. A read past the
-  // route's bound is refused, never cut, so it is never truncated.
+  // The dated reported state: its accounts, its payables and its
+  // scheduled-payment captures. A read past the route's bound is refused,
+  // never cut, so it is never truncated.
   if (operation === "reported-state.read")
     return {
       rows:
         (Array.isArray(value["accounts"]) ? value["accounts"].length : 0) +
-        (Array.isArray(value["payables"]) ? value["payables"].length : 0),
+        (Array.isArray(value["payables"]) ? value["payables"].length : 0) +
+        (Array.isArray(value["scheduledPayments"]) ? value["scheduledPayments"].length : 0),
       truncated: false,
     };
   // One UI page read (`{ schemaVersion, data }`, src/page-read-tools.ts): the

@@ -181,7 +181,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.instruments.history":
     "Read the same append-only instrument history as the owner UI, under records.read and a whole-store read grant.",
   "kogane.reported-state.read":
-    "What each provider last reported on a date (YYYY-MM-DD, Asia/Tokyo, not after today), per account, from the latest complete capture before the end of that date, beside the card statements due around it; optionally one source or one account. The same answer as GET /api/v2/reported-state, under records.read and a whole-store read grant. Provider figures only: nothing is added, converted or netted, and a container without a capture is named in the coverage, never shown as zero.",
+    "What each provider last reported on a date (YYYY-MM-DD, Asia/Tokyo, not after today), per account, from the latest complete capture before the end of that date, beside the card statements due around it and the payments the card company's newest skip-payment page before that date still scheduled (`scheduledPayments`, per capture, never matched with a statement or counted as a liability; not listed under an account filter); optionally one source or one account. The same answer as GET /api/v2/reported-state, under records.read and a whole-store read grant. Provider figures only: nothing is added, converted or netted, and a container without a capture is named in the coverage, never shown as zero.",
   "kogane.instruments.coverage":
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
   "kogane.accounts.candidates":

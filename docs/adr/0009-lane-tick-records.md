@@ -1,8 +1,12 @@
 # ADR 0009: Lane tick records are bounded operational state
 
 - Status: accepted; the
+  [2026-11-07 amendment](#amendment-2026-11-07-refund-and-zero-totals-get-their-own-code)
+  is accepted (merged 2026-11-07 in [#1029](https://github.com/risu729/kogane/pull/1029)), and the
   [2026-11-06 amendment](#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)
-  is accepted (#947)
+  is accepted (#947); the
+  [2026-11-22 amendment](#amendment-2026-11-22-a-failed-ticks-code-is-from-a-closed-set)
+  is proposed
 - Date: 2026-09-25
 - Implemented by: #249
 - Carried by: [processor §6.1](../processor.md#61-tick-records),
@@ -134,6 +138,8 @@ closed set is dropped from the row and from `/status`.
 
 ## Amendment 2026-11-07: refund and zero totals get their own code
 
+- Status: accepted (merged 2026-11-07 in [#1029](https://github.com/risu729/kogane/pull/1029))
+
 The settlement sweep's `unmatched` map gains a fourth closed code,
 `statement_total_refund_or_zero`, for a statement whose exact total is zero
 or below (a refund, or a month with nothing to pay). Before this, such a
@@ -152,3 +158,42 @@ the owner 2026-11-07 03:58 UTC).
 Verification: `services/processor/test/card-settlement-unmatched.test.ts`
 counts a zero total, a refund and a refund without a due date as
 `statement_total_refund_or_zero`, and the other shapes as before.
+
+## Amendment 2026-11-22: a failed tick's code is from a closed set
+
+Context: the "safe code" of a `failed` tick was a pipeline code or the
+thrown error's `constructor.name`. A class name is free text whoever threw
+chose, so a custom class could put a word into `error_code`, the
+`<lane>_failed` log line and, when it was lower-case, the lane audit record;
+a value whose prototype lookup throws (a hostile proxy) made the scheduler
+itself throw and skip the remaining lanes. The tick, `lane_tick_record_failed`
+and `lane_audit_record_failed` logs and the queue consumer's
+`collection_notification_failed` line had the same gap.
+
+Options considered: (1) keep the class name behind the `^[A-Za-z][A-Za-z0-9_]{0,63}$`
+grammar, rejected because a name that fits the grammar is still free text;
+(2) a new stored code for "any other error", rejected because no new
+`error_code` value is needed; (3) the closed set below. Chosen: (3).
+
+Decision: a failed tick's code is one of the pipeline's own codes; one of two
+Processor lane errors whose class name is already their documented code
+(`RewardClaimWriteRefused`, `IdentityObservationBoundExceeded`), matched by
+`instanceof`, never by name; else the error's built-in class as the
+Processor's existing `safeFailureCode` classifies it (`AggregateError`,
+`EvalError`, `RangeError`, `ReferenceError`, `SyntaxError`, `TypeError`,
+`URIError`, `Error`), or `unknown`. Every value was already a possible
+`error_code`; none is new. The two record-failure logs use `safeFailureCode`,
+and `lane_audit_record_failed` keeps an error's own `code` only when it is
+the audit builder's `audit_record_invalid` or `audit_diff_invalid`.
+
+Consequences: a failure from a custom Error subclass (a driver's or a
+library's) now reads `Error`, so it no longer says which class threw; the
+cause is read by reproducing the lane, not from the tick. A new lane error
+whose class should be its code is added to the list in
+`services/processor/src/worker.ts` and documented, or it reads `Error`.
+
+Verification: `services/processor/test/lane-ticks.test.ts`,
+`lane-audit.test.ts` and `invocation-probe.test.ts` throw a custom-named
+class, a class that only shares a documented code's name, a non-Error and a
+proxy whose every trap throws, and check the log lines and stored rows carry
+only the closed codes and that the later lanes still run.

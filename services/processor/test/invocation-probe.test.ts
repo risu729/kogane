@@ -740,3 +740,37 @@ test("thenable introspection and observer setup never replace a source result or
     r2FailedOperations: 1,
   });
 });
+
+test("a failed queue message names only a built-in error class, never a custom class name", async () => {
+  class Synthetic_private_account_label extends Error {}
+  const refuse = () => {
+    throw new Error("synthetic private trap");
+  };
+  const hostile = new Proxy({}, { get: refuse, getPrototypeOf: refuse, has: refuse });
+  const lines: string[] = [];
+  const throwing = (thrown: unknown) => ({
+    body: { invalid: true },
+    ack() {
+      throw thrown;
+    },
+    retry() {},
+  });
+  await consumeTerminalNotifications(
+    [
+      throwing(new Synthetic_private_account_label("synthetic")),
+      throwing("synthetic private text"),
+      throwing(hostile),
+      throwing(new URIError("synthetic")),
+    ],
+    {} as Env,
+    invocationContext(),
+    (line) => lines.push(line),
+  );
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_notification_failed", code: "Error" },
+    { event: "collection_notification_failed", code: "unknown" },
+    { event: "collection_notification_failed", code: "unknown" },
+    { event: "collection_notification_failed", code: "URIError" },
+  ]);
+  expect(lines.join("\n")).not.toMatch(/Synthetic_private|synthetic private/u);
+});

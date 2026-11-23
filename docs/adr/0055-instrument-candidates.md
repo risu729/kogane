@@ -4,11 +4,18 @@
   [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
   (route, page, agent read tool and cost) is accepted (#608)
 - The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is accepted (#629).
+- The [pure temporal selector amendment](#amendment-2026-10-09-pure-temporal-selector)
+  is accepted (#637), and the two 2026-10-10 amendments,
+  [local temporal journal storage primitives](#amendment-2026-10-10-local-temporal-journal-storage-primitives)
+  and [refuse temporal-to-current command fallback](#amendment-2026-10-10-refuse-temporal-to-current-command-fallback),
+  are accepted (#652).
 - The [2026-11-08 amendment](#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)
   (rule `instrument-auto-v1`: SBI's bare domestic code adopted onto its listing
-  by a recorded rule decision) is accepted (#1123).
+  by a recorded rule decision) is accepted (#1123), and the
+  [second 2026-11-08 amendment](#amendment-2026-11-08-adoption-and-keeping-apart-pin-the-whole-pair)
+  (adoption and keeping apart pin the whole pair) is accepted (#1128).
 - The [2026-11-19 amendment](#amendment-2026-11-19-the-adoption-re-checks-listed_as-when-it-writes)
-  (the rule's write re-checks `listed_as`) is proposed.
+  (the rule's write re-checks `listed_as`) is accepted (merged 2026-11-20 in [#1430](https://github.com/risu729/kogane/pull/1430)).
 - Date: 2026-10-08
 - Issue: part of #546
 

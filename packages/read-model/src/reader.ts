@@ -113,6 +113,27 @@ export interface SourceParseRun {
   parser_version: string;
 }
 
+/**
+ * Marks of what the publication gate, the run exclusions and the dataset
+ * policies have done: the newest `publication_events` id, the number of
+ * `exclude_from_financial_views` annotations, and the policy columns the
+ * current lists read. An activation or a rollback moves an artifact's
+ * published run without recording a newer parse run, an exclusion hides a run
+ * without one, and an operator's policy update (a dataset named for the `unit`
+ * eligibility scope, another snapshot policy) changes which published runs are
+ * current without one; each still moves these marks.
+ */
+export interface PublicationMarks {
+  publicationEvent: number;
+  exclusions: number;
+  /**
+   * The policy rows of the read sources as canonical text: one JSON array per
+   * row, sorted, so equal policies give equal text whatever order the store
+   * returns them in. `"[]"` when no row names those sources.
+   */
+  snapshotPolicies: string;
+}
+
 /** One source's visible fetch runs, counted over its whole history. */
 export interface SourceFetchRunCount {
   source_id: string;
@@ -135,6 +156,12 @@ export interface ObservationReader {
    * place in it. An empty list reads nothing.
    */
   sourceParseRuns(sources: readonly string[]): Promise<SourceParseRun[]>;
+  /**
+   * `PublicationMarks` of the listed sources, or of every source for `null`.
+   * A listed source's marks never move with another source's events; an
+   * empty list reads nothing and is zero.
+   */
+  publicationMarks(sources: readonly string[] | null): Promise<PublicationMarks>;
   /**
    * D13 partial-update signal: partial fetch runs that refreshed some units of
    * a dataset on the `unit` eligibility scope. Empty for every dataset on the

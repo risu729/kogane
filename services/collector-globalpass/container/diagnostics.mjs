@@ -14,6 +14,19 @@ const stages = new Set([
 ]);
 const types = new Set(["Error", "TypeError", "SyntaxError", "TimeoutError", "AbortError"]);
 /**
+ * A thrown value's name as a closed code: one of `types`, else `UnknownError`
+ * (a custom name, a value that is not an Error, or a `name` getter that
+ * throws). A name is whatever its thrower chose, a page script's included.
+ */
+export function closedErrorType(error) {
+  try {
+    const candidate = error instanceof Error ? error.name : undefined;
+    return types.has(candidate) ? candidate : "UnknownError";
+  } catch {
+    return "UnknownError";
+  }
+}
+/**
  * Why one challenge attempt ended, as a closed code: the Turnstile token was
  * generated (`token`), the wait ran out with the widget frame present
  * (`token-timeout`) or absent (`widget-missing`), the edge refused the page
@@ -61,8 +74,7 @@ export function createBrowserDiagnostics(relayUrl) {
   }
   function emit(stage, outcome, elapsedMs, error, httpStatus) {
     try {
-      const candidate = error instanceof Error ? error.name : undefined;
-      const name = types.has(candidate) ? candidate : "UnknownError";
+      const name = closedErrorType(error);
       const status = httpStatusOrNothing(httpStatus);
       write({
         stage: stages.has(stage) ? stage : "unknown",

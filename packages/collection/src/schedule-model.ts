@@ -649,7 +649,10 @@ function* joinedDeferrals(
       continue;
     }
     // One day before `from` covers a window that starts on the previous local date.
-    for (let date = localDate(from, rule.timezone) - DAY; date <= from + horizon; date += DAY) {
+    // The last date is the horizon's end in the rule's zone: ahead of UTC, that
+    // local date begins before the instant, and a window on it can start in time.
+    const last = localDate(from + horizon, rule.timezone);
+    for (let date = localDate(from, rule.timezone) - DAY; date <= last; date += DAY) {
       if (!startsOn(p, date)) continue;
       const start = windowAt(date, p.start, rule.timezone, "start");
       if (start !== null && start > from && start < from + horizon) starts.add(start);

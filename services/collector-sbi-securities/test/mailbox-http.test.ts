@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   MailboxHttp,
   MAILBOX_MAIN_LINK,
+  mailboxMainLink,
   readMailboxResponse,
   updateMailboxCookies,
   type MailboxCookie,
@@ -497,4 +498,23 @@ test("calls the fetcher unbound, as the Workers runtime's fetch requires", async
   };
   await new MailboxHttp([], strict).open();
   expect(calls.map((call) => call.url)).toContain(MAILBOX_APPLICATION);
+});
+
+test("the report link follows the signed-in classic host and nothing else", () => {
+  const link = (href: string | undefined) => mailboxMainLink(href ? new URL(href) : undefined);
+  expect(link("https://site2.sbisec.co.jp/ETGate/?x=1")).toBe(
+    MAILBOX_MAIN_LINK.replace("site4.", "site2."),
+  );
+  for (const href of [
+    undefined,
+    "https://www.sbisec.co.jp/ETGate/",
+    "https://login.sbisec.co.jp/",
+    "http://site2.sbisec.co.jp/ETGate/",
+    "https://site2.sbisec.co.jp.invalid/ETGate/",
+    "https://site123.sbisec.co.jp/ETGate/",
+  ])
+    expect(link(href)).toBe(MAILBOX_MAIN_LINK);
+  expect(() => new MailboxHttp([], fetch, Infinity, undefined, "https://evil.invalid/")).toThrow(
+    "sbi_mailbox_transport_failed",
+  );
 });
