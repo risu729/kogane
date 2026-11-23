@@ -1377,6 +1377,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "64476ce0e5c03a918938a4c3e72d7e02faf1c0ad7896b12b892b11effba73f24"
+    },
+    {
+      "file": "0105_observation_no_replace.sql",
+      "statementCount": 11,
+      "insertStatements": [],
+      "sha256": "312b5d16141073e2cb21bfd8d410ce75266bb5b324b8955f4524578e42a562ac"
     }
   ],
   "tables": [
@@ -3416,6 +3422,7 @@
         "balance_observations_bump_revision_insert",
         "balance_observations_bump_revision_update",
         "balance_observations_no_delete",
+        "balance_observations_no_replace",
         "balance_observations_no_update"
       ],
       "noUpdateTriggers": [
@@ -11500,6 +11507,7 @@
         "observation_decimal_values_bump_revision_insert",
         "observation_decimal_values_bump_revision_update",
         "observation_decimals_no_delete",
+        "observation_decimals_no_replace",
         "observation_decimals_no_update"
       ],
       "noUpdateTriggers": [
@@ -13019,6 +13027,7 @@
         "parse_coverage_claims_bump_revision_insert",
         "parse_coverage_claims_bump_revision_update",
         "parse_coverage_claims_no_delete",
+        "parse_coverage_claims_no_replace",
         "parse_coverage_claims_no_update"
       ],
       "noUpdateTriggers": [
@@ -13104,6 +13113,7 @@
       ],
       "triggers": [
         "parse_input_references_no_delete",
+        "parse_input_references_no_replace",
         "parse_input_references_no_update"
       ],
       "noUpdateTriggers": [
@@ -13195,6 +13205,7 @@
       ],
       "triggers": [
         "parse_issues_no_delete",
+        "parse_issues_no_replace",
         "parse_issues_no_update"
       ],
       "noUpdateTriggers": [
@@ -13655,6 +13666,7 @@
       "triggers": [
         "position_decimals_v1",
         "position_observations_no_delete",
+        "position_observations_no_replace",
         "position_observations_no_update"
       ],
       "noUpdateTriggers": [
@@ -13763,6 +13775,7 @@
       ],
       "triggers": [
         "price_observation_claims_no_delete",
+        "price_observation_claims_no_replace",
         "price_observation_claims_no_update",
         "price_observation_claims_observation"
       ],
@@ -13892,6 +13905,7 @@
       ],
       "triggers": [
         "price_observations_no_delete",
+        "price_observations_no_replace",
         "price_observations_no_update"
       ],
       "noUpdateTriggers": [
@@ -16346,6 +16360,7 @@
       ],
       "triggers": [
         "scheduled_payment_observations_no_delete",
+        "scheduled_payment_observations_no_replace",
         "scheduled_payment_observations_no_update"
       ],
       "noUpdateTriggers": [
@@ -16846,6 +16861,7 @@
         "purchase_retirement_transaction_observations_update",
         "transaction_decimals_v1",
         "transaction_observations_no_delete",
+        "transaction_observations_no_replace",
         "transaction_observations_no_update"
       ],
       "noUpdateTriggers": [
@@ -16991,6 +17007,7 @@
       "triggers": [
         "valuation_decimals_v1",
         "valuation_observations_no_delete",
+        "valuation_observations_no_replace",
         "valuation_observations_no_update"
       ],
       "noUpdateTriggers": [
@@ -18141,6 +18158,13 @@
       "timing": "BEFORE",
       "event": "DELETE",
       "sqlSha256": "55abe073eeeda245"
+    },
+    {
+      "name": "balance_observations_no_replace",
+      "table": "balance_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "18da29b7f7881735"
     },
     {
       "name": "balance_observations_no_update",
@@ -20103,6 +20127,13 @@
       "sqlSha256": "1830448d0ec826f6"
     },
     {
+      "name": "observation_decimals_no_replace",
+      "table": "observation_decimal_values",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "18a70ad9b3ba5c48"
+    },
+    {
       "name": "observation_decimals_no_update",
       "table": "observation_decimal_values",
       "timing": "BEFORE",
@@ -20271,6 +20302,13 @@
       "sqlSha256": "7978e6d0a6e13437"
     },
     {
+      "name": "parse_coverage_claims_no_replace",
+      "table": "parse_coverage_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "f0846225009edd53"
+    },
+    {
       "name": "parse_coverage_claims_no_update",
       "table": "parse_coverage_claims",
       "timing": "BEFORE",
@@ -20285,6 +20323,13 @@
       "sqlSha256": "004a5ddb45b3e652"
     },
     {
+      "name": "parse_input_references_no_replace",
+      "table": "parse_input_references",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "6de0b4ac5b9cc86e"
+    },
+    {
       "name": "parse_input_references_no_update",
       "table": "parse_input_references",
       "timing": "BEFORE",
@@ -20297,6 +20342,13 @@
       "timing": "BEFORE",
       "event": "DELETE",
       "sqlSha256": "196f773078f67d70"
+    },
+    {
+      "name": "parse_issues_no_replace",
+      "table": "parse_issues",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "08217b1a34dafed0"
     },
     {
       "name": "parse_issues_no_update",
@@ -20390,6 +20442,13 @@
       "sqlSha256": "7d60c725e6460469"
     },
     {
+      "name": "position_observations_no_replace",
+      "table": "position_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "0d11b71d94e244e9"
+    },
+    {
       "name": "position_observations_no_update",
       "table": "position_observations",
       "timing": "BEFORE",
@@ -20402,6 +20461,13 @@
       "timing": "BEFORE",
       "event": "DELETE",
       "sqlSha256": "95e1d50a527b7a87"
+    },
+    {
+      "name": "price_observation_claims_no_replace",
+      "table": "price_observation_claims",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "d3cc51831017579d"
     },
     {
       "name": "price_observation_claims_no_update",
@@ -20423,6 +20489,13 @@
       "timing": "BEFORE",
       "event": "DELETE",
       "sqlSha256": "b75d4ec70b4fef9d"
+    },
+    {
+      "name": "price_observations_no_replace",
+      "table": "price_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a84392502cc96093"
     },
     {
       "name": "price_observations_no_update",
@@ -21209,6 +21282,13 @@
       "sqlSha256": "476a5654fdaddaf4"
     },
     {
+      "name": "scheduled_payment_observations_no_replace",
+      "table": "scheduled_payment_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "09cfde70941c117c"
+    },
+    {
       "name": "scheduled_payment_observations_no_update",
       "table": "scheduled_payment_observations",
       "timing": "BEFORE",
@@ -21293,6 +21373,13 @@
       "sqlSha256": "72720bda0a666271"
     },
     {
+      "name": "transaction_observations_no_replace",
+      "table": "transaction_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "fa6ec37d631b2ea8"
+    },
+    {
       "name": "transaction_observations_no_update",
       "table": "transaction_observations",
       "timing": "BEFORE",
@@ -21312,6 +21399,13 @@
       "timing": "BEFORE",
       "event": "DELETE",
       "sqlSha256": "7d795da4cb320319"
+    },
+    {
+      "name": "valuation_observations_no_replace",
+      "table": "valuation_observations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "830dc30e6e246043"
     },
     {
       "name": "valuation_observations_no_update",
@@ -22061,7 +22155,7 @@
   "summary": {
     "tableCount": 142,
     "viewCount": 44,
-    "triggerCount": 527,
+    "triggerCount": 538,
     "explicitIndexCount": 147,
     "byClassification": {
       "core-keep": [
@@ -22337,6 +22431,6 @@
       "0100_sbi_supplemental_unit_eligibility.sql",
       "0101_myjcb_document_unit_eligibility.sql"
     ],
-    "schemaSha256": "1783ff9f980ab8cac79d6dfce7fc4f4d08db3dede5d457e02daa7bc0af3d9211"
+    "schemaSha256": "28706e40ed863c826e77f7209b60f4a35d5d8b475f49b84c4672c1e1faf12e4c"
   }
 }
