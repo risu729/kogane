@@ -11,11 +11,12 @@
 //     on its way to the screen. Counts are printed as plain digits.
 //   * Timestamps are printed exactly as stored. `as_of` and `observed_at`
 //     mean different things and reformatting either would be a claim the
-//     store does not make. The exceptions show an instant in Japan time:
-//     <Time> in changes-since.tsx (最近の変化's run and parse times, and the
-//     time the collection quality page read its answer, which only the
-//     client holds), keeping the instant in `<time dateTime>`, and the
-//     schedule settings' formatter.
+//     store does not make. The exceptions show an instant in Japan time,
+//     all through tokyoTime in src/tokyo-time.ts: <Time> in
+//     changes-since.tsx (最近の変化's run and parse times, and the time the
+//     collection quality page read its answer, which only the client holds),
+//     keeping the instant in `<time dateTime>`, and the schedule settings
+//     page.
 //
 // React escapes every string it renders, and dangerouslySetInnerHTML is used
 // nowhere in this client, which is what makes provider-authored text —

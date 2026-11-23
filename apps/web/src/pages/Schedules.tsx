@@ -25,6 +25,7 @@ import { operationRoute } from "../operations-api.ts";
 import { BusyButton } from "../busy-button.tsx";
 import { Link } from "../router";
 import { Notice, QueryBoundary } from "../ui.tsx";
+import { tokyoTime } from "../tokyo-time.ts";
 import "../styles/schedules.css";
 const PATH = "/api/ops/v1/schedules";
 const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -60,14 +61,8 @@ const REF = {
   "no-applicable-rule": "収集に該当する定例停止なし",
   "not-found": "定例停止時間が見つかりません",
 };
-const fmt = (value: string | null) =>
-  value
-    ? new Intl.DateTimeFormat("ja-JP", {
-        timeZone: "Asia/Tokyo",
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(new Date(value))
-    : "未設定";
+/** A stored instant in Japan time; an unset one says so. */
+const timeOrUnset = (value: string | null) => (value ? tokyoTime(value) : "未設定");
 const name = (id: string) => displayLabel(NAMES, id);
 async function request<T>(suffix = "", body?: unknown): Promise<T> {
   const response = await fetch(`${PATH}${suffix}`, {
@@ -106,7 +101,7 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
   return (
     <div className="schedule-receipt">
       <span>
-        {fmt(value.startedAt)} · {STATUS[value.status]}
+        {timeOrUnset(value.startedAt)} · {STATUS[value.status]}
       </span>
       {value.runLinks.map((link) =>
         link.evidenceId ? (
@@ -295,17 +290,17 @@ function CollectionRequest({
             <dt>前回の実行</dt>
             <dd>
               {value.latest
-                ? `${fmt(value.latest.startedAt)} · ${STATUS[value.latest.status]}`
+                ? `${timeOrUnset(value.latest.startedAt)} · ${STATUS[value.latest.status]}`
                 : "記録なし"}
             </dd>
             <dt>実行中の収集</dt>
             <dd>
               {lease
-                ? `あり（開始 ${fmt(lease.startedAt)}）。終わるまで依頼は待機します。`
+                ? `あり（開始 ${timeOrUnset(lease.startedAt)}）。終わるまで依頼は待機します。`
                 : "なし"}
             </dd>
             <dt>次の定期実行</dt>
-            <dd>{fmt(value.nextRunAt)}</dd>
+            <dd>{timeOrUnset(value.nextRunAt)}</dd>
             <dt>メンテナンス時間</dt>
             <dd>{REF[value.maintenance.status]}。停止時間中は終了まで待機します。</dd>
           </dl>
@@ -622,11 +617,11 @@ function ScheduleCard({
       )}
       <dl>
         <dt>本来の次回予定</dt>
-        <dd>{fmt(value.nextNominalAt)}</dd>
+        <dd>{timeOrUnset(value.nextNominalAt)}</dd>
         <dt>メンテナンスを考慮した予定</dt>
-        <dd>{fmt(value.nextRunAt)}</dd>
+        <dd>{timeOrUnset(value.nextRunAt)}</dd>
         <dt>実際に予約されている時刻</dt>
-        <dd>{fmt(value.actualAlarmAt)}</dd>
+        <dd>{timeOrUnset(value.actualAlarmAt)}</dd>
       </dl>
       {value.source ? (
         <p className="schedule-provenance">
@@ -637,7 +632,7 @@ function ScheduleCard({
               <a href={value.maintenance.referenceUrl} target="_blank" rel="noreferrer">
                 公式案内
               </a>{" "}
-              · 確認 {fmt(value.maintenance.verifiedAt || null)}
+              · 確認 {timeOrUnset(value.maintenance.verifiedAt || null)}
               {Date.now() - Date.parse(value.maintenance.verifiedAt) > 30 * 86400000
                 ? " · 再確認が必要です"
                 : ""}
@@ -656,7 +651,7 @@ function ScheduleCard({
 }
 function description(rule: Pick<MaintenanceRule, "pattern">): string {
   const p = rule.pattern;
-  if (p.kind === "once") return `${fmt(p.from)} ～ ${fmt(p.to)}`;
+  if (p.kind === "once") return `${timeOrUnset(p.from)} ～ ${timeOrUnset(p.to)}`;
   if (p.kind === "weekly")
     return `毎週 ${p.weekdays.map((d) => DAYS[d]).join("・")} ${p.start} ～ ${p.end}${p.end < p.start ? "（翌日）" : ""}`;
   return `毎月 第${p.nth}${DAYS[p.weekday]}曜${p.offsetDays ? `の${p.offsetDays}日後` : ""} ${p.start} ～ ${p.end}${p.end < p.start ? "（翌日）" : ""}`;
@@ -781,7 +776,7 @@ function SurveyProposal({
           {value.status === "review_pending"
             ? `確認が必要: ${value.reasons.map((r) => REASON[r]).join("、")}`
             : "公式ページの記載と現在の設定が異なります"}{" "}
-          · 取得 {fmt(value.fetchedAt)} ·{" "}
+          · 取得 {timeOrUnset(value.fetchedAt)} ·{" "}
           <a href={value.referenceUrl} target="_blank" rel="noreferrer">
             公式案内
           </a>
@@ -840,12 +835,12 @@ function SurveySection({
                   <strong>{name(t.source)}</strong> · {FRESHNESS[t.freshness]}
                   <br />
                   <small>
-                    最終成功 {fmt(t.lastSuccessAt)}
+                    最終成功 {timeOrUnset(t.lastSuccessAt)}
                     {t.lastFailureCode
-                      ? ` · 最終失敗 ${fmt(t.lastFailureAt)}（${FAILURE[t.lastFailureCode]}）`
+                      ? ` · 最終失敗 ${timeOrUnset(t.lastFailureAt)}（${FAILURE[t.lastFailureCode]}）`
                       : ""}
-                    {t.lastChangedAt ? ` · ページ更新を検知 ${fmt(t.lastChangedAt)}` : ""}
-                    {t.nextDueAt ? ` · 次回 ${fmt(t.nextDueAt)}` : ""} ·{" "}
+                    {t.lastChangedAt ? ` · ページ更新を検知 ${timeOrUnset(t.lastChangedAt)}` : ""}
+                    {t.nextDueAt ? ` · 次回 ${timeOrUnset(t.nextDueAt)}` : ""} ·{" "}
                     <a href={t.url} target="_blank" rel="noreferrer">
                       公式案内
                     </a>
@@ -1322,7 +1317,7 @@ export function SchedulesPage(): ReactNode {
                             ? "一部機能のみ：収集は延期しません"
                             : "収集を延期"
                           : "無効"}{" "}
-                        · 確認 {fmt(r.verifiedAt)} ·{" "}
+                        · 確認 {timeOrUnset(r.verifiedAt)} ·{" "}
                         <a href={r.referenceUrl} target="_blank" rel="noreferrer">
                           公式案内
                         </a>
@@ -1371,7 +1366,7 @@ export function SchedulesPage(): ReactNode {
                 {(data.leases as { source: string; leaseRef: string; startedAt: string }[]).map(
                   (lease) => (
                     <div className="schedule-history" key={lease.source}>
-                      <strong>{name(lease.source)}</strong> · 開始 {fmt(lease.startedAt)}
+                      <strong>{name(lease.source)}</strong> · 開始 {timeOrUnset(lease.startedAt)}
                       <BusyButton
                         busy={releasingSources.includes(lease.source)}
                         onClick={() => void releaseLease(lease)}
