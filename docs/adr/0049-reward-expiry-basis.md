@@ -944,3 +944,85 @@ Option 3.
   rules with a `null` calendar compute nothing; a provider display stays an
   observation beside the refusal; the validators accept only `null` as the
   unreadable calendar.
+
+## Amendment: an instant counts on the rule's deadline calendar
+
+- Status: proposed
+- Date: 2026-11-23
+
+### Context
+
+`estimateExpiry` turned a `TemporalValue` into a calendar day with a private
+`localDate` that read an `instant` by the first ten characters of its text:
+the date its offset was written in, not its date in any zone.
+`2026-09-30T20:00:00Z` is 2026-10-01 in Asia/Tokyo, but it anchored an
+inactivity deadline on 2026-09-30, and an instant clock one second after Tokyo
+midnight on the last day of a rule version kept that version in force. Two
+inputs reach it: the evaluation clock (which rule versions and tier claims
+cover the evaluation day) and each qualifying activity's date (the anchor).
+ADR 0056 makes `civilDateOfInstant` the domain's reader of an instant's civil
+date in a named zone, and `reward-conversion.ts` already reads instants with
+it.
+
+No current input reaches the slice. The only caller outside tests is
+`buildRewardProjection` (`packages/read-model/src/reward-projection.ts`): its
+clock is `evaluationClock`, always a `local-date` (the UTC day of the
+evaluation instant), and its history is `UNCLASSIFIED_REWARD_HISTORY`, with no
+activities.
+
+### Options considered
+
+1. Keep the slice and write it down as a limit. The first instant-dated
+   activity a collector classifies would anchor a deadline a day early for
+   nine hours of every Tokyo day; rejected.
+2. Read an instant in its own zone, as `reward-conversion.ts` reads a clock or
+   an offer date. The day would be right when the instant's zone is the rule's,
+   but the anchor and deadline are stamped with the rule's deadline zone, so
+   an instant of another zone would yield a day of one calendar labelled with
+   another; rejected.
+3. Read an instant on the rule's deadline calendar (`civilDateOfInstant` in
+   `deadlineCalendar.zone`), the calendar the anchor and deadline are stated
+   in, as the goal search reads an instant deadline on its clock's calendar
+   (amendment of 2026-11-18 above). When the rule has no readable calendar,
+   read the clock in its own zone; such a rule derives nothing either way.
+
+### Decision
+
+Option 3. `localDate` in `packages/domain/src/rewards.ts` takes the calendar
+zone: a `local-date` is read as before; an `instant` is
+`civilDateOfInstant(value, calendarZone ?? value.zone)`; anything else is no
+day. A zone the runtime does not know gives no day, so an activity is
+`activity_date_unknown` and a clock establishes no evaluation day, as an
+unreadable date already did; no closed code is added.
+
+`EXPIRY_DERIVATION_RELEASE` stays `reward-expiry-v3`. A release names a
+derivation that changed for an input it can be given (the rule of #1520).
+Every input the projection gives today is a `local-date` clock and an empty
+history, whose derivation is unchanged, so every stored and future snapshot
+row is the one v3 already produced. The release is bumped when a change in
+derivation would reach a current input.
+
+### Consequences
+
+- An instant clock or activity date counts on the rule's calendar day: an
+  activity at `2026-09-30T20:00:00Z` anchors an `Asia/Tokyo` rule on
+  2026-10-01, whatever zone the instant is stamped with.
+- A plain date is read exactly as before, and its zone is still not compared
+  with the rule's (a limit, unchanged).
+- The projection's output, build digest and snapshots are unchanged.
+- An instant display is still compared with the computed date by
+  `compareTemporal` (`agreementOf`), which takes the instant's day as its
+  offset wrote it; such a display never agrees, and it can disagree by that
+  day (a limit this amendment does not change).
+
+### Verification
+
+`packages/domain/test/reward-expiry-basis.test.ts` ("an instant counts on the
+rule's deadline calendar, ..."), with synthetic instants around one Tokyo
+midnight: a `Z` instant after Tokyo midnight anchors on the Tokyo day; the same
+moment at `+09:00` and the plain date anchor on the same day; one second before
+Tokyo midnight anchors on the previous day; an instant stamped `UTC` still
+counts on the `Asia/Tokyo` calendar; a calendar zone the runtime does not know
+makes an instant `activity_date_unknown` while a plain date still anchors; and
+an instant clock at Tokyo midnight is on the next version's first day. The
+`Z`, `UTC`, unknown-zone and clock cases fail on the slicing reader.
