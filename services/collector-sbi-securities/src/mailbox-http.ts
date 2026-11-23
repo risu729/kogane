@@ -82,6 +82,51 @@ interface MailboxDiagnosis {
   contentType?: (typeof MEDIA_TYPES)[number] | "other";
   refusedHost?: (typeof KNOWN_HOSTS)[number] | "classic" | "other";
   refusedRoute?: string;
+  /** Which transport rule refused, when it was one of the navigation's own. */
+  reason?: MailboxRefusal;
+  /** For a repeated cookie attribute, its name when it is a standard one. */
+  cookieAttribute?: (typeof COOKIE_ATTRIBUTES)[number] | "other";
+}
+/**
+ * The navigation's own refusal rules. Each names a rule, never what the
+ * provider sent.
+ */
+type MailboxRefusal =
+  | "status"
+  | "unexpected-page"
+  | "no-location"
+  | "bad-location"
+  | "redirect-target"
+  | "redirect-loop"
+  | "post-redirect"
+  | "too-many-hops"
+  | "request-url"
+  | "response-url"
+  | "cookie-pair"
+  | "cookie-attribute"
+  | "cookie-domain"
+  | "cookie-path"
+  | "cookie-name"
+  | "cookie-header";
+type CookieRule = Extract<MailboxRefusal, `cookie-${string}`>;
+const COOKIE_ATTRIBUTES = [
+  "domain",
+  "path",
+  "secure",
+  "httponly",
+  "samesite",
+  "expires",
+  "max-age",
+  "partitioned",
+] as const;
+/** A refused `Set-Cookie`, with the rule and at most a standard attribute name. */
+class CookieRefusal extends MailboxError {
+  constructor(
+    readonly rule: CookieRule,
+    readonly attribute?: (typeof COOKIE_ATTRIBUTES)[number] | "other",
+  ) {
+    super("sbi_mailbox_transport_failed");
+  }
 }
 const MEDIA_TYPES = ["text/html", "application/json", "application/pdf", "text/plain"] as const;
 const KNOWN_HOSTS = [
@@ -285,7 +330,7 @@ export class MailboxHttp {
     const visited = new Set<string>();
     for (let hop = 0; hop < 5; hop++) {
       this.diagnosis.hop = hop;
-      if (visited.has(current)) fail();
+      if (visited.has(current)) this.refuse("redirect-loop");
       visited.add(current);
       const response = await this.request(
         current,
@@ -295,32 +340,36 @@ export class MailboxHttp {
       if (response.status === 200) {
         if (!destinations.has(current)) {
           await cancel(response);
-          fail();
+          this.refuse("unexpected-page");
         }
         return response;
       }
-      const location = response.headers.get("location");
-      if (![301, 302, 303, 307, 308].includes(response.status) || location === null) {
+      if (![301, 302, 303, 307, 308].includes(response.status)) {
         await cancel(response);
-        fail();
+        this.refuse("status");
+      }
+      const location = response.headers.get("location");
+      if (location === null) {
+        await cancel(response);
+        this.refuse("no-location");
       }
       let next: URL;
       try {
         next = new URL(location, current);
       } catch {
         await cancel(response);
-        fail();
+        this.refuse("bad-location");
       }
       if (!destinations.has(next.href) && !via(next)) {
         this.diagnosis.refusedHost = knownHost(next);
         this.diagnosis.refusedRoute = knownRoute(next);
         await cancel(response);
-        fail();
+        this.refuse("redirect-target");
       }
       // Never repeat a secret-bearing POST at a redirect destination.
       if (method === "POST" && (response.status === 307 || response.status === 308)) {
         await cancel(response);
-        fail();
+        this.refuse("post-redirect");
       }
       await cancel(response);
       // A one-time hand-off URL is never sent onward as a referer.
@@ -329,6 +378,12 @@ export class MailboxHttp {
       method = "GET";
       body = undefined;
     }
+    this.refuse("too-many-hops");
+  }
+
+  /** Records which navigation rule refused, then refuses with the one closed code. */
+  private refuse(reason: MailboxRefusal): never {
+    this.diagnosis.reason = reason;
     fail();
   }
 
@@ -349,7 +404,7 @@ export class MailboxHttp {
         target.port ||
         target.hash
       )
-        fail();
+        this.refuse("request-url");
       const cookie = this.cookies
         .filter((entry) => matches(entry, target))
         .sort((a, b) => b.path.length - a.path.length)
@@ -382,13 +437,15 @@ export class MailboxHttp {
       }
       if (response.redirected || (response.url && response.url !== target.href)) {
         await cancel(response);
-        fail();
+        this.refuse("response-url");
       }
       try {
         updateMailboxCookies(this.cookies, response.headers, target);
-      } catch {
+      } catch (error) {
         await cancel(response);
-        fail();
+        if (error instanceof CookieRefusal && error.attribute !== undefined)
+          this.diagnosis.cookieAttribute = error.attribute;
+        this.refuse(error instanceof CookieRefusal ? error.rule : "cookie-header");
       }
       return response;
     } catch (error) {
@@ -455,12 +512,16 @@ export function updateMailboxCookies(jar: MailboxCookie[], headers: Headers, ori
     const pieces = header.split(";").map((piece) => piece.trim());
     const pair = pieces.shift()!;
     const equal = pair.indexOf("=");
-    if (equal <= 0 || /[\r\n]/u.test(pair)) fail();
+    if (equal <= 0 || /[\r\n]/u.test(pair)) throw new CookieRefusal("cookie-pair");
     const attrs = new Map<string, string>();
     for (const piece of pieces) {
       const split = piece.indexOf("=");
       const name = (split < 0 ? piece : piece.slice(0, split)).toLowerCase();
-      if (attrs.has(name)) fail();
+      if (attrs.has(name))
+        throw new CookieRefusal(
+          "cookie-attribute",
+          COOKIE_ATTRIBUTES.find((known) => known === name) ?? "other",
+        );
       attrs.set(name, split < 0 ? "" : piece.slice(split + 1));
     }
     const requestedDomain = attrs.get("domain")?.replace(/^\./u, "").toLowerCase();
@@ -471,12 +532,12 @@ export function updateMailboxCookies(jar: MailboxCookie[], headers: Headers, ori
         domain !== "plus.e-shishobako.ne.jp") ||
       (origin.hostname !== domain && !origin.hostname.endsWith(`.${domain}`))
     )
-      fail();
+      throw new CookieRefusal("cookie-domain");
     const lastSlash = origin.pathname.lastIndexOf("/");
     const path = attrs.get("path") ?? (lastSlash <= 0 ? "/" : origin.pathname.slice(0, lastSlash));
-    if (!path.startsWith("/")) fail();
+    if (!path.startsWith("/")) throw new CookieRefusal("cookie-path");
     const name = pair.slice(0, equal);
-    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u.test(name)) fail();
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u.test(name)) throw new CookieRefusal("cookie-name");
     const value = pair.slice(equal + 1);
     const existing = jar.findIndex(
       (cookie) => cookie.name === name && cookie.domain === domain && cookie.path === path,

@@ -495,6 +495,19 @@ the classic host that sign-in lands on when it is a `site<n>.sbisec.co.jp`
 host, else on the observed `site4` host. A failed sign-in logs
 `sbi-mailbox-refused` with step `session`.
 
+The 2026-11-23 21:00 UTC run, the first with that sign-in, passed it and the
+report link: the refusal moved to step `landing`, hop 1, status 302, with no
+refused host. So the mobile hand-off answered a redirect, and a rule other
+than the redirect target refused it: a missing or unparsable `Location`, a
+response URL that differs from the request, or a `Set-Cookie` the jar refuses.
+The refusal line now also carries `reason`, the name of the rule that refused
+(`status`, `unexpected-page`, `no-location`, `bad-location`,
+`redirect-target`, `redirect-loop`, `post-redirect`, `too-many-hops`,
+`request-url`, `response-url`, or `cookie-pair`, `cookie-attribute`,
+`cookie-domain`, `cookie-path`, `cookie-name`, `cookie-header` for a refused
+cookie), and for a repeated cookie attribute its name when it is a standard
+one (else `other`). Still no header value, cookie name or provider text.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
