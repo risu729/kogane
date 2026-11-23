@@ -136,7 +136,7 @@ export const REVISION_EXCLUDED_TABLES = [
   // (which writes one) would invalidate the read models.
   "audit_records",
   "audit_overflow_counters",
-  // ADR 0129's guards (migration 0106): the Processor's rows read per hour and
+  // ADR 0129's guards (migration 0107): the Processor's rows read per hour and
   // the report job's skip gate. Both record what the Processor did; the gate
   // is keyed on this very revision, so a bump from it would never let it hold.
   "processor_read_budget_hours",

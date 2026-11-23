@@ -606,7 +606,7 @@ job's rows, `reportPartition` and the body schema). They are kept by hand;
 only the query text is pinned to its release by a frozen digest. The context
 id is the digest of that manifest, so:
 
-- a skip gate (`report_job_gates`, migration 0106,
+- a skip gate (`report_job_gates`, migration 0107,
   [ADR 0129](adr/0129-d1-rows-read-latest-state.md)) answers an unchanged
   store without reading it: per set of options and releases it keeps the
   report last stored and the input key read before that build (the CORE

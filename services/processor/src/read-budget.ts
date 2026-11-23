@@ -1,4 +1,4 @@
-// The Processor's daily D1 read budget (ADR 0129, migration 0106, issue #1491).
+// The Processor's daily D1 read budget (ADR 0129, migration 0107, issue #1491).
 //
 // Every metered invocation adds the rows D1 reported reading to its hour's row
 // in `processor_read_budget_hours`. Before its lanes run, the scheduled tick

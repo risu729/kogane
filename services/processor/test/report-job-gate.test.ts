@@ -1,4 +1,4 @@
-// The report job's skip gate (ADR 0129, migration 0106): with nothing it reads
+// The report job's skip gate (ADR 0129, migration 0107): with nothing it reads
 // changed, a second run returns the stored report after one small read, and
 // every change the report depends on (a revision move, a promoted price, the
 // clock reaching a pending price, an earlier cutoff, a cut set) builds again.

@@ -375,13 +375,13 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "bounded price promotion scan progress",
   },
-  // The Processor's rows read per hour (0106, ADR 0129): the daily read
+  // The Processor's rows read per hour (0107, ADR 0129): the daily read
   // budget's input, pruned to 48 hours, never evidence.
   processor_read_budget_hours: {
     classification: "operational-mutable",
     planRow: "bounded processor rows-read per hour",
   },
-  // The report job's skip gate (0106, ADR 0129): which stored report answers
+  // The report job's skip gate (0107, ADR 0129): which stored report answers
   // an unchanged input key. Rewritten in place; the reports stay in
   // report_artifacts.
   report_job_gates: {

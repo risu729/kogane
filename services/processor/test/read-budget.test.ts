@@ -1,4 +1,4 @@
-// The Processor's daily read budget (ADR 0129, migration 0106): invocations add
+// The Processor's daily read budget (ADR 0129, migration 0107): invocations add
 // their rows read to an hourly row, and above the budget the scheduled tick
 // logs one error per hour and runs the derived lanes on the hour's first tick
 // only, while collection, parsing and dispatch keep running.

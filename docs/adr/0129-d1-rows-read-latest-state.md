@@ -395,7 +395,7 @@ The draft's open questions, as the accepted design answers them:
   `readLatestBalanceCandidates` splits the unfiltered list and both views from
   it with the same 5,000-row bound per set. `tick-rows-read.test.ts` checks on
   both stores that the split equals the reader's three lists.
-- Report skip: `report_job_gates` (migration 0106) holds one row per set of
+- Report skip: `report_job_gates` (migration 0107) holds one row per set of
   options and releases rather than a single row, so a caller with other
   options (a test, a later on-demand build) does not evict the tick's gate.
   Until slice 2 adds the snapshot-input revision, the key's revision part is
@@ -409,7 +409,7 @@ The draft's open questions, as the accepted design answers them:
   check, decimals, the cutoff and boundary lookups, the two price queries and
   the gate read), so a deploy that changes one builds again without a
   release bump. A gated run reads 3 rows on either harness store.
-- Guard: `processor_read_budget_hours` (migration 0106) sums every metered
+- Guard: `processor_read_budget_hours` (migration 0107) sums every metered
   invocation's reported rows read per hour. "At most once an hour" is the
   first scheduled tick of each hour, which also logs the error line once.
   `first()` results carry no metadata, so statements read that way are not in

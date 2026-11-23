@@ -741,7 +741,7 @@ and [ADR 0036](adr/0036-lane-cost-observability.md).
 
 Every metered invocation, scheduled tick or queue batch, adds the D1 rows it
 read (the `invocation_budget` line's `d1RowsRead.reported`) to its starting
-hour's row in `processor_read_budget_hours` (migration 0106), in one batch that
+hour's row in `processor_read_budget_hours` (migration 0107), in one batch that
 also drops rows older than 48 hours (`src/read-budget.ts`). Before its lanes,
 the scheduled tick sums the current hour and the 23 before it. Above
 `D1_ROWS_READ_DAILY_BUDGET` (300 million rows, about a third of the 25 billion
