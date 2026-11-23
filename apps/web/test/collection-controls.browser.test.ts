@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
-import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settledTest } from "./settle.ts";
 
@@ -11,21 +10,6 @@ const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable && process.env["CI"] === "true") process.exitCode = 1;
-
-const row: TransactionRow = {
-  id: 1,
-  source_id: "synthetic-bank",
-  source_account: "synthetic-account",
-  parser: "synthetic-parser@1",
-  amount_minor: "100",
-  amount_text: "100",
-  currency: "JPY",
-  as_of: "2026-09-08",
-  description: "Synthetic row",
-  counterparty: null,
-  external_id: null,
-  status: "posted",
-};
 
 let browser: Browser;
 if (runnable) browser = await chromium.launch({ executablePath });
@@ -95,11 +79,16 @@ describe.if(runnable)("server filter controls show the filter the URL applies", 
     }
   }
 
-  /** The text of the option a select shows; `name` is its accessible name or its label's first words. */
-  async function selected(page: Page, name: string): Promise<string> {
-    const select = page
+  /** A filter select; `name` is its accessible name or its label's first words. */
+  function control(page: Page, name: string) {
+    return page
       .getByLabel(name, { exact: true })
       .or(page.locator("label.filter-field", { hasText: name }).locator("select"));
+  }
+
+  /** The text of the option a select shows. */
+  async function selected(page: Page, name: string): Promise<string> {
+    const select = control(page, name);
     await select.waitFor({ timeout: 10_000 });
     return select.evaluate((element) => {
       const control = element as HTMLSelectElement;
@@ -120,6 +109,19 @@ describe.if(runnable)("server filter controls show the filter the URL applies", 
       expect(await selected(page, "全記録の口座")).toBe(
         "retired-account · retired-bank（現在は一覧にありません）",
       );
+      // Choosing "every account" drops the unlisted account and keeps the source...
+      await control(page, "全記録の口座").selectOption("");
+      await page.waitForURL(`${origin}/transactions?source=retired-bank`);
+      expect(await selected(page, "全記録の口座")).toBe("すべての口座");
+      // ...and choosing a listed source drops the unlisted one and its marker.
+      await control(page, "全記録の取得元").selectOption("synthetic-bank");
+      await page.waitForURL(`${origin}/transactions?source=synthetic-bank`);
+      expect(await selected(page, "全記録の取得元")).toBe("synthetic-bank");
+      expect(
+        await control(page, "全記録の取得元")
+          .locator("option", { hasText: "retired-bank" })
+          .count(),
+      ).toBe(0);
       // A source and account that are listed read as before.
       await page.goto(`${origin}/transactions?source=synthetic-bank&account=synthetic-account`);
       await page.getByRole("heading", { name: "取引", exact: true }).waitFor();
@@ -139,6 +141,13 @@ describe.if(runnable)("server filter controls show the filter the URL applies", 
       await until(() => listed.some((search) => search.includes("instrument=XXX")));
       expect(await selected(page, "通貨・単位")).toBe("XXX（現在は一覧にありません）");
       expect(await selected(page, "残高の種類")).toBe("retired_metric（現在は一覧にありません）");
+      // Choosing a listed kind replaces the unlisted one; "every" unit removes the unit.
+      await control(page, "残高の種類").selectOption("synthetic_balance");
+      await page.waitForURL(`${origin}/balances?instrument=XXX&metric=synthetic_balance`);
+      await control(page, "通貨・単位").selectOption("");
+      await page.waitForURL(`${origin}/balances?metric=synthetic_balance`);
+      expect(await selected(page, "通貨・単位")).toBe("すべて");
+      expect(await selected(page, "残高の種類")).toBe("synthetic_balance");
     } finally {
       await page.close();
     }
