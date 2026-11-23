@@ -12,7 +12,7 @@ import {
   reviseIdentity,
   type IdentityResolver,
 } from "../src/identity-store.ts";
-import { publishParse } from "./harness.ts";
+import { publishParse, publishParseStatements } from "./harness.ts";
 import { identitySweepCandidatesSql } from "../../../packages/storage-d1/src/core/identity-sweep-sql.ts";
 import { settledTest } from "./support/settle.ts";
 const legacyCandidates = readFileSync(
@@ -140,38 +140,49 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
+/** Each distinct SQL text of the seeding helpers, prepared once: a `prepare`
+ * and a `bind` are each a synchronous round trip to workerd, and the helpers
+ * write the same few statements for every run they seed. `bind` returns a new
+ * statement and leaves the prepared one unbound. */
+const prepared = new Map<string, D1PreparedStatement>();
+function prepare(sql: string): D1PreparedStatement {
+  let statement = prepared.get(sql);
+  if (!statement) prepared.set(sql, (statement = db.prepare(sql)));
+  return statement;
+}
+
 async function vpass(id: number, ordinal = "card-001", withObservation = true) {
   await seed(id, 0, "vpass");
-  await db.batch([
-    db.prepare("INSERT OR IGNORE INTO sources VALUES('vpass','synthetic')"),
-    db.prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),
-    db.prepare("UPDATE fetch_runs SET producer_id='collector-r2-importer' WHERE id=?").bind(id),
-    db
-      .prepare(
-        "UPDATE acquisition_sessions SET producer_id='collector-r2-importer',external_id_namespace='vpass-worker-card-v1' WHERE id=?",
-      )
-      .bind(id),
-    db
-      .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
-      .bind(id, id, ordinal),
-    db.prepare("UPDATE fetch_artifacts SET fetch_unit_id=? WHERE id=?").bind(id, id),
+  await db.batch(vpassStatements(id, ordinal, withObservation));
+  return { ...parse(id, "vpass"), producer_id: "collector-r2-importer" };
+}
+/** What `vpass` writes after `seed`, in its order. */
+function vpassStatements(id: number, ordinal: string, withObservation: boolean) {
+  return [
+    prepare("INSERT OR IGNORE INTO sources VALUES('vpass','synthetic')"),
+    prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),
+    prepare("UPDATE fetch_runs SET producer_id='collector-r2-importer' WHERE id=?").bind(id),
+    prepare(
+      "UPDATE acquisition_sessions SET producer_id='collector-r2-importer',external_id_namespace='vpass-worker-card-v1' WHERE id=?",
+    ).bind(id),
+    prepare(
+      "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')",
+    ).bind(id, id, ordinal),
+    prepare("UPDATE fetch_artifacts SET fetch_unit_id=? WHERE id=?").bind(id, id),
     ...(withObservation
       ? [
-          db
-            .prepare(
-              "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,?,'JPY','$',?)",
-            )
-            .bind(
-              id,
-              `vpass:${ordinal}`,
-              JSON.stringify({
-                trustedVpassBinding: { cardToken: `vpass-card-v1-${"f".repeat(64)}` },
-              }),
-            ),
+          prepare(
+            "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,?,'JPY','$',?)",
+          ).bind(
+            id,
+            `vpass:${ordinal}`,
+            JSON.stringify({
+              trustedVpassBinding: { cardToken: `vpass-card-v1-${"f".repeat(64)}` },
+            }),
+          ),
         ]
       : []),
-  ]);
-  return { ...parse(id, "vpass"), producer_id: "collector-r2-importer" };
+  ];
 }
 async function sidecar(
   id: number,
@@ -180,24 +191,27 @@ async function sidecar(
   ordinal = "card-001",
   sealed = true,
 ) {
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id,source_run_key) VALUES(?,'vpass','collector-r2-importer',?,?)",
-      )
-      .bind(id, financial, `${ordinal}-vpass-card-binding-v1`),
-    db
-      .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
-      .bind(id, id, token),
-    db.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)").bind(id),
-    db.prepare("INSERT INTO fetch_unit_reports VALUES(?,'terminal','success',NULL)").bind(id),
-    db
-      .prepare(
-        "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,artifact_role,format_id,format_version) VALUES(?,?,'vpass','card-identity-binding','card-identity-binding.json',?,'collector_derived','vpass-card-identity-binding-json','1')",
-      )
-      .bind(id, id, id),
-  ]);
-  if (sealed) await db.prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id).run();
+  await db.batch(sidecarStatements(id, financial, token, ordinal));
+  if (sealed) await sealStatement(id).run();
+}
+/** What `sidecar` writes before its seal, in its order. */
+function sidecarStatements(id: number, financial: number, token: string, ordinal: string) {
+  return [
+    prepare(
+      "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id,source_run_key) VALUES(?,'vpass','collector-r2-importer',?,?)",
+    ).bind(id, financial, `${ordinal}-vpass-card-binding-v1`),
+    prepare(
+      "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')",
+    ).bind(id, id, token),
+    prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)").bind(id),
+    prepare("INSERT INTO fetch_unit_reports VALUES(?,'terminal','success',NULL)").bind(id),
+    prepare(
+      "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,artifact_role,format_id,format_version) VALUES(?,?,'vpass','card-identity-binding','card-identity-binding.json',?,'collector_derived','vpass-card-identity-binding-json','1')",
+    ).bind(id, id, id),
+  ];
+}
+function sealStatement(id: number) {
+  return prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id);
 }
 
 test("Vpass missing sidecars complete at baseline; late sealed binding upgrades with pinned evidence", async () => {
@@ -403,49 +417,58 @@ async function seed(
   rows: (id: number) => D1PreparedStatement[] = () => [],
   dataset = "synthetic",
 ) {
-  await db.batch([
-    db
-      .prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)")
-      .bind(id, `synthetic-${id}`),
-    db
-      .prepare(
-        "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id) VALUES(?,?,?,?)",
-      )
-      .bind(id, source, "synthetic-producer", id),
-    db.prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id),
-    db.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)").bind(id),
-    db
-      .prepare("INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset) VALUES(?,?,?,?)")
-      .bind(id, id, source, dataset),
-    db
-      .prepare(
-        "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'synthetic','1','2026-01-01','pending','[]')",
-      )
-      .bind(id, id),
-    db
-      .prepare(
-        "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) SELECT ?,?,'synthetic_balance',?,'synthetic:'||value,'{}' FROM json_each(?)",
-      )
-      .bind(
-        id,
-        source === "v-point"
-          ? "v-point:member"
-          : source === "mizuho-bank"
-            ? "mizuho-bank:ordinary:001:1234567"
-            : source === "sbi-shinsei-bank"
-              ? "sbi-shinsei:synthetic-account"
-              : source === "myjcb"
-                ? "myjcb:synthetic-connection:j-point:total"
-                : "smbc-bank:ordinary-yen",
-        source === "v-point" ? "V_POINT" : source === "myjcb" ? "J_POINT" : "JPY",
-        JSON.stringify(Array.from({ length: count }, (_, i) => i)),
-      ),
-    ...rows(id),
-    db.prepare("UPDATE parse_runs SET status=? WHERE id=?").bind(success ? "ok" : "error", id),
-  ]);
+  await db.batch(seedStatements(id, count, source, success, rows, dataset));
   // A success is published the way the pipeline writer does; the identity
   // views read the publication projection since migration 0026.
   if (success) await publishParse(db, id);
+}
+/** What `seed` writes before it publishes, in its order. */
+function seedStatements(
+  id: number,
+  count: number,
+  source: string,
+  success: boolean,
+  rows: (id: number) => D1PreparedStatement[],
+  dataset: string,
+) {
+  return [
+    prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)").bind(
+      id,
+      `synthetic-${id}`,
+    ),
+    prepare(
+      "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id) VALUES(?,?,?,?)",
+    ).bind(id, source, "synthetic-producer", id),
+    prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id),
+    prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)").bind(id),
+    prepare("INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset) VALUES(?,?,?,?)").bind(
+      id,
+      id,
+      source,
+      dataset,
+    ),
+    prepare(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'synthetic','1','2026-01-01','pending','[]')",
+    ).bind(id, id),
+    prepare(
+      "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) SELECT ?,?,'synthetic_balance',?,'synthetic:'||value,'{}' FROM json_each(?)",
+    ).bind(
+      id,
+      source === "v-point"
+        ? "v-point:member"
+        : source === "mizuho-bank"
+          ? "mizuho-bank:ordinary:001:1234567"
+          : source === "sbi-shinsei-bank"
+            ? "sbi-shinsei:synthetic-account"
+            : source === "myjcb"
+              ? "myjcb:synthetic-connection:j-point:total"
+              : "smbc-bank:ordinary-yen",
+      source === "v-point" ? "V_POINT" : source === "myjcb" ? "J_POINT" : "JPY",
+      JSON.stringify(Array.from({ length: count }, (_, i) => i)),
+    ),
+    ...rows(id),
+    prepare("UPDATE parse_runs SET status=? WHERE id=?").bind(success ? "ok" : "error", id),
+  ];
 }
 async function count(table: string, where = "1=1") {
   return await db.prepare(`SELECT count(*) n FROM ${table} WHERE ${where}`).first<number>("n");
@@ -1749,10 +1772,22 @@ test("SQL cannot publish an empty identity run of a failed parse", async () => {
 });
 
 test("empty Vpass projections batch at most40 runs with mandatory trusted pins and no resolver calls", async () => {
-  for (let id = 3000; id < 3043; id++) {
-    await vpass(id, "card-001", false);
-    if (id !== 3042) await sidecar(id + 1000, id);
-  }
+  // What `vpass(id, "card-001", false)` and then `sidecar(id + 1000, id)`
+  // write for each run, in their order, as one batch: a batch per helper cost
+  // about 900 prepares, binds and batches, each a round trip to workerd.
+  await db.batch(
+    Array.from({ length: 43 }, (_, n) => 3000 + n).flatMap((id) => [
+      ...seedStatements(id, 0, "vpass", true, () => [], "synthetic"),
+      ...publishParseStatements({ prepare }, id),
+      ...vpassStatements(id, "card-001", false),
+      ...(id === 3042
+        ? []
+        : [
+            ...sidecarStatements(id + 1000, id, `vpass-card-v1-${"a".repeat(64)}`, "card-001"),
+            sealStatement(id + 1000),
+          ]),
+    ]),
+  );
   const accountsBefore = await count("account_mappings");
   const instrumentsBefore = await count("instrument_mappings");
   let resolverCalls = 0;
