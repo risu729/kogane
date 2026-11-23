@@ -15,7 +15,9 @@
 - Amended: 2026-10-09, [valuation on a date as implemented](#amendment-2026-10-09-valuation-on-a-date-as-implemented)
   (`packages/domain/src/valuation-on-date.ts`,
   `packages/application/src/query/valuation-on-date.ts`; accepted, merged
-  2026-10-09 in #590)
+  2026-10-09 in #590); 2026-11-22, [a known-at offset no zone uses is refused](#amendment-2026-11-22-a-known-at-offset-no-zone-uses-is-refused)
+  (`packages/domain/src/zone-offset.ts`; accepted, merged 2026-11-22 in
+  [#1578](https://github.com/risu729/kogane/pull/1578))
 - Related: [ADR 0019](0019-dated-reported-state.md) (the exclusive bound of a
   date), [ADR 0004](0004-payment-type-shapes-from-evidence.md) (unobserved
   semantics stay unsupported), [ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md)
@@ -522,7 +524,7 @@ With synthetic data only:
 
 ## Amendment (2026-11-22): a known-at offset no zone uses is refused
 
-- Status: accepted
+- Status: accepted (merged 2026-11-22 in [#1578](https://github.com/risu729/kogane/pull/1578))
 - Date: 2026-11-22
 
 ### Context

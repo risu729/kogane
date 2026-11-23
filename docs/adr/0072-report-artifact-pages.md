@@ -560,7 +560,7 @@ once.
 
 ## Amendment: a cached explanation that is not JSON is refused as such (2026-11-21)
 
-- Status: accepted
+- Status: accepted (merged 2026-11-23 in [#1513](https://github.com/risu729/kogane/pull/1513))
 - Date: 2026-11-21
 
 ### Context

@@ -242,7 +242,7 @@ reason with no fabricated terminal or provider payload.
 
 ## Amendment: a maintenance window is never dropped at a clock change (2026-11-22)
 
-Status: accepted
+Status: accepted (merged 2026-11-22 in [#1573](https://github.com/risu729/kogane/pull/1573))
 Date: 2026-11-22
 
 ### Context

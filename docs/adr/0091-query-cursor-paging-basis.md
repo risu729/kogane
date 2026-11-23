@@ -2,9 +2,11 @@
 
 - Status: accepted (merged 2026-11-08 in [#1172](https://github.com/risu729/kogane/pull/1172));
   the [2026-11-21 amendment](#amendment-2026-11-21-an-empty-holdings-or-coverage-scope-is-a-gap-not-a-complete-answer)
-  is accepted (merged 2026-11-22 in [#1555](https://github.com/risu729/kogane/pull/1555)), and the
+  is accepted (merged 2026-11-22 in [#1555](https://github.com/risu729/kogane/pull/1555)), the
   [second 2026-11-21 amendment](#amendment-2026-11-21-rows-a-date-window-cannot-place-are-a-gap)
-  is accepted (merged 2026-11-22 in [#1556](https://github.com/risu729/kogane/pull/1556))
+  is accepted (merged 2026-11-22 in [#1556](https://github.com/risu729/kogane/pull/1556)), and the
+  [third 2026-11-21 amendment](#amendment-2026-11-21-a-publication-marker-that-moves-with-every-publication-change)
+  is accepted (merged 2026-11-22 in [#1502](https://github.com/risu729/kogane/pull/1502))
 - Date: 2026-11-08; amended 2026-11-21
 - Carried by: `packages/application/src/context/open.ts` (`pagingBasisRef`),
   `packages/application/src/query/cursor.ts`,
@@ -273,7 +275,7 @@ text.
 
 ## Amendment 2026-11-21: a publication marker that moves with every publication change
 
-- Status: accepted
+- Status: accepted (merged 2026-11-22 in [#1502](https://github.com/risu729/kogane/pull/1502))
 - Date: 2026-11-21
 - Carried by: `services/app/src/agent-service.ts` (`contextInputs`),
   `packages/read-model/src/observation-reader.ts` (`publicationMarks`,

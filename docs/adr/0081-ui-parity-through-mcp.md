@@ -878,7 +878,7 @@ leg by key until `LIMIT` and `OFFSET` are met.
 
 ## Amendment: explain reads the detail route's organization (2026-11-21)
 
-- Status: accepted
+- Status: accepted (merged 2026-11-22 in [#1505](https://github.com/risu729/kogane/pull/1505))
 - Date: 2026-11-21
 
 ### Context
