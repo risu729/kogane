@@ -171,15 +171,16 @@ own slice after events-filters avoids the conflict entirely.
 - `retryWith` is not yet a route hint (`services/app/src/http.ts` is edited by #1483); the shared
   builder exists, and S2 wires it.
 
-### Owner decisions needed
+### Owner decisions (decided 2026-11-22, [ADR 0128 amendment](../adr/0128-one-paging-contract.md#amendment-owner-decisions-2026-11-22))
 
 1. Approve the published changes of S1 (new result fields on 12 tools and their routes, the refusal
-   changes of `audit.search` and `ops.operation.list`) before merge.
+   changes of `audit.search` and `ops.operation.list`) before merge. **Approved; merged in #1494.**
 2. Whether `audit.search` days move from UTC to Asia/Tokyo when its filters become top-level
-   arguments (ADR 0128 §3).
+   arguments (ADR 0128 §3). **Asia/Tokyo days, top-level filters.**
 3. Whether the selector arguments (`collection`, `kind`, `page`, `view`) and the two meanings of
-   `view` are renamed after S3.
-4. The page unit of `rewards.read` holdings (bucket rows or holdings) before S1b.
+   `view` are renamed after S3. **Selectors become `view`, the measure view becomes `measure`;
+   `kind` stays as a record-type filter.**
+4. The page unit of `rewards.read` holdings (bucket rows or holdings) before S1b. **Holdings.**
 5. Whether `financial-error-v1` grows the paging codes in place or moves to a v2 (S7). The stacked
    S6/S7 branch implements nothing that depends on it ([ADR 0128, S7: open
    decision](../adr/0128-one-paging-contract.md#s7-open-decision)): the agent query path keeps
@@ -188,7 +189,9 @@ own slice after events-filters avoids the conflict entirely.
    `financial-result-v1`. The same decision settles two follow-ups: whether `next`/`paging` move
    into a `financial-result-v2` (and `result.nextCursor` goes in S9), and whether the query withholds
    a page past `maxRows` (`stoppedBy: "budget"`, today it offers the cursor and refuses the
-   continued call `413 budget_exceeded`).
+   continued call `413 budget_exceeded`). **In place, no v2; the query withholds past `maxRows`
+   (`stoppedBy: "budget"`).**
 6. Approve the published changes of S6 and the decision-free part of S7 (new result fields on
    `kogane.accounts.candidates`, `kogane.instruments.candidates` and `kogane.financial.query` and
    their routes; the candidate reads' new `budget` stop) before the stacked branch merges.
+   **Approved; merged in #1496.**
