@@ -161,6 +161,14 @@ Contests between statements and competing refused debits are judged within
 one run only, so a caller that splits overlapping windows across runs would
 lose them.
 
+A refused debit competes only for a statement whose own exact sums it could
+complete. When it could instead complete another statement's exact sum
+together with a debit of this statement's single candidate, this statement
+stays `proposed`, although, had the refused debit been admitted, the shared
+debit would have made both statements `needs_review`
+(`debit_in_other_statement_allocation`). In that case the refusal does pick
+which statement the shared debit pays.
+
 A debit given twice, two debits sharing a key or alias class, a debit whose
 key or alias class is held, and a debit without an admitted identity take no
 part; currencies are never combined. Ownership is a rejection condition as in
@@ -518,7 +526,8 @@ statements before the payable window nor the scheduled payments is read.
   code),
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
-  due by the date, so it may not show it; or on the due date of a bill the
+  due by the date, among the debits the read knows of (limits below), so it
+  may not show it; or on the due date of a bill the
   line counts, so it may already show it, and comparing it with that bill
   would count the debit twice), `cards_with_unknown_account` (a bill with no known
   account is due by the line's date) or `cards_with_unknown_due_date` (a card
@@ -570,6 +579,16 @@ Limits:
   date (`no_statement_due`). A bank that debits it later, for example on the
   next business day, is not modelled; `balance_before_previous_debit` only
   covers a balance captured on or before the due date itself.
+- The previous debit from an account is the latest of two dates only: the
+  debit date of each card's newest accepted settlement per bank account, and
+  the due date of the newest statement of each card the account answers for,
+  when it is already due. A card whose newest statement is a bill has its
+  earlier statement left out unless an accepted settlement pays it, so a
+  balance captured on or before that earlier statement's due date is
+  compared with the bill as if it showed that debit, and can read `yes`
+  though the bank has since taken it. ADR 0114's decision names the latest
+  card debit from the account; the read does not look at a card's older
+  statements.
 
 ## Candidate and decision lifecycle
 

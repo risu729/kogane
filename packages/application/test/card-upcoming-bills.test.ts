@@ -603,6 +603,40 @@ describe("covers", () => {
       reasons: ["balance_not_exact"],
     });
   });
+
+  test("a stated limit: a card's older statement no settlement pays is not a previous debit", async () => {
+    // card-x: July accepted from bank B (07-27), August due 08-27 with no
+    // settlement, September its newest statement and a bill. Bank B's balance
+    // was captured on 08-25, before the August debit, yet the previous debit
+    // the read knows of is July's, so the balance is compared with the bill
+    // (docs/card-settlements.md, Upcoming bills, limits).
+    const store = new DatedStore();
+    const card = "vpass:card-x";
+    const month = (period: string, paymentDate: string, minor: number) => {
+      const captured = statement(store, { card, period, paymentDate, minor });
+      store.identify(captured, "vpass", "acct-card-x", "provider-local");
+      return captured;
+    };
+    accept(store, month("2026-07", "2026-07-27", 1_000), {
+      card,
+      period: "2026-07",
+      bank: BANK_B,
+      debitDate: "2026-07-27",
+    });
+    month("2026-08", "2026-08-27", 60_000);
+    month("2026-09", "2026-09-28", 20_000);
+    balances(store, "2026-08-25T01:00:00Z", [[BANK_B, 70_000, "acct-bank-b"]]);
+    expect((await review(store)).byDebitAccount).toMatchObject([
+      {
+        account: "acct-bank-b",
+        debitDate: "2026-09-28",
+        cardBills: { value: "20000", status: "exact" },
+        balance: { value: "70000", status: "exact", capturedAt: "2026-08-25T01:00:00.000Z" },
+        covers: "yes",
+        reasons: [],
+      },
+    ]);
+  });
 });
 
 describe("the answer as served", () => {
