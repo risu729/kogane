@@ -639,7 +639,7 @@ closure; a changed one means a package in that closure changed version, appeared
 
 | package | lockfile | packages | closure sha256 |
 | --- | --- | --- | --- |
-| `apps/web` | bun.lock | 134 | `4e9a6c2556a27e1f11859a38c9c63cee67226e98916447b38e26117924c908b8` |
+| `apps/web` | bun.lock | 134 | `6b8745c586aa5f6f1f98cd00815cd00593faf191c261bff7e8b68e560b818b23` |
 | `experiments/cloudflare-browser-run` | bun.lock | 160 | `283813262cbb1044b810bb7f8c8a34de78e4e797dc59abad650d8570ba5ced21` |
 | `experiments/cloudflare-runtime-probe` | bun.lock | 166 | `8950ca0878baab01cae49adeb328b6741f6716a36ad208628c36f901210326c0` |
 | `experiments/d1-conformance` | bun.lock | 156 | `5bbea50463324bf319d7c1c82c21c7fc5504c15c6612b2006caa98d7b9633acb` |
@@ -648,7 +648,7 @@ closure; a changed one means a package in that closure changed version, appeared
 | `experiments/st-george-automation` | bun.lock | 27 | `f9cbdae5c81f876a0b0275757829f00544c358d71f7d91f74a84457f1c94c558` |
 | `experiments/tamia-tcp-bridge` | bun.lock | 154 | `b73395a9d56929b42e309417ac620ca7d6c5bf19811e58671fe6ca4d45aee026` |
 | `packages/application` | bun.lock | 26 | `24c58a96a79e94651883e763023d717d5b933d199ce51731b0f7ca2a89043038` |
-| `packages/collection` | bun.lock | 186 | `17d0360fdabc7f3911662f37b758c5981bfd91edf6349474825f7c56d590486c` |
+| `packages/collection` | bun.lock | 186 | `efb78b913c092b59ce4b795a0d68158abb0ac6d41c5810aeb2795082278bad16` |
 | `packages/collector-diagnostics` | bun.lock | 25 | `ac1a336f71626a9c766b13ee259aa98d763bcf2e07798ff50c6313a8e3c580e4` |
 | `packages/domain` | bun.lock | 25 | `ac1a336f71626a9c766b13ee259aa98d763bcf2e07798ff50c6313a8e3c580e4` |
 | `packages/evidence-contract` | bun.lock | 25 | `ac1a336f71626a9c766b13ee259aa98d763bcf2e07798ff50c6313a8e3c580e4` |
@@ -658,23 +658,23 @@ closure; a changed one means a package in that closure changed version, appeared
 | `packages/read-model` | bun.lock | 25 | `ac1a336f71626a9c766b13ee259aa98d763bcf2e07798ff50c6313a8e3c580e4` |
 | `packages/sbi-vc-trade-client` | bun.lock | 25 | `ac1a336f71626a9c766b13ee259aa98d763bcf2e07798ff50c6313a8e3c580e4` |
 | `packages/storage-d1` | bun.lock | 26 | `5366ddbf38e3aa644b2696eccfdf41bedd3586927048d9d903c74186d9ac69be` |
-| `services/app` | bun.lock | 250 | `1b879175c57be1e94430033de029e38a09d58dbdbbb2053c691539f37a682f97` |
-| `services/collector-globalpass` | bun.lock | 219 | `211d038f4e62ed49fdfea3517d1a98e53856c7ed555179a7e594972020bb7360` |
+| `services/app` | bun.lock | 250 | `80b27e704c033a5f09382e05a82c7b4549e2b952e2c0622dce7a00d3486e0d79` |
+| `services/collector-globalpass` | bun.lock | 219 | `cc54e4e3ffb7d02ca8f7373d536de22f29ca7e670020fd5b6a6415d97b276e48` |
 | `services/collector-globalpass/container` | package-lock.json | 5 | `0c7c5a96eb584f1b849c1da3bf272bf5fecfe72a8a2f425ac035401335e8fc28` |
-| `services/collector-mizuho` | bun.lock | 242 | `442490536e181e14b531d74f82330119ba52df8b7e6f9bf2d3d646a866d62660` |
-| `services/collector-mobile-suica` | bun.lock | 246 | `3f8f40fba729a05de15deaa77cafe606cf11febc4a25e1ead21125ade818ee1f` |
+| `services/collector-mizuho` | bun.lock | 242 | `83822463519c96d1119674fb05e74c658b487e6408d37a25f36c4c84305d47d8` |
+| `services/collector-mobile-suica` | bun.lock | 246 | `1a54160d7b570f20d40f581460078916a0300a542425192e80ba66e2baeda4e4` |
 | `services/collector-moneyforward` | bun.lock | 164 | `3f08be429e2db6d39ff4e91606a0447f86f9f90b36b32b15ca7b621ddc29e9bc` |
 | `services/collector-myjcb` | bun.lock | 170 | `172bbc56676809720ab8a79924f1ee3fdc8988e8b1291a0bb814528960d337ce` |
-| `services/collector-prestia-bank` | bun.lock | 240 | `2aa153b8d4df464c8a01e1e498206c7258af275179b6bd5c9dd56e16cc199de0` |
-| `services/collector-sbi-securities` | bun.lock | 241 | `52e4b3758e116aab99d010998f8bbb90c6502f86e4e16a81de4edffbc3584807` |
-| `services/collector-sbi-shinsei` | bun.lock | 239 | `0b5180dad5ace4e24847a7c61effda50fc6aa2c9f50a296146e47039e73b023d` |
+| `services/collector-prestia-bank` | bun.lock | 240 | `acf26bdfdc18078a28d4c9036d1f143d6b5f6f74b2dec74510ce29871d6fbf44` |
+| `services/collector-sbi-securities` | bun.lock | 241 | `9183b0095262bf4a7e85979032c15dfcd039c9e6413d76f3e23282310595893e` |
+| `services/collector-sbi-shinsei` | bun.lock | 239 | `26a10692d567a9bb9e6ac0a1989677d02d43b6008ceb3221d9d398995d0aeee0` |
 | `services/collector-sbi-shinsei/container` | package-lock.json | 3 | `db30876ea7466033cde4bd2f65d668af73cb83d55975ef7b8a62f18cf48f05c3` |
-| `services/collector-sbi-vc-trade` | bun.lock | 238 | `0f1d0b439d8789d978fbecc997968b6c5e1ca330f2eb0c1603fb9ac93d1194f2` |
-| `services/collector-smbc-direct` | bun.lock | 244 | `44428363a446e71c94156fcb662932798c37b0d411dc4a1e3039275936615499` |
+| `services/collector-sbi-vc-trade` | bun.lock | 238 | `757869431c35b1adcf096c43a8bb616224f0e0e99ecff6e9930c562b42e32ee5` |
+| `services/collector-smbc-direct` | bun.lock | 244 | `79ad930ea9bcc426030bc91e8e4b6a1ae67c23a811ed595dddb31e6e90066b00` |
 | `services/collector-sony-bank` | bun.lock | 162 | `197985b597102de45675520ea44555f97b00a2c551d5416edf45a18d028a5494` |
-| `services/collector-st-george` | bun.lock | 239 | `5d2011e7292e6ee23b73cddb17d885dff8dc4c8a73ea84f2347282201f473b40` |
+| `services/collector-st-george` | bun.lock | 239 | `eb4e8db5d8df3dfd92243d246decb5b60391bcdc11f5a9edf13394564ecce360` |
 | `services/collector-st-george/container` | package-lock.json | 3 | `db30876ea7466033cde4bd2f65d668af73cb83d55975ef7b8a62f18cf48f05c3` |
-| `services/collector-vpass` | bun.lock | 181 | `28390352621157e9dd3b7a0900c814e8da9e4e17ef69d7cf88e3d57845a728b1` |
-| `services/collector-vpoint` | bun.lock | 260 | `86713b23c06694fde48e31acb5631f4bf09c82a8677f41cbde069e0d62023e4f` |
-| `services/collector-vpoint-pay` | bun.lock | 238 | `0f1d0b439d8789d978fbecc997968b6c5e1ca330f2eb0c1603fb9ac93d1194f2` |
+| `services/collector-vpass` | bun.lock | 181 | `78f49954e33d6c92474989d70e7a0e46a6b929ff513e57b24e6bd4368a8331a5` |
+| `services/collector-vpoint` | bun.lock | 260 | `78978ad00675dd7c3dd2b755a7dac4a3011b8a243d3883e18018b0aad1ce4c9b` |
+| `services/collector-vpoint-pay` | bun.lock | 238 | `757869431c35b1adcf096c43a8bb616224f0e0e99ecff6e9930c562b42e32ee5` |
 | `services/processor` | bun.lock | 165 | `01dce9939d830e8a4f51953a839179b0d4c9b4459b34f08632e9de1e0243a547` |

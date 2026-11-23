@@ -432,6 +432,21 @@ describe("grant, request and bounds", () => {
     const second = await review(s, { offset: ACCOUNT_CANDIDATES_PAGE_SIZE });
     expect(second.items).toHaveLength(10);
     expect(second.nextOffset).toBeNull();
+    // `next` and `paging` (ADR 0128) say the same, and tell a page the grant's
+    // maxRows withholds from the last one, which `nextOffset` alone did not.
+    expect(first.next).toEqual({ arguments: { offset: ACCOUNT_CANDIDATES_PAGE_SIZE } });
+    expect(first.paging).toEqual({ limit: 50, returned: 50, hasMore: true, stoppedBy: "limit" });
+    expect(second.next).toBeNull();
+    expect(second.paging).toEqual({ limit: 50, returned: 10, hasMore: false, stoppedBy: null });
+    const withheld = await review(s, {}, { ...READER, budget: { ...READER.budget, maxRows: 99 } });
+    expect(withheld.nextOffset).toBeNull();
+    expect(withheld.next).toBeNull();
+    expect(withheld.paging).toEqual({
+      limit: 50,
+      returned: 50,
+      hasMore: true,
+      stoppedBy: "budget",
+    });
 
     const overfull = (text: string): SqlExecutor => ({
       all: async <T>(sql: string, args: readonly unknown[]) => {

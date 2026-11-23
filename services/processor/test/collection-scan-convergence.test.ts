@@ -757,8 +757,10 @@ test("a normal registration spends exactly what it spent before seal refusals we
   );
   expect(result.outcome).toBe("registered");
   // Measured on main before this change, with the same run: classifying the
-  // seal's refusal adds no operation to the path that seals.
-  expect({ ...budget.meter }).toEqual({ d1Statements: 74, d1Batches: 3, r2Operations: 5 });
+  // seal's refusal adds no operation to the path that seals. It was 74 until
+  // a registration read its fetch run once rather than in each of its six
+  // port operations after `createRun` (registration-round-trips.test.ts).
+  expect({ ...budget.meter }).toEqual({ d1Statements: 69, d1Batches: 3, r2Operations: 5 });
 });
 
 /** A three-artifact run registered one artifact at a time: left `pending`. */

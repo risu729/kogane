@@ -289,7 +289,13 @@ describe("listing the stored reports", () => {
     const first = await listed();
     expect(first.status).toBe(200);
     expect(validApiResponse("/api/v2/reports", first.json)).toBe(true);
-    expect(Object.keys(first.json)).toEqual(["apiVersion", "items", "nextCursor"]);
+    expect(Object.keys(first.json)).toEqual([
+      "apiVersion",
+      "items",
+      "nextCursor",
+      "next",
+      "paging",
+    ]);
     expect(first.json.items).toHaveLength(REPORTS_PAGE_SIZE);
     expect(first.json.items.slice(0, 2).map((item: { reportId: string }) => item.reportId)).toEqual(
       [idOf(extra - 1), idOf(extra - 2)],
@@ -304,10 +310,20 @@ describe("listing the stored reports", () => {
       createdAt: "2026-09-30T00:00:00.000Z",
     });
     expect(first.json.nextCursor).toBe(String(REPORTS_PAGE_SIZE));
+    // `next.arguments` (ADR 0128) names the same page as the deprecated cursor.
+    expect(first.json.next).toEqual({ arguments: { offset: REPORTS_PAGE_SIZE } });
+    expect(first.json.paging).toEqual({
+      limit: REPORTS_PAGE_SIZE,
+      returned: REPORTS_PAGE_SIZE,
+      hasMore: true,
+      stoppedBy: "limit",
+    });
 
-    const second = await listed(`?offset=${first.json.nextCursor}`);
+    const second = await listed(`?offset=${first.json.next.arguments.offset}`);
     expect(validApiResponse("/api/v2/reports", second.json)).toBe(true);
     expect(second.json.nextCursor).toBeNull();
+    expect(second.json.next).toBeNull();
+    expect(second.json.paging).toMatchObject({ hasMore: false, stoppedBy: null });
     // The two pages together hold every artifact exactly once, the first
     // synthetic report (2026-08-31) last.
     const ids = [...first.json.items, ...second.json.items].map(

@@ -281,6 +281,13 @@ that the within-source policy lists apart is not added twice: the projection
 leaves both references unresolved (`account_entity_shared`), so neither is
 added here and the cash read below counts neither.
 
+The response validator also refuses a subtotal `coefficient` that is not an
+integer, or that is zero at a `scale` other than 0 (INV03), and a `knownAssetsSubtotal` that is `null`
+without a `reasonCode` or a list beside one (INV05). On the summary and cash
+pages an exact `value` must be decimal text with exactly `scale` fraction
+digits, as `decimalToString` writes it; other text is refused, never shown as
+an amount.
+
 `GET /api/v2/balances/cash` (`kogane.balances.read` `collection: cash`)
 answers the same snapshot's cash per account: one line per account entity
 with its references and amounts, exact subtotals per unit and per source, and

@@ -30,6 +30,7 @@
 //   is cut between sources at `CHANGES_SINCE_MAX_BYTES` and continues with
 //   `after`.
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
+import { parseQueryInstant } from "../../../domain/src/query-instant.ts";
 import {
   CHANGES_SINCE_CAPTURE_BOUND,
   CHANGES_SINCE_EVENT_WALK,
@@ -73,9 +74,6 @@ export const CHANGES_SINCE_HANDLER_CAPABILITIES: Record<ChangesSinceHandlerName,
     unchanged: "evidence.read",
   };
 
-/** An instant with a date, a time and a zone (`Z` or an offset): no bare date, no local time. */
-const CHANGES_SINCE_INSTANT =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 /** A source id, in the evidence browser's charset. */
 const CHANGES_SINCE_SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
 
@@ -243,35 +241,16 @@ export interface ChangesSinceRequest {
   after?: unknown;
 }
 
-/** The ISO form of `since`, or the closed ref of why it is refused. */
+/**
+ * The ISO form of `since`, or the closed ref of why it is refused. A real
+ * calendar time whose UTC form leaves the years 0000 to 9999 is no format
+ * error: it is outside the window like any other time that far away.
+ */
 function checkedSince(value: unknown, now: number): { since: string } | { refusal: string } {
-  if (typeof value !== "string" || !CHANGES_SINCE_INSTANT.test(value))
-    return { refusal: "since:format" };
-  const at = Date.parse(value);
-  if (!Number.isFinite(at)) return { refusal: "since:format" };
-  // A real calendar time: a parser that rolls `02-30` or `24:00` over to
-  // another instant is not trusted with it.
-  const [, year, month, day, hour, minute, second = "0"] =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/u.exec(value)!;
-  const civil = new Date(
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      Number(second),
-    ),
-  );
-  if (
-    civil.getUTCFullYear() !== Number(year) ||
-    civil.getUTCMonth() !== Number(month) - 1 ||
-    civil.getUTCDate() !== Number(day) ||
-    civil.getUTCHours() !== Number(hour) ||
-    civil.getUTCMinutes() !== Number(minute) ||
-    civil.getUTCSeconds() !== Number(second)
-  )
-    return { refusal: "since:format" };
+  if (typeof value !== "string") return { refusal: "since:format" };
+  const parsed = parseQueryInstant(value);
+  if (!parsed.ok && parsed.reason === "format") return { refusal: "since:format" };
+  const at = parsed.epochMs;
   if (at > now) return { refusal: "since:future" };
   if (at < now - CHANGES_SINCE_MAX_DAYS * DAY_MS) return { refusal: "since:too_old" };
   return { since: new Date(at).toISOString() };

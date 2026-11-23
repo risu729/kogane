@@ -378,7 +378,8 @@ describe.if(runnable)("operator schedule administration", () => {
     stoppedLease();
     leaseResponse = async () => {
       snapshot.leases = [];
-      return Response.json({ error: "unavailable" }, { status: 503 });
+      // As the App answers a release whose Processor answer was lost.
+      return Response.json({ error: "scheduling_unavailable" }, { status: 503 });
     };
     const page = await browser.newPage();
     page.on("dialog", (dialog) => dialog.accept());

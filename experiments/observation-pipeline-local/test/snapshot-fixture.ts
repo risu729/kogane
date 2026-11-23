@@ -73,7 +73,7 @@ export function database(): Store {
 }
 
 /** Overrides applied to the default complete container claim of a snapshot. */
-export type CoverageOverrides = Partial<CoverageClaim>;
+type CoverageOverrides = Partial<CoverageClaim>;
 
 export interface Snapshot {
   parser: string;

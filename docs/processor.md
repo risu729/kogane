@@ -93,7 +93,7 @@ nothing:
 
 Such an answer costs three operations of the invocation's budget (the
 terminal read, the conditional insert and the row read) for a registered or
-blocked run, four for an unreadable terminal already recorded (it reads the
+blocked run, four for a corrupt terminal already recorded (it reads the
 bytes twice), and five for a retryable run within its interval (two stage
 reads more); it writes nothing. A page of 25 such terminals costs at most 125
 of the 500, plus the scan's own four (the list, the pending read, the state
@@ -156,21 +156,22 @@ earlier version registered whose descriptors the new version does not change
 is **carried over** instead: the new version's row is linked to the fetch run
 the terminal already is, so one capture is never parsed twice (§3.4).
 
-| Situation                                                                                                                | Outcome                                            | Recorded                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
-| Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                       |
-| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
-| Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
-| Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                          |
-| `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
-| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
-| Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
-| Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)            | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
-| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
-| Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
-| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
-| Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
+| Situation                                                                                                                       | Outcome                                            | Recorded                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| First sighting of a valid terminal                                                                                              | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
+| Same terminal again                                                                                                             | no-op                                              | nothing new                                                                                       |
+| Different manifest, same run id (under any contract version)                                                                    | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
+| Source not in the collector mapping (§3.1)                                                                                      | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
+| Source maps to an id CORE has no active row for                                                                                 | blocked `source_undeclared`, no port call          | as above                                                                                          |
+| `providerOutcome: failed` with no provider artifact                                                                             | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
+| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage)        | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
+| Referenced object missing or resized                                                                                            | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
+| Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)                   | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
+| Terminal too large, not JSON, not a valid manifest, of another identity, not canonical, or not the digest its metadata declares | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
+| Terminal whose bytes R2 failed to return (`terminal_unreadable` from the reader)                                                | not judged: the call throws, like an R2 failure    | nothing; the scan counts it in `failed` and the next attempt reads it again (§2)                  |
+| Processor's ingest client or route absent                                                                                       | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
+| Operation budget spent (§3.3)                                                                                                   | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
+| Registered under an earlier contract version, descriptors unchanged (§3.4)                                                      | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
 
 The derivation does not re-check every seal rule. A manifest whose units'
 `artifactCount` disagrees with the artifacts that name them, or that puts a
@@ -203,6 +204,30 @@ each — and skips it, so the budget is spent on new work and a run of any size
 the manifest schema allows converges over as many invocations as it needs.
 Every port operation is idempotent on its own key, so a call that re-runs one
 anyway is a no-op rather than a conflict.
+
+A terminal the reader refuses is recorded under the SHA-256 of its stored
+bytes. The reader does not hand those bytes back, so registration reads the
+object a second time and hashes its body as it streams (`sha256HexOfStream`
+in `packages/collection/src/stream-digest.ts`: Cloudflare's
+`crypto.DigestStream` in Workers, `Bun.CryptoHasher` under Bun). The body is
+never buffered. A terminal refused as `terminal_too_large` (over 8 MiB) can be
+any size R2 stores, larger than the Worker's memory, and buffering it would end
+the invocation at `collection_scan` on every tick, skip every later lane and
+leave the cursor where it was. The streamed digest is the value the earlier
+buffered read computed for the same bytes, so a run recorded before keeps its
+identity (`services/processor/test/collection-oversized-terminal.test.ts`, and
+the Workers path against real R2 in
+`packages/collection/worker-test/r2-terminal.test.ts`). The reader itself
+cancels the body of a terminal it refuses for its size, unread.
+
+Streaming bounds the memory, not the time, and this is an open limit. The hash
+reads every byte, so its CPU and wall time grow with the object's size, with no
+byte cap. The digest is computed before the conditional insert, so every walk
+of the `runs/` prefix that reaches the terminal hashes it again, even when its
+block is already recorded. An object large enough to pass the invocation's CPU
+limit (`limits.cpu_ms`, 300 s) or its wall-clock limit would still end the
+invocation at `collection_scan`. Whether to cap that work, and under what
+identity a capped terminal is recorded, is an owner decision not yet made.
 
 ### 3.1 Collector ids, CORE source ids and producers
 
@@ -271,8 +296,10 @@ the manifest validator.
 
 A block is write-once, which is why a missing ingest route is retryable
 instead: the block would outlive the operator's fix. A retryable stage row is
-appended only when the state or the code changes, so an append-only table does
-not fill with one row per tick.
+appended when the state or the code changes, and otherwise at most once per
+retry interval (`RETRYABLE_RETRY_INTERVAL_MS`, 24 hours, measured from the
+newest row), so an append-only table does not fill with one row per tick or per
+queue redelivery.
 
 ### 3.3 Operation budget and staged registration (issue #87)
 
@@ -323,16 +350,17 @@ step outgrows its reserve:
 | Step                                                               | Measured                              | Reserve              |
 | ------------------------------------------------------------------ | ------------------------------------- | -------------------- |
 | Preamble: terminal read, run row, conflict and refusal checks      | 8                                     | 16                   |
-| The run, a unit, a range, the inventory declaration, a unit report | 5-6                                   | 16                   |
-| An artifact: its R2 head, adoption and catalogue row               | 19, +1 per transform, +2 per relation | 32, +1 each, +2 each |
-| An inventory chunk (at most 30 items, the contract's maximum)      | 7 + 3 per item (97 full)              | 16 + 4 per item      |
-| Final: run report, seal (direct of ≤ 50, or staged), link          | 32 direct, 16 staged                  | 64                   |
+| The run, a unit, a range, the inventory declaration, a unit report | 4-6                                   | 16                   |
+| An artifact: its R2 head, adoption and catalogue row               | 17, +1 per transform, +2 per relation | 32, +1 each, +2 each |
+| An inventory chunk (at most 30 items, the contract's maximum)      | 6 + 3 per item (96 full)              | 16 + 4 per item      |
+| Final: run report, seal (direct of ≤ 50, or staged), link          | 30 direct, 14 staged                  | 64                   |
 | Audit: a `pending` row for a yield, or a stage row and the block   | 1-2                                   | 4, always kept back  |
 
 So no invocation spends more than 500 operations on registration, and a
 failure at the edge of the budget still records its audit. A Vpass card of
 about twenty statement pages registers in one invocation; a 34-artifact card
-takes two (467 and 292 operations); the schema's largest structure converges
+takes two (a synthetic 34-artifact run of one unit measures 469 and 186
+operations); the schema's largest structure converges
 over as many as it needs. No step can be too large for every invocation: the
 descriptor contract accepts at most 100 transformation steps and 100 relations
 per artifact, and that artifact's reserve (332) still fits what a fresh
@@ -340,6 +368,20 @@ invocation has left after its preamble and the run. A manifest whose derived
 descriptor the contract refuses — a transformation with more inputs than 100
 relations, which the manifest schema allows — is blocked with the contract's
 code (`invalid_relations`, say) instead of failing on every tick.
+
+Within one registration call the fetch run is read once. `registerTerminal`
+builds its port over an env made by `rememberingRunLookups`
+(`packages/application/src/ingest/access.ts`), and every later operation on
+that run answers its id, producer and source from the call's memory instead
+of reading `fetch_runs` again: one statement fewer per port operation, two
+per artifact. Those columns never change, because CORE refuses every
+update and delete of `fetch_runs`. Nothing is remembered across calls, so the
+next invocation reads the run again. The client and route checks are not
+remembered: they still run before every port operation, so a revocation takes
+effect at the next one. `services/processor/test/registration-round-trips.test.ts`
+pins the statement count of a synthetic registration and registers the same
+captures with and without the memory: every CORE table ends identical and
+every verdict is the same, including a route or client revoked half-way through.
 
 **The continuation.** A registration that reaches the budget yields `pending`:
 the `registered` stage says `pending` and names the fetch run, and everything
@@ -389,7 +431,7 @@ continued in its place. The same holds for any continuation CORE answers from
 its row (`already_registered`, for a run the queue registered between the
 pending read and the continuation). Such runs share the 25 pending runs read
 with the missing ones above. An answer from a row costs at most five
-operations (§2: four for an unreadable terminal already recorded, five
+operations (§2: four for a corrupt terminal already recorded, five
 for a retryable refusal within its interval), so the continuations answered
 from rows cost at most 125 of the 500 per tick, as a listed page of 25 judged
 terminals does; 25 digest conflicts measure 75 (50 D1 statements, 25 R2

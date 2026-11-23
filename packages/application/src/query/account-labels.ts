@@ -11,14 +11,14 @@ import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
 
 /** Where an entity's label came from, for a reader that wants to say so. */
-export type EntityLabelOrigin = "connection" | "card-name";
+type EntityLabelOrigin = "connection" | "card-name";
 export interface EntityAccountLabel {
   label: string;
   origin: EntityLabelOrigin;
 }
 
 /** The bound on account entities one call labels (the organization step's own bound). */
-export const ENTITY_LABEL_ACCOUNT_LIMIT = 5501;
+const ENTITY_LABEL_ACCOUNT_LIMIT = 5501;
 /** The bound on the current source references of those entities. */
 const REFERENCE_LIMIT = 5501;
 

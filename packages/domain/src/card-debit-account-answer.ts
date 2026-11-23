@@ -24,7 +24,6 @@ export const CARD_DEBIT_ACCOUNT_ANSWER_RULE = "card-debit-account-answer-v1";
 
 /** The bases an answer can rest on, strongest first. */
 export const CARD_DEBIT_ACCOUNT_BASES = ["provider-stated", "accepted-settlement"] as const;
-export type CardDebitAccountBasis = (typeof CARD_DEBIT_ACCOUNT_BASES)[number];
 
 /** A bank account as CORE names it: the bank adapter's source and source account. */
 export interface DebitBankAccount {
@@ -62,7 +61,7 @@ export const STATED_ABSENT_REASONS = [
   "source_has_no_debit_account_statement",
   "evidence_not_recorded",
 ] as const;
-export type StatedAbsentReason = (typeof STATED_ABSENT_REASONS)[number];
+type StatedAbsentReason = (typeof STATED_ABSENT_REASONS)[number];
 
 /**
  * The provider-stated side of one card. `latest` is the newest reading with
@@ -111,7 +110,7 @@ export const CARD_DEBIT_ACCOUNT_ANSWER_CODES = [
   "settled_accounts_differ",
   "stated_reading_conflicting",
 ] as const;
-export type CardDebitAccountAnswerCode = (typeof CARD_DEBIT_ACCOUNT_ANSWER_CODES)[number];
+type CardDebitAccountAnswerCode = (typeof CARD_DEBIT_ACCOUNT_ANSWER_CODES)[number];
 
 /**
  * Why an answer is `unknown`, in the order checked:
@@ -127,7 +126,7 @@ export const CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS = [
   "only_unreviewed_candidates",
   "no_debit_account_evidence",
 ] as const;
-export type CardDebitAccountUnknownReason = (typeof CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS)[number];
+type CardDebitAccountUnknownReason = (typeof CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS)[number];
 
 export type CardDebitAccountAnswer =
   | {

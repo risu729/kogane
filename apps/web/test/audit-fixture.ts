@@ -288,8 +288,11 @@ export async function auditFixture(): Promise<AuditFixture> {
       const page = await readAuditPage(store, filters, cursor);
       if (!page.ok)
         return {
-          status: page.code === "stale_context" ? 409 : 400,
-          body: { error: page.code },
+          status: 400,
+          body:
+            page.code === "cursor_mismatch"
+              ? { error: page.code, mustMatch: ["operation"] }
+              : { error: page.code },
         };
       return {
         status: 200,

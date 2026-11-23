@@ -2,14 +2,24 @@
 // Full CORE migrations, real sealed observation/unit views, all triggers/foreign keys,
 // no ANALYZE. Provider values are synthetic. No Worker runtime is started.
 import { beforeAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import { myJcbJPointHistory } from "../../../packages/parsers/src/parsers/myjcb-jpoint-history.ts";
 import { syntheticJPointHistory } from "../../../packages/parsers/test/myjcb-jpoint-history-fixture.ts";
 import { fullCoreSchema } from "../../../packages/read-model/test/card-usage-scale-fixture.ts";
 import { fromTemplate } from "../../../packages/read-model/test/schema-template.ts";
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { rewardCandidateQuery, REWARD_PROMOTION_RELEASE } from "../src/reward-claims-job.ts";
+import {
+  promoteRewardClaims,
+  rewardCandidateQuery,
+  rewardPromotionPending,
+  REWARD_PROMOTION_RELEASE,
+} from "../src/reward-claims-job.ts";
 import { FROZEN_REWARD_CANDIDATE_QUERY } from "./reward-claims-legacy-query.ts";
+import {
+  FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY,
+  FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY_SHA256,
+} from "./reward-claims-account-legacy-query.ts";
 const PRODUCER = "collector-r2-importer",
   CLIENT = "reward-query-fixture",
   SHA = "a".repeat(64);
@@ -158,6 +168,8 @@ const overrides: Partial<Spec>[] = [
   { account: `myjcb:${"a".repeat(65)}:j-point:total` },
   { account: `myjcb:${"a".repeat(64)}:j-point:total` },
   { account: "myjcb:a:j-point:total" },
+  // SQLite's `length`, `substr` and GLOB stop at a NUL; the rule reads it all.
+  { account: "myjcb:a:j-point:total\u0000x" },
 ];
 function fullSchema(): Database {
   const db = fromTemplate("reward-candidate-differential-full-core", () => {
@@ -403,6 +415,9 @@ function seed(db: Database, spec: Spec, id: number): Candidate {
 // Independent expected extension: public source/parser/measure, valid connection total,
 // sealed/published/not-excluded, plus whole-run success or its own successful unit.
 // It deliberately does not read PROMOTION_RULES, current SQL, or the generic SQL helper.
+// The promotion rule's own total account shape (`matches`), restated here so
+// the expectation never reads the job's regular expression or its SQL.
+const TOTAL_ACCOUNT = /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u;
 function expectedPoint(spec: Spec, policyEnabled: boolean): boolean {
   const whole =
     spec.outcome === "success" &&
@@ -421,7 +436,7 @@ function expectedPoint(spec: Spec, policyEnabled: boolean): boolean {
     spec.parser === "myjcb-jpoint-balance" &&
     spec.metric === "displayed_jpoint_total" &&
     spec.instrument === "J_POINT" &&
-    /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u.test(spec.account) &&
+    TOTAL_ACCOUNT.test(spec.account) &&
     spec.sealed &&
     spec.published &&
     !spec.excluded &&
@@ -441,6 +456,14 @@ function frozen(db: Database, limit: number): Candidate[] {
     REWARD_PROMOTION_RELEASE,
     limit,
     ...FROZEN_REWARD_CANDIDATE_QUERY.scopeBindings,
+  ]);
+}
+/** The read as e8f455ed9 shipped it, before the history account filter narrowed. */
+function shipped(db: Database, limit: number): Candidate[] {
+  return query(db, FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.sql, [
+    REWARD_PROMOTION_RELEASE,
+    limit,
+    ...FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.scopeBindings,
   ]);
 }
 function drain(db: Database, limit: number, legacyQuery = false): Candidate[] {
@@ -503,6 +526,24 @@ for (const [name, specs] of [
           ...models.filter(({ spec }) => expectedPoint(spec, policyEnabled)).map(({ row }) => row),
         ].sort((a, b) => a.id - b.id);
         if (name === "scaled" && policyEnabled) expect(expected.length).toBeGreaterThan(500);
+        // Against the read e8f455ed9 shipped, which already filtered the total
+        // account, the current read drops only totals the rule refuses (one
+        // with text after a NUL) and moves nothing else.
+        const shippedRows = shipped(db, 5000);
+        expect(current(db, 5000)).toEqual(
+          shippedRows.filter(
+            (row) =>
+              row.parser_name !== "myjcb-jpoint-balance" || TOTAL_ACCOUNT.test(row.source_account),
+          ),
+        );
+        if (name === "scaled")
+          expect(
+            shippedRows.filter(
+              (row) =>
+                row.parser_name === "myjcb-jpoint-balance" &&
+                !TOTAL_ACCOUNT.test(row.source_account),
+            ).length,
+          ).toBeGreaterThan(0);
         expect(
           current(db, 5000).filter((row) => row.parser_name !== "myjcb-jpoint-balance"),
         ).toEqual(old);
@@ -647,6 +688,8 @@ function seedHistoryCapture(
   index: number,
   conn: string,
   mode: HistoryMode,
+  /** The stored account of each acquisition row, from the parser's own. */
+  account: (parsed: string) => string = (parsed) => parsed,
 ): number[] {
   const at = new Date(Date.UTC(2099, 0, 1, 0, 0, index)).toISOString();
   const withTotal = mode !== "history-only-partial";
@@ -759,7 +802,7 @@ function seedHistoryCapture(
     if (row.kind !== "balance") throw new Error("synthetic_history_kind_invalid");
     const id = insert(
       historyParse,
-      row.sourceAccount,
+      account(row.sourceAccount),
       row.metric,
       row.amountText!,
       JSON.stringify(row.extra),
@@ -874,4 +917,236 @@ test("history candidates follow the cohort's complete-container coverage check",
   } finally {
     store.db.close();
   }
+});
+
+// The promotion rule's own account shape (`matches`), restated here so the
+// expectation never reads the job's regular expression or its SQL.
+const HISTORY_ACCOUNT = /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:acquired:\d{4}-\d{2}-\d{2}$/u;
+/** History accounts the shipped GLOB `myjcb:*:j-point:acquired:????-??-??`
+ * already admits; each maps the parser's own account of one acquisition. */
+const ACCOUNT_VARIANTS: readonly ((parsed: string) => string)[] = [
+  // Admitted by the rule.
+  (parsed) => parsed,
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, `myjcb:${"a".repeat(64)}:`),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:0:"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:z-:"),
+  // Digits only, not a calendar check: the rule takes the month as written.
+  (parsed) => parsed.replace(/-\d{2}-\d{2}$/u, "-13-45"),
+  // Refused by the rule: the date's digits.
+  (parsed) => parsed.replace(/-(\d)\d-/u, "-$1a-"),
+  (parsed) => parsed.replace(/\d{4}-\d{2}-\d{2}$/u, "????-??-??"),
+  (parsed) => parsed.replace(/\d{4}-/u, "２０９９-"),
+  // Refused by the rule: the connection's characters and length.
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb::"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:Synthetic:"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:a_b:"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:-bad:"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:a:b:"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, "myjcb:あ:"),
+  (parsed) => parsed.replace(/^myjcb:[^:]+:/u, `myjcb:${"a".repeat(65)}:`),
+  // Refused by the rule: text after a NUL, where SQLite's GLOB, `length` and
+  // `substr` stop.
+  (parsed) => `${parsed}\u0000x`,
+];
+// SQLite's GLOB stops at the first NUL, so the shipped read admits what follows it.
+const SHIPPED_GLOB = /^myjcb:.*:j-point:acquired:.{4}-.{2}-.{2}(?:\0.*)?$/su;
+test("the frozen J-POINT account read is the text e8f455ed9 shipped", () => {
+  expect(createHash("sha256").update(FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.sql).digest("hex")).toBe(
+    FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY_SHA256,
+  );
+});
+test("every account variant is one the shipped GLOB admits, and both kinds are drawn", () => {
+  const parsed = "myjcb:synthetic-variant:j-point:acquired:2099-01-15";
+  const accounts = ACCOUNT_VARIANTS.map((variant) => variant(parsed));
+  for (const account of accounts) expect(SHIPPED_GLOB.test(account)).toBe(true);
+  expect(accounts.filter((account) => HISTORY_ACCOUNT.test(account))).toHaveLength(5);
+  expect(new Set(accounts).size).toBe(accounts.length);
+});
+
+/** `store.db` behind the D1 calls the promotion job makes. */
+function d1(db: Database) {
+  const prepare = (sql: string) => {
+    let args: SQLQueryBindings[] = [];
+    const statement = {
+      bind: (...values: SQLQueryBindings[]) => {
+        args = values;
+        return statement;
+      },
+      first: async () => db.query(sql).get(...args) ?? null,
+      all: async () => ({ results: db.query(sql).all(...args) }),
+      write: () => ({ meta: { changes: db.query(sql).run(...args).changes } }),
+    };
+    return statement;
+  };
+  return {
+    prepare,
+    batch: async (statements: ReturnType<typeof prepare>[]) =>
+      db.transaction(() => statements.map((statement) => statement.write()))(),
+  } as unknown as D1Database;
+}
+
+// A row the candidate read selects but the rule refuses is never claimed, so
+// it would stay a candidate for good and hold the READ capture at
+// `reward_promotion_incomplete`. The parser writes only accounts the rule
+// admits; this row is built by hand.
+test("a history account the promotion rule refuses is never a candidate and holds up no READ capture", async () => {
+  const store = new QualityStore();
+  try {
+    const promotable = seedHistoryCapture(store, 1, "synthetic-valid", "complete");
+    expect(promotable).toHaveLength(3);
+    const refused = seedHistoryCapture(store, 2, "synthetic-refused", "complete", (parsed) =>
+      parsed.replace(/-(\d)\d-/u, "-$1a-"),
+    );
+    expect(refused).toHaveLength(3);
+    // The shipped read selected them.
+    expect(shipped(store.db, 5000).map((row) => row.id)).toEqual([...promotable, ...refused]);
+    expect(current(store.db, 5000).map((row) => row.id)).toEqual(promotable);
+    const db = d1(store.db);
+    expect(await promoteRewardClaims(db, { now: "2099-03-01T00:00:00.000Z" })).toMatchObject({
+      scanned: 3,
+      promoted: 3,
+      skipped: 0,
+    });
+    expect(await rewardPromotionPending(db)).toBe(false);
+  } finally {
+    store.db.close();
+  }
+});
+
+// Narrowing proof against the read e8f455ed9 shipped: on the same store, the
+// current read returns the shipped rows minus exactly the history rows whose
+// account the rule refuses, in the same order and pages.
+for (const randomSeed of [null, 1, 2, 3, 4])
+  test(`history account filter keeps every admitted candidate and drops only refused ones: ${randomSeed ?? "scaled"}`, () => {
+    const store = new QualityStore();
+    try {
+      const next = random(randomSeed ?? 1),
+        latest = new Map<string, { ids: number[]; admitted: boolean }>();
+      const connections = randomSeed === null ? 180 : 24,
+        captures = randomSeed === null ? 2 : 3;
+      let index = 0;
+      store.db.transaction(() => {
+        for (let c = 0; c < connections; c++)
+          for (let n = 0; n < captures; n++) {
+            const conn = `synthetic-account-${c}`;
+            const mode: HistoryMode =
+              randomSeed === null
+                ? "complete"
+                : (["complete", "complete", "partial", "mismatch"] as const)[
+                    Math.floor(next() * 4)
+                  ]!;
+            const variant =
+              randomSeed === null
+                ? ACCOUNT_VARIANTS[index % ACCOUNT_VARIANTS.length]!
+                : ACCOUNT_VARIANTS[Math.floor(next() * ACCOUNT_VARIANTS.length)]!;
+            const ids = seedHistoryCapture(store, ++index, conn, mode, variant);
+            // Only the newest capture of a connection is its cohort.
+            latest.set(conn, {
+              ids,
+              admitted: HISTORY_ACCOUNT.test(variant(`myjcb:${conn}:j-point:acquired:2099-01-15`)),
+            });
+          }
+      })();
+      const legacyRun = store.run({
+        source: "v-point",
+        at: "2099-02-01T00:00:00.000Z",
+        artifacts: [{ key: "legacy.json", dataset: "balance-info" }],
+      });
+      const legacyParse = store.parse(legacyRun.artifacts[0]!, "v-point-balance-info", {
+        kind: "published",
+      });
+      if (legacyParse === null) throw new Error("synthetic_legacy_parse_missing");
+      store.db
+        .query(
+          "INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_text,amount_scale,instrument,observed_at,raw_locator,extra_json) VALUES(?,'v-point:regular:0','available_point_bucket','1000',0,'V_POINT','2099-02-01T00:00:00.000Z','json:synthetic','{}')",
+        )
+        .run(legacyParse);
+      const old = shipped(store.db, 5000),
+        actual = current(store.db, 5000);
+      const history = (row: Candidate) => row.parser_name === myJcbJPointHistory.name;
+      expect(actual).toEqual(
+        old.filter((row) => !history(row) || HISTORY_ACCOUNT.test(row.source_account)),
+      );
+      const dropped = old.filter((row) => !actual.some((kept) => kept.id === row.id));
+      expect(
+        dropped.every((row) => history(row) && !HISTORY_ACCOUNT.test(row.source_account)),
+      ).toBe(true);
+      // The kept history candidates are exactly the admitted newest cohorts,
+      // decided from the seed and not from either read.
+      const admitted = [...latest.values()].filter((capture) => capture.admitted);
+      expect(actual.filter(history).map((row) => row.id)).toEqual(
+        admitted.flatMap((capture) => capture.ids).sort((a, b) => a - b),
+      );
+      expect(dropped.length).toBeGreaterThan(0);
+      expect(actual.filter(history).length).toBeGreaterThan(0);
+      if (randomSeed === null) expect(old.length).toBeGreaterThan(500);
+      for (const limit of [1, 7, 37, 500]) {
+        expect(current(store.db, limit)).toEqual(actual.slice(0, limit));
+        if (randomSeed !== null || limit >= 37) expect(drain(store.db, limit)).toEqual(actual);
+      }
+      expect(
+        store.db.query("SELECT name FROM sqlite_master WHERE name='sqlite_stat1'").get(),
+      ).toBeNull();
+    } finally {
+      store.db.close();
+    }
+  });
+
+test("the history account filter keeps the shipped plan on real CORE views without statistics", () => {
+  const store = new QualityStore();
+  const legacyStore = fullSchema();
+  try {
+    store.db.transaction(() => {
+      ACCOUNT_VARIANTS.forEach((variant, index) =>
+        seedHistoryCapture(store, index + 1, `synthetic-plan-${index}`, "complete", variant),
+      );
+    })();
+    legacyStore.transaction(() =>
+      CASES.forEach((spec, index) => {
+        seed(legacyStore, spec, index + 1);
+      }),
+    )();
+    for (const db of [store.db, legacyStore]) {
+      expect(db.query("SELECT name FROM sqlite_master WHERE name='sqlite_stat1'").get()).toBeNull();
+      // Node ids are bytecode addresses, which the added terms shift; the
+      // tree is compared by each node's position and its parent's.
+      const plan = (sql: string, args: readonly (string | number)[]) => {
+        const nodes = db
+          .query<{ id: number; parent: number; detail: string }, SQLQueryBindings[]>(
+            "EXPLAIN QUERY PLAN " + sql,
+          )
+          .all(...args);
+        const position = new Map(nodes.map((node, at) => [node.id, at]));
+        return nodes.map(({ parent, detail }) => ({
+          parent: parent === 0 ? -1 : position.get(parent),
+          detail,
+        }));
+      };
+      const q = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, 500);
+      const old = plan(FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.sql, [
+        REWARD_PROMOTION_RELEASE,
+        500,
+        ...FROZEN_JPOINT_ACCOUNT_CANDIDATE_QUERY.scopeBindings,
+      ]);
+      // The added terms are filters on the row already read; every scan,
+      // search, index and materialization stays as shipped.
+      expect(old.length).toBeGreaterThan(10);
+      expect(plan(q.sql, q.bindings)).toEqual(old);
+    }
+  } finally {
+    store.db.close();
+    legacyStore.close();
+  }
+});
+
+// bun:sqlite takes longer patterns than D1, which refuses a GLOB pattern over
+// 50 bytes as "too complex" and so fails the whole read.
+test("every GLOB pattern of the candidate read fits D1's pattern length limit", () => {
+  const q = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, 1);
+  const patterns = [...q.sql.matchAll(/GLOB (?:'([^']*)'|\?(\d+))/gu)].map(
+    ([, literal, index]) => literal ?? String(q.bindings[Number(index) - 1]),
+  );
+  expect(patterns).toContain("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]");
+  for (const pattern of patterns)
+    expect(new TextEncoder().encode(pattern).byteLength).toBeLessThanOrEqual(50);
 });
