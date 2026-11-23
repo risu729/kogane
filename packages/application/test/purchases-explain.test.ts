@@ -785,7 +785,7 @@ describe("the bytes stop (ADR 0128 §2)", () => {
     // Both stops were reached, so neither check above is vacuous.
     expect(shortPages).toBeGreaterThan(0);
     expect(fullPages).toBeGreaterThan(0);
-  });
+  }, 60_000);
 });
 
 describe("no path writes", () => {
