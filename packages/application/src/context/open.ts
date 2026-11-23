@@ -42,7 +42,13 @@ export const EVENT_DECISION_MANIFEST_REF = "economic-events:none-v1";
 export interface ContextInputs {
   /** Instant the evaluation runs at. */
   now: string;
-  /** Highest visible publication; what "current" means for this context. */
+  /**
+   * What "current" means for this context: a marker that moves with every
+   * change of the published, visible rows (the App reads the highest visible
+   * parse run, the newest publication event, the run exclusions and the
+   * dataset snapshot policies; ADR 0091 amendment). It is pinned as given,
+   * in `publicationRef` and the paging basis.
+   */
   publicationHighWater: string;
   /** Digest over the parser builds behind the visible publications. */
   parserBuildDigest: string;
@@ -146,7 +152,7 @@ export async function openContext(
 
   const perimeterRef = perimeterRefFor(grant);
   const manifest = {
-    schemaVersion: "financial-context-v1",
+    schemaVersion: "financial-context-v2",
     querySemanticsVersion: QUERY_SEMANTICS_VERSION,
     perimeterRef,
     effectiveTime,

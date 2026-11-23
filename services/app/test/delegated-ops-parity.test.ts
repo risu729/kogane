@@ -333,7 +333,7 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
     expect(
       (await tool("kogane.ops.operation.list", { cursor: `op_${"0".repeat(64)}` }))
         .structuredContent,
-    ).toEqual({ error: "receipt_not_found", refs: ["cursor"] });
+    ).toEqual({ error: "invalid_cursor", refs: ["cursor"] });
 
     const recorded = await env.DB.prepare(
       "SELECT principal_kind,path,subject,result,target_ref,diff_json FROM audit_records WHERE principal=? AND operation='ops.operation.list' AND result='read' ORDER BY recorded_at DESC,audit_id DESC LIMIT 1",

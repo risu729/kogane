@@ -264,6 +264,7 @@ describe("production observation API", () => {
         reconstructedStateOnDate: true,
         reportArtifacts: true,
         pendingDecisions: true,
+        changesSince: true,
         eventsV2: true,
         rewardsV2: true,
         cardPurchaseRecognition: true,
@@ -486,6 +487,17 @@ async function call(
     } as Env,
   );
 }
+/** The HSTS policy of every answer (ADR 0131): one year, this host only, not preloaded. */
+const HSTS = "max-age=31536000";
+/** `call` with extra request headers, for a conditional request. */
+async function rawCall(path: string, headers: Record<string, string>) {
+  return worker.fetch(
+    new Request(`https://fixture.test${path}`, {
+      headers: { "cf-access-jwt-assertion": await token(), ...headers },
+    }),
+    { ...env, ACCESS_ISSUER: issuer, ACCESS_AUDIENCE: "fixture-audience" } as Env,
+  );
+}
 async function catalogueSnapshot() {
   const tables = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name",
@@ -586,6 +598,30 @@ describe("authenticated read-only evidence", () => {
       expect(response.headers.get("cross-origin-resource-policy"), path).toBe("same-origin");
       expect(response.headers.get("cross-origin-opener-policy"), path).toBe("same-origin");
       await response.arrayBuffer();
+    }
+  });
+  // The browser keeps to HTTPS for this host once it has seen one answer, so
+  // a later `http://` link or a typed hostname cannot be served in clear text
+  // by whoever sits on the network path (ADR 0131). Every kind of answer
+  // carries it: the shell, its revalidation, a HEAD, a read and each refusal.
+  it("tells the browser to use only HTTPS on every kind of answer", async () => {
+    const shell = await call("/evidence/sources/sony-bank");
+    const etag = shell.headers.get("etag");
+    await shell.arrayBuffer();
+    expect(etag).not.toBeNull();
+    const answers: [string, Response, number][] = [
+      ["shell", shell, 200],
+      ["revalidated shell", await rawCall("/", { "if-none-match": etag! }), 304],
+      ["HEAD shell", await call("/", { method: "HEAD" }), 200],
+      ["read", await call(`${prefix}/meta`), 200],
+      ["unrouted API path", await call(`${prefix}/missing`), 404],
+      ["no Access assertion", await call(`${prefix}/meta`, { jwt: null }), 401],
+      ["write to a read", await call(`${prefix}/meta`, { method: "POST" }), 405],
+    ];
+    for (const [label, response, status] of answers) {
+      expect(response.status, label).toBe(status);
+      expect(response.headers.get("strict-transport-security"), label).toBe(HSTS);
+      if (!response.bodyUsed) await response.arrayBuffer();
     }
   });
   it("classifies malformed identity keys as a provider outage rather than invalid credentials", async () => {
@@ -696,6 +732,7 @@ describe("authenticated read-only evidence", () => {
       `attachment; filename="synthetic-0.json"; filename*=UTF-8''synthetic-0.json`,
     );
     expect(response.headers.get("content-security-policy")).toContain("sandbox");
+    expect(response.headers.get("strict-transport-security")).toBe(HSTS);
     const head = await call(path, { method: "HEAD", environment });
     expect(head.status).toBe(200);
     expect(head.headers.get("content-disposition")).toBe(

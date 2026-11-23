@@ -289,7 +289,13 @@ describe("listing the stored reports", () => {
     const first = await listed();
     expect(first.status).toBe(200);
     expect(validApiResponse("/api/v2/reports", first.json)).toBe(true);
-    expect(Object.keys(first.json)).toEqual(["apiVersion", "items", "nextCursor"]);
+    expect(Object.keys(first.json)).toEqual([
+      "apiVersion",
+      "items",
+      "nextCursor",
+      "next",
+      "paging",
+    ]);
     expect(first.json.items).toHaveLength(REPORTS_PAGE_SIZE);
     expect(first.json.items.slice(0, 2).map((item: { reportId: string }) => item.reportId)).toEqual(
       [idOf(extra - 1), idOf(extra - 2)],
@@ -304,10 +310,20 @@ describe("listing the stored reports", () => {
       createdAt: "2026-09-30T00:00:00.000Z",
     });
     expect(first.json.nextCursor).toBe(String(REPORTS_PAGE_SIZE));
+    // `next.arguments` (ADR 0128) names the same page as the deprecated cursor.
+    expect(first.json.next).toEqual({ arguments: { offset: REPORTS_PAGE_SIZE } });
+    expect(first.json.paging).toEqual({
+      limit: REPORTS_PAGE_SIZE,
+      returned: REPORTS_PAGE_SIZE,
+      hasMore: true,
+      stoppedBy: "limit",
+    });
 
-    const second = await listed(`?offset=${first.json.nextCursor}`);
+    const second = await listed(`?offset=${first.json.next.arguments.offset}`);
     expect(validApiResponse("/api/v2/reports", second.json)).toBe(true);
     expect(second.json.nextCursor).toBeNull();
+    expect(second.json.next).toBeNull();
+    expect(second.json.paging).toMatchObject({ hasMore: false, stoppedBy: null });
     // The two pages together hold every artifact exactly once, the first
     // synthetic report (2026-08-31) last.
     const ids = [...first.json.items, ...second.json.items].map(
@@ -334,6 +350,41 @@ describe("listing the stored reports", () => {
       env,
     );
     expect(unauthenticated.status).toBe(401);
+  });
+
+  it("answers every report path 404 where the store has no catalogue (CORE 0034)", async () => {
+    // The store before CORE 0034: the probe finds no `report_artifacts`, and
+    // any read of the table fails as a missing table does.
+    const absent = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get(target, property) {
+          if (property === "prepare")
+            return (sql: string) =>
+              target.prepare(
+                sql.includes("sqlite_master") && sql.includes("report_artifacts")
+                  ? "SELECT 0 AS present"
+                  : sql.replaceAll("report_artifacts", "report_artifacts_not_migrated"),
+              );
+          const value = Reflect.get(target, property) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    } as Env;
+    for (const path of [
+      "/api/v2/reports",
+      "/api/v2/reports?offset=01",
+      `/api/v2/reports/${REPORT}`,
+      `/api/v2/reports/${REPORT}/explanation`,
+      `/api/v2/reports/${REPORT}/export`,
+      `/api/v2/reports/${REPORT}?limit=10`,
+    ]) {
+      const answer = await reportsApi(absent, new URL(`https://fixture.test${path}`)).then(
+        (response) => ({ status: response?.status, code: undefined as string | undefined }),
+        (error: { status?: number; code?: string }) => ({ status: error.status, code: error.code }),
+      );
+      expect(answer, path).toEqual({ status: 404, code: "not_found" });
+    }
   });
 
   it("the list query reads the catalogue only", () => {

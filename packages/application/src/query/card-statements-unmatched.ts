@@ -72,7 +72,8 @@ import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import { statementTotal } from "./card-statement-total.ts";
-import { pageBeyondBudget, withinBudget } from "./page-budget.ts";
+import { budgetPagedFields, pageBeyondBudget, withinBudget } from "./page-budget.ts";
+import type { PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 
 const REQUEST_ID = "card-settlements.unmatched";
 /** A statement total CORE 0024's CHECK never stores fails the read, never an answer. */
@@ -158,7 +159,8 @@ export interface UnmatchedCardStatement {
   acceptable: false;
 }
 
-export interface UnmatchedCardStatementsReview {
+/** `next` and `paging` (ADR 0128) beside the deprecated `nextOffset` and `nextPage`. */
+export interface UnmatchedCardStatementsReview extends PagedFields {
   schemaVersion: "kogane-card-statements-unmatched-v1";
   query: UnmatchedCardStatementsRequest;
   manifest: {
@@ -586,6 +588,7 @@ export async function reviewUnmatchedCardStatements(input: {
       items: page.map((row) => items.get(row.id)!),
       nextOffset: next.nextOffset,
       nextPage: next.nextPage,
+      ...budgetPagedFields(next, UNMATCHED_PAGE_SIZE, page.length),
     },
   };
 }

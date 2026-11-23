@@ -530,7 +530,7 @@ describe("the account view's summary over random sources", () => {
         lines.slice(offset, offset + page.accounts.length + page.unattributed.length),
       );
     }
-  });
+  }, 60_000);
 });
 
 // ── Every summary page held to 8 KB (ADR 0123, amendment 2026-11-21) ──

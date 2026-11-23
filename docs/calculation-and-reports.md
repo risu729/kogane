@@ -134,7 +134,12 @@ knowledge mode: `current` reads the parses `published_parse_runs` names now;
 `publication_events` row of the claim's artifact and parser at or before K
 adopted, so a later re-parse or a rollback is seen as it stood at K. K may
 carry at most three fractional digits, the precision SQLite compares at, and
-the domain re-checks each price's `recorded_at` against K exactly. One read
+an offset a zone uses, -12:00 to +14:00, and must not be after
+9999-12-31T23:59:59.999Z; any other K is refused as an invalid request
+(SQLite's `julianday` reads no offset of 15 hours or more and no later
+instant, so a K at `+15:00` would match no row and every key would read
+`missing`), and the domain re-checks each price's `recorded_at` against K
+exactly. One read
 (`selectPriceCandidates`, two SQL texts `PRICE_CANDIDATES_SQL` and
 `PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key every row in a coarse window
 around the freshness span, the rows of the newest instant before it and every
@@ -176,11 +181,16 @@ date built on it (§2), so no valuation cell, route or page uses them yet. No ma
 shipped, so a business-day rule refuses with `calendar_missing`. A price is
 keyed by the provider-scoped base reference, so another source's price for the
 same instrument is never used. Exclusion counts cover only the rows the read
-returns. The row that explains `stale` is the newest before the window
-whatever its rule, kind, basis or effective-time shape (a date-only row, or
-one the domain cannot read), so such a key reads `missing` rather than
-`stale`. In `known-at` mode a row whose `recorded_at` SQLite cannot read as a
-time is not read. Nothing fetches a price or rate from an external source.
+returns. Before the window the read returns only the rows of the newest
+instant (`before-window`), whatever their rule, kind, amount, basis or
+effective-time shape (a date-only row, or one the domain cannot read). When
+every one of them is excluded (by the policy, a non-positive amount, an
+unreadable effective time or, in `known-at` mode, a `recorded_at` after K) and
+no other row read is eligible, no older row is read, so a key whose older
+price would have been usable reads `missing` rather than `stale`, and the age
+of that price is not reported; no amount is taken as zero. In `known-at` mode
+a row whose `recorded_at` SQLite cannot read as a time is not read. Nothing
+fetches a price or rate from an external source.
 The candidate read reaches each key by index but reads that key's whole
 history (the window bounds what it returns, not what it reads): 13 currencies
 four times a day took about 90 ms over 1,000 boards and 360–500 ms over 4,380
@@ -522,7 +532,10 @@ The list returns catalogue columns only (id, context, purpose, schema,
 digest, creator, creation time), newest first by `created_at` then id, 50 per
 page with `nextCursor` and no total. It reads no body and derives no
 replayability; those come from re-displaying one report. Only one `offset`
-is accepted, and the route answers 404 where `report_artifacts` is absent.
+is accepted. Where `report_artifacts` is absent, every report path (the list,
+a report, its explanation and its export) answers 404 before it reads a
+parameter, as `reportArtifacts` on `/api/meta` is then false; it never queries
+the missing table (`readReportRoute` in `services/app/src/reports-api.ts`).
 
 The report job stores a report whose positions it cut at `maxRows` (500 by
 default; `coverage.truncated`) as `partial-verified-scope` even when every
@@ -548,7 +561,15 @@ observation pages, and each price with its source claim) is requested only
 when the report says it may be explained; a restricted or unavailable report
 says why it is not, and a missing cached node is shown as missing. A body
 whose digest no longer matches, or that is gone, is never shown as the
-report. The page has no recompute or share control. Amounts are formatted by
+report. The reader refuses a stored body it cannot serve with a closed
+`503`: `report_digest_mismatch`, `report_body_invalid` (not JSON, or not a
+report body) or `report_body_too_large`. It refuses a cached explanation
+node that is not JSON with `503 report_explanation_invalid`; the node is
+served as cached otherwise, without a shape check of its own (the web
+client's contract checks it), and one over the size bound is refused with
+`report_body_too_large`. No stored text reaches the answer or the log
+([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-a-cached-explanation-that-is-not-json-is-refused-as-such-2026-11-21)).
+The page has no recompute or share control. Amounts are formatted by
 the shared exact formatter; a decimal with more places than its unit's minor
 unit, or in a unit with no known minor unit, is shown with every place
 through `formatDecimal` (integer digits grouped in threes), never rounded.
@@ -761,6 +782,10 @@ would discard later collection and later decisions (docs/operations.md).
   method gates, refusal of explanation and export under a restriction, the
   decimal policy selection contract, the list's order, paging and query
   refusals, and the real answers checked against the client contract.
+- `services/app/test/page-read-reports.test.ts` — `kogane.reports.read`
+  answers as the routes do, including `503 report_explanation_invalid` for
+  a cached explanation that is not JSON, with that code in the request log
+  and the audit record and none of the stored text.
 - `apps/web/test/report-artifacts-contract.test.ts` — refusals of the list,
   detail and explanation contract, the capability, the routes and the exact
   amount formatting; `apps/web/test/reports.browser.test.ts` — both pages in

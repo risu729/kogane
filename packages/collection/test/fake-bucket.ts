@@ -52,6 +52,9 @@ function hexOf(value: string | ArrayBuffer): string {
   return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** Bytes per chunk of a fake body: small, so a stream of a few KiB is several chunks. */
+const FAKE_BODY_CHUNK = 4096;
+
 class FakeObject implements R2ObjectBodyLike {
   constructor(
     readonly key: string,
@@ -77,6 +80,21 @@ class FakeObject implements R2ObjectBodyLike {
     const hex = this.entry.nativeSha256;
     const bytes = Uint8Array.from(hex.match(/.{2}/gu) ?? [], (part) => Number.parseInt(part, 16));
     return { sha256: bytes.buffer as ArrayBuffer };
+  }
+  /** The stored bytes in chunks of {@link FAKE_BODY_CHUNK}, as R2 streams a body. */
+  get body(): ReadableStream<Uint8Array> {
+    const bytes = this.entry.bytes.slice();
+    let offset = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(bytes.subarray(offset, offset + FAKE_BODY_CHUNK));
+        offset += FAKE_BODY_CHUNK;
+      },
+    });
   }
   async arrayBuffer(): Promise<ArrayBuffer> {
     const copy = new Uint8Array(this.entry.bytes.byteLength);

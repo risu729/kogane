@@ -254,6 +254,29 @@ describe("the grant and the request", () => {
       code: "invalid_query",
       refs: ["since:too_old"],
     });
+    // A real time in the years 0000 to 0099 is too old, not malformed: the
+    // year is read as written, never as 1900 to 1999. So is one whose UTC
+    // form leaves the four-digit years; its calendar time is still checked.
+    for (const since of [
+      "0000-01-01T00:00Z",
+      "0000-02-29T12:00:00Z",
+      "0050-06-15T00:00:00.5+09:00",
+      "0099-12-31T23:59:59.999Z",
+      "0000-01-01T00:00+00:01",
+    ])
+      expect(await refusal({ request: { since } })).toEqual({
+        code: "invalid_query",
+        refs: ["since:too_old"],
+      });
+    for (const since of ["0100-02-29T00:00Z", "0000-01-01T24:00Z", "0000-01-01T00:00+24:00"])
+      expect(await refusal({ request: { since } })).toEqual({
+        code: "invalid_query",
+        refs: ["since:format"],
+      });
+    expect(await refusal({ request: { since: "9999-12-31T23:59-01:00" } })).toEqual({
+      code: "invalid_query",
+      refs: ["since:future"],
+    });
     const db = migratedDatabase();
     // The bounds themselves are allowed, and an offset is read as its instant.
     expect(

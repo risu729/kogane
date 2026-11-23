@@ -9,6 +9,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
+import { walkPages } from "../../../packages/observation-shared/test-support/paging-walk";
 
 const CHANGE = "kogane.reported-holdings-change.read";
 const PATH = "/api/v2/reported-holdings-change";
@@ -142,6 +143,22 @@ describe("the holdings change summary over the route and MCP", () => {
       ...REMOVED.map((code) => [code, "listed_at_start_only", null]),
       ...ADDED.map((code) => [code, "listed_at_end_only", null]),
     ]);
+    // A client that follows only `next.arguments` (ADR 0128), at another page
+    // size, lists the same lines once each, in the same order.
+    const walk = await walkPages({
+      first: { ...ARGS, limit: 25 },
+      call: async (args) => {
+        const answer = await page.mcp(CHANGE, args);
+        expect(answer.isError).toBe(false);
+        return answer.body.data;
+      },
+      items: (data) =>
+        data.items as { container: string; sourceAccount: string; securityCode: string }[],
+      id: (line) => `${line.sourceAccount} ${line.securityCode}`,
+    });
+    expect(walk.calls).toHaveLength(3);
+    expect(walk.calls.slice(1).every((call) => call.limit === 25)).toBe(true);
+    expect(walk.items.map((line) => line.securityCode)).toEqual(lines.map(([code]) => code));
     // Each line names the position that reads it in full.
     const item = first.body.data.items[0];
     const position = await page.mcp("kogane.observations.get", {

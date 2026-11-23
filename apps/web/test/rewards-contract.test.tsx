@@ -334,7 +334,7 @@ test("provider subset sections render separately, including not-displayed and un
     holdingRef: "holding:conn",
     parentBucketRef: "total",
     unitRef: "points:j-point",
-    observedAt: { kind: "unknown" as const, reasonCode: "synthetic_time" },
+    observedAt: { kind: "unknown" as const, reasonCode: "observed_at_unparsed" },
     sourceFactRefs: ["balance:1"],
     coverage: "observed" as const,
     reasonCode: null,
@@ -421,7 +421,11 @@ test("each holding and expiry table region has its own accessible name", () => {
     buckets: [],
     qualificationMeasures: [],
     membership: [],
-    valueModel: { netAssetEligible: false, cashLikeRedemptionEstimate: null, reasonCode: "none" },
+    valueModel: {
+      netAssetEligible: false,
+      cashLikeRedemptionEstimate: null,
+      reasonCode: "no_offer_named",
+    },
   });
   const expiry = (id: string): RewardExpiryRow => ({
     holdingRef: `holding:${id}`,

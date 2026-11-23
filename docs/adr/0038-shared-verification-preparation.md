@@ -92,7 +92,7 @@ and [native Bun sharding](https://bun.com/docs/test/parallel#splitting-a-suite-a
 
 ## Amendment: native browser preparation guard (2026-11-06)
 
-Status: accepted on merge (first proposed 2026-10-15 in #729).
+Status: accepted (merged 2026-11-06 in [#966](https://github.com/risu729/kogane/pull/966); first proposed 2026-10-15 in #729).
 
 Use mise 2026.10.10 `skip_if` on `//apps/web:browser` to express its existing
 condition before the task body starts: skip when `CI` is not exactly `true`, or

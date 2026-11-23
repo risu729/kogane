@@ -1,5 +1,6 @@
 // Public scheduling contract. No credentials, bank values or provider response text.
 import type { MaintenanceSurveyView } from "./maintenance-survey-model";
+import { pagedFields, type PagedFields } from "../../observation-shared/src/paging-contract";
 export type SchedulePattern =
   | { kind: "daily"; time: string; weekdays: number[] }
   | { kind: "interval"; minutes: number };
@@ -250,7 +251,8 @@ export const MAINTENANCE_SUMMARY_LINES = 16;
  * lines that page holds, and its `scheduleCount` and `ruleCount` say how
  * many it has in all.
  */
-export interface MaintenanceSummary {
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `coverage.nextOffset`. */
+export interface MaintenanceSummary extends PagedFields {
   detail: "summary";
   sources: {
     source: string;
@@ -371,6 +373,7 @@ export function maintenanceReadSummary(read: MaintenanceRead, offset = 0): Maint
       rules: whole.rules.slice(Math.max(0, from - schedules), Math.max(0, to - schedules)),
     });
   }
+  const nextOffset = end < first ? end : null;
   return {
     detail: "summary",
     sources: page,
@@ -380,8 +383,13 @@ export function maintenanceReadSummary(read: MaintenanceRead, offset = 0): Maint
       lines: first,
       limit: MAINTENANCE_SUMMARY_LINES,
       offset,
-      nextOffset: end < first ? end : null,
+      nextOffset,
     },
+    ...pagedFields({
+      limit: MAINTENANCE_SUMMARY_LINES,
+      returned: Math.max(0, Math.min(end, first) - offset),
+      next: nextOffset === null ? null : { offset: nextOffset },
+    }),
   };
 }
 export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
@@ -641,7 +649,10 @@ function* joinedDeferrals(
       continue;
     }
     // One day before `from` covers a window that starts on the previous local date.
-    for (let date = localDate(from, rule.timezone) - DAY; date <= from + horizon; date += DAY) {
+    // The last date is the horizon's end in the rule's zone: ahead of UTC, that
+    // local date begins before the instant, and a window on it can start in time.
+    const last = localDate(from + horizon, rule.timezone);
+    for (let date = localDate(from, rule.timezone) - DAY; date <= last; date += DAY) {
       if (!startsOn(p, date)) continue;
       const start = windowAt(date, p.start, rule.timezone, "start");
       if (start !== null && start > from && start < from + horizon) starts.add(start);

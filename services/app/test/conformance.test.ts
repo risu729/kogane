@@ -80,6 +80,7 @@ const production: ConformanceTarget = {
     reconstructedStateOnDate: true,
     reportArtifacts: true,
     pendingDecisions: true,
+    changesSince: true,
     eventsV2: true,
     rewardsV2: true,
     cardPurchaseRecognition: true,
@@ -236,6 +237,7 @@ describe("shared contract pin", () => {
       reconstructedStateOnDate: false,
       reportArtifacts: false,
       pendingDecisions: false,
+      changesSince: false,
       eventsV2: false,
       opsApi: false,
     });

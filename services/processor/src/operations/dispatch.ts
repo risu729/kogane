@@ -237,8 +237,10 @@ async function dispatchOne(
       return dispatchCollector(env, store, receipt, at, collectors);
     case "projection":
       // The projection lane runs every tick from CORE; handing the request
-      // over is all there is to do. `projected` is completed by whoever
-      // publishes the snapshot (U11), never here.
+      // over is all there is to do. Nothing records this request's
+      // `projected` stage, here or where the snapshot is published, so it
+      // stays `pending`: a rebuild request is still not traced
+      // (docs/ops-api.md#projected-read, ADR 0048).
       await recordDispatch({
         store,
         operationId: receipt.operationId,

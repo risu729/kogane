@@ -10,6 +10,7 @@ import {
   type MaintenanceReadSource,
   maintenanceReadSummary,
 } from "../src/schedule-model";
+import { walkPages } from "../../observation-shared/test-support/paging-walk";
 
 function revision(
   number: number,
@@ -124,6 +125,8 @@ test("a job keeps its closed states, revision, run times and newest receipt's fa
       offset: 0,
       nextOffset: null,
     },
+    next: null,
+    paging: { limit: MAINTENANCE_SUMMARY_LINES, returned: 2, hasMore: false, stoppedBy: null },
   });
   // Provenance is in the full read only.
   const text = JSON.stringify(summary);
@@ -208,7 +211,44 @@ test("pages by line: a source whose lines continue is listed on both pages with 
   expect(maintenanceReadSummary(read, 24)).toMatchObject({
     sources: [],
     coverage: { lines: 24, offset: 24, nextOffset: null },
+    next: null,
+    paging: { limit: MAINTENANCE_SUMMARY_LINES, returned: 0, hasMore: false, stoppedBy: null },
   });
+});
+
+test("walks every job and rule line once by next.arguments alone (ADR 0128)", async () => {
+  const rules = Array.from({ length: 30 }, (_, index) => [revision(index + 1)]);
+  const read: MaintenanceRead = {
+    sources: [source("myjcb", 3, []), source("sbi-securities", 4, rules), source("vpoint", 2, [])],
+    limits: LIMITS,
+  };
+  // The tool answers this function's page as it is (services/app/src/schedule-tools.ts).
+  const walk = await walkPages({
+    first: { detail: "summary" },
+    call: async (args) => {
+      const summary = maintenanceReadSummary(read, (args["offset"] as number | undefined) ?? 0);
+      // The deprecated coverage says the same.
+      expect(summary.next?.arguments.offset ?? null).toBe(summary.coverage.nextOffset);
+      return summary as unknown as Record<string, unknown>;
+    },
+    items: (answer) =>
+      (answer["sources"] as { schedules: { id: string }[]; rules: { id: string }[] }[]).flatMap(
+        (entry) => [...entry.schedules, ...entry.rules],
+      ),
+    id: (line) => line.id,
+  });
+  expect(walk.calls).toEqual([
+    { detail: "summary" },
+    { detail: "summary", offset: 16 },
+    { detail: "summary", offset: 32 },
+  ]);
+  expect(walk.items).toHaveLength(39);
+  expect(walk.items.map((line) => line.id)).toEqual([
+    ...[0, 1, 2].map((index) => `myjcb-job-${index}`),
+    ...[0, 1, 2, 3].map((index) => `sbi-securities-job-${index}`),
+    ...rules.map((_, index) => `sbi-securities-rule-${index}`),
+    ...[0, 1].map((index) => `vpoint-job-${index}`),
+  ]);
 });
 
 test("a source with neither a job nor a rule is one line, and its missing reference stays null", () => {

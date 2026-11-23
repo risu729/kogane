@@ -576,7 +576,8 @@ describe.if(runnable)("card settlement review", () => {
           committed = true;
           if (commitLost) {
             commitLost = false;
-            return Response.json({ error: "bad_gateway" }, { status: 502 });
+            // As the App answers when the Processor's answer is lost.
+            return Response.json({ error: "internal_error" }, { status: 500 });
           }
           return Response.json({
             receipt: {

@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { createBrowserDiagnostics } from "./diagnostics.mjs";
+import { closedErrorType, createBrowserDiagnostics } from "./diagnostics.mjs";
 import { obtainChallengeToken } from "./challenge.mjs";
 import { signOut } from "./logout.mjs";
 import { CollectorFailure, failureCode } from "./failure.mjs";
@@ -41,7 +41,7 @@ export async function collect(payload, response, deps) {
     await writeLine(response, {
       type: "error",
       operation: "browser-collection",
-      errorType: error instanceof Error ? error.name : "UnknownError",
+      errorType: closedErrorType(error),
       errorCode: failureCode(error, stage),
       ...(stage ? { stage } : {}),
       challengeAttempts: attempts,

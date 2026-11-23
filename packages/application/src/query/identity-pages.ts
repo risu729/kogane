@@ -11,6 +11,7 @@ import type {
 } from "../../../observation-shared/src/identity-contract.ts";
 import {
   IDENTITY_PAGE_LIMIT,
+  identityPaging,
   nextIdentityOffset,
 } from "../../../observation-shared/src/identity-contract.ts";
 import {
@@ -159,8 +160,10 @@ const RECORDED_RELEASES = `SELECT DISTINCT ctx.policy_release FROM current_ident
  JOIN identity_run_contexts ctx ON ctx.identity_run_id=o.identity_run_id
  JOIN source_accounts s ON s.id=o.source_account_id WHERE (?1 IS NULL OR s.source_id=?1) LIMIT 101`;
 function page<T>(rows: T[], offset: number) {
+  const shown = rows.slice(0, LIMIT);
   return {
-    rows: rows.slice(0, LIMIT),
+    rows: shown,
+    ...identityPaging(offset, shown.length, rows.length > LIMIT),
     coverage: {
       limit: LIMIT,
       truncated: rows.length > LIMIT,
@@ -348,6 +351,7 @@ export async function readIdentityAccountList(
   const more = accounts.length > offset + LIMIT;
   return {
     rows,
+    ...identityPaging(offset, rows.length, more),
     coverage: { limit: LIMIT, truncated: more, nextOffset: nextIdentityOffset(offset, more) },
     interpretationContext: interpretationContext(
       mode,

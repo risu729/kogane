@@ -242,7 +242,9 @@ whichever principal made it: the operator in the browser or any MCP client
       "updatedAt": "2026-09-11T00:05:00Z",
     },
   ],
-  "nextCursor": null, // or the operationId to pass as `cursor` for the next page
+  "nextCursor": null, // deprecated: the operationId `next.arguments.cursor` also names
+  "next": null, // or { "arguments": { "cursor": "op_<64 hex>" } } (ADR 0128)
+  "paging": { "limit": 20, "returned": 1, "hasMore": false, "stoppedBy": null },
 }
 ```
 
@@ -250,12 +252,15 @@ whichever principal made it: the operator in the browser or any MCP client
   descending. Neither column changes after insert, so the order is stable,
   and a cursor taken from one page continues after it under any filter.
 - **Query.** `kind` (one of the five kinds), `status` (one of the six
-  statuses), `cursor` (the `nextCursor` of the previous page) and `limit`
+  statuses), `cursor` (from the previous page's `next.arguments`, or its
+  deprecated `nextCursor`) and `limit`
   (1–50, default 20). Each key at most once. An unknown key is
   `400 invalid_query` without a ref; a repeated key or a value outside its
   list is `400 invalid_query` naming the key. A cursor that names no
-  operation is `404 receipt_not_found` with ref `cursor`; any principal's
-  operation is a cursor.
+  operation is not one the list issued: `400 invalid_cursor` with ref
+  `cursor` ([ADR 0128](adr/0128-one-paging-contract.md)); any principal's
+  operation is a cursor. The cursor is not bound to `kind` or `status`: a
+  cursor read under other filters continues the other list after that row.
 - **Content.** A summary has no stages, no `execution` block, no target and
   no principal; read one operation for the first three, and the
   [audit log](audit-log.md) for who requested it. The stored request is not
@@ -391,7 +396,8 @@ carries the route label, the status and the code, never a ref.
 | `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record                        |
 | `origin_not_allowed`   | 403  | A `POST` carried another site's `Origin` (ADR 0078)                                    |
 | `not_found`            | 404  | No such operations route                                                               |
-| `receipt_not_found`    | 404  | No such operation, as an id or a list cursor                                           |
+| `invalid_cursor`       | 400  | A list cursor that names no operation (ADR 0128)                                       |
+| `receipt_not_found`    | 404  | No such operation id                                                                   |
 | `idempotency_conflict` | 409  | The same key was reused for a different payload                                        |
 | `request_too_large`    | 413  | The body exceeds 16 KiB                                                                |
 | `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded                         |

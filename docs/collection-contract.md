@@ -187,17 +187,28 @@ Worker used the same pattern in production.
 - `readTerminal(bucket, source, runId)` / `readTerminalAt(bucket, key)` return
   `found`, `missing`, or `blocked` with a reason code. A terminal whose bytes
   are not the canonical encoding of its own manifest, or whose identity does
-  not match its key, is `blocked` rather than trusted.
+  not match its key, is `blocked` rather than trusted. A terminal over 8 MiB
+  is `blocked` `terminal_too_large` without being read: the reader cancels its
+  body.
 - `verifyReferencedObjects(bucket, manifest)` re-checks existence, size and
   digest for every artifact and reports each problem
   (`object_missing`, `object_size_mismatch`, `object_hash_mismatch`,
   `object_digest_unverifiable`). The native `checksums.sha256` is R2's proof
   for single-part objects; for a multipart object the check is against the
   `customMetadata.sha256` the writer declared, which the writer computed over
-  the bytes it uploaded but is still a declaration. With `{ streamHash: true }`
-  the object is read and hashed when metadata cannot prove the digest. This is
-  what lets the Processor register the collector's own bytes without copying
-  them.
+  the bytes it uploaded but is still a declaration. This re-check is what lets
+  the Processor register the collector's own bytes without copying them. With
+  `{ streamHash: true }` the object is read and hashed when metadata cannot
+  prove the digest: its body is hashed as it streams (`digestOfStream` in
+  `stream-digest.ts`), never buffered, so memory stays at one chunk whatever
+  the artifact's size. The
+  size it compares is the bytes the body yielded and the digest is the
+  `sha256Hex` of those bytes, as the buffered read it replaced computed. The
+  time still grows with the size, which is why the option is off by default.
+  No production caller turns it on: the Processor's registration
+  (`registerTerminal` in `packages/application`) accepts a `streamHash` input
+  that the Processor never sets, so an unprovable object blocks registration
+  as `object_digest_unverifiable`. Only tests set it.
 - `listTerminals(bucket, { source?, cursor, limit })` is a **bounded scan of
   the whole `runs/` prefix**, paged by the R2 cursor. It is never a time window
   and never a lexicographic watermark: a run whose terminal is confirmed after

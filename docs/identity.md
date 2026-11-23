@@ -229,7 +229,8 @@ the figures). Before the walk the service counts them from the identity run
 seals, in milliseconds, and refuses above 500,000 (`budget_exceeded`,
 `budget:identityObservations=500000`). That is acceptable today for one owner
 reading the page behind Access; routine agent polling needs a written bound
-first. A reader pages to offset 950 of a view (no `nextOffset` past it);
+first. A reader pages to offset 950 of a view (no `nextOffset` past it; the
+950 page's `paging` says `stoppedBy: "budget"` when items follow, ADR 0128);
 `identifierId` narrows a larger one. The page re-reads a candidate before it
 plans and plans nothing if the candidate, its commands or either
 identifier's mapping revision changed. Candidate adoption payloads carry the

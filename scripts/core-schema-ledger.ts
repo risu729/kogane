@@ -643,7 +643,10 @@ export function splitSqlStatements(sql: string): string[] {
 export interface MigrationRecord {
   file: string;
   statementCount: number;
-  /** Top-level `INSERT` statements: seed rows and in-migration backfill (06 §1). */
+  /**
+   * Top-level `INSERT` and `REPLACE` statements, one behind a `WITH` included:
+   * seed rows and in-migration backfill (06 §1).
+   */
   insertStatements: { table: string; kind: "seed-or-backfill" }[];
   sha256: string;
 }
@@ -695,6 +698,49 @@ interface MasterRow {
   sql: string | null;
 }
 
+/** Quote characters of SQL text and identifiers, and what closes each. */
+const QUOTE_CLOSERS: Readonly<Record<string, string>> = { "'": "'", '"': '"', "`": "`", "[": "]" };
+
+/**
+ * The table a statement writes new rows into, or undefined when it writes none.
+ *
+ * A row-writing statement need not begin with `INSERT`: `REPLACE INTO` is one,
+ * and so is an `INSERT` behind common table expressions (`WITH [RECURSIVE] …
+ * INSERT …`). Only the statement's own top level counts, so the text inside
+ * parentheses and quotes (a CTE body, a subquery, a string literal, a quoted
+ * name that reads like a keyword) is set aside first; a trigger's body is the
+ * `CREATE TRIGGER` statement's, not an insert of its own. A writing statement
+ * whose table cannot be read, a quoted one included, is `(unknown)`, never
+ * left out. The statement comes from `splitSqlStatements`, which has already
+ * dropped its comments.
+ */
+export function insertTarget(statement: string): string | undefined {
+  let top = "";
+  let depth = 0;
+  for (let index = 0; index < statement.length; index += 1) {
+    const character = statement[index] as string;
+    const closer = QUOTE_CLOSERS[character];
+    if (closer !== undefined) {
+      const end = statement.indexOf(closer, index + 1);
+      if (depth === 0) top += character + closer;
+      index = end === -1 ? statement.length : end;
+      continue;
+    }
+    if (character === "(") depth += 1;
+    else if (character === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) top += character;
+  }
+  const writes =
+    /^(?:WITH\b(?:(?!\b(?:INSERT|REPLACE|UPDATE|DELETE|SELECT)\b)[^])*)?\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\b/iu.exec(
+      top.trimStart(),
+    );
+  if (writes === null) return undefined;
+  const target = /^\s*(?<table>[A-Za-z_][A-Za-z0-9_]*)/u.exec(
+    top.trimStart().slice(writes[0].length),
+  );
+  return target?.groups?.["table"] ?? "(unknown)";
+}
+
 /** Apply every migration in order to a fresh in-memory database. */
 export function applyMigrations(
   root: string,
@@ -712,14 +758,10 @@ export function applyMigrations(
     migrations.push({
       file,
       statementCount: statements.length,
-      insertStatements: statements
-        .filter((statement) => /^INSERT\b/iu.test(statement))
-        .map((statement) => ({
-          table:
-            /^INSERT\s+(?:OR\s+\w+\s+)?INTO\s+(?<table>[A-Za-z_][A-Za-z0-9_]*)/iu.exec(statement)
-              ?.groups?.["table"] ?? "(unknown)",
-          kind: "seed-or-backfill" as const,
-        })),
+      insertStatements: statements.flatMap((statement) => {
+        const table = insertTarget(statement);
+        return table === undefined ? [] : [{ table, kind: "seed-or-backfill" as const }];
+      }),
       sha256: createHash("sha256").update(sql).digest("hex"),
     });
   }
