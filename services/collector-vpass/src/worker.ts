@@ -334,7 +334,7 @@ async function captureCard(
       onPersisted?.(`${runId}-credit-${cardLabel}`);
     } catch (error) {
       creditFailed = true;
-      const persisted = await persistFailedCard(env, `${runId}-credit`, cardLabel, started).catch(
+      const persisted = await persistFailedCard(env, runId, cardLabel, started, "credit").catch(
         () => false,
       );
       if (persisted) onPersisted?.(`${runId}-credit-${cardLabel}`);
@@ -422,20 +422,25 @@ async function captureCard(
   }
 }
 /** The failed-run terminal for one card or, with `run`, for a session that
- * failed before a card was selected. */
+ * failed before a card was selected; with `credit`, for a card's credit
+ * snapshot run. */
 async function persistFailedCard(
   env: Env,
   runId: string,
   unitKey: string,
   started: Date,
+  runKind: "statement" | "credit" = "statement",
 ): Promise<boolean> {
   const outcome = await persistFailedRun(sharedBucket(env.DATA), {
     sessionRunId: runId,
     unitKey,
+    runKind,
     startedAt: started.toISOString(),
     failedAt: new Date().toISOString(),
   });
-  logVpassDiagnostic(sharedRunDiagnostic(runId, unitKey, outcome));
+  logVpassDiagnostic(
+    sharedRunDiagnostic(runKind === "credit" ? `${runId}-credit` : runId, unitKey, outcome),
+  );
   return sharedRunPersisted(outcome);
 }
 async function collectAllCards(

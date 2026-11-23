@@ -102,6 +102,12 @@ export interface VpassFailedRun {
   readonly sessionRunId: string;
   /** `card-NNN`, or `run` when the session failed before a card was selected. */
   readonly unitKey: string;
+  /**
+   * `credit` for a card's daily credit snapshot run
+   * (`<session>-credit-card-NNN`, ADR 0105); a statement run otherwise.
+   * Either way the run names the session as its acquisition session.
+   */
+  readonly runKind?: "statement" | "credit";
   readonly startedAt: string;
   readonly failedAt: string;
   readonly operationId?: string;
@@ -517,12 +523,13 @@ async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<Pe
  */
 function vpassFailedRunPlan(run: VpassFailedRun): PersistRunPlan {
   const operationId = identifier(run.operationId, "shared_operation_id_invalid");
+  const runPrefix = run.runKind === "credit" ? `${run.sessionRunId}-credit` : run.sessionRunId;
   return {
     run: {
       source: SOURCE,
       producer: PRODUCER,
       producerVersion: VPASS_CARD_SCHEMA_VERSION,
-      runId: `${run.sessionRunId}-${run.unitKey}`,
+      runId: `${runPrefix}-${run.unitKey}`,
       attemptId: identifier(run.attemptId, "shared_attempt_id_invalid") ?? run.sessionRunId,
       ...(operationId === undefined ? {} : { operationId }),
       acquisitionSessionRef: run.sessionRunId,
