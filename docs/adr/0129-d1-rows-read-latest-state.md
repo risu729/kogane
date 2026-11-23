@@ -438,13 +438,17 @@ The draft's open questions, as the accepted design answers them:
   always holds and that only the walks state. Without table statistics a plain
   (source, dataset) index moved the plans of the card usage, card statement
   and reward candidate reads to it; the partial index leaves every other plan
-  as it was.
+  as it was. The walk orders by the raw time in ms, the shipped selections by
+  the view's text of it, which is NULL from year 10000 on; the two orders agree
+  only below that, so migration 0108 refuses a capture or terminal report timed
+  at or past it (production held none).
 - Memo key and reading: the digest is pinned in code
   (`SNAPSHOT_SELECTION_DIGEST`, checked against the walk's text by a test) so
   that the reading statements can name this build's key. A statement that finds
   no key for the current revision fails ("malformed JSON") rather than reading
   an empty set, and the Processor stores the memo again and retries, then falls
-  back to the shipped selection inline. Only the Processor reads the memo; the
+  back to the shipped selection inline. A failure to store the memo fails the
+  lane instead of falling back, so it is seen. Only the Processor reads the memo; the
   app and MCP keep the inline selection, so they never depend on a lane having
   run.
 - Readers: the balance and position reads start from the candidate parses

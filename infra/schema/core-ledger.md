@@ -10,14 +10,14 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `4e67b6b6842e073815a0b51abd497655d8fcc747d573e54ca87f48102a08d831`
+Schema digest: `9e49a06b58f4f37d6a1de94f199c541544fe98c3494eeaf9278bab2fbfd4216e`
 
 ## Summary
 
 - Migrations applied: 101
 - Tables: 148 (all `STRICT`: yes)
 - Views: 44
-- Triggers: 606
+- Triggers: 608
 - Explicit indexes: 151
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, snapshot_selection_containers, snapshot_selection_members, source_external_ids
 
@@ -93,11 +93,11 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `entity_relations` | core-keep | decisions and relations | yes | no | yes | entity_relations_no_update | entity_relations_no_delete | 10 | 1 | 2 | 8 |
 | `evidence_use_restrictions` | core-keep | evidence use restrictions and retention | yes | no | yes | evidence_use_restrictions_no_update | evidence_use_restrictions_no_delete | 7 | 0 | 1 | 5 |
 | `expiry_rules` | core-keep | reward reference claims | yes | no | yes | expiry_rules_no_update | expiry_rules_no_delete | 11 | 1 | 1 | 5 |
-| `fetch_artifacts` | core-keep | raw objects and origin | yes | no | yes | fetch_artifacts_no_update | fetch_artifacts_no_delete | 26 | 14 | 7 | 9 |
+| `fetch_artifacts` | core-keep | raw objects and origin | yes | no | yes | fetch_artifacts_no_update | fetch_artifacts_no_delete | 26 | 14 | 7 | 10 |
 | `fetch_page_groups` | core-keep | acquisition and fetch history | yes | no | yes | fetch_page_groups_no_update | fetch_page_groups_no_delete | 6 | 2 | 0 | 5 |
 | `fetch_run_annotations` | unclassified-keep | not named in 04 §2; run annotations that the financial views read (0003) | yes | yes | yes | fetch_run_annotations_no_update | fetch_run_annotations_no_delete | 4 | 1 | 0 | 8 |
 | `fetch_run_ranges` | core-keep | acquisition and fetch history | yes | no | yes | fetch_run_ranges_no_update | fetch_run_ranges_no_delete | 12 | 2 | 1 | 5 |
-| `fetch_run_reports` | core-keep | acquisition and fetch history | yes | no | yes | fetch_run_reports_no_update | fetch_run_reports_no_delete | 17 | 2 | 3 | 9 |
+| `fetch_run_reports` | core-keep | acquisition and fetch history | yes | no | yes | fetch_run_reports_no_update | fetch_run_reports_no_delete | 17 | 2 | 3 | 10 |
 | `fetch_run_seals` | core-keep | inventories, seals and verification | yes | no | yes | fetch_run_seals_no_update | fetch_run_seals_no_delete | 4 | 3 | 0 | 12 |
 | `fetch_runs` | core-keep | acquisition and fetch history | yes | no | yes | fetch_runs_no_update | fetch_runs_no_delete | 7 | 7 | 1 | 7 |
 | `fetch_unit_reports` | core-keep | acquisition and fetch history | yes | no | yes | fetch_unit_reports_no_update | fetch_unit_reports_no_delete | 15 | 2 | 2 | 9 |
@@ -303,6 +303,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0099_sbi_document_unit_eligibility.sql` | 2 | dataset_snapshot_policies |
 | `0100_sbi_supplemental_unit_eligibility.sql` | 4 | dataset_snapshot_policies |
 | `0101_myjcb_document_unit_eligibility.sql` | 1 | dataset_snapshot_policies |
-| `0108_snapshot_selection_memo.sql` | 35 | core_snapshot_input_revision, snapshot_selection_containers |
+| `0108_snapshot_selection_memo.sql` | 37 | core_snapshot_input_revision, snapshot_selection_containers |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql, 0078_maintenance_change_provenance.sql, 0079_instrument_temporal_journal.sql, 0082_collection_lease_heartbeat.sql, 0083_parse_runs_pending_index.sql, 0084_csv_reader_release_snapshot_policies.sql, 0086_collection_provider_failure_code.sql, 0102_vpass_authori_transition_policy.sql, 0103_sbi_income_policy_version_0_1_3.sql, 0104_vpass_credit_card_name_policy.sql, 0105_observation_no_replace.sql, 0106_no_replace_rowid.sql, 0107_scheduled_read_guards.sql

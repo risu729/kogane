@@ -99,7 +99,7 @@ const NAMED = {
     sql.includes("JOIN valuation_observations v ON v.parse_run_id = po.parse_run_id"),
   rewardBuckets: (sql: string) =>
     sql.includes("memo_members AS MATERIALIZED") && sql.includes("FROM reward_bucket_claims_v2 c"),
-  snapshotMemo: (sql: string) => sql.startsWith("INSERT OR IGNORE INTO snapshot_selection_members"),
+  snapshotMemo: (sql: string) => sql.startsWith("INSERT INTO snapshot_selection_members"),
   staleKeys: (sql: string) => sql.startsWith("WITH current_keys AS MATERIALIZED"),
   cardUsage: (sql: string) =>
     sql.startsWith("WITH ranked_myjcb_snapshots") && sql.includes("current_rows AS MATERIALIZED"),

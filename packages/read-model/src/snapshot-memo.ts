@@ -381,13 +381,14 @@ export const STORE_SNAPSHOT_MEMO_SQL = {
    JOIN core_source_revision memo_core ON memo_core.id = 1
    WHERE memo_revision.id = 1
    ON CONFLICT (snapshot_revision, core_epoch, selection_digest) DO NOTHING`,
-  insertMembers: `INSERT OR IGNORE INTO snapshot_selection_members
+  insertMembers: `INSERT INTO snapshot_selection_members
      (key_id, selection, parser_name, fetch_artifact_id, fetch_run_id, required_version)
    SELECT current_key.id, member.selection, member.parser_name, member.fetch_artifact_id,
           member.fetch_run_id, member.required_version
    FROM (SELECT ${MEMO_KEY} AS id) current_key
    CROSS JOIN (${SNAPSHOT_MEMBERS_SQL}) member
-   WHERE current_key.id IS NOT NULL`,
+   WHERE current_key.id IS NOT NULL
+   ON CONFLICT DO NOTHING`,
 } as const;
 
 /**
@@ -460,11 +461,11 @@ export function memoCandidateParsesCte(governed: readonly string[]): string {
   CROSS JOIN published_parse_runs pub ON pub.parser_name = registered.parser_name
   WHERE coalesce(pub.parser_name, pub.parse_run_id) IS NOT NULL
     AND registered.parser_name NOT IN (SELECT parser_name FROM snapshot_policies)${
-    governed.length > 0
-      ? `
+      governed.length > 0
+        ? `
     AND registered.parser_name NOT IN (${governedList})`
-      : ""
-  }
+        : ""
+    }
     AND NOT EXISTS (
       SELECT 1 FROM artifact_container_policies container_policy
       JOIN fetch_artifacts container_artifact ON container_artifact.id = pub.fetch_artifact_id

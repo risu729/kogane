@@ -142,6 +142,19 @@ FROM published_parse_runs published
 JOIN fetch_artifacts a ON a.id=published.fetch_artifact_id
 LEFT JOIN fetch_units u ON u.id=a.fetch_unit_id;
 
+-- The walks order captures by their raw time in ms, the shipped selections by
+-- the sealed view's text of that time, which is NULL from year 10000 on (and a
+-- NULL sorts last). Both orders agree only below that bound, so no capture or
+-- terminal report may carry a time at or past it. Updates of either table are
+-- already refused (migration 0001); production held none past it when this
+-- was added (2026-11-23).
+CREATE TRIGGER fetch_artifacts_capture_time_before_10000 BEFORE INSERT ON fetch_artifacts
+WHEN coalesce(NEW.fetched_at_ms, NEW.recorded_at_ms) >= 253402300800000
+BEGIN SELECT RAISE(ABORT,'fetch_artifacts capture time is past year 9999'); END;
+CREATE TRIGGER fetch_run_reports_completion_before_10000 BEFORE INSERT ON fetch_run_reports
+WHEN NEW.completed_at_ms >= 253402300800000
+BEGIN SELECT RAISE(ABORT,'fetch_run_reports completion time is past year 9999'); END;
+
 -- The walks' order. A container's captures newest first, by the time the
 -- sealed view shows (`observation_fetch_artifacts.fetched_at`), and the
 -- terminal reports newest first for the V Point run selection, which ranks

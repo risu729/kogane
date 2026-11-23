@@ -622,3 +622,108 @@ test("the registry keys MyJCB past-months containers by the shipped connection",
   // Both registry triggers and the backfill.
   expect(migration.split(`THEN ${connection} ELSE '' END`).length - 1).toBe(3);
 });
+
+// ── What the memo relies on ──────────────────────────────────────────────
+
+const MIGRATION_0108 = readFileSync(
+  join(import.meta.dir, "../../storage-d1/migrations/core/0108_snapshot_selection_memo.sql"),
+  "utf8",
+);
+
+function registry(db: Database): string[] {
+  return (
+    db
+      .query(
+        "SELECT source_id, parser_name, dataset_key, unit_key, connection_key FROM snapshot_selection_containers",
+      )
+      .all() as Record<string, string>[]
+  )
+    .map((row) => Object.values(row).join("|"))
+    .sort();
+}
+
+/** The current container members' run and parser, newest stored key. */
+function currentContainerMember(db: Database): { fetch_run_id: number; parser_name: string } {
+  return db
+    .query(
+      `SELECT fetch_run_id, parser_name FROM snapshot_selection_members
+       WHERE key_id = (${SNAPSHOT_MEMO_KEY_SQL}) AND selection = 'container'
+       ORDER BY fetch_run_id DESC LIMIT 1`,
+    )
+    .get() as { fetch_run_id: number; parser_name: string };
+}
+
+describe("what the memo relies on", () => {
+  test("the 0108 backfill registers what the publication trigger registers", () => {
+    const start = MIGRATION_0108.indexOf("INSERT OR IGNORE INTO snapshot_selection_containers");
+    const backfill = MIGRATION_0108.slice(start, MIGRATION_0108.indexOf(";", start) + 1);
+    for (const seed of SEEDS.slice(0, 3)) {
+      const store = randomStore(seed);
+      try {
+        // These stores were written after the migrations, so the trigger
+        // filled the registry; the backfill must rebuild exactly that.
+        const triggered = registry(store.db);
+        expect(triggered.length).toBeGreaterThan(0);
+        store.db.run("DELETE FROM snapshot_selection_containers");
+        store.db.run(backfill);
+        expect(registry(store.db)).toEqual(triggered);
+      } finally {
+        store.db.close();
+      }
+    }
+  });
+
+  const writes: [string, (db: Database) => void][] = [
+    [
+      "a run hidden from financial views",
+      (db) =>
+        db
+          .query(
+            `INSERT INTO fetch_run_annotations(fetch_run_id,annotation_kind,reason_code,recorded_at_ms)
+             VALUES(?,'exclude_from_financial_views','synthetic-hide',1)`,
+          )
+          .run(currentContainerMember(db).fetch_run_id),
+    ],
+    // Every published parse of an ungoverned parser is current, the older
+    // captures' too.
+    ["the snapshot policies removed", (db) => db.run("DELETE FROM dataset_snapshot_policies")],
+  ];
+  for (const [name, write] of writes)
+    test(`${name} makes the stored memo stale, and the next memo reads as inline`, () => {
+      const store = randomStore(SEEDS[2] ?? 24_839);
+      try {
+        seedObservations(store.db);
+        storeMemo(store.db);
+        const before = readers(store.db, "inline");
+        expect(readers(store.db, "memo")).toEqual(before);
+        write(store.db);
+        const after = readers(store.db, "inline");
+        // The write changed what is current, so a memo kept past it would be wrong.
+        expect(after).not.toEqual(before);
+        expect(() => readers(store.db, "memo")).toThrow(SNAPSHOT_MEMO_STALE_ERROR);
+        storeMemo(store.db, 2);
+        expect(readers(store.db, "memo")).toEqual(after);
+      } finally {
+        store.db.close();
+      }
+    });
+
+  test("no capture or terminal report is timed at or past year 10000", () => {
+    const store = new QualityStore();
+    try {
+      const shape = CONTAINERS[0]!;
+      const capture = (at: string, artifacts: ArtifactSpec[]) =>
+        store.run({ source: shape.source, at, artifacts });
+      const artifact: ArtifactSpec = { key: "far.json", dataset: shape.dataset };
+      expect(() => capture("+010000-01-01T00:00:00.000Z", [artifact])).toThrow(
+        "fetch_artifacts capture time is past year 9999",
+      );
+      expect(() => capture("+010000-01-01T00:00:00.000Z", [])).toThrow(
+        "fetch_run_reports completion time is past year 9999",
+      );
+      expect(capture("9999-12-31T23:59:59.999Z", [artifact]).artifacts).toHaveLength(1);
+    } finally {
+      store.db.close();
+    }
+  });
+});

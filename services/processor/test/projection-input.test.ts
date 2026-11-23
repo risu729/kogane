@@ -139,9 +139,11 @@ test("D1 counts the revision bump in meta.changes: one ledger row is two changes
   // migration 0038 every write to a dependency-ledger table also writes the
   // revision row. A guard that expects exactly one change on a ledger table
   // would therefore never match again, and a business count derived from
-  // `meta.changes` on one would be doubled. Nothing in services/** or
-  // packages/** does either (the three counting sites use RETURNING), and
-  // this test is what a reader should find when wondering why.
+  // `meta.changes` on one would be doubled (a table that is also on the
+  // snapshot-input ledger of migration 0108 counts a third row, for its own
+  // revision). Nothing in services/** or packages/** does either (the three
+  // counting sites use RETURNING), and this test is what a reader should find
+  // when wondering why.
   const before = await currentCoreRevision(env.DB);
   const ledger = await env.DB.prepare(
     `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,

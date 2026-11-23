@@ -1398,7 +1398,7 @@
     },
     {
       "file": "0108_snapshot_selection_memo.sql",
-      "statementCount": 35,
+      "statementCount": 37,
       "insertStatements": [
         {
           "table": "core_snapshot_input_revision",
@@ -1409,7 +1409,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "8f77f7d38be435164a2bfbb471c01d6cf96bb1c8f796f58eb83b77de8e55f355"
+      "sha256": "6828b3e59baee76c09c63fe8e1bfc02736d6b343f003463f6637f9f13e2b8d37"
     }
   ],
   "tables": [
@@ -8102,6 +8102,7 @@
         "fetch_artifact_page_within_declared_count",
         "fetch_artifact_reject_after_seal",
         "fetch_artifact_requires_active_route",
+        "fetch_artifacts_capture_time_before_10000",
         "fetch_artifacts_no_delete",
         "fetch_artifacts_no_update",
         "fetch_artifacts_reject_duplicate_insert",
@@ -8584,6 +8585,7 @@
         "fetch_run_report_reject_after_seal",
         "fetch_run_report_reject_after_terminal",
         "fetch_run_report_requires_active_route",
+        "fetch_run_reports_completion_before_10000",
         "fetch_run_reports_no_delete",
         "fetch_run_reports_no_update",
         "fetch_run_reports_reject_duplicate_insert",
@@ -19799,6 +19801,13 @@
       "sqlSha256": "410df7c06083f405"
     },
     {
+      "name": "fetch_artifacts_capture_time_before_10000",
+      "table": "fetch_artifacts",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "36d14ba4aad09916"
+    },
+    {
       "name": "fetch_artifacts_no_delete",
       "table": "fetch_artifacts",
       "timing": "BEFORE",
@@ -19965,6 +19974,13 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "ad70c81a70e08122"
+    },
+    {
+      "name": "fetch_run_reports_completion_before_10000",
+      "table": "fetch_run_reports",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "3fcf15c561cae666"
     },
     {
       "name": "fetch_run_reports_no_delete",
@@ -23142,7 +23158,7 @@
   "summary": {
     "tableCount": 148,
     "viewCount": 44,
-    "triggerCount": 606,
+    "triggerCount": 608,
     "explicitIndexCount": 151,
     "byClassification": {
       "core-keep": [
@@ -23433,6 +23449,6 @@
       "0101_myjcb_document_unit_eligibility.sql",
       "0108_snapshot_selection_memo.sql"
     ],
-    "schemaSha256": "4e67b6b6842e073815a0b51abd497655d8fcc747d573e54ca87f48102a08d831"
+    "schemaSha256": "9e49a06b58f4f37d6a1de94f199c541544fe98c3494eeaf9278bab2fbfd4216e"
   }
 }

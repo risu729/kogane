@@ -54,6 +54,8 @@ export function isSnapshotMemoStale(error: unknown): boolean {
  * a write moves the revision during the read, the memo is stored again and the
  * read repeated; after `MEMO_ATTEMPTS` the read takes the inline selection.
  * `read` must be repeatable: it is called again from the start, never resumed.
+ * A failure to store the memo is not a stale read and fails the lane, so that
+ * it shows up instead of hiding behind the inline selection's cost.
  */
 export async function withSnapshotSelection<T>(
   db: D1Like,

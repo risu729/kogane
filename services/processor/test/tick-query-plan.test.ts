@@ -105,7 +105,7 @@ const ACCEPTED: readonly PlanEntry[] = [
   },
   {
     kind: "bounded",
-    statement: "INSERT OR IGNORE INTO snapshot_selection_members",
+    statement: "INSERT INTO snapshot_selection_members",
     step: /^SCAN report USING COVERING INDEX idx_fetch_run_reports_terminal_completion$/u,
     reason:
       "the V Point run walk reads terminal reports newest first and stops at the first eligible run of each source (migration 0108, ADR 0129); it runs once per snapshot-input revision",
