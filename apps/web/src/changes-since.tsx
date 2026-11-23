@@ -22,6 +22,7 @@ import {
 } from "../../../packages/domain/src/changes-since.ts";
 import { CHANGES_SINCE_PATH } from "../../../packages/observation-shared/src/changes-since-contract.ts";
 import { OUTCOMES } from "./evidence-ui.tsx";
+import { BusyButton } from "./busy-button.tsx";
 import { Link } from "./router.tsx";
 import {
   ArtifactLink,
@@ -463,14 +464,9 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
           retrying={query.isFetching}
         />
       ) : (
-        <button
-          type="button"
-          className="button"
-          disabled={query.isFetchingNextPage}
-          onClick={() => void query.fetchNextPage()}
-        >
+        <BusyButton busy={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
           {query.isFetchingNextPage ? "読み込んでいます…" : "続きを読み込む"}
-        </button>
+        </BusyButton>
       )}
     </div>
   ) : null;

@@ -654,10 +654,16 @@ test("migration 0032 applies on 0017 through 0035 with seeded rows and keeps its
     const bucket = await local.getR2Bucket("EVIDENCE");
     const localEnv = { DB: store, EVIDENCE: bucket } as unknown as Env;
     await store.exec(LAYER_A_SQL);
+    // One batch per migration file, its statements in file order, as Wrangler
+    // applies a migration: a statement at a time cost a round trip to workerd
+    // each, about 1,060 here and most of this case's time.
     const apply = async (names: string[]) => {
       for (const name of names)
-        for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
-          await store.prepare(sql).run();
+        await store.batch(
+          splitSql(readFileSync(new URL(name, migrationDir), "utf8")).map((sql) =>
+            store.prepare(sql),
+          ),
+        );
     };
     const migrations = layerBMigrations();
     expect(migrations).toContain("0032_economic_events.sql");

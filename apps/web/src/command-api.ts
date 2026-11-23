@@ -168,7 +168,6 @@ const MESSAGES: Record<string, string> = {
   budget_exceeded:
     "処理できる件数の上限を超えているため、この変更は受け付けられません。再試行しても結果は変わりません。",
   evidence_restricted: "この根拠を使う権限がないため、この操作は受け付けられません。",
-  invalid_payload: "入力した識別名、理由、根拠を確認してください。",
   invalid_command:
     "送信した内容の形式を受け付けられませんでした。表示を更新して、内容を確認し直してください。",
   commands_disabled: "この接続先では確認操作が有効になっていません。",

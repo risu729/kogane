@@ -428,12 +428,6 @@ test("the importer's v1 and the collector's v2 identity of one account differ un
   ]);
 }, 60_000);
 
-/** Applies `file` statement by statement, as D1 applies a migration. */
-async function migrate(env: Env, file: string): Promise<void> {
-  for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)))
-    await env.DB.prepare(sql).run();
-}
-
 /**
  * The split account of the test above on a store migrated through 0062, the
  * pair staged by 0062's own statement, then 0063 applied: what production
@@ -462,7 +456,8 @@ async function rewritten() {
       ).map((row) => [row.producer_id, row]),
     );
   const before = await byProducer();
-  await migrate(env, REWRITE);
+  // One batch, as Wrangler applies a migration file.
+  await applyTestSql(env.DB, migrationSql(CORE_MIGRATIONS_URL, REWRITE));
   return { env, before, after: await byProducer() };
 }
 

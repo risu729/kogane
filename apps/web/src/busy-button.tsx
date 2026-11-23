@@ -6,7 +6,9 @@
 // arrives (docs/ui-guidelines.md). The review pages' plan buttons, the pager
 // buttons (`pagination.tsx`) and the retry buttons of a failed read
 // (`ErrorState` and `QueryBoundary`'s 前回読み込んだ warning in `ui.tsx`) render
-// through it. The shell's 表示を更新 follows the same rule with its own markup.
+// through it, as do the confirmation, operation and schedules pages' in-flight
+// buttons and the 最近の変化 panel's 続きを読み込む (docs/ui-guidelines.md
+// lists them). The shell's 表示を更新 follows the same rule with its own markup.
 import type { ReactNode } from "react";
 
 export function BusyButton({

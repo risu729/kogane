@@ -22,6 +22,7 @@ import {
   postCollectionRequest,
 } from "../collection-request-api";
 import { operationRoute } from "../operations-api.ts";
+import { BusyButton } from "../busy-button.tsx";
 import { Link } from "../router";
 import { Notice, QueryBoundary } from "../ui.tsx";
 import "../styles/schedules.css";
@@ -45,14 +46,15 @@ const NAMES: Record<string, string> = {
   "smbc-direct": "SMBCダイレクト",
   "vpoint-pay": "VポイントPay",
 };
+// One label per status the occurrence table's CHECK allows (CORE 0085); a
+// label for any other status is a type error.
 const STATUS = {
   started: "実行中・結果待ち",
   completed: "完了",
   failed: "失敗",
   uncertain: "結果を確認できません",
   not_dispatched: "収集の呼び出し前に停止",
-  partial: "一部のみ取得",
-};
+} satisfies Record<ScheduleOccurrence["status"], string>;
 const REF = {
   confirmed: "停止時間を確認済み",
   "no-applicable-rule": "収集に該当する定例停止なし",
@@ -313,9 +315,9 @@ function CollectionRequest({
             </Notice>
           ) : null}
           <div className="schedule-actions">
-            <button type="button" className="button" disabled={busy || earlier} onClick={send}>
+            <BusyButton busy={busy} disabled={earlier} onClick={() => void send()}>
               {busy ? "送信中…" : "依頼を送信"}
-            </button>
+            </BusyButton>
             <button
               type="button"
               className="button"
@@ -473,6 +475,8 @@ function ScheduleCard({
   const client = useQueryClient();
   async function save(event: FormEvent) {
     event.preventDefault();
+    // A save in flight ignores another submission, Enter in a field included.
+    if (busy) return;
     setBusy(true);
     setMessage({ from: value.revision, revision: value.revision, text: "" });
     const intended = canonical({ enabled, timezone, pattern });
@@ -604,9 +608,12 @@ function ScheduleCard({
               <option value="UTC">UTC</option>
             </select>
           </label>
+          {/* In flight it waits as `BusyButton` does (aria-disabled, focus
+              kept); with no weekday chosen there is nothing to save. */}
           <button
             className="button"
-            disabled={busy || (pattern.kind === "daily" && pattern.weekdays.length === 0)}
+            disabled={pattern.kind === "daily" && pattern.weekdays.length === 0}
+            aria-disabled={busy ? true : undefined}
           >
             {busy ? "保存中…" : "設定を保存"}
           </button>
@@ -783,16 +790,16 @@ function SurveyProposal({
         <p role="alert">{message}</p>
       </div>
       <div className="schedule-actions">
-        <button
-          className="button"
-          disabled={busy || earlier || !value.current}
+        <BusyButton
+          busy={busy}
+          disabled={earlier || !value.current}
           onClick={() => void decide("accept")}
         >
           採用
-        </button>
-        <button className="button" disabled={busy || earlier} onClick={() => void decide("reject")}>
+        </BusyButton>
+        <BusyButton busy={busy} disabled={earlier} onClick={() => void decide("reject")}>
           却下
-        </button>
+        </BusyButton>
       </div>
     </li>
   );
@@ -922,6 +929,8 @@ function MaintenanceEditor({
   const client = useQueryClient();
   async function save(e: FormEvent) {
     e.preventDefault();
+    // A save in flight ignores another submission, Enter in a field included.
+    if (busy) return;
     setBusy(true);
     setMessage("");
     // Set once the request is about to be sent: a failure before it stored nothing.
@@ -1156,7 +1165,8 @@ function MaintenanceEditor({
         />
       </label>
       <div className="schedule-actions">
-        <button className="button" disabled={busy}>
+        {/* In flight it waits as `BusyButton` does: aria-disabled, focus kept. */}
+        <button className="button" aria-disabled={busy ? true : undefined}>
           {busy ? "保存中…" : "停止時間を保存"}
         </button>
         <button className="button" type="button" onClick={close}>
@@ -1191,7 +1201,7 @@ export function SchedulesPage(): ReactNode {
   // its documented retry after a failed read back.
   const earlier = showsEarlier(query);
   async function releaseLease(lease: ScheduleSnapshot["leases"][number]) {
-    // The ref closes the gap before React disables the button, including
+    // The ref closes the gap before React marks the button busy, including
     // another activation while the confirmation dialog is being opened.
     if (leaseRequests.current.has(lease.source)) return;
     leaseRequests.current.add(lease.source);
@@ -1362,13 +1372,12 @@ export function SchedulesPage(): ReactNode {
                   (lease) => (
                     <div className="schedule-history" key={lease.source}>
                       <strong>{name(lease.source)}</strong> · 開始 {fmt(lease.startedAt)}
-                      <button
-                        className="button"
-                        disabled={releasingSources.includes(lease.source)}
-                        onClick={() => releaseLease(lease)}
+                      <BusyButton
+                        busy={releasingSources.includes(lease.source)}
+                        onClick={() => void releaseLease(lease)}
                       >
                         {releasingSources.includes(lease.source) ? "解除中…" : "停止した実行を解除"}
-                      </button>
+                      </BusyButton>
                     </div>
                   ),
                 )}

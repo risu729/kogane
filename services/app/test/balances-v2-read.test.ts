@@ -366,9 +366,10 @@ describe("the v2 balance routes over the READ database", () => {
     // and a deployment pointed at one of the other shape must not read it as
     // if it were its own.
     // The directory's statements, run directly: `applyD1Migrations` would
-    // skip a file the migration table already records as applied.
+    // skip a file the migration table already records as applied. Each file
+    // is one batch, as `applyD1Migrations` applies it.
     for (const migration of env.READ_TEST_MIGRATIONS)
-      for (const query of migration.queries) await env.READ.prepare(query).run();
+      await env.READ.batch(migration.queries.map((query) => env.READ.prepare(query)));
     await env.READ.prepare(
       `INSERT INTO read_instance(id,read_instance_id,created_at,contract_version)
        VALUES(1,'instance-other-shape','2026-09-11T00:00:00.000Z','read-baseline-v0')`,
