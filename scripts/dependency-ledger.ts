@@ -9,8 +9,11 @@
 // therefore means walking those prefixes before falling back to the bare
 // entry.
 //
+// The npm-managed `container/` images sit outside the workspace, so each of
+// those is read from its own `package-lock.json` instead.
+//
 // It is a snapshot, not a guard: it is regenerated on demand, not asserted in
-// CI, because the lockfile changes for legitimate reasons. The migration note
+// CI, because the lockfiles change for legitimate reasons. The migration note
 // it carries is the record chapter 07 §5 asks for — what the merge onto one
 // lockfile did to resolved versions. That note, and any other static block this
 // generator renders verbatim, lives in `dependency-ledger-notes.ts`: a large
