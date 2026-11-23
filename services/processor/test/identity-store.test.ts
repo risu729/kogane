@@ -1774,7 +1774,8 @@ test("SQL cannot publish an empty identity run of a failed parse", async () => {
 test("empty Vpass projections batch at most40 runs with mandatory trusted pins and no resolver calls", async () => {
   // What `vpass(id, "card-001", false)` and then `sidecar(id + 1000, id)`
   // write for each run, in their order, as one batch: a batch per helper cost
-  // about 900 prepares, binds and batches, each a round trip to workerd.
+  // 940 prepares, 854 binds and 213 batches or runs, each a round trip to
+  // workerd.
   await db.batch(
     Array.from({ length: 43 }, (_, n) => 3000 + n).flatMap((id) => [
       ...seedStatements(id, 0, "vpass", true, () => [], "synthetic"),
