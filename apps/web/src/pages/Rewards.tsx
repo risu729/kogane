@@ -348,7 +348,7 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
  * used — or the one reason it could not be computed. A missing basis is said
  * in words; it is never shown as "no expiry".
  */
-export function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }): ReactNode {
+function ExpiryBasisView({ basis }: { basis: RewardExpiryBasis | null }): ReactNode {
   if (basis === null)
     return (
       <p className="footnote">

@@ -19,7 +19,7 @@
 // on the page.
 
 import type { Warnings } from "./api.ts";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { amountSign, formatAmount } from "./money.ts";
 import { Link, type ObservationKind } from "./router.tsx";
@@ -27,6 +27,7 @@ import { BusyButton } from "./busy-button.tsx";
 import { ApiError, rawUrl } from "./api.ts";
 import { CommandError } from "./command-api.ts";
 import { displayLabel } from "./labels.ts";
+import { useRepeatedFailure } from "./repeated-failure.ts";
 
 // ── values ───────────────────────────────────────────────────────────
 
@@ -457,29 +458,13 @@ export function QueryBoundary<T>({
   coverageNotice?: boolean;
   children: (data: T) => ReactNode;
 }): ReactNode {
-  // The failure a pressed retry repeats. React Query clears the error of a
-  // query that holds no answer as soon as a refetch starts, which would swap
-  // the alert, and the retry button the owner pressed, for the loading state
-  // and drop the focus to the document body. Until that read settles the
-  // alert stays, its button waiting (再試行中…).
-  const [repeating, setRepeating] = useState<{ error: Error; at: number } | null>(null);
-  const retry = (): void => {
-    if (query.isFetching) return;
-    if (query.error !== null) setRepeating({ error: query.error, at: query.errorUpdatedAt });
-    void query.refetch();
-  };
-  const failure =
-    query.error ??
-    (repeating !== null &&
-    query.data === undefined &&
-    query.fetchStatus === "fetching" &&
-    query.errorUpdatedAt === repeating.at
-      ? repeating.error
-      : null);
+  // The failure a pressed retry repeats stays until that read settles, so the
+  // alert and its waiting button (再試行中…) keep the focus (repeated-failure.ts).
+  const { failure, retry, retrying } = useRepeatedFailure(query);
   // Authorization failures hide cached records; transient failures keep the
   // previous response with a warning. An empty success replaces old rows.
   if (failure instanceof ApiError && [401, 403].includes(failure.status)) {
-    return <ErrorState error={failure} label={label} onRetry={retry} retrying={query.isFetching} />;
+    return <ErrorState error={failure} label={label} onRetry={retry} retrying={retrying} />;
   }
   if (query.data === undefined) {
     if (query.fetchStatus === "paused")
@@ -496,9 +481,7 @@ export function QueryBoundary<T>({
         />
       );
     if (failure !== null)
-      return (
-        <ErrorState error={failure} label={label} onRetry={retry} retrying={query.isFetching} />
-      );
+      return <ErrorState error={failure} label={label} onRetry={retry} retrying={retrying} />;
     return <Loading label={label} />;
   }
   const data = query.data;

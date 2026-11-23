@@ -46,14 +46,15 @@ const NAMES: Record<string, string> = {
   "smbc-direct": "SMBCダイレクト",
   "vpoint-pay": "VポイントPay",
 };
+// One label per status the occurrence table's CHECK allows (CORE 0085); a
+// label for any other status is a type error.
 const STATUS = {
   started: "実行中・結果待ち",
   completed: "完了",
   failed: "失敗",
   uncertain: "結果を確認できません",
   not_dispatched: "収集の呼び出し前に停止",
-  partial: "一部のみ取得",
-};
+} satisfies Record<ScheduleOccurrence["status"], string>;
 const REF = {
   confirmed: "停止時間を確認済み",
   "no-applicable-rule": "収集に該当する定例停止なし",

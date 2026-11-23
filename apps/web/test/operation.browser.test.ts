@@ -216,7 +216,12 @@ const waiting: OperationRecordWire = {
   },
 };
 
-/** A read-model rebuild: no collector, one stage. */
+/**
+ * A read-model rebuild after dispatch: no collector, one stage. Nothing records
+ * a rebuild's `projected` stage and READ is consulted only for kinds that reach
+ * `adopted`, so the App answers it unreported: `pending`, no code, no attempt
+ * (`stageReports` in packages/application/src/operations/requests.ts).
+ */
 const rebuild: OperationRecordWire = {
   schemaVersion: "kogane-operation-v1",
   operationId: REBUILD,
@@ -225,16 +230,7 @@ const rebuild: OperationRecordWire = {
   source: null,
   targetRef: `projection:${REBUILD}`,
   dispatch: { state: "dispatched", attempts: 1 },
-  stages: [
-    {
-      stage: "projected",
-      state: "retryable",
-      evidenceRef: null,
-      failureCode: "snapshot_incomplete",
-      attempts: 1,
-      updatedAt: "2026-09-11T00:10:00Z",
-    },
-  ],
+  stages: pending("projection"),
   failureCode: null,
   acceptedAt: "2026-09-11T00:00:00Z",
   updatedAt: "2026-09-11T00:10:00Z",
@@ -573,9 +569,13 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
       await page.getByRole("heading", { level: 2, name: "段階" }).waitFor();
       const shown = await text(page);
       expect(shown).toContain("読み取りモデルの再構築");
-      expect(shown).toContain("再試行待ち");
-      expect(shown).toContain("snapshot_incomplete");
       expect(shown).toContain("指定なし");
+      // The one stage, unreported: 未到達 with no reason, no attempt and no time.
+      const stage = page.getByRole("row").filter({ hasText: "読み取りモデルへの反映" });
+      expect(await stage.count()).toBe(1);
+      expect((await stage.innerText()).replace(/\s+/gu, " ").trim()).toBe(
+        "読み取りモデルへの反映 projected 未到達 なし なし 0 未到達",
+      );
       expect(await page.getByRole("heading", { level: 2, name: "収集の実行" }).count()).toBe(0);
     } finally {
       await page.close();

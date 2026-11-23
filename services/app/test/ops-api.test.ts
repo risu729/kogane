@@ -754,12 +754,14 @@ describe("stage progress is evidence, not a guess", () => {
     const accepted = await ops("/projections", { reason: "stage progress fixture" });
     const operationId = accepted.json.operationId as string;
     const store = d1CommandStore(env.DB);
+    // Short of completion, a rebuild's `projected` stage is only ever `pending`
+    // with no code: no executor records another state for it, and READ is
+    // consulted only for kinds that reach `adopted` (docs/ops-api.md).
     await recordOperationStage({
       store,
       operationId,
       stage: "projected",
-      state: "retryable",
-      failureCode: "snapshot_incomplete",
+      state: "pending",
       now: "2026-09-07T00:00:00Z",
     });
     let receipt = (await (
@@ -768,14 +770,14 @@ describe("stage progress is evidence, not a guess", () => {
     expect(receipt.stages).toEqual([
       {
         stage: "projected",
-        state: "retryable",
+        state: "pending",
         evidenceRef: null,
-        failureCode: "snapshot_incomplete",
+        failureCode: null,
         attempts: 1,
         updatedAt: "2026-09-07T00:00:00Z",
       },
     ]);
-    // A retryable stage is not completion: the operation is still accepted.
+    // A pending stage is not completion: the operation is still accepted.
     expect(receipt.status).toBe("accepted");
     await recordOperationStage({
       store,

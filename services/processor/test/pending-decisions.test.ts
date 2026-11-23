@@ -62,15 +62,38 @@ async function survey(id: number, source: string, decided: boolean) {
   ]);
 }
 
+/** Rows per table of the store, so a read that writes anything is seen. Each
+ * table is a column of one statement (D1 returns at most 100 columns), all in
+ * one batch: a statement per table cost a synchronous round trip to workerd
+ * per `prepare`, most of the first case's time on the CORE schema (as in
+ * card-debit-accounts.test.ts). */
 async function tableCounts(): Promise<Record<string, number>> {
   const names = await db
     .prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
     )
     .all<{ name: string }>();
+  const chunks = Array.from({ length: Math.ceil(names.results.length / 100) }, (_, n) =>
+    names.results.slice(n * 100, n * 100 + 100),
+  );
+  const results = await db.batch<Record<string, number>>(
+    chunks.map((chunk) =>
+      db.prepare(
+        "SELECT " +
+          chunk.map(({ name }, column) => `(SELECT count(*) FROM "${name}") AS c${column}`).join(),
+      ),
+    ),
+  );
   const counts: Record<string, number> = {};
-  for (const { name } of names.results)
-    counts[name] = (await db.prepare(`SELECT count(*) AS n FROM "${name}"`).first<number>("n"))!;
+  chunks.forEach((chunk, n) =>
+    chunk.forEach(({ name }, column) => {
+      const count = results[n]!.results[0]![`c${column}`];
+      // A count read under the wrong column would compare equal before and
+      // after any write, so it fails here instead.
+      if (typeof count !== "number") throw new Error(`no row count for ${name}`);
+      counts[name] = count;
+    }),
+  );
   return counts;
 }
 

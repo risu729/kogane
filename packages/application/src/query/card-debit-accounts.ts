@@ -31,13 +31,10 @@ import {
 } from "../../../domain/src/card-debit-account.ts";
 import {
   answerCardDebitAccount,
-  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
   CARD_DEBIT_ACCOUNT_ANSWER_RULE,
   CARD_DEBIT_ACCOUNT_BASES,
-  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
   compareDebitBankAccounts,
   compareMatchedDebitAccounts,
-  STATED_ABSENT_REASONS,
   statedDebitAccount,
   type CardDebitAccountAnswer,
   type DebitBankAccount,
@@ -65,22 +62,11 @@ import { pageBeyondBudget } from "./page-budget.ts";
 const REQUEST_ID = "card-settlements.debit-accounts";
 /** The most cards one answer lists. */
 export const CARD_DEBIT_ACCOUNTS_CARDS_MAX = 100;
-/** A request carries no key: any key is refused, never ignored. */
-export const CARD_DEBIT_ACCOUNTS_KEYS = [] as const;
 
-export {
-  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
-  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
-  STATED_ABSENT_REASONS,
-  type CardDebitAccountAnswer,
-  type DebitBankAccount,
-  type MatchedDebitAccount,
-  type StatedDebitAccount,
-  type StatedReading,
-};
+export { type DebitBankAccount, type MatchedDebitAccount, type StatedReading };
 
 /** The card sources whose statements the settlement review reads. */
-export type CardDebitAccountSource = "vpass" | "myjcb";
+type CardDebitAccountSource = "vpass" | "myjcb";
 /** Sources with a reader of a provider-stated debit account (ADR 0032). */
 const STATED_READER_SOURCES: readonly CardDebitAccountSource[] = ["myjcb"];
 
@@ -266,18 +252,6 @@ FROM live WHERE status='accepted' OR (statement_key NOT IN (SELECT statement_key
   AND m.card_account_id=live.card_account_id AND m.period=live.period))
 GROUP BY status,card_source_id,card_source_account,bank_source_id,bank_source_account
 ORDER BY card_source_id,card_source_account,status,bank_source_id,bank_source_account`;
-
-/** Parse an untrusted request body: no key at all. */
-export function parseCardDebitAccountsRequest(
-  body: unknown,
-): { ok: true; value: Record<string, never> } | { ok: false; refs: string[] } {
-  if (body === null || typeof body !== "object" || Array.isArray(body))
-    return { ok: false, refs: ["body"] };
-  const keys = Object.keys(body);
-  return keys.length === 0
-    ? { ok: true, value: {} }
-    : { ok: false, refs: keys.map((key) => "key:" + key) };
-}
 
 const invalid = () => new Error("card_debit_accounts_row_invalid");
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;

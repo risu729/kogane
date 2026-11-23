@@ -75,7 +75,7 @@ export const GLOBALPASS_CONTAINER_FAILURE_CODES = [
   "globalpass_browser_close_failed",
   "browser_collection_failed",
 ] as const;
-export type GlobalPassContainerFailureCode = (typeof GLOBALPASS_CONTAINER_FAILURE_CODES)[number];
+type GlobalPassContainerFailureCode = (typeof GLOBALPASS_CONTAINER_FAILURE_CODES)[number];
 
 /** The container's stages (`container/diagnostics.mjs`) an `error` record may name. */
 export const GLOBALPASS_CONTAINER_STAGES = [
@@ -92,7 +92,7 @@ export const GLOBALPASS_CONTAINER_STAGES = [
   "browser-close",
   "relay-close",
 ] as const;
-export type GlobalPassContainerStage = (typeof GLOBALPASS_CONTAINER_STAGES)[number];
+type GlobalPassContainerStage = (typeof GLOBALPASS_CONTAINER_STAGES)[number];
 
 export interface CollectionFailure {
   operation: "browser-collection" | "contract" | "sanitization" | "pagination" | "r2";

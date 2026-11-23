@@ -5,12 +5,14 @@
 // the matcher stores one (card-purchase-world.ts). Synthetic values only.
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
+import { CARD_PURCHASE_LINES_MAX } from "../../domain/src/card-purchase-view.ts";
 import type { SourceFactRef } from "../../domain/src/events.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import {
   validAgentCardPurchasePage,
   validCardPurchasePage,
 } from "../../observation-shared/src/card-purchase-contract.ts";
+import { validPagedFields } from "../../observation-shared/src/paging-contract.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
 import {
   decodeLinesCursor,
@@ -153,6 +155,18 @@ async function world() {
     status: "accepted",
   });
   return { w, pendingEvent, postedEvent, proposalId };
+}
+
+/** A seeded uniform draw in [0, 1) (mulberry32), so a failing store replays. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function explained(outcome: PurchasesExplainOutcome) {
@@ -699,6 +713,79 @@ describe("the line view (ADR 0125 amendment)", () => {
     });
     expect(tables(w.db)).toEqual(before);
   });
+});
+
+describe("the bytes stop (ADR 0128 §2)", () => {
+  test("random stores: a page the byte bound ends is short, and a full page says limit", async () => {
+    // Seeded stores of 0 to 80 lines whose counterparties run from empty to
+    // past the line's cut, in plain, JSON-escaped and astral text, with and
+    // without an account id on each line, walked in both sorts to the end.
+    const escaped = "\u0001";
+    const astral = "🛒";
+    let shortPages = 0;
+    let fullPages = 0;
+    for (let seed = 1; seed <= 16; seed += 1) {
+      const random = seededRandom(seed);
+      const w = new PurchaseWorld();
+      worlds.push(w);
+      const accountId = random() < 0.5 ? `account_${"f".repeat(64)}` : null;
+      if (accountId !== null)
+        w.run(
+          "INSERT INTO accounts(id,label,role,status) VALUES(?,'Synthetic card','liability','identified')",
+          accountId,
+        );
+      const rows = Math.floor(random() * 81);
+      // Some stores' lines all fit a full page; others' pass the byte bound.
+      const longest = [0, 12, 40, 80][Math.floor(random() * 4)]!;
+      for (let row = 0; row < rows; row += 1) {
+        const char = [" ", "a", escaped, astral][Math.floor(random() * 4)]!;
+        await w.recognise(
+          w.usage({
+            externalId: `vpass:card-009:202609:web:row-${row}:0`,
+            amount: -(1 + Math.floor(random() * 2_000_000_000)),
+            usageDate: `2026-08-${String(1 + Math.floor(random() * 28)).padStart(2, "0")}`,
+            sourceAccount: "vpass:card-009",
+            ...(accountId === null ? {} : { accountId }),
+            counterparty: char.repeat(Math.floor(random() * (longest + 1))),
+          }),
+        );
+      }
+      for (const sort of ["date", "amount"] as const) {
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const outcome = await explainCardPurchaseLines({
+            grant: grant(),
+            sql: w.sql,
+            request: { period: "2026-09", sort, ...(cursor === undefined ? {} : { cursor }) },
+          });
+          if (!outcome.ok) throw new Error(`refused: ${outcome.error.code}`);
+          const answer = outcome.explanation;
+          const { paging } = answer;
+          expect(validPagedFields(answer), JSON.stringify({ seed, sort, paging })).toBe(true);
+          expect(paging.limit).toBe(CARD_PURCHASE_LINES_MAX);
+          if (paging.stoppedBy === "bytes") {
+            expect(paging.returned).toBeLessThan(CARD_PURCHASE_LINES_MAX);
+            shortPages += 1;
+          }
+          // And a short page that continues was ended by the byte bound.
+          if (paging.hasMore && paging.returned < CARD_PURCHASE_LINES_MAX)
+            expect(paging.stoppedBy).toBe("bytes");
+          if (paging.hasMore && paging.returned === CARD_PURCHASE_LINES_MAX) {
+            expect(paging.stoppedBy).toBe("limit");
+            fullPages += 1;
+          }
+          seen.push(...answer.data.lines.map((line) => line.eventId));
+          cursor = answer.data.nextCursor ?? undefined;
+        } while (cursor !== undefined);
+        expect(new Set(seen).size).toBe(rows);
+        expect(seen).toHaveLength(rows);
+      }
+    }
+    // Both stops were reached, so neither check above is vacuous.
+    expect(shortPages).toBeGreaterThan(0);
+    expect(fullPages).toBeGreaterThan(0);
+  }, 60_000);
 });
 
 describe("no path writes", () => {

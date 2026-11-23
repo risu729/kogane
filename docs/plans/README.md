@@ -32,7 +32,9 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
 - [2026-11 one paging contract and consistent arguments across the MCP tools](2026-11-mcp-consistency.md):
   proposed on 2026-11-20 at the owner's request; an inventory of how every published tool pages,
   refuses and names its arguments, with file and line references, and the slices of
-  [ADR 0128](../adr/0128-one-paging-contract.md). Slice S1 is implemented with the plan.
+  [ADR 0128](../adr/0128-one-paging-contract.md). Slice S1 is implemented with the plan; S6 and
+  the part of S7 that needs no decision are implemented on a branch stacked on it, and S7's
+  `financial-error-v1` refusals wait for the owner's decision.
 
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production

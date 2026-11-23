@@ -232,8 +232,10 @@ TypeScript SDK (`@modelcontextprotocol/server`) for the initialize-based
 revisions and the stateless 2026-07-28 revision alike; what a client meets on
 it is in [Connecting an MCP client](#connecting-an-mcp-client). It holds no logic, no
 session state and no authorization of its own — including which tools exist:
-the adapter publishes the list it is handed and dispatches by name, so a tool
-set that is off is neither listed nor callable. `kogane.purchases.explain`
+the adapter publishes the list it is handed and dispatches by name. A tool
+set that is off is not listed; most are not callable either, but the delegated
+command, decision, schedule-job and survey-decision tools answer a refusal
+([contract](#contract-for-tools-on-mcp)). `kogane.purchases.explain`
 follows the operator route it shares a query with: while `/api/meta` reports
 `cardPurchaseRecognition: true` (CORE 0047 applied) it is appended to the six
 above, and otherwise its name is
@@ -724,8 +726,13 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 `kogane-instrument-candidates-v1` with the manifest (policy, bounds, every
 closed code), the summary counts, `decisions: "change-lifecycle"`, `total`,
 at most 50 `items` with their `evidenceRefs`, `nextOffset` (null past the
-last page and where the next page would exceed the grant's `maxRows`) and the
-identifiers the items name.
+last page and where the next page would exceed the grant's `maxRows`), the
+identifiers the items name, and `next` and `paging`
+([one paging contract](#one-paging-contract-adr-0128)): `next.arguments` is
+`{offset}` while a next page is offered, and a page whose next page the
+grant's `maxRows` refuses says `paging.stoppedBy: "budget"` with `hasMore:
+true` and `next: null`, where `nextOffset` alone is null as on the last page.
+`nextOffset` is deprecated in their favour and kept for one release.
 
 Each call walks every current identity observation, linear in captured
 history (ADR 0055 amendment, Cost). Routine polling of this tool needs a
@@ -769,8 +776,12 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 6,400) and `sourceAccountId` (only the items naming that source account).
 Output: `kogane-account-candidates-v1` with the manifest (policy, bounds,
 every closed code), the summary, `decisions: "change-lifecycle"`, `total`, at
-most 50 `items`, `nextOffset` and the named source accounts with their
-current mappings.
+most 50 `items`, `nextOffset`, the named source accounts with their
+current mappings, and `next` and `paging`
+([one paging contract](#one-paging-contract-adr-0128)), as for the instrument
+candidates: a next page the grant's `maxRows` refuses is
+`stoppedBy: "budget"`, `next: null`. `nextOffset` is deprecated in their
+favour and kept for one release.
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,
@@ -1819,7 +1830,9 @@ side, 1,000 coverage rows) and the reported state's 5,000 rows a read.
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) (item 8) in slice S4 of
 the [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
 Both tools exist while `SCHEDULES_ENABLED` is on; otherwise their names are
-`unknown_tool`. Each call is recorded once through the common chokepoint
+`unknown_tool`. The revision is listed only where a Processor binding also
+exists: without one it is not listed, and a call answers
+`403 schedules_disabled`. Each call is recorded once through the common chokepoint
 ([audit log](audit-log.md)).
 
 **Reading** (`kogane.schedules.maintenance.read`, operation
@@ -1915,7 +1928,9 @@ bound of 200 shown proposals. It never carries page text.
 
 The decision is an operation an MCP client applies as itself
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), listed while
-`SCHEDULES_ENABLED` is on; it has no `/api/agent/v1` route. Its arguments are
+`SCHEDULES_ENABLED` is on and a Processor binding exists. While it is not
+listed it is still dispatched, and a call answers `403 schedules_disabled`. It
+has no `/api/agent/v1` route. Its arguments are
 `decision`, `source`, `proposalId`, `step` and `idempotencyKey`. A rejection is
 `step: "apply"` (R1). An acceptance adds `baseRevision` and takes
 `step: "prepare"`, then `"confirm"` with `confirmationDigest` (R2). Both go
@@ -1944,7 +1959,10 @@ Refusals are closed codes:
 The confirmation page's operations (`POST /api/command/v1/{plan,simulate,approve,commit,operation}`,
 catalogue `command.*`) are on `/mcp` as five tools, listed to every MCP client
 while `COMMANDS_ENABLED` is on and a Processor binding exists
-(`src/delegated-command-tools.ts`, `src/delegated-decision-tools.ts`). Both
+(`src/delegated-command-tools.ts`, `src/delegated-decision-tools.ts`). While
+they are not listed they are still dispatched: a call answers
+`403 commands_disabled` with `COMMANDS_ENABLED` off, and
+`503 command_executor_unavailable` without the binding. Both
 paths forward to the Processor's one command route, which runs
 `createPlan`, `simulate`, `approve` and `commit` in `packages/application`; the
 App writes no plan, approval, receipt or decision itself.
@@ -2098,19 +2116,20 @@ whatever their cursor kind:
   with every other argument repeated as it was. `cursor` is an opaque token or
   an id the read minted; `offset` a position.
 - `paging.stoppedBy` is `limit` (the page is full), `bytes` (the answer
-  reached its byte bound first), `budget` (rows follow but the grant's
-  `maxRows` withholds the next page: `next` is null, `hasMore` true) or
+  reached its byte bound before the page was full: it holds fewer than
+  `limit` items, and `next` continues it), `budget` (rows follow but the
+  grant's `maxRows` withholds the next page: `next` is null, `hasMore` true) or
   `walk` (a scan bound ended the page before it was full: it holds fewer than
-  `limit` items, perhaps none, and `next` continues it; a full page says
-  `limit`). No converted read in S1 answers `walk` yet. It says
-  nothing about whether the data behind the page is complete; each read's own
-  reasons do.
+  `limit` items, perhaps none, and `next` continues it). A full page says
+  `limit`, even when the byte bound or a scan bound ended it at the same row.
+  No converted read in S1 answers `walk` yet. It says nothing about whether
+  the data behind the page is complete; each read's own reasons do.
 - A refused continuation is `400 invalid_cursor` (not a token this read
   issued), `400 cursor_mismatch` with `mustMatch` (issued for other
   arguments), `410 context_expired` (its fixed context is gone) or
   `413 result_limit_exceeded`.
 
-Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
+Converted in slice S1: `kogane.identity.read`, `kogane.events.read`,
 `kogane.reports.read` (list), `kogane.evidence.read` (runs, artifacts),
 `kogane.reported-holdings-change.read` (summary), `kogane.card-settlements.read`,
 `.statements` and `.unmatched`, `kogane.purchases.explain` (`view: events` and
@@ -2118,11 +2137,34 @@ Converted (slice S1): `kogane.identity.read`, `kogane.events.read`,
 `kogane.schedules.maintenance.read` (summary), with their routes. Each keeps its
 previous continuation fields (`nextOffset`, `nextCursor`, `nextPage`,
 `coverage.nextOffset`, `page.nextCursor`, audit's result `cursor`) beside
-`next` and `paging` for one release; they always agree. The other paged reads
-(`kogane.financial.query` above, `observations.list`, `balances.read`,
-`rewards.read`, `collection-quality.read`, `changes.since`, the candidate
-reads) still page as their sections say, until their slice of the
-[MCP consistency plan](plans/2026-11-mcp-consistency.md).
+`next` and `paging` for one release; they always agree.
+
+Converted in slice S6: `kogane.accounts.candidates` and
+`kogane.instruments.candidates` and their routes
+(`/api/identity/account-candidates`, `/api/identity/instrument-candidates`):
+`next` and `paging` beside the deprecated `nextOffset`, and a page whose next
+page the grant's `maxRows` refuses now says so (`stoppedBy: "budget"`), where
+`nextOffset: null` alone looked like the last page
+([account candidates](#account-candidates),
+[instrument candidates](#instrument-candidates)).
+
+Converted in slice S7, the part that waits for no decision:
+`kogane.financial.query` and `GET /api/v2/query`. An `activity` or
+`reported-state` answer carries `next` and `paging` at the top level, beside
+`result` ([result contract](#result-contract)); `next.arguments` is
+`{cursor}`, the same token as `result.nextCursor`, and `paging.limit` is the
+resolved page size. `coverage` and `holdings` answer whole and carry neither.
+Two limits stay until the owner decides
+([ADR 0128, S7: open decision](adr/0128-one-paging-contract.md#s7-open-decision)):
+a refused cursor is still `financial-error-v1` (`409 stale_context` for a
+cursor this context or query did not issue, never `invalid_cursor` or
+`cursor_mismatch`), and the query does not withhold by budget, so a page can
+offer a cursor whose continued call, at the same `limit`, is
+`413 budget_exceeded` (when `offset + 2 × limit + 1` passes `maxRows`).
+
+The other paged reads (`observations.list`, `balances.read`, `rewards.read`,
+`collection-quality.read`, `changes.since`) still page as their sections say,
+until their slice of the [MCP consistency plan](plans/2026-11-mcp-consistency.md).
 
 ### Explain and the identity read
 
@@ -2183,8 +2225,17 @@ Every successful query returns
   "resultRef": "result:<64 hex>",
   "unresolvedInputs": [/* defaults the server chose */],
   "result": {/* financial-result-v1, packages/domain/src/result.ts */},
+  // activity and reported-state only (ADR 0128 slice S7):
+  "next": { "arguments": { "cursor": "…" } }, // null on the last page
+  "paging": { "limit": 100, "returned": 100, "hasMore": true, "stoppedBy": "limit" },
 }
 ```
+
+`next` and `paging` sit beside `result`, not inside it: `financial-result-v1`
+is a versioned shape with exact keys, and whether it changes in place is part
+of the owner's open S7 decision. They say exactly what `result.nextCursor`
+says (`packages/application/src/query/query-paging.ts`), and the browser's
+validator refuses an answer whose two fields disagree with it.
 
 `result` is the `FinancialResult<T>` of addendum 10 §4: `completeness`
 (`complete` / `partial` / `unavailable`), `data`, `coverage` (scope, covered
@@ -2429,6 +2480,7 @@ are unchanged.
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
 | unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601` (under HTTP `404` in the 2026-07-28 revision, whose methods do not include `ping`); `-32602 unknown_tool`                       |
 | an operations tool whose principal does not resolve (a malformed subject, a bad clock)                                                                            | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_mcp_client"}` (or the resolution's other closed code); only the refusal record                         |
+| a delegated command or schedule write that is not published but still dispatched ([which, and when](#contract-for-tools-on-mcp))                                  | tool                                        | `isError: true`, `{"error":"commands_disabled"}`, `schedules_disabled` or `command_executor_unavailable`; one audit record                        |
 | capability not granted                                                                                                                                            | tool                                        | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                                              |
 | source, account or row outside the scope                                                                                                                          | tool                                        | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                                            |
 | raw evidence without `evidence.read`                                                                                                                              | tool                                        | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`                                                                  |
@@ -2612,8 +2664,28 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   list `agentApi` hands `handleMcp` (`src/agent-api.ts`), and a branch in the
   same dispatcher. The SDK publishes the list as given and routes
   `tools/call` by name; a name the dispatcher returns `null` for is
-  `unknown_tool`. A tool set that is off — for the deployment, or for this
-  caller — is neither listed nor dispatched.
+  `unknown_tool`. A tool set that is off is not listed. Most sets are not
+  dispatched either, so a call to one of their names is `unknown_tool` (a
+  JSON-RPC error, `-32602`). The delegated command, decision, schedule-job and
+  survey-decision tools are dispatched whatever the switches say: their
+  adapter answers a refusal, a tool result with `isError: true` and
+  `{ "error": <code> }`, recorded once through the chokepoint: `refused`, or
+  `failed` for the 5xx `command_executor_unavailable`
+  (`test/mcp-off-tool-sets.test.ts`):
+
+  | Tool set                                                                                                                                                                                                                                                                                                            | Off when                                         | `tools/call` answers               |
+  | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
+  | the reads that exist only with some tables or views: `kogane.purchases.explain`, `kogane.reconstructed-state.read`, `kogane.reported-state.read`, the five `kogane.card-settlements.*` reads, `kogane.reported-holdings-change.read`, `kogane.reports.read`, `kogane.collection-quality.read`, `kogane.events.read` | the store lacks them                             | `unknown_tool`                     |
+  | `kogane.ops.*`                                                                                                                                                                                                                                                                                                      | `OPS_API_ENABLED` off                            | `unknown_tool`                     |
+  | `kogane.schedules.read`, `kogane.schedules.maintenance.read`, `kogane.schedules.survey.read`, `kogane.schedules.lease.release`, `kogane.schedules.maintenance.update`                                                                                                                                               | `SCHEDULES_ENABLED` off                          | `unknown_tool`                     |
+  | `kogane.schedules.maintenance.update`                                                                                                                                                                                                                                                                               | `SCHEDULES_ENABLED` on, no Processor binding     | `403 schedules_disabled`           |
+  | `kogane.schedules.job.update`, `kogane.schedules.survey.decide`                                                                                                                                                                                                                                                     | `SCHEDULES_ENABLED` off, or no Processor binding | `403 schedules_disabled`           |
+  | `kogane.command.plan`, `.simulate`, `.operation.get`, `.approve`, `.commit`                                                                                                                                                                                                                                         | `COMMANDS_ENABLED` off                           | `403 commands_disabled`            |
+  | the same five                                                                                                                                                                                                                                                                                                       | `COMMANDS_ENABLED` on, no Processor binding      | `503 command_executor_unavailable` |
+
+  Every other tool has no switch: it is listed and dispatched on every
+  deployment.
+
 - **Input schema.** Generate `inputSchema` from the tool's Zod argument schema
   with `mcpInputSchema` (`src/mcp-input-schema.ts`), never with
   `z.toJSONSchema` directly. MCP requires `type: "object"` at the root, and the

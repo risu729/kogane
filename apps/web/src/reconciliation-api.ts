@@ -13,8 +13,8 @@ export type {
   CardSettlementStatementGroup,
   CardSettlementStatementPage,
 };
-export const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
-export const CARD_SETTLEMENT_STATEMENTS_PATH = `${CARD_SETTLEMENT_PATH}/statements`;
+const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
+const CARD_SETTLEMENT_STATEMENTS_PATH = `${CARD_SETTLEMENT_PATH}/statements`;
 
 /**
  * The reads that show a settlement candidate under review: the grouped list,

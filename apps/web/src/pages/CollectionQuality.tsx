@@ -77,7 +77,7 @@ const QUALITY_REASON_LABELS: Record<CellReason | SourceReason, string> = {
 };
 const instant = (value: string | null): string => (value === null ? "記録なし・未確認" : value);
 /** `collection-freshness-v1`: the age of the capture the data stands on, and why it is not fresh. */
-export function freshnessText(value: CollectionFreshness): string {
+function freshnessText(value: CollectionFreshness): string {
   const age =
     value.ageDays === null
       ? "取得なし"

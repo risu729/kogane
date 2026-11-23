@@ -75,7 +75,9 @@ there shows no total and no earlier lines (INV05). It uses the shared states dir
 (a status) while the first read waits, and `ErrorState` (an alert with
 `判断待ちの件数を再試行`) once a read fails. The alert stays, its button saying 再試行中…,
 while that retry or a refresh after an earlier answer is in flight; a refresh that starts
-on its own after a failed first read shows `Loading` again.
+on its own after a failed first read shows `Loading` again. The panel and `QueryBoundary`
+keep the failure a pressed retry repeats through one hook, `useRepeatedFailure`
+(`apps/web/src/repeated-failure.ts`).
 
 ## Design tokens and stylesheet layout
 

@@ -267,9 +267,23 @@ describe("a page of the candidate read", () => {
       (item) => (item as ReviewCandidate).candidateId,
     );
     expect(new Set(seen).size).toBe(count);
-    // A next page the same grant would be refused is not offered.
+    // `next` and `paging` (ADR 0128) say the same: a full page, then the last.
+    expect(first.next).toEqual({ arguments: { offset: INSTRUMENT_CANDIDATES_PAGE_SIZE } });
+    expect(first.paging).toEqual({ limit: 50, returned: 50, hasMore: true, stoppedBy: "limit" });
+    expect(second.next).toBeNull();
+    expect(second.paging).toEqual({ limit: 50, returned: 5, hasMore: false, stoppedBy: null });
+    // A next page the same grant would be refused is not offered, and the page
+    // says it is withheld rather than the last (ADR 0128 slice S6).
     const tight = { ...READER, budget: { ...READER.budget, maxRows: 99 } };
-    expect((await review(w.sql, {}, tight)).nextOffset).toBeNull();
+    const withheld = await review(w.sql, {}, tight);
+    expect(withheld.nextOffset).toBeNull();
+    expect(withheld.next).toBeNull();
+    expect(withheld.paging).toEqual({
+      limit: 50,
+      returned: 50,
+      hasMore: true,
+      stoppedBy: "budget",
+    });
     const enough = { ...READER, budget: { ...READER.budget, maxRows: 100 } };
     expect((await review(w.sql, {}, enough)).nextOffset).toBe(INSTRUMENT_CANDIDATES_PAGE_SIZE);
   });
@@ -279,6 +293,8 @@ describe("a page of the candidate read", () => {
     const page = await review(w.sql);
     expect(page.items).toHaveLength(INSTRUMENT_CANDIDATES_PAGE_SIZE);
     expect(page.nextOffset).toBeNull();
+    // Full, but nothing follows: the last page, not a withheld one.
+    expect(page.paging).toEqual({ limit: 50, returned: 50, hasMore: false, stoppedBy: null });
   });
 
   test("a separated pair's evidence refs name every identifier it was separated through", async () => {
