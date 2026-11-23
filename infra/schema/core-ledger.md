@@ -10,14 +10,14 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `1783ff9f980ab8cac79d6dfce7fc4f4d08db3dede5d457e02daa7bc0af3d9211`
+Schema digest: `28706e40ed863c826e77f7209b60f4a35d5d8b475f49b84c4672c1e1faf12e4c`
 
 ## Summary
 
-- Migrations applied: 97
+- Migrations applied: 98
 - Tables: 142 (all `STRICT`: yes)
 - Views: 44
-- Triggers: 527
+- Triggers: 538
 - Explicit indexes: 147
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
@@ -53,7 +53,7 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `artifact_transform_steps` | core-keep | raw objects and origin | yes | yes | yes | artifact_transform_steps_no_update | artifact_transform_steps_no_delete | 7 | 2 | 0 | 6 |
 | `audit_overflow_counters` | operational-mutable | daily audit overflow counters (ADR 0064) | yes | no | no | — | — | 7 | 0 | 0 | 0 |
 | `audit_records` | core-keep | common audit records (ADR 0064) | yes | no | yes | audit_records_no_update | audit_records_no_delete | 25 | 2 | 8 | 4 |
-| `balance_observations` | core-keep | parse runs and observations | yes | no | yes | balance_observations_no_update | balance_observations_no_delete | 12 | 1 | 2 | 6 |
+| `balance_observations` | core-keep | parse runs and observations | yes | no | yes | balance_observations_no_update | balance_observations_no_delete | 12 | 1 | 2 | 7 |
 | `calculation_policies` | core-keep | prices and calculation policies | yes | no | yes | calculation_policies_no_update | calculation_policies_no_delete | 7 | 0 | 1 | 5 |
 | `calculation_results` | core-keep | calculation runs and reports | yes | no | yes | calculation_results_no_update | calculation_results_no_delete | 10 | 1 | 1 | 3 |
 | `calculation_runs` | core-keep | calculation runs and reports | yes | no | no | — | calculation_runs_no_delete | 8 | 0 | 1 | 3 |
@@ -126,7 +126,7 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `metadata_projections` | core-keep | metadata projections | yes | no | yes | metadata_projections_no_update | metadata_projections_no_delete | 8 | 1 | 1 | 2 |
 | `obligation_revisions` | core-keep | economic events | yes | no | no | — | obligation_revisions_no_delete | 16 | 1 | 2 | 3 |
 | `observation_artifact_metadata` | unclassified-keep | not named in 04 §2; pipeline artifact metadata (0017) | yes | no | yes | observation_artifact_metadata_no_update | observation_artifact_metadata_no_delete | 4 | 2 | 0 | 5 |
-| `observation_decimal_values` | core-keep | observation_decimal_values (CORE for now; columns may be copied to READ) | yes | no | yes | observation_decimals_no_update | observation_decimals_no_delete | 8 | 1 | 0 | 5 |
+| `observation_decimal_values` | core-keep | observation_decimal_values (CORE for now; columns may be copied to READ) | yes | no | yes | observation_decimals_no_update | observation_decimals_no_delete | 8 | 1 | 0 | 6 |
 | `observation_lane_state` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 5 | 0 | 0 | 0 |
 | `observation_parse_jobs` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 14 | 1 | 2 | 0 |
 | `observation_replay_plans` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 20 | 0 | 2 | 0 |
@@ -139,15 +139,15 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `origin_template_policies` | core-keep | sources, producers and routes | yes | yes | no | — | — | 8 | 1 | 0 | 0 |
 | `own_transfer_proposal_retirements` | core-keep | economic events | yes | no | yes | own_transfer_proposal_retirements_no_update | own_transfer_proposal_retirements_no_delete | 3 | 1 | 0 | 3 |
 | `own_transfer_proposals` | core-keep | economic events | yes | no | yes | own_transfer_proposals_no_update | own_transfer_proposals_no_delete | 19 | 1 | 2 | 4 |
-| `parse_coverage_claims` | core-keep | parse runs and observations | yes | no | yes | parse_coverage_claims_no_update | parse_coverage_claims_no_delete | 17 | 1 | 1 | 5 |
-| `parse_input_references` | core-keep | metadata projections | yes | no | yes | parse_input_references_no_update | parse_input_references_no_delete | 4 | 2 | 2 | 2 |
-| `parse_issues` | unclassified-keep | not named in 04 §2; created with parse_coverage_claims (0025) | yes | no | yes | parse_issues_no_update | parse_issues_no_delete | 7 | 1 | 1 | 2 |
+| `parse_coverage_claims` | core-keep | parse runs and observations | yes | no | yes | parse_coverage_claims_no_update | parse_coverage_claims_no_delete | 17 | 1 | 1 | 6 |
+| `parse_input_references` | core-keep | metadata projections | yes | no | yes | parse_input_references_no_update | parse_input_references_no_delete | 4 | 2 | 2 | 3 |
+| `parse_issues` | unclassified-keep | not named in 04 §2; created with parse_coverage_claims (0025) | yes | no | yes | parse_issues_no_update | parse_issues_no_delete | 7 | 1 | 1 | 3 |
 | `parse_run_candidates` | core-keep | parser releases and activations | yes | no | no | — | parse_run_candidates_no_delete | 5 | 2 | 1 | 2 |
 | `parse_runs` | core-keep | parse runs and observations | yes | no | no | — | parse_runs_no_delete | 9 | 2 | 3 | 5 |
 | `parser_releases` | core-keep | parser releases and activations | yes | no | yes | parser_releases_no_update | parser_releases_no_delete | 9 | 0 | 1 | 3 |
-| `position_observations` | core-keep | parse runs and observations | yes | no | yes | position_observations_no_update | position_observations_no_delete | 13 | 1 | 2 | 3 |
-| `price_observation_claims` | core-keep | prices and calculation policies | yes | no | yes | price_observation_claims_no_update | price_observation_claims_no_delete | 7 | 2 | 2 | 3 |
-| `price_observations` | core-keep | prices and calculation policies | yes | no | yes | price_observations_no_update | price_observations_no_delete | 13 | 0 | 1 | 2 |
+| `position_observations` | core-keep | parse runs and observations | yes | no | yes | position_observations_no_update | position_observations_no_delete | 13 | 1 | 2 | 4 |
+| `price_observation_claims` | core-keep | prices and calculation policies | yes | no | yes | price_observation_claims_no_update | price_observation_claims_no_delete | 7 | 2 | 2 | 4 |
+| `price_observations` | core-keep | prices and calculation policies | yes | no | yes | price_observations_no_update | price_observations_no_delete | 13 | 0 | 1 | 3 |
 | `price_promotion_cursor` | operational-mutable | bounded price promotion scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `processor_lane_ticks` | operational-mutable | bounded processor lane tick records | yes | no | no | processor_lane_ticks_no_update | — | 7 | 0 | 1 | 2 |
 | `producer_sources` | core-keep | sources, producers and routes | yes | yes | no | — | — | 3 | 2 | 0 | 0 |
@@ -172,13 +172,13 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `run_inventories` | core-keep | inventories, seals and verification | yes | no | yes | run_inventories_no_update | run_inventories_no_delete | 9 | 2 | 1 | 5 |
 | `run_inventory_items` | core-keep | inventories, seals and verification | yes | yes | yes | run_inventory_items_no_update | run_inventory_items_no_delete | 5 | 6 | 0 | 5 |
 | `sbi_mailbox_progress` | operational-mutable | SBI mailbox bounded-run continuation cursor; no evidence or session material | yes | no | no | — | — | 3 | 0 | 0 | 0 |
-| `scheduled_payment_observations` | core-keep | parse runs and observations | yes | no | yes | scheduled_payment_observations_no_update | scheduled_payment_observations_no_delete | 15 | 1 | 1 | 2 |
+| `scheduled_payment_observations` | core-keep | parse runs and observations | yes | no | yes | scheduled_payment_observations_no_update | scheduled_payment_observations_no_delete | 15 | 1 | 1 | 3 |
 | `settlement_relations` | core-keep | economic events | yes | no | no | — | settlement_relations_no_delete | 12 | 2 | 3 | 3 |
 | `source_accounts` | core-keep | identity and mappings | yes | no | yes | source_accounts_no_update | source_accounts_no_delete | 4 | 2 | 0 | 6 |
 | `source_external_ids` | core-keep | identity and mappings | yes | yes | no | — | — | 3 | 4 | 0 | 0 |
 | `sources` | core-keep | sources, producers and routes | yes | no | no | — | — | 4 | 0 | 0 | 0 |
-| `transaction_observations` | core-keep | parse runs and observations | yes | no | yes | transaction_observations_no_update | transaction_observations_no_delete | 15 | 1 | 3 | 6 |
-| `valuation_observations` | core-keep | parse runs and observations | yes | no | yes | valuation_observations_no_update | valuation_observations_no_delete | 13 | 1 | 2 | 3 |
+| `transaction_observations` | core-keep | parse runs and observations | yes | no | yes | transaction_observations_no_update | transaction_observations_no_delete | 15 | 1 | 3 | 7 |
+| `valuation_observations` | core-keep | parse runs and observations | yes | no | yes | valuation_observations_no_update | valuation_observations_no_delete | 13 | 1 | 2 | 4 |
 
 Full column, foreign-key, index and trigger detail per table is in
 `infra/schema/core-ledger.json`; the markdown keeps the retention decision readable.
@@ -298,4 +298,4 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0100_sbi_supplemental_unit_eligibility.sql` | 4 | dataset_snapshot_policies |
 | `0101_myjcb_document_unit_eligibility.sql` | 1 | dataset_snapshot_policies |
 
-Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql, 0078_maintenance_change_provenance.sql, 0079_instrument_temporal_journal.sql, 0082_collection_lease_heartbeat.sql, 0083_parse_runs_pending_index.sql, 0084_csv_reader_release_snapshot_policies.sql, 0086_collection_provider_failure_code.sql, 0102_vpass_authori_transition_policy.sql, 0103_sbi_income_policy_version_0_1_3.sql, 0104_vpass_credit_card_name_policy.sql
+Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql, 0078_maintenance_change_provenance.sql, 0079_instrument_temporal_journal.sql, 0082_collection_lease_heartbeat.sql, 0083_parse_runs_pending_index.sql, 0084_csv_reader_release_snapshot_policies.sql, 0086_collection_provider_failure_code.sql, 0102_vpass_authori_transition_policy.sql, 0103_sbi_income_policy_version_0_1_3.sql, 0104_vpass_credit_card_name_policy.sql, 0105_observation_no_replace.sql
