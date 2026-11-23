@@ -178,6 +178,8 @@ describe("the agent reads the operator's page", () => {
         decisions: "operator-only",
         // Two events: no page follows the first, so none is offered.
         nextPage: "none",
+        next: null,
+        paging: { limit: 50, returned: page.items.length, hasMore: false, stoppedBy: null },
         data: withoutReviewAffordances(page),
       });
       // Nothing but the candidates' affordances differs from the page.
@@ -595,6 +597,13 @@ describe("the line view (ADR 0125 amendment)", () => {
         },
         decisions: "operator-only",
         nextPage: "offered",
+        next: { arguments: { cursor: data.nextCursor! } },
+        paging: {
+          limit: 25,
+          returned: data.lines.length,
+          hasMore: true,
+          stoppedBy: data.lines.length < 25 ? "bytes" : "limit",
+        },
         data,
       },
     });
@@ -624,6 +633,9 @@ describe("the line view (ADR 0125 amendment)", () => {
       explanation: {
         ...ok.explanation,
         nextPage: "budget_exceeded",
+        // Withheld (ADR 0128): lines follow, no continuation is offered.
+        next: null,
+        paging: { ...ok.explanation.paging, stoppedBy: "budget" },
         data: { ...data, nextCursor: null },
       },
     });

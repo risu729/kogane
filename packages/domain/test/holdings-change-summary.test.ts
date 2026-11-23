@@ -6,6 +6,7 @@
 // (parser and dataset names, a provider account with a deposit type, an
 // exchange code), never their values.
 import { describe, expect, test } from "bun:test";
+import { pagedFields } from "../../observation-shared/src/paging-contract.ts";
 import { validReportedHoldingsChangeSummary } from "../../observation-shared/src/reported-holdings-change-contract.ts";
 import {
   compareReportedHoldings,
@@ -397,6 +398,37 @@ describe("summary pages", () => {
       if (cursor === null) break;
     }
     expect(walked).toEqual(all);
+  });
+
+  test("next and paging say what page.nextCursor says, and nothing more (ADR 0128)", async () => {
+    const change = await manyChanges(25);
+    const first = await summary(change, 10);
+    const last = await summary(
+      change,
+      10,
+      (await summary(change, 10, first.page.nextCursor)).page.nextCursor,
+    );
+    expect(last.next).toBeNull();
+    const wire = (page: HoldingsChangeSummary, extra: object) => ({
+      apiVersion: 2,
+      ...page,
+      ...extra,
+    });
+    // A last page whose next page is said to be withheld.
+    expect(
+      validReportedHoldingsChangeSummary(
+        wire(
+          last,
+          pagedFields({ limit: 10, returned: last.items.length, next: null, withheld: true }),
+        ),
+      ),
+    ).toBe(false);
+    // A continuation with an argument the old cursor does not name.
+    expect(
+      validReportedHoldingsChangeSummary(
+        wire(first, { next: { arguments: { ...first.next!.arguments, offset: 10 } } }),
+      ),
+    ).toBe(false);
   });
 
   test("a cursor is refused when it does not decode, belongs to other dates or filters, or the comparison moved", async () => {

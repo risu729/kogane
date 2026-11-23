@@ -30,6 +30,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
+import { CONTINUATION_INPUTS, PAGING_WAITING, PAGING_WALKED } from "./paging-registry";
 import { HOLDING_CHANGE_STATUSES } from "../../../packages/domain/src/holdings-change.ts";
 import { HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES } from "../../../packages/domain/src/holdings-change-summary.ts";
 import { VALUE_STATUSES } from "../../../packages/domain/src/values.ts";
@@ -487,6 +488,42 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       names.filter((name) => !tools.has(name)).map((name) => `${route} -> ${name}`),
     );
     expect(unpublished).toEqual([]);
+  });
+});
+
+describe("one paging contract across the published tools (ADR 0128)", () => {
+  it("keeps every published description within what a client shows, 2,048 characters", async () => {
+    const long = (await publishedDefinitions())
+      .filter((tool) => tool.description.length > 2048)
+      .map((tool) => `${tool.name}: ${tool.description.length}`);
+    expect(long).toEqual([]);
+  });
+
+  it("classes every tool that takes a continuation argument as walked or waiting for its slice", async () => {
+    const tools = (await publishedDefinitions()) as unknown as {
+      name: string;
+      description: string;
+      inputSchema: { properties?: Record<string, unknown> };
+    }[];
+    const paged = tools
+      .filter((tool) =>
+        CONTINUATION_INPUTS.some((name) => Object.hasOwn(tool.inputSchema.properties ?? {}, name)),
+      )
+      .map((tool) => tool.name)
+      .sort();
+    const walked = Object.keys(PAGING_WALKED);
+    const waiting = Object.keys(PAGING_WAITING);
+    expect(walked.filter((name) => waiting.includes(name))).toEqual([]);
+    expect(paged).toEqual([...walked, ...waiting].sort());
+  });
+
+  it("tells each converted tool's caller to continue by next.arguments", async () => {
+    const tools = await publishedDefinitions();
+    for (const name of Object.keys(PAGING_WALKED)) {
+      const tool = tools.find((entry) => entry.name === name)!;
+      expect(tool.description, name).toContain("`next.arguments`");
+      expect(tool.description, name).toContain("`paging`");
+    }
   });
 });
 

@@ -1151,12 +1151,23 @@ describe("the operator's read and the never-recorded list", () => {
     expect(body.records.length).toBeGreaterThan(0);
     expect(body.records.length).toBeLessThanOrEqual(50);
     expect(body.records.every((record) => record.result === "refused")).toBe(true);
-    expect(Object.keys(body).sort()).toEqual(["cursor", "records", "schemaVersion"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "cursor",
+      "next",
+      "paging",
+      "records",
+      "schemaVersion",
+    ]);
     // Reading the log is a page load: it is not recorded.
     expect(await recordsOf(page.requestId)).toEqual([]);
     if (body.cursor !== null) {
+      // A cursor of other filters is the paging family's mismatch (ADR 0128).
       const stale = await call(`/api/v2/audit?result=read&cursor=${body.cursor}`);
-      expect(stale.response.status).toBe(409);
+      expect(stale.response.status).toBe(400);
+      expect(await stale.response.json()).toMatchObject({
+        error: "cursor_mismatch",
+        mustMatch: ["operation", "path", "principalKind", "result", "from", "to"],
+      });
     }
   });
 

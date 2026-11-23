@@ -372,7 +372,7 @@ export const opsServices = {
   },
   async list(context: OpsContext, query: OperationListQuery) {
     const outcome = await listOperations({ ...context, query });
-    // A cursor naming no operation is `receipt_not_found`.
+    // A cursor naming no operation is `invalid_cursor` (ADR 0128).
     if (!outcome.ok)
       throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
     return { status: 200, body: outcome.page };

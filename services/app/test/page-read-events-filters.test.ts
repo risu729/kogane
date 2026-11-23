@@ -419,7 +419,7 @@ describe("the filtered activity list", () => {
 });
 
 describe("the unfiltered activity list", () => {
-  it("is the shipped answer: the same fields, offset paging and offset cursor", async () => {
+  it("is the shipped answer with ADR 0128's next and paging: offset paging and offset cursor", async () => {
     const first = (await page.route("/api/v2/activity")) as {
       status: number;
       body: Record<string, unknown> & { items: unknown[]; nextCursor: string };
@@ -431,8 +431,11 @@ describe("the unfiltered activity list", () => {
       "items",
       "nextCursor",
       "dataCoverage",
+      "next",
+      "paging",
     ]);
     expect(first.body.items).toHaveLength(200);
+    expect(first.body.next).toEqual({ arguments: { offset: 200 } });
     // A cursor issued before the filters (the next offset) still continues.
     expect(first.body.nextCursor).toBe("200");
     const next = await page.expectSameAnswer(

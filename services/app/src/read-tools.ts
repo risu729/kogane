@@ -52,6 +52,11 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
+import { pagingRefusal } from "./paging-refusal";
+import {
+  cursorMismatch,
+  invalidCursor,
+} from "../../../packages/observation-shared/src/paging-contract.ts";
 import {
   REPORTED_STATE_ACCOUNT,
   REPORTED_STATE_DATE,
@@ -184,7 +189,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.accounts.history":
     "The append-only correction history of one source account, the same answer as GET /api/identity/account-history on the 口座の対応候補 page: every revision of its account mapping, every assignment or override release decided about it, and every relation row naming it on either side (connection_contains acceptances and withdrawals, same_account decisions), each with its decision kind, reason and closed origin, oldest first. Under records.read and a whole-store read grant; refused past the grant's maxRows, never truncated. Read-only; correcting it is a plan through the change lifecycle.",
   "kogane.card-settlements.unmatched":
-    "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep), a null paymentDate's paymentDateReason (payment_date_absent or payment_date_invalid) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
+    "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep), a null paymentDate's paymentDateReason (payment_date_absent or payment_date_invalid) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `nextOffset` and `nextPage` are deprecated.",
   "kogane.card-settlements.debit-accounts":
     "Each credit card's debit bank account, as on the operator's カード照合 page. Default view: per card (at most 100; cardsTruncated says when more exist) its newest statement (null paymentDate: paymentDateReason payment_date_absent or payment_date_invalid), the provider-stated side (the newest MyJCB 「カード情報」 readings; status named, conflicting, not_named or absent with source_has_no_debit_account_statement or evidence_not_recorded), accepted and undecided candidates per bank account (null debitDate here and in the answer: debitDateReason debit_date_invalid), and the answer: provider-stated, else accepted-settlement (weaker: an accepted amount match), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed codes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting). Any code leaves a provider-stated answer unconfirmed. Undecided candidates never answer. view: upcoming (the page's 次回の引落, ?view=upcoming) is compact: bills (each card whose newest statement is due today or later, Asia/Tokyo: card label, statementPeriod, debitDate, amount as exact decimal text or status and reason, debitAccount with answer, account, label, since, codes); byDebitAccount, one line per account and debit date counting every bill to it due by then (cardBills summed exactly) with the account's newest reported balance (never summed) and capturedAt, and covers: yes or no only on exact figures, else unknown with reasons debit_account_unknown, unit_mismatch, bill_not_exact, balance_not_exact, balance_before_previous_debit, cards_with_unknown_account or cards_with_unknown_due_date; the note other_debits_not_modelled is always there (only known card bills are compared); notListed, other cards with no_statement, payment_date_not_published, no_statement_due, statement_settled or statement_total_refund_or_zero (refund or zero, never netted) and their last statement, never a zero bill. Under records.read and a whole-store read grant. Read-only.",
   "kogane.decisions.pending":
@@ -194,13 +199,13 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
-    "The card statement to bank debit reviews of the カード照合 pages: one page (offset), one statement's candidates (statementKey, with offset), one review (proposalId, alone), or the candidates a review competes with (relatedTo, with offset: those sharing its statement key, its bank debit key, or its statement's source, resolved account and period, every status, never the review itself; not_found when it names no candidate), with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review, or correcting a wrong acceptance by withdrawing it and accepting a competitor, is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+    "The card statement to bank debit reviews of the カード照合 pages: one page (offset), one statement's candidates (statementKey, with offset), one review (proposalId, alone), or the candidates a review competes with (relatedTo, with offset: those sharing its statement key, its bank debit key, or its statement's source, resolved account and period, every status, never the review itself; not_found when it names no candidate), with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review, or correcting a wrong acceptance by withdrawing it and accepting a competitor, is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `nextOffset` and `nextPage` are deprecated.",
   "kogane.card-settlements.statements":
-    "One page of the カード照合 page's review list grouped by statement (offset, counted in statements, 10 per page): each statement key with how many candidates it has and its newest five candidates and any accepted one, plus its newest older ready candidate when none of those is accepted or ready (searching at most coverage.olderCandidatesSearched older ones; leadSearch says not_searched, found, none_ready or truncated, and truncated means older ones were not judged, not that none is ready), the one the page leads with first, each with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history; the statement's other candidates are kogane.card-settlements.read with statementKey. The same answer as GET /api/v2/reconciliation/card-settlements/statements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+    "One page of the カード照合 page's review list grouped by statement (offset, counted in statements, 10 per page): each statement key with how many candidates it has and its newest five candidates and any accepted one, plus its newest older ready candidate when none of those is accepted or ready (searching at most coverage.olderCandidatesSearched older ones; leadSearch says not_searched, found, none_ready or truncated, and truncated means older ones were not judged, not that none is ready), the one the page leads with first, each with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history; the statement's other candidates are kogane.card-settlements.read with statementKey. The same answer as GET /api/v2/reconciliation/card-settlements/statements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `nextOffset` and `nextPage` are deprecated.",
   "kogane.card-settlements.ownership":
     "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims, self-declaration and owner-default blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
-    "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
+    "Read permitted audit records, scoped before paging, with other subjects pseudonymized. A cursor issued under other filters is 400 cursor_mismatch (`mustMatch`: `filters`); one this read did not issue is 400 invalid_cursor. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; the result's `cursor` is deprecated.",
   "kogane.audit.get":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
 };
@@ -437,6 +442,11 @@ async function readTool(
           filters,
           cursor: input.cursor ?? null,
         });
+        // A refused cursor answers the paging family (ADR 0128): a cursor
+        // issued under other filters names `filters` as what must repeat.
+        if (!outcome.ok && outcome.code === "cursor_mismatch")
+          return pagingRefusal(cursorMismatch(["filters"]));
+        if (!outcome.ok && outcome.code === "invalid_cursor") return pagingRefusal(invalidCursor());
         return outcome.ok
           ? {
               status: 200,
@@ -444,17 +454,11 @@ async function readTool(
                 schemaVersion: "kogane-audit-page-v1",
                 records: outcome.records,
                 cursor: outcome.cursor,
+                next: outcome.next,
+                paging: outcome.paging,
               },
             }
-          : {
-              status:
-                outcome.code === "invalid_query"
-                  ? 400
-                  : outcome.code === "stale_context"
-                    ? 409
-                    : 403,
-              body: { error: outcome.code },
-            };
+          : { status: outcome.code === "invalid_query" ? 400 : 403, body: { error: outcome.code } };
       }
       case "kogane.audit.get": {
         const input = parseRequest(schemas[name], body ?? {});

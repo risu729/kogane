@@ -1401,9 +1401,10 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     // A cursor of another principal pages on; one of no operation is refused.
     const peer = await request("/projections", { reason: REASON }, LISTER_PEER);
     expect((await list(`?cursor=${peer}`)).status).toBe(200);
+    // A cursor this list did not issue is the paging family's (ADR 0128).
     const refused = await list(`?cursor=op_${"0".repeat(64)}`);
-    expect(refused.status).toBe(404);
-    expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
+    expect(refused.status).toBe(400);
+    expect(refused.json).toMatchObject({ error: "invalid_cursor", refs: ["cursor"] });
   });
 
   it("refuses an agent and a stranger on the route, and is absent while the flag is off", async () => {

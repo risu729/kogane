@@ -33,6 +33,7 @@
 // status, which the index holds and READ cannot change, so the `status`
 // filter matches `storedStatus`, every row carries it, and the page says so
 // in `statusFilterMatches` (ADR 0086, amendment of 2026-11-18, projection).
+import { pagedFields, type PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 import type { CommandStore, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
@@ -81,7 +82,8 @@ export interface OperationSummary {
 /** The summary field the `status` filter matches: always the stored status. */
 export const STATUS_FILTER_MATCHES = "storedStatus";
 
-export interface OperationListPage {
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `nextCursor`. */
+export interface OperationListPage extends PagedFields {
   schemaVersion: "kogane-operation-list-v2";
   /** The summary field the `status` filter matched, stated on every page. */
   statusFilterMatches: typeof STATUS_FILTER_MATCHES;
@@ -168,8 +170,8 @@ function summaryOf(row: ListRow, status: OperationStatus): OperationSummary {
 
 /**
  * `GET /api/ops/v1/operations` and `kogane.ops.operation.list`: one page of
- * every principal's requests. A cursor that names no operation answers
- * `receipt_not_found`.
+ * every principal's requests. A cursor that names no operation is not one
+ * this list issued: `invalid_cursor` (ADR 0128).
  */
 export async function listOperations(input: {
   store: CommandStore;
@@ -189,7 +191,7 @@ export async function listOperations(input: {
   for (const [status, kind] of arms) binds.push(status, kind);
   if (query.cursor !== null) {
     const position = await store.first<{ created_at: string }>(CURSOR_POSITION, [query.cursor]);
-    if (!position) return commandError("receipt_not_found", ["cursor"]);
+    if (!position) return commandError("invalid_cursor", ["cursor"]);
     binds.push(position.created_at, query.cursor);
   }
   const rows = await store.all<ListRow>(
@@ -208,13 +210,19 @@ export async function listOperations(input: {
     })),
   );
   const page = shown.map((row) => summaryOf(row, statuses.get(row.operation_id)!));
+  const nextCursor = rows.length > query.limit ? page[page.length - 1]!.operationId : null;
   return {
     ok: true,
     page: {
       schemaVersion: "kogane-operation-list-v2",
       statusFilterMatches: STATUS_FILTER_MATCHES,
       operations: page,
-      nextCursor: rows.length > query.limit ? page[page.length - 1]!.operationId : null,
+      nextCursor,
+      ...pagedFields({
+        limit: query.limit,
+        returned: page.length,
+        next: nextCursor === null ? null : { cursor: nextCursor },
+      }),
     },
   };
 }
