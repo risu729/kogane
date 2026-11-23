@@ -436,7 +436,7 @@ export function AccountCandidatesPage(): ReactNode {
                           ? "none"
                           : "offered"
                     }
-                    list={current.label}
+                    list={`「${current.label}」の候補`}
                   />
                 </>
               );

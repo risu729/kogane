@@ -214,7 +214,7 @@ describe.if(runnable)("account candidate review", () => {
     const note = panel.getByRole("note");
     await note.waitFor();
     expect(await note.textContent()).toBe(
-      "確認待ちはこの先にもありますが、一度に先頭から読める件数の上限に達したため、ここより先は表示できません。続きがないという意味ではありません。",
+      "「確認待ち」の候補はこの先にもありますが、一度に先頭から読める件数の上限に達したため、ここより先は表示できません。続きがないという意味ではありません。",
     );
     expect(await panel.getByRole("button", { name: "次の候補", exact: true }).isDisabled()).toBe(
       true,

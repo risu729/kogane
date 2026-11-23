@@ -348,7 +348,7 @@ export function InstrumentCandidatesPage(): ReactNode {
                           ? "none"
                           : "offered"
                     }
-                    list={current.label}
+                    list={`「${current.label}」の候補`}
                   />
                 </>
               );
