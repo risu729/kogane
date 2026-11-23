@@ -15,7 +15,7 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
     ...overrides,
   };
   async function execute(env: Env) {
-    return withCollectionLease(env, "prestia-bank", async () => {
+    const result = await withCollectionLease(env, "prestia-bank", async () => {
       const runId = crypto.randomUUID(),
         startedAt = new Date().toISOString();
       let collection: PrestiaBankCollection | undefined, errorCode: string | undefined;
@@ -71,6 +71,11 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
         };
       }
     });
+    // One closed result line per run, whichever entrypoint started it: the
+    // Processor alarm's `alarmCollection` returns only `collection_failed`, so
+    // the run's closed `error` code reaches a log only here.
+    console.log(JSON.stringify({ event: "prestia-bank-scheduled-collection", ...result.body }));
+    return result;
   }
   return execute;
 }
@@ -95,7 +100,6 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
     async scheduled(controller: ScheduledController, env: Env): Promise<void> {
       controller.noRetry();
       const result = await execute(env);
-      console.log(JSON.stringify({ event: "prestia-bank-scheduled-collection", ...result.body }));
       if (result.httpStatus !== 200) throw new Error("prestia-bank-scheduled-collection-failed");
     },
   } satisfies ExportedHandler<Env> & { alarmCollection(env: Env): Promise<ScheduledResult> };

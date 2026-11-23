@@ -27,6 +27,15 @@ source notes are in [PRESTIA](../../docs/sources/prestia.md).
   (`src/storage.ts`). There is no Cron Trigger.
 - Retries: the collector never resubmits the password. Its `scheduled`
   handler calls `controller.noRetry()`, but no Cron Trigger invokes it.
+- Logs: every run, whichever entrypoint started it, logs one
+  `prestia-bank-scheduled-collection` line (`src/worker.ts`): the run id,
+  status, persistence outcome and artifact count, the page's counts and
+  `signoffFailed` after a successful read, and the closed `error` code when
+  the run failed (one of `PRESTIA_ERROR_CODES` in `src/client.ts`, or
+  `persistence-failed`, which replaces the read's code when the save threw).
+  No provider text is logged. The alarm's result carries only
+  `collection_failed` and the terminal only `collection-failed`, so this line
+  is the only place the read's closed code is recorded.
 - Budgets: `wrangler.jsonc` sets no `limits`; the CPU and subrequest budgets in
   effect are not recorded in the repository.
 
