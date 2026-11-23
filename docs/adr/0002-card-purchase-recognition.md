@@ -161,8 +161,14 @@ replacement is never counted beside it.
   shipped text's rows plus exactly the keys of revisions holding a posted key,
   none of them current, and a current pending key.
 - Cost: one primary-key probe per current key that a revision holds; no new
-  scan. The retirement proof (migration 0064) is unchanged: the read depends
-  on the same tables.
+  scan. The retirement proof's triggers (migration 0064) are unchanged: the
+  read depends on the same tables. Its contract release is
+  `card-purchase-retirement-v2` (it was `-v1`), as
+  [ADR 0037](0037-reconciliation-purchase-cost.md) requires when the
+  selection changes: the earlier release certified empty reads while a merged
+  event whose posted row had left was still held by its current pending key,
+  so a deployment reusing that proof would keep the double count until an
+  unrelated input mutation dirtied it.
 
 ### Verification
 
@@ -176,6 +182,11 @@ replacement is never counted beside it.
   pins the open limit: the confirmed row gone with no replacement leaves the
   purchase in neither total, one unresolved event, until a `relation.reject`
   of the link authorizes the pending row's own event again.
+- The same test file: a proof certified clean under `card-purchase-retirement-v1`
+  after the confirmed row was re-keyed (before and after its replacement was
+  recognised) is not reused; the merged event is retired and the captured
+  total is the purchase once. It failed while the release was still `-v1`
+  (captured total twice the purchase).
 - `packages/read-model/test/card-purchase-keys.test.ts`: the same shape on the
   card store fixture, reported stale with both keys.
 - `packages/read-model/test/card-purchase-stale-reference.ts`, used by

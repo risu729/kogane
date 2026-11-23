@@ -212,3 +212,58 @@ test("a merged event whose posted row left with no replacement is unresolved unt
   ]);
   expect(await w.totals()).toMatchObject({ captured: "0", authorized: "800", unresolved: 1 });
 }, 120_000);
+
+test("a clean retirement proof certified under the earlier selection is not reused", async () => {
+  const w = await world();
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    rows: [ROW],
+  });
+  await w.myjcb({
+    state: "confirmed",
+    period: "detailMonth-1",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    rows: [ROW],
+  });
+  await w.sweep();
+  const posted = (await events(w)).find((event) => event.roles === "posted")!;
+  const page = await queryCardPurchases(executor(w), { eventId: posted.event_id });
+  const [candidate] = page.items[0]?.candidates ?? [];
+  if (!candidate) throw new Error("no candidate");
+  await review(w, "relation.accept", candidate);
+  const [merged] = await events(w);
+  await w.myjcb({
+    state: "confirmed",
+    period: "detailMonth-1",
+    fetchedAt: "2026-06-13T00:00:00.000Z",
+    rows: [{ ...ROW, merchant: "架空店舗J 本店" }],
+  });
+  // The release before the amendment read nothing stale here (the merged
+  // event still held its current pending key) and certified every empty read
+  // clean under its own contract: once before the replacement row was
+  // recognised and again after it. A deployment that reused that proof would
+  // never run the amended read until an unrelated input mutation dirtied it,
+  // and the purchase would stay counted twice.
+  const certifiedByEarlierRelease = () =>
+    w.db
+      .prepare(
+        "UPDATE card_purchase_retirement_check SET clean_revision=revision,clean_policy='card-purchase-retirement-v1' WHERE singleton=1",
+      )
+      .run();
+  await certifiedByEarlierRelease();
+  await w.sweep();
+  await certifiedByEarlierRelease();
+  expect(await w.sweep()).toMatchObject({ conflicts: 0, failed: 0 });
+  expect((await events(w)).find((event) => event.event_id === merged!.event_id)).toEqual({
+    event_id: merged!.event_id,
+    state: "unknown",
+    roles: "posted,pending",
+  });
+  expect(await w.totals()).toMatchObject({ captured: "800", authorized: "0", unresolved: 1 });
+  // The amended read, finding nothing stale, certifies under its own release.
+  expect(
+    await w.all("SELECT clean_policy FROM card_purchase_retirement_check WHERE singleton=1"),
+  ).toEqual([{ clean_policy: "card-purchase-retirement-v2" }]);
+}, 120_000);

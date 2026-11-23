@@ -1125,7 +1125,10 @@ pass follows the page.
 
 Before the retire pass materializes current usage, it reads the operational
 clean proof from migration 0064. An unchanged revision under the same read
-contract skips only retirement; recognition and candidates continue. Only an
+contract (`card-purchase-retirement-v2` since
+[ADR 0002's 2026-11-21 amendment](adr/0002-card-purchase-recognition.md#amendment-2026-11-21-a-merged-event-is-retired-by-its-posted-row)
+changed the selection; a proof of another release is read again) skips only
+retirement; recognition and candidates continue. Only an
 empty stale-key read can establish that proof, and its write checks that no
 input mutation overlapped the read. Publication, identity, decimal, decisions,
 restrictions, CORE epoch and live-recognition changes invalidate it. Failed,
