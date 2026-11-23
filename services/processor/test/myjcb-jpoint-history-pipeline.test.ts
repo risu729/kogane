@@ -187,6 +187,9 @@ test("real registration selects same-capture history once, falls back on a faile
   expect(input.ok).toBe(true);
   if (!input.ok) throw new Error("synthetic_reward_input_unavailable");
   expect(input.captured.input.content.buckets).toHaveLength(3);
+  // The selected lots are not totals: none of them is a provider display
+  // section, and the total they replace is not selected (ADR 0068, ADR 0107).
+  expect(input.captured.input.content.providerSections).toEqual([]);
   await capture(2, "200");
   const newer = (await reader.holdings({ programId: "program:j-point", offset: 0 })).rows[0]!;
   expect(newer.holding.buckets).toHaveLength(1);
