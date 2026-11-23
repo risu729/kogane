@@ -318,6 +318,11 @@ export function upcomingCardBills(input: {
         if (account.balance.value.status !== "exact" || account.balance.unitRef !== unit)
           reasons.add("balance_not_exact");
         const captured = account.capturedAt === null ? null : captureDate(account.capturedAt);
+        // A capture time with no capture date cannot be placed against the
+        // previous debit or a bill's due date, so it is refused rather than
+        // compared as if it came after them.
+        if (account.capturedAt !== null && captured === null)
+          throw new Error("invalid_capture_time");
         // A balance captured on a counted bill's own due date (only the date
         // itself: no capture is later) may come before or after the bank
         // takes it; compared with that bill, a capture after it would count

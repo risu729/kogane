@@ -43,8 +43,12 @@ describe("captureDate", () => {
     );
   });
 
-  test("a Tokyo date past 9999-12-31 is not written as a date", () => {
+  test("a Tokyo date outside 0000-01-01..9999-12-31 is not written as a date", () => {
     expect(captureDate("9999-12-31T15:00:00.000Z")).toBeNull();
+    expect(tokyoDate("9999-12-31T15:00:00.000Z")).toBeNull();
+    expect(tokyoDate("9999-12-31T23:00:00-05:00")).toBeNull();
+    expect(tokyoDate("0000-01-01T00:00:00+18:00")).toBeNull();
+    expect(tokyoDate("0000-01-01T00:00:00+09:00")).toBe("0000-01-01");
   });
 
   test("only the stored UTC form is read", () => {
