@@ -1389,6 +1389,12 @@
       "statementCount": 43,
       "insertStatements": [],
       "sha256": "b9a0d7a426a7d851b369a14d6f9ef8cc368fa843d376e04fbd3aa3a126446405"
+    },
+    {
+      "file": "0107_scheduled_read_guards.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "a13f1baccd26fa69d72654351d24f0c4a708a5aabde22b6c4844f4807b699b56"
     }
   ],
   "tables": [
@@ -14078,6 +14084,53 @@
       "sqlSha256": "32e6f9b91c6e62a1"
     },
     {
+      "name": "processor_read_budget_hours",
+      "classification": "operational-mutable",
+      "planRow": "bounded processor rows-read per hour",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "hour_start_ms",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "rows_read",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "scheduled_ticks",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "queue_invocations",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "hour_start_ms"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "e6ddebc1bab0a4f9"
+    },
+    {
       "name": "producer_sources",
       "classification": "core-keep",
       "planRow": "sources, producers and routes",
@@ -15473,6 +15526,95 @@
       ],
       "appendOnly": true,
       "sqlSha256": "ec6ed1aa8d6abff2"
+    },
+    {
+      "name": "report_job_gates",
+      "classification": "operational-mutable",
+      "planRow": "report job skip gate",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "gate_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "input_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "report_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "context_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "content_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "built_cutoff_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "valid_until_ms",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "gate_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "report_id",
+          "references": "report_artifacts(report_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "9380fc9fde4daac4"
     },
     {
       "name": "retention_classes",
@@ -22503,7 +22645,7 @@
     }
   ],
   "summary": {
-    "tableCount": 142,
+    "tableCount": 144,
     "viewCount": 44,
     "triggerCount": 581,
     "explicitIndexCount": 147,
@@ -22646,8 +22788,10 @@
         "ops_collector_dispatches",
         "price_promotion_cursor",
         "processor_lane_ticks",
+        "processor_read_budget_hours",
         "provider_maintenance_references",
         "reconciliation_scan_cursor",
+        "report_job_gates",
         "sbi_mailbox_progress"
       ],
       "unclassified-keep": [
@@ -22698,12 +22842,14 @@
       "parse_runs",
       "price_promotion_cursor",
       "processor_lane_ticks",
+      "processor_read_budget_hours",
       "producer_sources",
       "producers",
       "provider_maintenance_references",
       "published_parse_runs",
       "reconciliation_proposals",
       "reconciliation_scan_cursor",
+      "report_job_gates",
       "retention_classes",
       "sbi_mailbox_progress",
       "settlement_relations",
@@ -22781,6 +22927,6 @@
       "0100_sbi_supplemental_unit_eligibility.sql",
       "0101_myjcb_document_unit_eligibility.sql"
     ],
-    "schemaSha256": "efc09ddff5b8e2158d904734fa1277972e3b68d2518ce73cd544f3322c645a74"
+    "schemaSha256": "12d2cd386c84148eb86f2fe0e5b2631ab0f433799a4e68c4d628cdbed88f2db8"
   }
 }

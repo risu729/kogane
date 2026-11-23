@@ -737,6 +737,37 @@ Unknown `first`/`raw` metadata stays unknown; interpretation and limits are
 in [operations.md §1.1](operations.md#11-invocation-budget-probe-issue-87)
 and [ADR 0036](adr/0036-lane-cost-observability.md).
 
+### 6.0 Daily read budget (ADR 0129)
+
+Every metered invocation, scheduled tick or queue batch, adds the D1 rows it
+read (the `invocation_budget` line's `d1RowsRead.reported`) to its starting
+hour's row in `processor_read_budget_hours` (migration 0107), in one batch that
+also drops rows older than 48 hours (`src/read-budget.ts`). Before its lanes,
+the scheduled tick sums the current hour and the 23 before it. Above
+`D1_ROWS_READ_DAILY_BUDGET` (300 million rows, about a third of the 25 billion
+the plan includes per month):
+
+- the first scheduled tick of each hour runs every lane and logs one
+  `{"event":"d1_read_budget_exceeded","rowsRead24h":…,"budget":…}` line at error
+  level, which Workers Issues reports;
+- the later ticks of that hour skip the lanes that recompute from stored state
+  (`identity_sweep`, `instrument_auto_adoption`, `balance_projection`,
+  `reconciliation_sweep`, `card_debit_account_sweep`, `card_settlement_sweep`,
+  `purchase_recognition`, `reward_claims_sweep`, `reward_read_projection`,
+  `price_promotion`, `report_job`, `decision_outbox`), each with a
+  `{"event":<lane>,"skipped":"read_budget"}` line and no tick record. Collection,
+  parsing, operation dispatch, the maintenance survey and the audit overflow
+  keep their cadence.
+
+The sum is what D1 reports: a statement read with `first()` returns no
+metadata and is not counted (`d1RowsRead.missing`). A failed budget read
+throttles nothing; a failed write loses that invocation's count and logs
+`read_budget_record_failed`. A tick is counted when it ends, so two ticks that
+overlap at the start of an hour, or a first tick whose record failed, both run
+as the hour's first. While throttled, an accepted decision's projection
+rebuild (`decision_outbox`) waits up to an hour, and the throttled lanes leave
+gaps of up to an hour in `processor_lane_ticks`.
+
 ### 6.1 Tick records
 
 Most lanes keep no state of their own, so until migration 0049 the only trace

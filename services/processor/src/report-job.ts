@@ -35,6 +35,7 @@ import {
   type ReportRow,
   type ValuationCell,
 } from "../../../packages/domain/src/index.ts";
+import { sha256Hex } from "../../../packages/domain/src/context.ts";
 import { PRICE_RULE_IDS } from "../../../packages/domain/src/price-sources.ts";
 import { quantityFromNormalizedDecimal } from "../../../packages/domain/src/values.ts";
 import {
@@ -43,7 +44,12 @@ import {
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
-import { POSITION_CUT_SQL } from "../../../packages/read-model/src/sql";
+import {
+  POSITION_CUT_SQL,
+  POSITION_VALUATIONS_SQL,
+  positionsSql,
+} from "../../../packages/read-model/src/sql";
+import type { CoreRevisionRow } from "../../../packages/read-model/src/source-revision";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
 const INPUT_MANIFEST_VERSION = "report-inputs-v2";
@@ -93,6 +99,11 @@ export interface ReportJobResult {
   partition: string | null;
   unvaluedReasons: string[];
   truncated: boolean;
+  /**
+   * The stored report was returned from the skip gate (`report_job_gates`)
+   * without reading the positions, valuations or prices again.
+   */
+  gated: boolean;
 }
 
 interface PriceRow {
@@ -144,6 +155,29 @@ function priceObservation(row: PriceRow): PriceObservation | null {
   };
 }
 
+const placeholders = (count: number) => Array.from({ length: count }, () => "?").join(",");
+
+/** `count` position ids, then the cutoff instant in milliseconds. */
+const recordedAfterCutoffSql = (count: number) => `SELECT po.id AS id FROM position_observations po
+         JOIN parse_runs p ON p.id=po.parse_run_id
+         JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+         WHERE po.id IN (${placeholders(count)})
+           AND coalesce(a.recorded_at_ms, a.fetched_at_ms) > ?`;
+
+/** `count` position ids. */
+const knowledgeBoundarySql = (count: number) =>
+  `SELECT max(coalesce(a.recorded_at_ms,a.fetched_at_ms)) AS newest
+         FROM position_observations po
+         JOIN parse_runs p ON p.id=po.parse_run_id
+         JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+         WHERE po.id IN (${placeholders(count)})`;
+
+/** The kind, the policy version, then `count` observation ids. */
+const decimalsSql = (count: number) =>
+  `SELECT observation_id,policy_version AS policyVersion,status,coefficient,scale,basis
+         FROM observation_decimal_values
+         WHERE kind=? AND policy_version=? AND observation_id IN (${placeholders(count)})`;
+
 /**
  * Position observations whose evidence was recorded after the knowledge
  * cutoff. A file fetched long ago but imported yesterday is knowledge Kogane
@@ -160,13 +194,7 @@ async function recordedAfterCutoff(
     const page = ids.slice(offset, offset + DECIMAL_LOOKUP_CHUNK);
     if (page.length === 0) break;
     const rows = await db
-      .prepare(
-        `SELECT po.id AS id FROM position_observations po
-         JOIN parse_runs p ON p.id=po.parse_run_id
-         JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
-         WHERE po.id IN (${page.map(() => "?").join(",")})
-           AND coalesce(a.recorded_at_ms, a.fetched_at_ms) > ?`,
-      )
+      .prepare(recordedAfterCutoffSql(page.length))
       .bind(...page, cutoffMs)
       .all<{ id: number }>();
     for (const row of rows.results) late.add(row.id);
@@ -176,8 +204,9 @@ async function recordedAfterCutoff(
 
 /**
  * The in-scope positions of one cut of the current positions, in page order,
- * read until they exceed `maxRows` or the store ends; `null` when every
- * attempt saw the cut move.
+ * read until they exceed `maxRows` or the store ends, and whether any row read
+ * was dropped as recorded after the cutoff; `null` when every attempt saw the
+ * cut move.
  *
  * The reader answers pages of `POSITION_PAGE` positions plus one row that
  * only says another page exists (and carries no valuations). Positions
@@ -207,7 +236,7 @@ async function readPositionCut(
   reader: ReturnType<typeof createD1ObservationReader>,
   cutoffMs: number,
   maxRows: number,
-): Promise<PositionWithValuations[] | null> {
+): Promise<{ kept: PositionWithValuations[]; late: boolean } | null> {
   for (let attempt = 0; attempt < POSITION_CUT_ATTEMPTS; attempt += 1) {
     const kept: PositionWithValuations[] = [];
     const seen = new Set<number>();
@@ -238,7 +267,7 @@ async function readPositionCut(
       cut.prefix_rows === seen.size &&
       (!ended || cut.current_rows === seen.size)
     )
-      return kept.sort(pageOrder);
+      return { kept: kept.sort(pageOrder), late: kept.length < seen.size };
   }
   return null;
 }
@@ -276,13 +305,7 @@ async function knowledgeBoundary(db: D1Database, ids: readonly number[]): Promis
     const page = ids.slice(offset, offset + DECIMAL_LOOKUP_CHUNK);
     if (page.length === 0) break;
     const row = await db
-      .prepare(
-        `SELECT max(coalesce(a.recorded_at_ms,a.fetched_at_ms)) AS newest
-         FROM position_observations po
-         JOIN parse_runs p ON p.id=po.parse_run_id
-         JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
-         WHERE po.id IN (${page.map(() => "?").join(",")})`,
-      )
+      .prepare(knowledgeBoundarySql(page.length))
       .bind(...page)
       .first<{ newest: number | null }>();
     if (row?.newest != null && (newest === null || row.newest > newest)) newest = row.newest;
@@ -302,11 +325,7 @@ async function decimals(
     const page = ids.slice(offset, offset + DECIMAL_LOOKUP_CHUNK);
     if (page.length === 0) break;
     const rows = await db
-      .prepare(
-        `SELECT observation_id,policy_version AS policyVersion,status,coefficient,scale,basis
-         FROM observation_decimal_values
-         WHERE kind=? AND policy_version=? AND observation_id IN (${page.map(() => "?").join(",")})`,
-      )
+      .prepare(decimalsSql(page.length))
       .bind(kind, policyVersion, ...page)
       .all<NormalizedDecimal & { observation_id: number }>();
     for (const row of rows.results) {
@@ -349,6 +368,29 @@ SELECT position_id, id, base_instrument_ref, base_quantity_coefficient, base_qua
  quote_unit_ref, quote_amount_coefficient, quote_amount_scale, price_kind, effective_time,
  source_claim_ref, market_ref, adjustment_policy_ref
 FROM ranked WHERE rank_in_key=1`;
+
+/**
+ * Same parameters as `SNAPSHOT_PRICE_SQL`. The earliest instant, as a Julian
+ * day, at which a price that selection would consider for a held position
+ * (same claim, rule, publication, quote unit and instant kind) but does not
+ * yet admit becomes admissible: the later of its effective and recorded
+ * instants, both of which the clock alone carries past the cutoff. NULL when
+ * no such price exists. The skip gate holds the stored report only until then.
+ */
+const NEXT_PRICE_INSTANT_SQL = `WITH wanted AS (
+ SELECT DISTINCT json_extract(value,'$[0]') AS base, json_extract(value,'$[1]') AS position_id
+ FROM json_each(?1)
+)
+SELECT min(max(julianday(json_extract(po.effective_time,'$.value')),julianday(po.recorded_at))) AS next_day
+FROM wanted
+JOIN position_observations held ON held.id=wanted.position_id
+JOIN price_observations po ON po.base_instrument_ref=wanted.base AND po.quote_unit_ref=?2
+JOIN price_observation_claims c ON c.price_id=po.id AND c.parse_run_id=held.parse_run_id
+JOIN published_parse_runs pub ON pub.parse_run_id=c.parse_run_id
+WHERE c.rule_id IN (SELECT value FROM json_each(?4))
+  AND json_extract(po.effective_time,'$.kind')='instant'
+  AND (julianday(json_extract(po.effective_time,'$.value'))>julianday(?3)
+    OR julianday(po.recorded_at)>julianday(?3))`;
 
 /**
  * The release of `SNAPSHOT_PRICE_SQL` and of how its rows become prices
@@ -417,6 +459,122 @@ async function snapshotPrices(
     if (price) prices.set(row.position_id, price);
   }
   return prices;
+}
+
+/** The Julian day of the Unix epoch, to turn SQLite's `julianday` into milliseconds. */
+const UNIX_EPOCH_JULIAN_DAY = 2_440_587.5;
+const DAY_MS = 86_400_000;
+
+/** When the clock alone would change which prices the positions are valued at. */
+async function nextPriceInstantMs(
+  db: D1Database,
+  wanted: readonly { ref: string; positionId: number }[],
+  unitRef: string,
+  cutoff: string,
+  ruleIds: readonly string[],
+): Promise<number | null> {
+  if (wanted.length === 0) return null;
+  const row = await db
+    .prepare(NEXT_PRICE_INSTANT_SQL)
+    .bind(
+      JSON.stringify(wanted.map((entry) => [entry.ref, entry.positionId])),
+      unitRef,
+      cutoff,
+      JSON.stringify(ruleIds),
+    )
+    .first<{ next_day: number | null }>();
+  if (row?.next_day == null || !Number.isFinite(row.next_day)) return null;
+  // Rounded down: a gate that ends a moment early only rebuilds the same report.
+  return Math.floor((row.next_day - UNIX_EPOCH_JULIAN_DAY) * DAY_MS);
+}
+
+/**
+ * The version of the skip gate's key. Bump it with any change to how this
+ * module turns what it reads into a report that `reportBuildReleases` and
+ * `readerTexts` do not already name (for example `pageOrder` or
+ * `readPositionCut`), or to what `gateId` and `inputKey` digest.
+ */
+const REPORT_GATE_VERSION = "report-gate-v1";
+
+/**
+ * ?1 the gate id. The CORE revision row, the newest price claim and the gate
+ * stored for these options, in one read of a handful of rows.
+ *
+ * Why these decide the report (ADR 0129). Positions, valuations, their decimals,
+ * snapshot membership, publication, annotations and use restrictions are all
+ * read through tables of the source-revision ledger (or are only reachable
+ * through a publication that is), so any change to them moves
+ * `source_revision` or `visibility_revision`. Prices and their claims sit
+ * outside the ledger; both are append-only and a price is reachable only
+ * through its claim, so the claims' newest rowid moves with every promotion.
+ * `core_epoch` changes when CORE is restored or replaced. What the clock alone
+ * changes (a price becoming effective) is `valid_until_ms`.
+ */
+const GATE_SQL = `SELECT r.source_revision, r.visibility_revision, r.core_epoch,
+ (SELECT coalesce(max(rowid),0) FROM price_observation_claims) AS price_claims,
+ g.input_key, g.report_id, g.context_id, g.content_digest, g.run_id,
+ g.built_cutoff_ms, g.valid_until_ms
+FROM core_source_revision r LEFT JOIN report_job_gates g ON g.gate_id=?1
+WHERE r.id=1`;
+
+interface GateRow extends CoreRevisionRow {
+  price_claims: number;
+  input_key: string | null;
+  report_id: string | null;
+  context_id: string | null;
+  content_digest: string | null;
+  run_id: string | null;
+  built_cutoff_ms: number | null;
+  valid_until_ms: number | null;
+}
+
+/**
+ * Every statement whose text decides which rows the report reads, so a deploy
+ * that changes one of them misses the gate and builds again, even when no
+ * release was bumped and no stored row moved.
+ */
+function readerTexts(): string[] {
+  return [
+    positionsSql({}, 0).sql,
+    POSITION_VALUATIONS_SQL,
+    POSITION_CUT_SQL,
+    recordedAfterCutoffSql(1),
+    knowledgeBoundarySql(1),
+    decimalsSql(1),
+    SNAPSHOT_PRICE_SQL,
+    NEXT_PRICE_INSTANT_SQL,
+    GATE_SQL,
+  ];
+}
+
+/** The options, releases and reader code a stored report answers for: one gate per set. */
+async function gateId(
+  options: ReportJobOptions,
+  maxRows: number,
+  releases: ReportBuildReleases,
+): Promise<string> {
+  return await canonicalDigest({
+    version: REPORT_GATE_VERSION,
+    perimeterRef: options.perimeterRef,
+    unitRef: options.unitRef,
+    decimalPolicyRelease: options.decimalPolicyRelease,
+    maxRows,
+    instrumentValuationPolicyId: DEFAULT_INSTRUMENT_VALUATION_POLICY.policyId,
+    inputManifestVersion: INPUT_MANIFEST_VERSION,
+    releases: { ...releases, priceRuleIds: [...releases.priceRuleIds].sort() },
+    readerTexts: await sha256Hex(readerTexts().join("\n;\n")),
+  });
+}
+
+/** What the stored report was built from, as read before the build. */
+async function inputKey(row: GateRow): Promise<string> {
+  return await canonicalDigest({
+    version: REPORT_GATE_VERSION,
+    sourceRevision: row.source_revision,
+    visibilityRevision: row.visibility_revision,
+    coreEpoch: row.core_epoch,
+    priceClaims: row.price_claims,
+  });
 }
 
 /**
@@ -498,16 +656,91 @@ export async function runReportJob(
     partition: null,
     unvaluedReasons: [],
     truncated: false,
+    gated: false,
   };
   if (!reportsEnabled(env.REPORTS_ENABLED)) return { ...empty, skipped: "flag_off" };
   const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS;
   const reader = createD1ObservationReader(env.DB);
   const cutoffMs = Date.parse(options.knowledgeCutoff);
   if (!Number.isFinite(cutoffMs)) return { ...empty, skipped: "invalid_knowledge_cutoff" };
-  const all = await readPositionCut(env.DB, reader, cutoffMs, maxRows);
-  if (all === null) return { ...empty, skipped: "snapshot_changed" };
+
+  // The skip gate (ADR 0129): when nothing the report reads has changed since
+  // the stored report was built, and the cutoff has not reached a price that
+  // the clock alone admits, that report is the answer. The key is read before
+  // the inputs, so a change during the build leaves an older key behind and
+  // the next run builds again.
+  const gate = gateId(options, maxRows, releases);
+  const marks = await env.DB.prepare(GATE_SQL)
+    .bind(await gate)
+    .first<GateRow>();
+  const key = marks === null ? null : await inputKey(marks);
+  if (
+    marks !== null &&
+    marks.input_key === key &&
+    marks.report_id !== null &&
+    marks.built_cutoff_ms !== null &&
+    marks.built_cutoff_ms <= cutoffMs &&
+    (marks.valid_until_ms === null || cutoffMs < marks.valid_until_ms)
+  )
+    return {
+      ...empty,
+      reused: 1,
+      reportId: marks.report_id,
+      contextId: marks.context_id,
+      contentDigest: marks.content_digest,
+      runId: marks.run_id,
+      gated: true,
+    };
+
+  const cut = await readPositionCut(env.DB, reader, cutoffMs, maxRows);
+  if (cut === null) return { ...empty, skipped: "snapshot_changed" };
+  const all = cut.kept;
   const truncated = all.length > maxRows;
   const positions = all.slice(0, maxRows);
+  // A report over a cut or a row the cutoff dropped can change when the clock
+  // admits a row it did not read, so it is never gated.
+  const gateable = key !== null && !truncated && !cut.late && cutoffMs >= 0;
+  const store = async (stored: {
+    reportId: string;
+    contextId: string;
+    contentDigest: string;
+    runId: string;
+  }): Promise<void> => {
+    if (!gateable) return;
+    const validUntil = await nextPriceInstantMs(
+      env.DB,
+      positions.map((entry) => ({
+        ref: instrumentRef(entry.position),
+        positionId: entry.position.id,
+      })),
+      options.unitRef,
+      options.knowledgeCutoff,
+      releases.priceRuleIds,
+    );
+    // A price admissible at the cutoff itself would already be selected, so a
+    // pending one ends the gate strictly after it.
+    if (validUntil !== null && validUntil <= cutoffMs) return;
+    await env.DB.prepare(
+      `INSERT INTO report_job_gates(gate_id,input_key,report_id,context_id,content_digest,run_id,built_cutoff_ms,valid_until_ms,updated_at)
+       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)
+       ON CONFLICT(gate_id) DO UPDATE SET input_key=excluded.input_key,report_id=excluded.report_id,
+        context_id=excluded.context_id,content_digest=excluded.content_digest,run_id=excluded.run_id,
+        built_cutoff_ms=excluded.built_cutoff_ms,valid_until_ms=excluded.valid_until_ms,
+        updated_at=excluded.updated_at`,
+    )
+      .bind(
+        await gate,
+        key,
+        stored.reportId,
+        stored.contextId,
+        stored.contentDigest,
+        stored.runId,
+        cutoffMs,
+        validUntil,
+        options.now,
+      )
+      .run();
+  };
 
   const positionIds = positions.map((entry) => entry.position.id);
   const valuationIds = positions.flatMap((entry) =>
@@ -571,7 +804,13 @@ export async function runReportJob(
   )
     .bind(reportId)
     .first<{ report_id: string; content_digest: string }>();
-  if (existing)
+  if (existing) {
+    await store({
+      reportId: existing.report_id,
+      contextId,
+      contentDigest: existing.content_digest,
+      runId,
+    });
     return {
       ...empty,
       reused: 1,
@@ -581,6 +820,7 @@ export async function runReportJob(
       runId,
       truncated,
     };
+  }
 
   const cells: ValuationCell[] = [];
   const rows: ReportRow[] = [];
@@ -815,11 +1055,13 @@ export async function runReportJob(
        WHERE NOT EXISTS(SELECT 1 FROM report_events WHERE report_id=? AND kind='generated')`,
     ).bind(reportId, options.actor, options.now, reportId),
   ]);
+  await store({ reportId, contextId, contentDigest, runId });
 
   return {
     generated: 1,
     reused: 0,
     skipped: null,
+    gated: false,
     reportId,
     contextId,
     contentDigest,

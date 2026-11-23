@@ -108,6 +108,12 @@ import {
 import { pricePromotionSweep } from "./price-promotion-job.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
 import {
+  D1_ROWS_READ_DAILY_BUDGET,
+  READ_BUDGET_THROTTLED_LANES,
+  readBudgetState,
+  recordRowsRead,
+} from "./read-budget.ts";
+import {
   IDENTITY_RUNS_PER_TICK,
   LANE_BUDGETS,
   LANES,
@@ -2002,6 +2008,13 @@ function collectionEnv(env: Env): DispatchEnv {
   return env as unknown as DispatchEnv;
 }
 
+/** The read budget's clock, threshold and error line, injectable for tests. */
+export interface ReadBudgetGuard {
+  now?: () => number;
+  budget?: number;
+  alert?: (line: string) => void;
+}
+
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
  * codes only, never provider values or exception text. The stages of one
@@ -2018,8 +2031,20 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
   context: InvocationContext = invocationContext(),
+  guard: ReadBudgetGuard = {},
 ): Promise<void> {
   const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
+  // ADR 0129: above the daily read budget, the derived lanes run on the first
+  // scheduled tick of each hour only, and that tick logs the error once.
+  const budget = await readBudgetState(env.DB, (guard.now ?? Date.now)(), guard.budget);
+  if (budget?.over && !budget.throttled)
+    (guard.alert ?? ((line: string) => console.error(line)))(
+      JSON.stringify({
+        event: "d1_read_budget_exceeded",
+        rowsRead24h: budget.rowsRead24h,
+        budget: guard.budget ?? D1_ROWS_READ_DAILY_BUDGET,
+      }),
+    );
   // [event, stage, whether its flag lets it run this tick]
   const lanes: [
     string,
@@ -2097,6 +2122,11 @@ export async function runScheduled(
   const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
+    if (budget?.throttled && enabled && READ_BUDGET_THROTTLED_LANES.has(event)) {
+      // Not a tick of the lane: it did not run, and its flag is not off.
+      log(JSON.stringify({ event, skipped: "read_budget" }));
+      continue;
+    }
     const startedAtMs = Date.now();
     const observation = observeLane(env, context, event);
     if (!enabled) {
@@ -2139,12 +2169,27 @@ export async function meteredInvocation(
   env: Env,
   work: (env: Env, context: InvocationContext) => Promise<void>,
   log: (line: string) => void = (line) => console.log(line),
+  now: () => number = Date.now,
 ): Promise<void> {
   const meter = new OperationMeter();
   const context = invocationContext();
+  const startedAtMs = now();
   try {
     await work(meteredEnv(env, meter), context);
   } finally {
+    // ADR 0129: the hour's rows read, outside the meter. A failed write only
+    // loses this invocation's count; it never fails the invocation.
+    if (typeof env.DB === "object" && env.DB !== null)
+      try {
+        await recordRowsRead(
+          env.DB,
+          startedAtMs,
+          meter.summary().d1RowsRead.reported ?? 0,
+          trigger,
+        );
+      } catch {
+        console.log(JSON.stringify({ event: "read_budget_record_failed" }));
+      }
     log(JSON.stringify(invocationProbe(trigger, meter, context)));
   }
 }
