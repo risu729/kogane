@@ -18,6 +18,7 @@ import {
 } from "../../../packages/application/src/index.ts";
 import { queryCardPurchases } from "../../../packages/application/src/query/card-purchases.ts";
 import type { SqlExecutor } from "../../../packages/read-model/src/reader.ts";
+import { STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL } from "../../../packages/read-model/test/card-usage-legacy-sql.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { disposeWorlds, world, type UsageRow, type World } from "./card-purchase-world.ts";
 
@@ -246,12 +247,16 @@ test("a clean retirement proof certified under the earlier selection is not reus
   // recognised and again after it. A deployment that reused that proof would
   // never run the amended read until an unrelated input mutation dirtied it,
   // and the purchase would stay counted twice.
-  const certifiedByEarlierRelease = () =>
-    w.db
+  // The premise is checked, not assumed: the frozen pre-amendment read
+  // (read-model's card-usage-legacy-sql.ts) finds nothing stale at both points.
+  const certifiedByEarlierRelease = async () => {
+    expect(await w.all(STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL, 0, -1, -1)).toEqual([]);
+    await w.db
       .prepare(
         "UPDATE card_purchase_retirement_check SET clean_revision=revision,clean_policy='card-purchase-retirement-v1' WHERE singleton=1",
       )
       .run();
+  };
   await certifiedByEarlierRelease();
   await w.sweep();
   await certifiedByEarlierRelease();

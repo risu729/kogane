@@ -184,9 +184,10 @@ replacement is never counted beside it.
   of the link authorizes the pending row's own event again.
 - The same test file: a proof certified clean under `card-purchase-retirement-v1`
   after the confirmed row was re-keyed (before and after its replacement was
-  recognised) is not reused; the merged event is retired and the captured
-  total is the purchase once. It failed while the release was still `-v1`
-  (captured total twice the purchase).
+  recognised; at both points the frozen shipped text,
+  `card-usage-legacy-sql.ts`, reads nothing stale) is not reused; the merged
+  event is retired and the captured total is the purchase once. It failed
+  while the release was still `-v1` (captured total twice the purchase).
 - `packages/read-model/test/card-purchase-keys.test.ts`: the same shape on the
   card store fixture, reported stale with both keys.
 - `packages/read-model/test/card-purchase-stale-reference.ts`, used by
