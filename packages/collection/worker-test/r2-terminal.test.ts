@@ -13,6 +13,7 @@ import { hexToBytes, nativeSha256Hex } from "../src/bucket";
 import { sha256Hex } from "../src/digest";
 import { objectKey, terminalKey } from "../src/keys";
 import { listTerminals, readTerminal, verifyReferencedObjects } from "../src/reader";
+import { sha256HexOfStream } from "../src/stream-digest";
 import { persistRun } from "../src/writer";
 import type { PersistArtifact, PersistRunPlan } from "../src/writer";
 import type { TerminalRunFields } from "../src/manifest";
@@ -148,5 +149,53 @@ describe("R2 create-only writes in the Workers runtime", () => {
     }
     expect(cursor).toBeNull();
     for (const runId of ["scan-a", "scan-b", "scan-c"]) expect(seen).toContain(runId);
+  });
+});
+
+describe("streamed digest of a refused terminal in the Workers runtime", () => {
+  it("hashes the R2 body with crypto.DigestStream to the digest of the buffered bytes", async () => {
+    // The Workers path, not Bun's: the runtime's Web Crypto extension.
+    expect(typeof (crypto as unknown as { DigestStream?: unknown }).DigestStream).toBe("function");
+    // Over the reader's 8 MiB cap, so the reader refuses it unread.
+    const size = 8 * 1024 * 1024 + 5;
+    const bytes = Uint8Array.from({ length: size }, (_, at) => (at * 13 + 7) & 0xff);
+    const key = terminalKey(SOURCE, "oversized-terminal");
+    expect(await env.DATA.put(key, bytes)).not.toBeNull();
+    expect(await readTerminal(env.DATA, SOURCE, "oversized-terminal")).toEqual({
+      outcome: "blocked",
+      key,
+      reasonCode: "terminal_too_large",
+    });
+
+    const streamed = await env.DATA.get(key);
+    const buffered = await env.DATA.get(key);
+    const digest = await sha256HexOfStream(streamed!.body);
+    expect(digest).toBe(await sha256Hex(new Uint8Array(await buffered!.arrayBuffer())));
+    expect(digest).toBe(await sha256Hex(bytes));
+  });
+
+  it("hashes an empty R2 body and offset views cut at any boundary like sha256Hex", async () => {
+    // An empty terminal is refused (`terminal_not_json`) and hashed here too.
+    const emptyKey = terminalKey(SOURCE, "empty-terminal");
+    expect(await env.DATA.put(emptyKey, new Uint8Array())).not.toBeNull();
+    const empty = await env.DATA.get(emptyKey);
+    expect(await sha256HexOfStream(empty!.body)).toBe(await sha256Hex(new Uint8Array()));
+
+    for (const length of [0, 1, 55, 56, 63, 64, 65, 4097]) {
+      const whole = Uint8Array.from({ length }, (_, at) => (at * 31 + length) & 0xff);
+      // Every chunk a view into one padded buffer, empty chunks included.
+      const padded = new Uint8Array(length + 8);
+      padded.set(whole, 3);
+      const cuts = [0, 0, Math.floor(length / 3), Math.floor(length / 3), length, length];
+      const chunks = cuts.slice(1).map((end, at) => padded.subarray(3 + cuts[at]!, 3 + end));
+      let next = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (next >= chunks.length) controller.close();
+          else controller.enqueue(chunks[next++]!);
+        },
+      });
+      expect(await sha256HexOfStream(stream)).toBe(await sha256Hex(whole));
+    }
   });
 });

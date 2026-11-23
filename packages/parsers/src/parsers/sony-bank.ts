@@ -70,7 +70,8 @@ const CUSTOMER_DISPLAY_ORDER = "customerDispOrdr";
 export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
   // Patch release: shared Sony module keeps exact decimals for non-table currencies (issue 1231).
-  version: "1.0.6",
+  // 1.0.7: patch release for the shared module's WALLET change; output unchanged.
+  version: "1.0.7",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -198,7 +199,8 @@ export const sonyBankGrossBalance: Parser = {
 export const sonyBankHistoryJson: Parser = {
   name: "sony-bank-history-json",
   // Exact decimals for CAD/CHF/EUR/GBP/HKD/NZD/SEK/ZAR history, no invented minor units (issue 1231).
-  version: "1.0.5",
+  // 1.0.6: patch release for the shared module's WALLET change; output unchanged.
+  version: "1.0.6",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(artifact.dataset ?? ""),
@@ -296,7 +298,8 @@ export const sonyBankHistoryJson: Parser = {
 export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
   // Exact decimals for CAD/CHF/EUR/GBP/HKD/NZD/SEK/ZAR history, no invented minor units (issue 1231).
-  version: "1.0.6",
+  // 1.0.7: patch release for the shared module's WALLET change; output unchanged.
+  version: "1.0.7",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
@@ -424,8 +427,10 @@ const WALLET_HEADERS = [
 
 export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
-  // Patch release: shared Sony module keeps exact decimals for non-table currencies (issue 1231).
-  version: "1.0.7",
+  // 1.0.8: a transaction amount or fee in a currency outside the minor-unit
+  // table (EUR, GBP, ...) keeps its exact decimal and no amountMinor, as
+  // history does since 1.0.5/1.0.6 (issue 1231); 1.0.7 refused the month.
+  version: "1.0.8",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
@@ -570,7 +575,7 @@ export const sonyBankWalletHistory: Parser = {
         status,
         ...(hasDirection
           ? {
-              amountMinor: transactionMoney.minor,
+              ...(transactionMoney.minor === null ? {} : { amountMinor: transactionMoney.minor }),
               amountText: transactionMoney.text,
               amountScale: transactionMoney.scale,
             }
@@ -585,7 +590,7 @@ export const sonyBankWalletHistory: Parser = {
             usageAmount: usageMoney,
             sourceView: "wallet-monthly-html",
             direction: hasDirection
-              ? transactionMoney.minor < 0
+              ? negativeDecimal(transactionMoney.text)
                 ? "outflow"
                 : "inflow"
               : "unknown",
@@ -854,15 +859,13 @@ function visibleText(html: string): string {
     .trim();
 }
 
-function walletMoney(
-  value: string,
-  label: string,
-): { currency: string; text: string; scale: number; minor: number; explicitSign: boolean };
-function walletMoney(
-  value: string,
-  label: string,
-  preserveProviderCurrency: true,
-): { currency: string; text: string; scale: number; minor: number | null; explicitSign: boolean };
+/**
+ * A WALLET amount with its currency. `minor` is null when the currency has no
+ * exponent in the minor-unit table (`money.ts`): the exact decimal is kept and
+ * no minor-unit integer is invented, as for history (issue 1231). A currency
+ * the table names must still be exact in its minor units. Without
+ * `preserveProviderCurrency` the code must be one of Sony's currencies.
+ */
 function walletMoney(
   value: string,
   label: string,
@@ -881,7 +884,8 @@ function walletMoney(
     ? strictString(match.currency, `${label} currency`, { pattern: /^[A-Z]{3}$/u })
     : enumText(match.currency, CURRENCIES, `${label} currency`);
   const minor = amountToMinorUnits(match.amount!, currency);
-  if (minor === undefined && !preserveProviderCurrency) throw new Error(`${label} is not exact`);
+  if (minor === undefined && !preserveProviderCurrency && minorUnitExponent(currency) !== undefined)
+    throw new Error(`${label} is not exact`);
   const decimal = exactDecimal(match.amount!.replace(/^[△▲]/u, "-"), label);
   return {
     currency,
@@ -889,4 +893,9 @@ function walletMoney(
     ...decimal,
     explicitSign: /^[+\-△▲]/u.test(match.amount!),
   };
+}
+
+/** Whether an exact decimal text is below zero (`-0.00` is not). */
+function negativeDecimal(text: string): boolean {
+  return text.startsWith("-") && !/^-0*(?:\.0*)?$/u.test(text);
 }

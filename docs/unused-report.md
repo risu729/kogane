@@ -9,13 +9,22 @@ deletion decision (acceptance G4-13 and G0-12).
 mise run root:knip
 ```
 
-The configuration is `knip.jsonc`. Knip 6.44.1 has a native
+The configuration is `knip.jsonc`. Knip 6.47.0 (the root `package.json` pin)
+has a native
 [mise plugin](https://knip.dev/reference/plugins/mise), so each workspace's
 inline `mise.toml` tasks supply script entry points and local tool dependencies.
 The old assumption that Knip only understands package scripts no longer applies.
 Workspace discovery follows the Bun manifests; the two independently installed
 Container packages are also explicit Knip workspaces so their dependencies are
 resolved against the correct manifest.
+
+The first run passes `--no-config-hints`; the advisory second run also prints
+Knip's configuration hints, `knip.jsonc` entries Knip suggests removing or
+refining. On 2026-11-22 it printed 8: two `ignore` patterns and three
+`ignoreDependencies` or `ignoreBinaries` entries it suggests removing, and
+three workspace `entry` patterns that match no file. Like the findings, the
+hints never fail the task, and acting on one is a configuration change
+reviewed on its own.
 
 ## What needs an explicit entry
 

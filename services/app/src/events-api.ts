@@ -15,6 +15,7 @@
 // fixed number of live revisions (`ACTIVITY_FILTER_WALK`).
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { decodeKeysetCursor, encodeKeysetCursor } from "../../../packages/domain/src/paging.ts";
+import { parseQueryInstant } from "../../../packages/domain/src/query-instant.ts";
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import {
   type ActivityFilters,
@@ -46,9 +47,6 @@ const ACTIVITY_CURSOR_SCOPE = "economic-events:activity";
 /** The longest value each query parameter takes; any other is at most 64 characters. */
 const MAX_LENGTH: Readonly<Record<string, number>> = { account: 300, cursor: 2048 };
 
-/** An instant with a date, a time and a zone (`Z` or an offset): no bare date, no local time. */
-const INSTANT =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 /** An account id as `accounts` holds it, optionally as a leg names it (`account:<id>`). */
 const ACCOUNT = /^(?:account:)?([A-Za-z0-9][A-Za-z0-9_.-]{0,255})$/u;
 /** A source id, in the evidence browser's charset. */
@@ -71,34 +69,6 @@ function offsetOf(url: Pick<URL, "searchParams">): number {
   return offset;
 }
 
-/** The ISO form of an instant with its zone, or null when it is not a real calendar time. */
-function instantOf(text: string): string | null {
-  const parts = INSTANT.exec(text);
-  const at = Date.parse(text);
-  if (parts === null || !Number.isFinite(at)) return null;
-  const [, year, month, day, hour, minute, second = "0"] = parts;
-  // A parser that rolls `02-30` or `24:00` over to another instant is not
-  // trusted with it (as `kogane.changes.since` checks its `since`). The year
-  // is set as written: `Date.UTC` would read years 0 to 99 as 1900 to 1999.
-  const civil = new Date(0);
-  civil.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
-  civil.setUTCHours(Number(hour), Number(minute), Number(second));
-  if (
-    civil.getUTCFullYear() !== Number(year) ||
-    civil.getUTCMonth() !== Number(month) - 1 ||
-    civil.getUTCDate() !== Number(day) ||
-    civil.getUTCHours() !== Number(hour) ||
-    civil.getUTCMinutes() !== Number(minute) ||
-    civil.getUTCSeconds() !== Number(second)
-  )
-    return null;
-  // `created_at` is compared in `strftime`'s four-digit years; an instant
-  // whose UTC form leaves them (`+010000-…`, `-000001-…`) would compare as
-  // text before every one of them.
-  const iso = new Date(at).toISOString();
-  return /^\d{4}-/u.test(iso) ? iso : null;
-}
-
 /**
  * The activity filters of this query in their compared form, or null when
  * none is given. A malformed value is `400 invalid_query` naming it
@@ -112,9 +82,11 @@ function activityFilters(params: URLSearchParams): ActivityFilters | null {
   const instant = (key: "since" | "before") => {
     const value = text(key);
     if (value === null) return null;
-    const iso = instantOf(value);
-    if (iso === null) refused.push(`${key}:format`);
-    return iso;
+    // `created_at` is compared in `strftime`'s four-digit years, so an
+    // instant whose UTC form leaves them is refused like a malformed one.
+    const parsed = parseQueryInstant(value);
+    if (!parsed.ok) refused.push(`${key}:format`);
+    return parsed.ok ? parsed.iso : null;
   };
   const since = instant("since");
   const before = instant("before");

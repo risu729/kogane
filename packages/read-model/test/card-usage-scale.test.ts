@@ -25,6 +25,7 @@ import {
   STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL,
   STATEMENT_SLOT_UNRECOGNIZED_CARD_USAGE_COUNT_SQL,
 } from "./card-usage-legacy-sql";
+import { addedStaleKeys, expectStaleKeys } from "./card-purchase-stale-reference";
 import { currentRowsDriver, explain, perRowKeyProbes, unboundedScans } from "./card-usage-plan";
 import {
   allCurrentUsage,
@@ -98,10 +99,15 @@ describe("current card usage on a scaled store without statistics", () => {
   test(
     "stale keys and the unrecognised count equal the shipped reads",
     () => {
+      // The shipped text's rows plus exactly ADR 0002's 2026-11-21 additions
+      // (card-purchase-stale-reference.ts), of which the scaled store holds none.
+      expect(addedStaleKeys(db)).toEqual([]);
       for (const limit of [1, 3, 100, 1000]) {
         const stale = staleCardPurchaseKeysSql(limit);
-        const found = rows(stale.sql, stale.args);
-        expect(found).toEqual(rows(STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL, stale.args));
+        const found = expectStaleKeys(db, stale);
+        expect(found as unknown[]).toEqual(
+          rows(STATEMENT_SLOT_STALE_CARD_PURCHASE_KEYS_SQL, stale.args),
+        );
         if (limit === 1000) expect(found.length).toBeGreaterThan(0);
       }
       const count = unrecognizedCardUsageCountSql();

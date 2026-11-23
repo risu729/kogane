@@ -60,12 +60,22 @@ response is required. Connection metadata gates observation pages as well. Other
 refresh failures retain previously authorized records with an explicit warning:
 `QueryBoundary` shows them under `更新できませんでした。前回読み込んだ{label}を表示しています。`
 ("could not refresh; showing the {label} loaded earlier") with a retry, or under its
-offline 前回読み込んだ notice while a read is paused. `収集スケジュール`
+offline 前回読み込んだ notice while a read is paused. A retry button, in that warning or in
+the alert of a load that has no answer yet, waits while its read is in flight: it says
+再試行中…, is `aria-disabled` and ignores a press rather than `disabled`, so the focus
+stays on it, and a failed first load keeps its alert through the retry instead of
+turning back into the loading state (`test/query-boundary.browser.test.ts`). `収集スケジュール`
 ("collection schedules") renders through it, and so do the two correction
 histories (`訂正履歴を見る` on an instrument candidate, `取得元の口座の訂正履歴を見る`
 on an account candidate), which are read again when reopened. While the schedules page shows an earlier
 answer it also holds 依頼を送信 and the re-survey 採用/却下, which decide from what
 it shows ([schedules](schedules.md#schedule-administration)).
+The ホーム page's `判断待ち` panel does not go through `QueryBoundary`: a failed read
+there shows no total and no earlier lines (INV05). It uses the shared states directly: `Loading`
+(a status) while the first read waits, and `ErrorState` (an alert with
+`判断待ちの件数を再試行`) once a read fails. The alert stays, its button saying 再試行中…,
+while that retry or a refresh after an earlier answer is in flight; a refresh that starts
+on its own after a failed first read shows `Loading` again.
 
 ## Design tokens and stylesheet layout
 
@@ -290,6 +300,29 @@ The hand-off in both directions is by reference, never by number or prose:
   allows — computed for that grant, not the page's numbers filtered down.
 
 See [Agent API](agent-api.md) for the grants, tools and result contract.
+
+### Recent changes on ホーム
+
+The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) reads
+`GET /api/v2/changes`, the service of `kogane.changes.since`
+([ADR 0127, amendment of 2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)).
+It sends `since` as the browser's clock minus the chosen window (24時間 by
+default, 7日間, 30日間), taken again on each first read (a refetch on focus or
+a retry included), and a continuation sends its first answer's `since`; the
+retry of a continuation the route refused (`400`) reads the answer again.
+While a window whose continuation failed is read again (that retry, a
+refocus, a return to the window), its answer read and the continuation's
+error stay on screen until the read settles; a continuation refused for
+authentication (`401`) withdraws the answer read, and the panel shows its
+error state. It
+checks every answer with `validChangesSince`, and
+shows the digest's counts per source by closed state, with labels typed by the
+domain's closed lists. A count the digest cut, and every count of an
+incomplete events line, reads 以上, and the states or kinds such a section or
+line does not list read そのほか 0件以上; unchanged sources and what the digest does
+not cover sit in closed disclosures; 続きを読み込む follows `next.after`. A
+`403` or `404` from the route hides the panel; any other failure, a malformed
+answer included, is the error state with no count.
 
 ## Safe preview
 

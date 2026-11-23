@@ -4,6 +4,10 @@
 // answer is this one plus those two fields and not a byte else. Do not edit
 // this file to follow a later change of the shipped function: a change that
 // moves the rest of the answer is a new decision, and its own differential.
+// The one exception is the context's publication basis, which #1502
+// (financial-context-v2, ADR 0091 amendment) moved on main while S7 was in
+// review: it is copied here as shipped, so the frozen text answers the same
+// context and only `next` and `paging` differ.
 import {
   type ContextInputs,
   ERROR_STATUS,
@@ -47,12 +51,15 @@ async function contextInputs(
     grant.scopes.sources === "*"
       ? overview.parseRuns
       : await context.reader.sourceParseRuns(visibleSources);
+  const marks = await context.reader.publicationMarks(
+    grant.scopes.sources === "*" ? null : visibleSources,
+  );
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
   return {
     now: context.now,
-    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}`,
+    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}+publication-events@${String(marks.publicationEvent)}+exclusions@${String(marks.exclusions)}+snapshot-policies@${await canonicalDigest(marks.snapshotPolicies)}`,
     parserBuildDigest: await canonicalDigest(builds),
     visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),

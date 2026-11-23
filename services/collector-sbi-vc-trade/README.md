@@ -33,6 +33,13 @@ A temporary PoC that logs into VCTRADE using an existing Bitwarden passkey entir
   `src/worker.ts`).
 - Budgets: `wrangler.jsonc` sets no `limits`; the CPU and subrequest budgets in
   effect are not recorded in the repository.
+- Failure codes: stored records (manifest failures and units, the health
+  record) and log lines carry only closed codes. `classifyError`
+  (`src/error-code.ts`) keeps a thrown message only when it is one of this
+  collector's own codes or a bounded `collector_http_<status>` /
+  `passkey_http_<status>`; anything else, code-shaped or not, is reduced to
+  `json_parse_failed`, a `crypto_*` code, `type_error` or `unexpected_error`
+  ([collection.md](../../docs/collection.md#sbi-vc-trade-kogane-sbi-vc-session-poc)).
 
 <a id="secretと永続化"></a>
 

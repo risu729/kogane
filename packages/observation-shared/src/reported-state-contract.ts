@@ -10,6 +10,9 @@ import {
   REPORTED_STATE_EXCLUSIONS,
   REPORTED_STATE_SCHEMA,
   REPORTED_STATE_ZONE,
+  SCHEDULED_PAYMENT_DUE_STATUSES,
+  SCHEDULED_PAYMENT_KINDS,
+  SCHEDULED_PAYMENTS_LISTING,
   STATEMENTS_BEFORE_WINDOW_REASONS,
 } from "../../domain/src/reported-state.ts";
 import {
@@ -224,6 +227,64 @@ function validPayable(value: unknown): boolean {
   );
 }
 
+const SCHEDULED_REF = /^scheduled-payment:[1-9][0-9]*$/u;
+const ARTIFACT_REF = /^artifact:[1-9][0-9]*$/u;
+const PARSE_RUN_REF = /^parse_run:[1-9][0-9]*$/u;
+
+function validScheduledPayment(value: unknown): boolean {
+  return (
+    record(value) &&
+    exactKeys(value, [
+      "ref",
+      "sourceAccount",
+      "scheduleKind",
+      "usageDate",
+      "dueDate",
+      "amount",
+      "providerText",
+      "counterparty",
+      "asOf",
+      "dueStatus",
+    ]) &&
+    typeof value.ref === "string" &&
+    SCHEDULED_REF.test(value.ref) &&
+    text(value.sourceAccount) &&
+    member(SCHEDULED_PAYMENT_KINDS)(value.scheduleKind) &&
+    date(value.usageDate) &&
+    date(value.dueDate) &&
+    validQuantity(value.amount) &&
+    text(value.providerText) &&
+    text(value.counterparty) &&
+    date(value.asOf) &&
+    member(SCHEDULED_PAYMENT_DUE_STATUSES)(value.dueStatus)
+  );
+}
+
+function validScheduledCapture(value: unknown): boolean {
+  return (
+    record(value) &&
+    exactKeys(value, [
+      "ref",
+      "sourceId",
+      "parserName",
+      "capturedAt",
+      "captureDate",
+      "ageDays",
+      "freshness",
+      "payments",
+    ]) &&
+    typeof value.ref === "string" &&
+    ARTIFACT_REF.test(value.ref) &&
+    text(value.sourceId) &&
+    text(value.parserName) &&
+    validInstantText(value.capturedAt) &&
+    date(value.captureDate) &&
+    count(value.ageDays) &&
+    member(FRESHNESS_STATES)(value.freshness) &&
+    list(value.payments, validScheduledPayment)
+  );
+}
+
 const EXCLUSION_REASONS = [...new Set(REPORTED_STATE_EXCLUSIONS.map((entry) => entry.reasonCode))];
 
 function validCoverage(value: unknown): boolean {
@@ -238,6 +299,7 @@ function validCoverage(value: unknown): boolean {
       "liabilitiesMissing",
       "payablesFromPaymentDate",
       "statementsBeforeWindow",
+      "scheduledPayments",
       "netAssets",
     ]) &&
     list(
@@ -300,6 +362,7 @@ function validCoverage(value: unknown): boolean {
     // The gap is named exactly when the answer leaves a statement out.
     value.liabilitiesMissing.includes("statements_before_window") ===
       value.statementsBeforeWindow.length > 0 &&
+    member(SCHEDULED_PAYMENTS_LISTING)(value.scheduledPayments) &&
     value.netAssets === "not-computed"
   );
 }
@@ -338,6 +401,8 @@ function validManifest(value: unknown): boolean {
       "statementAccounts",
       "settlementRefs",
       "statementsBeforeWindow",
+      "scheduledPaymentCaptures",
+      "scheduledPaymentRefs",
     ]) &&
     value.schemaVersion === REPORTED_STATE_SCHEMA &&
     date(value.date) &&
@@ -377,7 +442,45 @@ function validManifest(value: unknown): boolean {
       value.statementsBeforeWindow.map((entry) =>
         JSON.stringify([entry["sourceId"], entry["accountId"], entry["reasonCode"]]),
       ),
-    ).size === value.statementsBeforeWindow.length
+    ).size === value.statementsBeforeWindow.length &&
+    list(
+      value.scheduledPaymentCaptures,
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        ARTIFACT_REF.test(entry[0]) &&
+        typeof entry[1] === "string" &&
+        PARSE_RUN_REF.test(entry[1]),
+    ) &&
+    list(
+      value.scheduledPaymentRefs,
+      (entry) => typeof entry === "string" && SCHEDULED_REF.test(entry),
+    )
+  );
+}
+
+/**
+ * The manifest pins exactly the scheduled-payment captures and payments the
+ * body lists, and none is listed under an account filter.
+ */
+function scheduledAgree(body: Record<string, unknown>): boolean {
+  const captures = body["scheduledPayments"] as {
+    ref: string;
+    payments: { ref: string }[];
+  }[];
+  const coverage = body["coverage"] as Record<string, unknown>;
+  const manifest = body["manifest"] as Record<string, unknown>;
+  const pinned = manifest["scheduledPaymentCaptures"] as [string, string][];
+  const refs = manifest["scheduledPaymentRefs"] as string[];
+  const listed = captures.flatMap((capture) => capture.payments.map((payment) => payment.ref));
+  return (
+    (coverage["scheduledPayments"] === "listed" || captures.length === 0) &&
+    pinned.length === captures.length &&
+    captures.every((capture) => pinned.some(([ref]) => ref === capture.ref)) &&
+    new Set(listed).size === listed.length &&
+    refs.length === listed.length &&
+    listed.every((ref) => refs.includes(ref))
   );
 }
 
@@ -417,6 +520,7 @@ export function validReportedState(value: unknown): boolean {
       "snapshots",
       "accounts",
       "payables",
+      "scheduledPayments",
       "coverage",
       "manifest",
       "contextId",
@@ -433,9 +537,11 @@ export function validReportedState(value: unknown): boolean {
     list(value.snapshots, validSnapshot) &&
     list(value.accounts, validAccount) &&
     list(value.payables, validPayable) &&
+    list(value.scheduledPayments, validScheduledCapture) &&
     validCoverage(value.coverage) &&
     validManifest(value.manifest) &&
     countsAgree(value.coverage, value.manifest) &&
+    scheduledAgree(value) &&
     // The manifest pins the filters the body was answered under.
     (value.manifest as { filters: Record<string, unknown> }).filters.source ===
       value.filters.source &&

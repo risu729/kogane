@@ -204,6 +204,30 @@ the manifest schema allows converges over as many invocations as it needs.
 Every port operation is idempotent on its own key, so a call that re-runs one
 anyway is a no-op rather than a conflict.
 
+A terminal the reader refuses is recorded under the SHA-256 of its stored
+bytes. The reader does not hand those bytes back, so registration reads the
+object a second time and hashes its body as it streams (`sha256HexOfStream`
+in `packages/collection/src/stream-digest.ts`: Cloudflare's
+`crypto.DigestStream` in Workers, `Bun.CryptoHasher` under Bun). The body is
+never buffered. A terminal refused as `terminal_too_large` (over 8 MiB) can be
+any size R2 stores, larger than the Worker's memory, and buffering it would end
+the invocation at `collection_scan` on every tick, skip every later lane and
+leave the cursor where it was. The streamed digest is the value the earlier
+buffered read computed for the same bytes, so a run recorded before keeps its
+identity (`services/processor/test/collection-oversized-terminal.test.ts`, and
+the Workers path against real R2 in
+`packages/collection/worker-test/r2-terminal.test.ts`). The reader itself
+cancels the body of a terminal it refuses for its size, unread.
+
+Streaming bounds the memory, not the time, and this is an open limit. The hash
+reads every byte, so its CPU and wall time grow with the object's size, with no
+byte cap. The digest is computed before the conditional insert, so every walk
+of the `runs/` prefix that reaches the terminal hashes it again, even when its
+block is already recorded. An object large enough to pass the invocation's CPU
+limit (`limits.cpu_ms`, 300 s) or its wall-clock limit would still end the
+invocation at `collection_scan`. Whether to cap that work, and under what
+identity a capped terminal is recorded, is an owner decision not yet made.
+
 ### 3.1 Collector ids, CORE source ids and producers
 
 A collector names itself in its terminal and in its `runs/<source>/` prefix
@@ -730,9 +754,19 @@ an `error_code` and `counts_json`:
 - `skipped-by-flag` — the lane's flag is off, so the stage was not called
   (or, for the always-wired `operation_dispatch`, it reported
   `enabled: false`); the log still gets no line, and `counts_json` is `{}`.
-- `failed` — the stage threw; `error_code` is the same safe code the
-  `<lane>_failed` log line carries (a pipeline code or the error's constructor
-  name, `unknown` for anything that is not a code) and `counts_json` is `{}`.
+- `failed` — the stage threw; `error_code` is the same closed code the
+  `<lane>_failed` log line carries, and `counts_json` is `{}`. The code is one
+  of the pipeline's own codes (`raw_object_missing`, `parse_contract_invalid`,
+  …), one of the two Processor lane errors whose class is their documented
+  code (`RewardClaimWriteRefused`, [rewards.md](rewards.md#7-promotion-job);
+  `IdentityObservationBoundExceeded`,
+  [ADR 0055](adr/0055-instrument-candidates.md)), matched by identity rather
+  than by name, or else the error's built-in class as `safeFailureCode`
+  classifies it (§7: `TypeError`, `RangeError`, …, `Error` for any other
+  Error, a custom class included) and `unknown` for a throw that is not an
+  Error or cannot be inspected. A class name or message the thrower chose is
+  never copied. The `collection_notification_failed` line of the queue
+  consumer carries a code from the same set.
 
 A lane whose stage is not wired at all records nothing. Only counts, flags and
 the closed code maps above (`purchase_recognition`'s exclusion codes,
@@ -747,8 +781,9 @@ The table is bounded: each insert deletes that lane's rows beyond the latest
 updated. It is `operational-mutable` in the CORE ledger and outside the
 source-revision ledger, so recording a tick never makes a projection stale. A
 row that cannot be written is logged as
-`{"event":"lane_tick_record_failed","lane":…,"code":…}` and changes nothing
-the lane did. `GET /status` (`mise run //services/processor:ops status`) and
+`{"event":"lane_tick_record_failed","lane":…,"code":…}`, the code being the
+error's built-in class or `unknown` (`safeFailureCode`, §7), and changes
+nothing the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 `GET /internal/health` (§13) report the latest tick of each lane as
 `laneTicks`; reading them is in [operations.md](operations.md#lane-tick-records).
 
@@ -773,7 +808,9 @@ counts. An idle tick, a lane whose flag is off and every other lane write no
 record. The mark and the record are read and written outside the lane's
 metered scope, and a failure to read or write them is logged as
 `{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
-the lane did.
+the lane did. The code is the audit builder's own `audit_record_invalid` or
+`audit_diff_invalid`, else the error's built-in class or `unknown`
+(`safeFailureCode`, §7); any other `code` an error carries is not copied.
 
 ## 7. Operations dispatch
 

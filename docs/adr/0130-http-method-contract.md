@@ -1,6 +1,6 @@
 # ADR 0130: Every 405 names what its route serves, and HEAD is GET without its body everywhere
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1518](https://github.com/risu729/kogane/pull/1518))
 - Date: 2026-11-21
 - Tracking: the owner's request to "fix needless inconsistencies"
 - Related: [ADR 0047](0047-mcp-client-connection.md) (`/mcp` is POST only),

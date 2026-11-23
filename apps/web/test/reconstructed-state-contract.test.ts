@@ -96,6 +96,34 @@ describe("reconstructed state HTTP contract", () => {
     expect(RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX).toBe(RECONSTRUCTION_ACCOUNTS_MAX);
   });
 
+  test("the manifest pins each account's mapped sources, sorted, within the scope", async () => {
+    const body = await answer(WORLD_BANK, WORLD_CARD);
+    const pairs = body.manifest!.accountSources;
+    expect(pairs.map((pair) => pair[0])).toEqual(expect.arrayContaining([WORLD_BANK, WORLD_CARD]));
+    const mutate = (change: (copy: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy);
+      return validReconstructedState(copy);
+    };
+    expect(mutate(() => {})).toBe(true);
+    expect(mutate((copy) => delete copy["manifest"]["accountSources"])).toBe(false);
+    expect(mutate((copy) => copy["manifest"]["accountSources"].reverse())).toBe(false);
+    expect(
+      mutate((copy) => copy["manifest"]["accountSources"].push([...pairs[pairs.length - 1]!])),
+    ).toBe(false);
+    expect(mutate((copy) => copy["manifest"]["accountSources"].push(["zz-other", "x"]))).toBe(
+      false,
+    );
+    expect(mutate((copy) => (copy["manifest"]["accountSources"][0] = [WORLD_BANK]))).toBe(false);
+    // An account mapped to no source is listed by no reported container.
+    expect(
+      mutate(
+        (copy) =>
+          (copy["manifest"]["accountSources"] = pairs.filter((pair) => pair[0] !== WORLD_BANK)),
+      ),
+    ).toBe(false);
+  });
+
   test("a figure, a code or a shape the contract does not name is refused", async () => {
     const body = await answer(WORLD_BANK);
     const mutate = (change: (copy: Record<string, any>) => void): boolean => {

@@ -1036,15 +1036,19 @@ table statistics.
 source, in one answer under 8 KB ([ADR 0127](adr/0127-changes-since-digest.md)).
 It is the service of `GET /api/v2/changes?since=…[&after=…]`
 (`readChangesSince`), which any signed-in subject reads under the reader
-authority of the evidence browser's GET routes; no screen reads it yet, so the
-parity guard lists the tool among the tools without a UI route. It is listed
-on `/mcp` only to a grant holding `records.read` over the whole store.
+authority of the evidence browser's GET routes. The ホーム page's 最近の変化
+panel reads that route ([ADR 0127, amendment of
+2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)),
+so the parity guard maps it to the tool. It is listed on `/mcp` only to a
+grant holding `records.read` over the whole store.
 
 Input: `since`, an ISO 8601 instant with a zone (`Z` or an offset), at most
 31 days before the call and not after it; `after`, optionally, a source id.
 Any other key is `400 invalid_request`; a `since` or `after` the service
 refuses is `400 invalid_query` with `since:format`, `since:future`,
-`since:too_old` or `after:format`. Output: `kogane-changes-since-v1` with the
+`since:too_old` or `after:format`; `since:format` is a value that is no real
+calendar time of that form (years as written, 0000 to 9999), and a real time
+outside the 31 days is `since:future` or `since:too_old`, whatever its year. Output: `kogane-changes-since-v1` with the
 canonical `since`, `asOf`, `basis: recorded`, the `bounds`, the positional
 `order` of each count, `sections` (`counted` or `unauthorized`), `sources`,
 `unchanged`, `next`, `events`, `handlers` and `notCovered`.
@@ -1101,7 +1105,8 @@ is cut or the events walk is incomplete.
 `kogane.reported-state.read` is `GET /api/v2/reported-state` for an agent
 (plan D5, [ADR 0019](adr/0019-dated-reported-state.md#agent-read-amendment--2026-11-06)):
 what each provider last reported on a date, per account, beside the card
-statements due around it ([reported state](reported-state.md)). It is not the
+statements due around it and the payments MyJCB's skip-payment page still
+scheduled ([reported state](reported-state.md)). It is not the
 `reported-state` intent of `kogane.financial.query`, which reads the latest
 balances and positions. Route and tool are adapters over one service,
 `readReportedStateRequest` in
@@ -1572,7 +1577,12 @@ and explanation are the operator route's answer with one difference, ADR
 run and without its body, is `403 evidence_restricted` on both views, and a
 report whose body has left R2 is `404 not_found`, the codes `/export`
 answers; the operator page re-displays the first and shows the second as
-`unavailable`. No argument reaches `/export`. The detail carries `partition`
+`unavailable`. A cached explanation node that is not JSON is
+`503 report_explanation_invalid` on the route and both agent paths (an
+`isError: true` result on `/mcp`), as a stored body that cannot be read is
+`503 report_body_invalid`; nothing of the stored text is answered or logged
+([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-a-cached-explanation-that-is-not-json-is-refused-as-such-2026-11-21)).
+No argument reaches `/export`. The detail carries `partition`
 beside the stored `body`, the partition the page shows: a body stored
 `complete` with `truncated: true` is answered `partial-verified-scope`
 ([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).
@@ -2054,10 +2064,23 @@ the intent, perimeter, bases and filters but not the page size or the
 effective time, so a client cannot change the answer by resizing a page. A
 cursor from a context with other pinned inputs (a later publication, another
 perimeter) or another query is `stale_context`; it is never quietly restarted
-from the newest rows. Limit: the publication high-water is the highest visible
-parse run id, so a release activation onto older candidate runs or a rollback
-need not move it, and a cursor resumed across one can repeat or skip rows
-([ADR 0091: consequences](adr/0091-query-cursor-paging-basis.md#consequences)).
+from the newest rows. The publication marker (`publicationRef`,
+`financial-context-v2`) is
+`published-parse-runs@<id>+publication-events@<id>+exclusions@<n>+snapshot-policies@<digest>`
+over the grant's sources: the highest visible parse run, the newest
+`publication_events` row, the number of runs excluded from financial views and
+a digest of the `dataset_snapshot_policies` columns the lists read. A release
+activation onto older candidate runs, a rollback, an exclusion and an
+operator's policy update (a dataset named for the `unit` eligibility scope)
+change the rows a page reads without a newer parse run, and each moves the
+marker, so a cursor across one is `stale_context` and, at one clock, the
+`contextId` differs
+([ADR 0091 amendment](adr/0091-query-cursor-paging-basis.md#amendment-2026-11-21-a-publication-marker-that-moves-with-every-publication-change);
+`services/app/test/query-paging-basis.test.ts`). Limits: the marker is read
+before the rows, in separate statements, so a change that lands between them
+is answered under the earlier marker, and a cursor checked against that
+marker resumes over the changed rows; and a deploy that changes the read SQL
+between two pages keeps the basis.
 
 `resultRef` is the digest of `{contextId, resolvedQuery, data}`. It, together
 with `contextId` and a proposal's `proposalId`, is what a page and an agent
@@ -2143,20 +2166,44 @@ and the tool alike. Its context is always opened under the latest identity
 (`contextInputs`, `services/app/src/agent-service.ts`), so its `contextId`
 pins the identity release (`identity:latest:current-mappings-v1`) and the
 evaluation clock, which the Worker cuts to whole seconds
-(`services/app/src/agent-api.ts`), and no mapping revision: a mapping
-corrected between two calls in the same second leaves the `contextId` as it
-was. A graph's `account_mapping:<referenceId>@<revision>` and
-`instrument_mapping:<referenceId>@<revision>` refs (and the
-`identity-decision:` ref under the account one) are written from the
-organization on the observation detail the reader returned, so they name the
-revision that was read, which the `contextId` does not pin.
+(`services/app/src/agent-api.ts`), and no mapping revision.
 
-Limit: the reader the Worker passes is the evidence reader, whose
-`getObservation` returns no organization
-(`packages/read-model/src/observation-reader.ts`). A graph served today
-therefore holds no `adopted-claim` or `identity-decision` node and reads no
-mapping; those levels are exercised only with a test reader
-(`packages/application/test/explain-propose.test.ts`).
+For an observation ref, the graph's organization levels come from the
+organization the observation detail route shows: `organizedExplainReader`
+reads it with `observationOrganizations`
+(`packages/application/src/query/observation-organization.ts`), the function
+`GET /api/observations/<kind>/<id>` calls, under the context's identity mode,
+and only after the grant has allowed the row. A mapped observation's graph
+then holds, below the result row:
+
+| Depth | Node                                                                            | Kind                |
+| ----- | ------------------------------------------------------------------------------- | ------------------- |
+| 2     | `account_mapping:<referenceId>@<revision>`                                      | `adopted-claim`     |
+| 2     | `instrument_mapping:<referenceId>@<revision>`                                   | `adopted-claim`     |
+| 3     | `identity-decision:<method>:<referenceId>@<revision>` (under the account claim) | `identity-decision` |
+
+`referenceId` is the source account or instrument identifier id the mapping is
+keyed by, `method` is `rule` or `manual`, and `revision` is the revision that
+was read. An observation no sealed identity run organizes has none of these
+nodes. The levels are shown under `summary.read`, like the parse run beside
+them; only the raw locators need `evidence.read`.
+
+Under `latest` a mapping corrected between two calls in the same second
+leaves the `contextId` as it was and changes the graph's refs to the new
+revision. That is how the shared context treats `latest`, which `explain`
+opens with the inputs `kogane.context.open` and `kogane.query` use: it pins
+the identity mode and release, not revisions, and the `identity` quality
+dimension of a `latest` query says `mappings_may_change_under_latest`
+([result contract](#result-contract)); balance pages likewise re-read the
+organization overlay. Not every `latest` answer works this way: a dated
+reported-state `contextId` pins each listed row's account and instrument, so
+a mapping revision that changes what a row shows moves it
+([reported state](reported-state.md#the-answer)). A graph is self-describing
+instead: each mapping ref
+names the revision it was built from, so two graphs that differ under one
+`contextId` say how. `explain` issues no cursor and no `resultRef`, so nothing
+resumes or hands off on a revision it did not read
+([ADR 0081 amendment 2026-11-21](adr/0081-ui-parity-through-mcp.md#amendment-explain-reads-the-detail-routes-organization-2026-11-21)).
 
 ## Result contract
 
@@ -2285,11 +2332,13 @@ Converting them to JSON does not make them instructions.
   `kogane.command.plan` `baseContextId` (256) and `kogane.command.approve`
   `scope` items (512). The keys of both open maps, and the values of
   `kogane.audit.search` `filters`, have no length bound in the schema.
-- `explain` returns identifiers only — `account_mapping:` (where its reader
-  supplies an organization, which the served one does not:
-  [explain and the identity read](#explain-and-the-identity-read)),
-  `parse_run:`, `fetch_artifact:`, `raw:<sha256>`. The provider URL an
-  artifact was fetched from is never in a graph, at any capability.
+- `explain` returns identifiers only — `account_mapping:`,
+  `instrument_mapping:`, `identity-decision:`, `parse_run:`,
+  `fetch_artifact:`, `raw:<sha256>`. The provider URL an artifact was fetched
+  from is never in a graph, at any capability, and neither is a mapping's
+  label or reason, the account entity or instrument it maps to, or an
+  identifier's namespace, scope or value
+  ([explain and the identity read](#explain-and-the-identity-read)).
 - Errors carry a code, a fixed remedy sentence and safe refs. No provider
   content, token, SQL text or raw exception string reaches a caller.
 - Bank credentials, sessions and keys are never in a response, and no Access
@@ -2420,7 +2469,7 @@ are unchanged.
 | `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                                          |
 | `GET` / `HEAD` / `DELETE`; a query string                                                                                                                         | Worker                                      | `405 method_not_allowed` with `Allow: POST` / `400 invalid_query`                                                                                 |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
-| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                                          |
+| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601` (under HTTP `404` in the 2026-07-28 revision, whose methods do not include `ping`); `-32602 unknown_tool`                       |
 | an operations tool whose principal does not resolve (a malformed subject, a bad clock)                                                                            | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_mcp_client"}` (or the resolution's other closed code); only the refusal record                         |
 | capability not granted                                                                                                                                            | tool                                        | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                                              |
 | source, account or row outside the scope                                                                                                                          | tool                                        | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                                            |
@@ -2984,7 +3033,7 @@ owner's agreement.
    `kogane.card-settlements.statements` with the grouped `/statements` route. Every other published tool that is
    not a `ui` operation is listed with its reason (`kogane.capabilities`,
    `kogane.explain`, `kogane.reconcile.propose`,
-   `kogane.events.read`, `kogane.audit.get`, `kogane.changes.since`),
+   `kogane.events.read`, `kogane.audit.get`),
    so a new read tool is mapped to its route and that route leaves the gaps.
 
    | UI read route                                                                                                                              | MCP read                                                                                                                                                       |
@@ -3000,6 +3049,7 @@ owner's agreement.
    | `/api/v2/reported-state`                                                                                                                   | `kogane.reported-state.read`                                                                                                                                   |
    | `/api/v2/reconstructed-state`                                                                                                              | `kogane.reconstructed-state.read`                                                                                                                              |
    | `/api/v2/audit`                                                                                                                            | `kogane.audit.search`                                                                                                                                          |
+   | `/api/v2/changes`                                                                                                                          | `kogane.changes.since` (the ホーム page's 最近の変化 panel)                                                                                                    |
    | `/api/v2/reconciliation/card-statements-unmatched`                                                                                         | `kogane.card-settlements.unmatched`                                                                                                                            |
    | `/api/v2/reconciliation/card-debit-accounts`                                                                                               | `kogane.card-settlements.debit-accounts`                                                                                                                       |
    | `/api/v2/decisions/pending`                                                                                                                | `kogane.decisions.pending`                                                                                                                                     |

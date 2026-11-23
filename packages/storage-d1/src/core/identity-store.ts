@@ -263,7 +263,10 @@ async function instrumentMapping(db: D1Like, instrument: InstrumentIdentity, ver
 }
 
 type ParseIdentity = IdentityParseMeta;
-interface ObservationRow {
+/** One Layer B form the identity projection interprets. */
+export type IdentityObservationKind = (typeof kinds)[number];
+/** The Layer B columns an identity input is built from. */
+export interface IdentityObservationRow {
   id: number;
   source_account: string;
   currency: string | null;
@@ -297,6 +300,108 @@ async function policyRecord(runId: string, parseId: number, selection: IdentityP
   ] as const;
 }
 
+/**
+ * The policy the projection applies to one parse: the module's selection for
+ * the requested version, the stored version it settles on, and the single
+ * trusted Vpass binding when the Vpass family was selected. A standard request
+ * (`IDENTITY_POLICY_VERSION`) gives each parse its own required version, so a
+ * parse without auxiliary evidence stays at the base version. `identifyParse`
+ * and the read-only classifier audit (`services/processor/scripts/audit-identities.ts`)
+ * both resolve through this, so the audit reports what the projection writes.
+ */
+export interface ParseIdentityPolicy {
+  selection: IdentityPolicySelection;
+  version: number;
+  binding: VpassBinding | undefined;
+}
+
+export async function parseIdentityPolicy(
+  db: D1Like,
+  parse: ParseIdentity,
+  requestedVersion = IDENTITY_POLICY_VERSION,
+): Promise<ParseIdentityPolicy> {
+  // The source's policy module decides the release and its evidence; the
+  // store only persists the selected plan.
+  const evidence = await loadIdentityEvidence(db, parse, requestedVersion);
+  const selection = selectIdentityPolicy(parse, evidence, requestedVersion);
+  return {
+    selection,
+    version: selection.policyVersion,
+    binding:
+      selection.policyFamily === VPASS_POLICY_FAMILY ? trustedVpassBinding(evidence) : undefined,
+  };
+}
+
+/** The resolver input for one observation of a parse under its selected policy. */
+export function identityObservationInput(
+  parse: ParseIdentity,
+  policy: ParseIdentityPolicy,
+  kind: IdentityObservationKind,
+  row: IdentityObservationRow,
+): IdentityInput {
+  const extra: unknown = JSON.parse(row.extra_json);
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra))
+    throw new Error("identity_extra_invalid");
+  const binding = policy.binding;
+  return {
+    kind,
+    observationId: row.id,
+    parseRunId: parse.id,
+    artifactId: parse.artifact_id,
+    fetchRunId: parse.fetch_run_id,
+    sourceId: parse.source_id,
+    producerId: parse.producer_id,
+    sourceAccount: row.source_account,
+    currency: row.currency,
+    instrument: row.instrument,
+    securityCode: row.security_code,
+    securityName: row.security_name,
+    market: row.market,
+    subject: row.subject,
+    extra: record(extra),
+    policyVersion: policy.version,
+    ...(binding && row.source_account === `vpass:${binding.financial_unit_key}`
+      ? {
+          trustedVpassBinding: {
+            cardToken: binding.card_token,
+            bindingArtifactId: binding.binding_artifact_id,
+            financialUnitId: binding.financial_unit_id,
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The resolver's plan for one input, as the projection applies it: a
+ * still-effective manual decision on the run-scoped reference of a trusted
+ * Vpass row is retained instead of being replaced by the automatic token
+ * mapping.
+ */
+export async function planObservationIdentity(
+  db: D1Like,
+  input: IdentityInput,
+  resolver: IdentityResolver,
+): Promise<IdentityPlan> {
+  const plan = resolver(input);
+  if (input.trustedVpassBinding) {
+    const fallbackKey = [input.sourceAccount, "fetch-run", String(input.fetchRunId)];
+    const fallbackRef = await identityKey("sa", [input.sourceId, input.producerId, fallbackKey]);
+    if (
+      await db
+        .prepare(
+          `SELECT 1 FROM protected_mapping_subjects WHERE subject_kind='account_mapping' AND subject_ref=?`,
+        )
+        .bind(fallbackRef)
+        .first()
+    ) {
+      plan.account.key = fallbackKey;
+      plan.issues.push("manual-run-scoped-account-mapping-preserved");
+    }
+  }
+  return plan;
+}
+
 export async function identifyParse(
   db: D1Like,
   parse: ParseIdentity,
@@ -321,13 +426,9 @@ export async function identifyParse(
     verified.fetch_run_id !== parse.fetch_run_id
   )
     throw new Error("identity_parse_provenance_invalid");
-  // The source's policy module decides the release and its evidence; the
-  // store only persists the selected plan.
-  const evidence = await loadIdentityEvidence(db, parse, version);
-  const selection = selectIdentityPolicy(parse, evidence, version);
-  version = selection.policyVersion;
-  const binding: VpassBinding | undefined =
-    selection.policyFamily === VPASS_POLICY_FAMILY ? trustedVpassBinding(evidence) : undefined;
+  const policy = await parseIdentityPolicy(db, parse, version);
+  const { selection, binding } = policy;
+  version = policy.version;
   const runId = await identityKey("ir", [parse.id, version]);
   if (
     await db.prepare("SELECT 1 FROM identity_run_seals WHERE identity_run_id=?").bind(runId).first()
@@ -369,63 +470,13 @@ export async function identifyParse(
             ORDER BY id LIMIT ?`,
         )
         .bind(parse.id, after, runId, kind, Math.min(50, maxRows - total))
-        .all<ObservationRow>();
+        .all<IdentityObservationRow>();
       if (!rows.results.length) break;
       const observations: unknown[][] = [];
       const uses: unknown[][] = [];
       for (const row of rows.results) {
-        const extra: unknown = JSON.parse(row.extra_json);
-        if (extra === null || typeof extra !== "object" || Array.isArray(extra))
-          throw new Error("identity_extra_invalid");
-        const input: IdentityInput = {
-          kind,
-          observationId: row.id,
-          parseRunId: parse.id,
-          artifactId: parse.artifact_id,
-          fetchRunId: parse.fetch_run_id,
-          sourceId: parse.source_id,
-          producerId: parse.producer_id,
-          sourceAccount: row.source_account,
-          currency: row.currency,
-          instrument: row.instrument,
-          securityCode: row.security_code,
-          securityName: row.security_name,
-          market: row.market,
-          subject: row.subject,
-          extra: record(extra),
-          policyVersion: version,
-          ...(binding && row.source_account === `vpass:${binding.financial_unit_key}`
-            ? {
-                trustedVpassBinding: {
-                  cardToken: binding.card_token,
-                  bindingArtifactId: binding.binding_artifact_id,
-                  financialUnitId: binding.financial_unit_id,
-                },
-              }
-            : {}),
-        };
-        const plan = resolver(input);
-        if (input.trustedVpassBinding) {
-          // A still-effective manual decision on the run-scoped reference is
-          // retained instead of being replaced by the automatic token mapping.
-          const fallbackKey = [input.sourceAccount, "fetch-run", String(input.fetchRunId)];
-          const fallbackRef = await identityKey("sa", [
-            input.sourceId,
-            input.producerId,
-            fallbackKey,
-          ]);
-          if (
-            await db
-              .prepare(
-                `SELECT 1 FROM protected_mapping_subjects WHERE subject_kind='account_mapping' AND subject_ref=?`,
-              )
-              .bind(fallbackRef)
-              .first()
-          ) {
-            plan.account.key = fallbackKey;
-            plan.issues.push("manual-run-scoped-account-mapping-preserved");
-          }
-        }
+        const input = identityObservationInput(parse, policy, kind, row);
+        const plan = await planObservationIdentity(db, input, resolver);
         const accountKey = JSON.stringify(plan.account.key);
         let account = accounts.get(accountKey);
         if (!account) {
