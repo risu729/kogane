@@ -203,6 +203,13 @@ test("real registration selects same-capture history once, falls back on a faile
     observedAt: completeAt,
     reasonCode: "history_not_current",
   });
+  // With the newer history failed the reader selects the total again, and the
+  // total keeps its provider display section.
+  const fallback = await captureRewardInput(env.DB, { now: () => "2026-10-03T00:00:00.000Z" });
+  if (!fallback.ok) throw new Error("synthetic_reward_input_unavailable");
+  expect(
+    fallback.captured.input.content.providerSections?.map((section) => section.parentBucketRef),
+  ).toEqual([newer.holding.buckets[0]!.bucketRef]);
   const smaller = syntheticJPointHistory();
   smaller.rows = [smaller.rows[1]!];
   smaller.reportedTotal = "40";
