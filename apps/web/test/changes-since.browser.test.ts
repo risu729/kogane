@@ -160,6 +160,7 @@ type Mode =
   | "answer"
   | "paged"
   | "continuation_failed"
+  | "continuation_held"
   | "continuation_unauthenticated"
   | "bounded"
   | "refused"
@@ -188,6 +189,8 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
   /** The server's clock in mode `bounded`, which refuses a `since` past the digest's bound. */
   let serverNow = Date.now();
   const requests: URLSearchParams[] = [];
+  /** In mode `continuation_held`, the continuation waits for it, then fails. */
+  let continuationHeld: Promise<void> = Promise.resolve();
   beforeAll(async () => {
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -257,6 +260,15 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
               return after === null
                 ? Response.json(firstPage(since))
                 : Response.json({ error: "internal" }, { status: 500 });
+            case "continuation_held":
+              if (after === null) return Response.json(firstPage(since));
+              await continuationHeld;
+              // Refused as the route refuses a `since` past the digest's bound;
+              // a 4xx is not retried by the client, so one read is one request.
+              return Response.json(
+                { error: "invalid_query", requestId: "synthetic-request" },
+                { status: 400 },
+              );
             case "continuation_unauthenticated":
               // The sign-in lapsed between the first page and its continuation.
               return after === null
@@ -463,6 +475,36 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
       );
       expect(await auditView(page)).toEqual([]);
     } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("続きを読み込む keeps the focus while its read is in flight, and a press meanwhile reads nothing more", async () => {
+    mode = "continuation_held";
+    let release!: () => void;
+    continuationHeld = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const page = await browser.newPage();
+    try {
+      const panel = await open(page);
+      const button = panel.getByRole("button", { name: /^(続きを読み込む|読み込んでいます…)$/u });
+      await button.focus();
+      requests.length = 0;
+      await page.keyboard.press("Enter");
+      await button.and(page.locator('[aria-disabled="true"]')).waitFor();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      await page.keyboard.press("Enter");
+      release();
+      // The refusal replaces the button with its own alert and 再試行 (open
+      // limit in docs/ui-guidelines.md: the focus is not carried there).
+      await panel
+        .getByRole("alert")
+        .filter({ hasText: "最近の変化の続きを読み込めませんでした" })
+        .waitFor({ timeout: 10_000 });
+      expect(requests.filter((params) => params.get("after") !== null)).toHaveLength(1);
+    } finally {
+      release();
       await page.close();
     }
   }, 30_000);

@@ -25,6 +25,7 @@ import {
   type OperationRecordRunWire,
   type OperationRecordWire,
 } from "../operations-api.ts";
+import { BusyButton } from "../busy-button.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, Kv, KvRow, Notice, Panel, QueryBoundary, type Tone } from "../ui.tsx";
 
@@ -450,14 +451,9 @@ export function OperationPage({ operationId }: { operationId: string }): ReactNo
                 </>
               )}
               <div className="panel-body">
-                <button
-                  className="button"
-                  type="button"
-                  disabled={query.isFetching}
-                  onClick={() => void query.refetch()}
-                >
+                <BusyButton busy={query.isFetching} onClick={() => void query.refetch()}>
                   最新の状態を読み直す
-                </button>
+                </BusyButton>
               </div>
             </>
           )}
