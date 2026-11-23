@@ -299,7 +299,7 @@ equal to `CHANGES_SINCE_HANDLERS`, so the published answer carries the new key.
 
 ## Amendment 2026-11-20: the ホーム panel reads the route
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted
 - Date: 2026-11-20
 - Revises: decision 1 (no screen reads the route) and the parity consequence
 - Owner approval: required before merge. The ホーム page gains a panel; the
@@ -445,9 +445,9 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
 
 ## Amendment: a `since` in the years 0000 to 0099 is too old, not malformed (2026-11-21)
 
-- Status: proposed. The refusal ref is part of `kogane.changes.since`'s
+- Status: accepted. The refusal ref is part of `kogane.changes.since`'s
   published answer, and it changes from `since:format` to `since:too_old` for
-  a `since` written in the years 0000 to 0099: **the owner's approval is
+  a `since` written in the years 0000 to 0099: **the owner's approval was
   needed before merge**.
 - Date: 2026-11-21
 

@@ -215,7 +215,7 @@ Synthetic data only; no production data, D1 or Workers deployment.
 
 ## Amendment: the context id pins each account's mapped sources (2026-11-21)
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-21
 
 ### Context

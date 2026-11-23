@@ -273,7 +273,7 @@ text.
 
 ## Amendment 2026-11-21: a publication marker that moves with every publication change
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-21
 - Carried by: `services/app/src/agent-service.ts` (`contextInputs`),
   `packages/read-model/src/observation-reader.ts` (`publicationMarks`,

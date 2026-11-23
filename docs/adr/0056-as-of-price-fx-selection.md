@@ -522,7 +522,7 @@ With synthetic data only:
 
 ## Amendment (2026-11-22): a known-at offset no zone uses is refused
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-22
 
 ### Context

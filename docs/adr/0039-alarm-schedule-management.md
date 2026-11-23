@@ -242,7 +242,7 @@ reason with no fabricated terminal or provider payload.
 
 ## Amendment: a maintenance window is never dropped at a clock change (2026-11-22)
 
-Status: proposed
+Status: accepted
 Date: 2026-11-22
 
 ### Context

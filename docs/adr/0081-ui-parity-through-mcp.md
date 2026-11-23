@@ -878,7 +878,7 @@ leg by key until `LIMIT` and `OFFSET` are met.
 
 ## Amendment: explain reads the detail route's organization (2026-11-21)
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-21
 
 ### Context

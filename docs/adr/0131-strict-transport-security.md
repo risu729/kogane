@@ -1,7 +1,7 @@
 # ADR 0131: Every App answer tells the browser to use only HTTPS for its host
 
-- Status: proposed. A change to the App Worker's response header policy:
-  **the owner's decision is needed before merge** on whether the Worker
+- Status: accepted. A change to the App Worker's response header policy:
+  **the owner's decision was needed before merge** on whether the Worker
   should send the header itself, and on its lifetime (below).
 - Date: 2026-11-21
 - Related: [production evidence browser: response headers](../production-evidence-browser.md#response-headers),

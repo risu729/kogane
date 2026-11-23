@@ -92,7 +92,7 @@ enablement is recorded in
 
 ## Amendment 2026-11-21: a merged event is retired by its posted row
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-21
 - Owner approval: required before merge, as a changed rule of this accepted
   record. No route, tool or wire shape changes; the captured totals of the

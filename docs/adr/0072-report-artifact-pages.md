@@ -560,7 +560,7 @@ once.
 
 ## Amendment: a cached explanation that is not JSON is refused as such (2026-11-21)
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-21
 
 ### Context
