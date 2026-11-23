@@ -118,7 +118,9 @@ A perimeter container with no snapshot before the cutoff is listed in
     says whether a balance could be added across disjoint accounts; nothing here
     adds it.
 - `payables`: provider statement totals (`card_statement_facts`' rule restated
-  with the cutoff: the newest published capture per statement key before it)
+  with the cutoff: the newest published capture per statement key before it,
+  ties broken as [card settlements](card-settlements.md#a-statements-capture)
+  states)
   due on or after `D − 31` days, or without a readable due date and captured
   in the 45 days before the cutoff, each with the resolved card account (the
   keyed form of `card_settlement_fact_ownership`) and the settlement review of
