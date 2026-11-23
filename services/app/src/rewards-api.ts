@@ -129,8 +129,15 @@ function holdingDto(view: RewardHoldingView, membership: readonly MembershipStat
       period: measure.period,
       consumable: measure.consumable,
     })),
+    // Membership is keyed by programme and holding, as MEMBERSHIP_SQL ranks it
+    // and `estimateExpiry` reads it: another programme's claim that names the
+    // same holding reference is not this holding's.
     membership: membership
-      .filter((state) => state.holdingRef === view.holding.holdingRef)
+      .filter(
+        (state) =>
+          state.programId === view.holding.programId &&
+          state.holdingRef === view.holding.holdingRef,
+      )
       .map((state) => ({
         tier: state.tier,
         valid: state.valid,
