@@ -606,6 +606,17 @@ job's rows, `reportPartition` and the body schema). They are kept by hand;
 only the query text is pinned to its release by a frozen digest. The context
 id is the digest of that manifest, so:
 
+- a skip gate (`report_job_gates`, migration 0106,
+  [ADR 0129](adr/0129-d1-rows-read-latest-state.md)) answers an unchanged
+  store without reading it: per set of options and releases it keeps the
+  report last stored and the input key read before that build (the CORE
+  revision row and the newest `price_observation_claims` rowid, since prices
+  sit outside the revision ledger). While the key is the same and the cutoff
+  is at or after the stored build's and before `valid_until_ms`, when the
+  earliest price claimed for a held position becomes admissible by the clock
+  alone, the job returns that report (`reused: 1`, `gated: true`) after one
+  read of a few rows. A report cut at `maxRows`, or one whose cutoff dropped a
+  position recorded later, is never gated;
 - re-running with unchanged inputs reuses the stored report, including at a
   later clock: the manifest records the newest moment any _included_ evidence
   was recorded, not the instant the sweep asked for, so a five-minute cron does

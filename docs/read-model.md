@@ -534,10 +534,10 @@ Rows read are per call. Doubling the history about doubles every read (1.84
 to 2.00) and nearly quadruples the Vpass binding insert (3.74), while what they
 return stays the same (the card usage page returns the older statement months
 the longer history still holds as current). The report job's second run over
-unchanged inputs reads as much as its first (32,451 rows at 30 days, 64,231 at
-60; the first run reads 32,466 and 64,246) only to find the report it stored:
-it reads every position, valuation, decimal and price before it compares the
-manifest digest. The current-snapshot selections alone (container snapshots,
+unchanged inputs reads 3 rows at either size (its skip gate,
+[calculation and reports](calculation-and-reports.md)); before ADR 0129's
+first slice it read as much as its first, about 52,500 and 104,000 rows, only
+to find the report it stored. The current-snapshot selections alone (container snapshots,
 MyJCB past months, V Point runs) are 45,503 of the 74,943 rows of one
 latest-balances read at 60 days; the rest is its active chain over every
 artifact. The test fails when a statement's growth exceeds a ceiling (2.4 for

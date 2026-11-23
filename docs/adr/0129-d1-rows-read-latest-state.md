@@ -388,6 +388,32 @@ The draft's open questions, as the accepted design answers them:
 8. The identity sweep's candidate page stays an accepted open limit, outside
    issue #1491.
 
+## Slice 1 as built (2026-11-23)
+
+- One capture read: `LATEST_BALANCE_CANDIDATES_SQL` returns the summaries
+  view's rows flagged `latest_in_group` and `is_summary`;
+  `readLatestBalanceCandidates` splits the unfiltered list and both views from
+  it with the same 5,000-row bound per set. `tick-rows-read.test.ts` checks on
+  both stores that the split equals the reader's three lists.
+- Report skip: `report_job_gates` (migration 0106) holds one row per set of
+  options and releases rather than a single row, so a caller with other
+  options (a test, a later on-demand build) does not evict the tick's gate.
+  Until slice 2 adds the snapshot-input revision, the key's revision part is
+  the CORE revision row (`source_revision`, `visibility_revision`,
+  `core_epoch`); slice 2 swaps it and bumps `REPORT_GATE_VERSION`. Beside
+  decision 5's inputs, the gate also requires the cutoff to be at or after the
+  stored build's (an earlier cutoff can exclude what the build included), and
+  a report cut at its row bound or one whose cutoff dropped a later-recorded
+  position is never gated. A gated run reads 3 rows on either harness store.
+- Guard: `processor_read_budget_hours` (migration 0106) sums every metered
+  invocation's reported rows read per hour. "At most once an hour" is the
+  first scheduled tick of each hour, which also logs the error line once.
+  `first()` results carry no metadata, so statements read that way are not in
+  the sum (the probe's `missing` count shows how many).
+- The report lane's gate outcome is in its log line (`gated`); the lane has no
+  tick record (`LANE_TICK_COUNTS` does not list it), so open question 5's
+  closed count is left to the slice that gives it one.
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each

@@ -1,0 +1,104 @@
+// The Processor's daily D1 read budget (ADR 0129, migration 0106, issue #1491).
+//
+// Every metered invocation adds the rows D1 reported reading to its hour's row
+// in `processor_read_budget_hours`. Before its lanes run, the scheduled tick
+// sums the last 24 rows. Above the budget it logs one error line per hour,
+// which Workers Issues reports, and runs the derived lanes only on the first
+// scheduled tick of each hour, so a read regression costs cents and is
+// reported the same day instead of running unnoticed for weeks. Collection,
+// parsing and operation dispatch keep their cadence: they take in evidence,
+// and the derived lanes catch up from it.
+//
+// What it counts is what D1 reports: `rows_read` of every `all()`, `run()`
+// and batch result. A `first()` returns no metadata, so a statement read that
+// way is not counted (the `invocation_budget` line shows those as `missing`).
+
+/** Rows read per rolling 24 hours above which the derived lanes slow down. */
+export const D1_ROWS_READ_DAILY_BUDGET = 300_000_000;
+
+const HOUR_MS = 3_600_000;
+/** Hours of rows kept: the 24 the budget sums, and a day more to read back. */
+const RETENTION_HOURS = 48;
+
+/**
+ * The lanes that recompute from what is already stored. While the budget is
+ * exceeded they run on the first scheduled tick of each hour only.
+ */
+export const READ_BUDGET_THROTTLED_LANES: ReadonlySet<string> = new Set([
+  "identity_sweep",
+  "instrument_auto_adoption",
+  "balance_projection",
+  "reconciliation_sweep",
+  "card_debit_account_sweep",
+  "card_settlement_sweep",
+  "purchase_recognition",
+  "reward_claims_sweep",
+  "reward_read_projection",
+  "price_promotion",
+  "report_job",
+  "decision_outbox",
+]);
+
+export interface ReadBudgetState {
+  /** Rows read in the current hour and the 23 before it. */
+  rowsRead24h: number;
+  over: boolean;
+  /** Over the budget, and a scheduled tick already ran this hour. */
+  throttled: boolean;
+}
+
+export function hourStart(ms: number): number {
+  return Math.floor(ms / HOUR_MS) * HOUR_MS;
+}
+
+/** The budget as of `nowMs`; null when it cannot be read, and then nothing is throttled. */
+export async function readBudgetState(
+  db: D1Database,
+  nowMs: number,
+  budget: number = D1_ROWS_READ_DAILY_BUDGET,
+): Promise<ReadBudgetState | null> {
+  const hour = hourStart(nowMs);
+  try {
+    const row = await db
+      .prepare(
+        `SELECT coalesce(sum(rows_read),0) AS rows_read,
+          coalesce(sum(CASE WHEN hour_start_ms=?2 THEN scheduled_ticks ELSE 0 END),0) AS ticks
+         FROM processor_read_budget_hours WHERE hour_start_ms>?1`,
+      )
+      .bind(hour - 24 * HOUR_MS, hour)
+      .first<{ rows_read: number; ticks: number }>();
+    const rowsRead24h = Number(row?.rows_read ?? 0);
+    const over = rowsRead24h > budget;
+    return { rowsRead24h, over, throttled: over && Number(row?.ticks ?? 0) > 0 };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Adds one invocation's rows read to the hour it started in, and drops the
+ * rows older than the retention, in one batch.
+ */
+export async function recordRowsRead(
+  db: D1Database,
+  startedAtMs: number,
+  rowsRead: number,
+  trigger: "scheduled" | "queue",
+): Promise<void> {
+  const hour = hourStart(startedAtMs);
+  const rows = Number.isSafeInteger(rowsRead) && rowsRead > 0 ? rowsRead : 0;
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO processor_read_budget_hours(hour_start_ms,rows_read,scheduled_ticks,queue_invocations)
+         VALUES(?1,?2,?3,?4)
+         ON CONFLICT(hour_start_ms) DO UPDATE SET rows_read=rows_read+excluded.rows_read,
+          scheduled_ticks=scheduled_ticks+excluded.scheduled_ticks,
+          queue_invocations=queue_invocations+excluded.queue_invocations`,
+      )
+      .bind(hour, rows, trigger === "scheduled" ? 1 : 0, trigger === "queue" ? 1 : 0),
+    db
+      .prepare("DELETE FROM processor_read_budget_hours WHERE hour_start_ms<?1")
+      .bind(hour - RETENTION_HOURS * HOUR_MS),
+  ]);
+}

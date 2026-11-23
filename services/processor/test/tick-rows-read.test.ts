@@ -26,7 +26,7 @@
 // ceiling to its new measurement in the same PR. The issue's acceptance, a
 // cost that does not grow with history, is a `test.todo` per statement. The
 // last cases record facts of the shipped statements that the documents quote:
-// the report job's reuse of an unchanged report, the Vpass insert's plan, and
+// the report job's gated reuse of an unchanged report, the Vpass insert's plan, and
 // the snapshot selections' share of a latest-balances read. Every value is
 // synthetic.
 import type { Database } from "bun:sqlite";
@@ -364,7 +364,7 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
     runReportJob({ DB: d, EVIDENCE: evidence, REPORTS_ENABLED: "true" }, options),
   );
   expect(built.generated).toBe(1);
-  expect(reused).toMatchObject({ reused: 1, reportId: built.reportId });
+  expect(reused).toMatchObject({ reused: 1, gated: true, reportId: built.reportId });
   await run("card purchase sweep", (d) => cardPurchaseSweep(d, { now }));
   // The lane's sweep takes the oldest unidentified parses, here card store
   // rows with observations; the V Point sweep reaches the batch that
@@ -520,18 +520,17 @@ test("rows read per call grow with the history no faster than today", () => {
 for (const name of Object.keys(NAMED))
   test.todo(`${name}: rows read per call at 2N within a small constant of N (issue #1491)`);
 
-test("the report job's second run over unchanged inputs reads as much as its first", () => {
+test("the report job's second run over unchanged inputs reads only its gate", () => {
   console.info("report job: build vs reuse of the stored report", {
     [`build, ${DAYS} days`]: small.reportBuild,
     [`reuse, ${DAYS} days`]: small.reportReuse,
     [`build, ${2 * DAYS} days`]: large.reportBuild,
     [`reuse, ${2 * DAYS} days`]: large.reportReuse,
   });
-  // runReportJob reads every position, valuation, decimal and price before it
-  // compares the manifest digest with the stored report.
-  for (const measured of [small, large])
-    expect(measured.reportReuse).toBeGreaterThan(0.95 * measured.reportBuild);
-  expect(large.reportReuse).toBeGreaterThan(1.6 * small.reportReuse);
+  // The skip gate (ADR 0129): the CORE revision row, the newest price claim
+  // and the stored gate, whatever the history holds.
+  for (const measured of [small, large]) expect(measured.reportReuse).toBeLessThan(10);
+  expect(large.reportReuse).toBe(small.reportReuse);
 });
 
 test("the Vpass binding insert's plan nests every Vpass artifact under every binding artifact", () => {
