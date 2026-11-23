@@ -323,16 +323,17 @@ step outgrows its reserve:
 | Step                                                               | Measured                              | Reserve              |
 | ------------------------------------------------------------------ | ------------------------------------- | -------------------- |
 | Preamble: terminal read, run row, conflict and refusal checks      | 8                                     | 16                   |
-| The run, a unit, a range, the inventory declaration, a unit report | 5-6                                   | 16                   |
-| An artifact: its R2 head, adoption and catalogue row               | 19, +1 per transform, +2 per relation | 32, +1 each, +2 each |
-| An inventory chunk (at most 30 items, the contract's maximum)      | 7 + 3 per item (97 full)              | 16 + 4 per item      |
-| Final: run report, seal (direct of ≤ 50, or staged), link          | 32 direct, 16 staged                  | 64                   |
+| The run, a unit, a range, the inventory declaration, a unit report | 4-6                                   | 16                   |
+| An artifact: its R2 head, adoption and catalogue row               | 17, +1 per transform, +2 per relation | 32, +1 each, +2 each |
+| An inventory chunk (at most 30 items, the contract's maximum)      | 6 + 3 per item (96 full)              | 16 + 4 per item      |
+| Final: run report, seal (direct of ≤ 50, or staged), link          | 30 direct, 14 staged                  | 64                   |
 | Audit: a `pending` row for a yield, or a stage row and the block   | 1-2                                   | 4, always kept back  |
 
 So no invocation spends more than 500 operations on registration, and a
 failure at the edge of the budget still records its audit. A Vpass card of
 about twenty statement pages registers in one invocation; a 34-artifact card
-takes two (467 and 292 operations); the schema's largest structure converges
+takes two (a synthetic 34-artifact run of one unit measures 469 and 186
+operations); the schema's largest structure converges
 over as many as it needs. No step can be too large for every invocation: the
 descriptor contract accepts at most 100 transformation steps and 100 relations
 per artifact, and that artifact's reserve (332) still fits what a fresh
@@ -340,6 +341,20 @@ invocation has left after its preamble and the run. A manifest whose derived
 descriptor the contract refuses — a transformation with more inputs than 100
 relations, which the manifest schema allows — is blocked with the contract's
 code (`invalid_relations`, say) instead of failing on every tick.
+
+Within one registration call the fetch run is read once. `registerTerminal`
+builds its port over an env made by `rememberingRunLookups`
+(`packages/application/src/ingest/access.ts`), and every later operation on
+that run answers its id, producer and source from the call's memory instead
+of reading `fetch_runs` again: one statement fewer per port operation, two
+per artifact. Those columns never change, because CORE refuses every
+update and delete of `fetch_runs`. Nothing is remembered across calls, so the
+next invocation reads the run again. The client and route checks are not
+remembered: they still run before every port operation, so a revocation takes
+effect at the next one. `services/processor/test/registration-round-trips.test.ts`
+pins the statement count of a synthetic registration and registers the same
+captures with and without the memory: every CORE table ends identical and
+every verdict is the same, including a route or client revoked half-way through.
 
 **The continuation.** A registration that reaches the budget yields `pending`:
 the `registered` stage says `pending` and names the fetch run, and everything
