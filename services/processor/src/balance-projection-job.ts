@@ -37,7 +37,6 @@ import {
 import {
   authorityRank,
   createCoreProjectionSource,
-  createD1ObservationReader,
   d1Executor,
   DECIMAL_POLICY_RELEASE,
   LATEST_IDENTITY_RELEASE,
@@ -45,6 +44,7 @@ import {
   projectionBuildDigest,
   projectionInputManifest,
   projectionRelationsSql,
+  readLatestBalanceCandidates,
   ResultLimitExceededError,
   type CoreRevisionRow,
   type EntityRelationRow,
@@ -72,7 +72,6 @@ import {
 import { readPublishedSnapshotAt, runReadProjection } from "./read-projection.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
-const CANDIDATE_LIMIT = 5001;
 const CANDIDATE_BOUND = 5000;
 /** Rows written per invocation, so one cron tick is bounded whatever the size. */
 const PROJECTION_WRITE_BUDGET = 1000;
@@ -179,27 +178,22 @@ interface OrganizationFields {
 type CandidateRow = BalanceRow & { measureView: "balances" | "summaries"; latestInGroup: boolean };
 
 /**
- * The candidate set: the same latest-balance query the reader serves, taken
- * once for the unfiltered list and once for each measure view, so the
- * projection holds their union and every view selects the same rows it does
- * today. The reader refuses more than 5,000 candidates; the job records that
- * refusal and seals nothing rather than projecting a partial set.
+ * The candidate set: the rows the reader's latest-balance query returns
+ * unfiltered and for each measure view, taken from one flagged read (ADR 0129,
+ * slice 1), so the projection holds their union and every view selects the
+ * same rows it does today. The read refuses more than 5,000 rows in any one
+ * view; the job records that refusal and seals nothing rather than projecting
+ * a partial set.
  */
 async function readCandidates(db: D1Like): Promise<CandidateRow[]> {
-  const reader = createD1ObservationReader(db);
   let latest: BalanceRow[];
   let balances: BalanceRow[];
   let summaries: BalanceRow[];
   try {
-    [latest, balances, summaries] = await Promise.all([
-      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT }),
-      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "balances" }),
-      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "summaries" }),
-    ]);
+    ({ latest, balances, summaries } = await readLatestBalanceCandidates(d1Executor(db)));
   } catch (error) {
-    // The reader refuses more than 5,000 candidates. That bound is the read
-    // contract, so the job reports the refusal and seals nothing rather than
-    // projecting a silently partial set.
+    // The 5,000-row bound is the read contract, so the job reports the
+    // refusal and seals nothing rather than projecting a silently partial set.
     if (error instanceof ResultLimitExceededError)
       throw new ProjectionBudgetError("candidate_limit_exceeded");
     throw error;

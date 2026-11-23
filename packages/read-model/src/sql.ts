@@ -35,6 +35,7 @@ import {
   type PageSql,
   pagedCollection,
   periodMeasureSql,
+  RESULT_BOUND,
   scopePredicates,
 } from "./scope";
 import {
@@ -610,16 +611,25 @@ export function undatedTransactionsSql(
  * instrument). The source is part of the key because `source_account` is only
  * the provider's own label. Computed on request and stored nowhere.
  */
-function latestBalancesInner(measureView: MeasureView | undefined): string {
+function latestBalancesInner(
+  measureView: MeasureView | undefined,
+  flags: "" | "with flags" = "",
+): string {
   // Period totals are one witness per statement month, so in the summaries
   // view every MyJCB payment amount is kept, not only the ranked latest.
   const keepPeriodTotals =
     measureView === "summaries"
       ? " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-credit-past-month-balances@%' AND metric = 'credit_statement_payment_amount')"
       : "";
+  const flagColumns =
+    flags === "with flags"
+      ? `,
+              CASE WHEN rank_in_group = 1 THEN 1 ELSE 0 END AS latest_in_group,
+              CASE WHEN ${periodMeasureSql("source_id", "parser", "metric")} THEN 1 ELSE 0 END AS is_summary`
+      : "";
   return `WITH ${SNAPSHOT_CTES}, ${myjcbPastMonthsSnapshotCtes()}, ${ELIGIBLE_VPOINT_RUNS}
        SELECT id, source_id, source_account, metric, instrument, amount_minor,
-              amount_text, as_of, observed_at, parser
+              amount_text, as_of, observed_at, parser${flagColumns}
        FROM (
          SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
                 CAST(b.amount_minor AS TEXT) AS amount_minor, b.amount_text,
@@ -683,6 +693,22 @@ export function latestBalancesSql(
     offset,
   );
 }
+
+/**
+ * Every latest-balance candidate in one read, for the balance projection's
+ * capture: the summaries view's rows (the ranked latest of every group plus
+ * every MyJCB statement-month payment amount), each flagged with whether it is
+ * its group's ranked latest and whether it is a period total. The unfiltered
+ * list, the balances view and the summaries view are exact subsets of it
+ * (`latestBalanceCandidateSets`), so the capture no longer runs the same
+ * selection three times (ADR 0129, slice 1). The read takes up to twice the
+ * per-view bound plus one row: when every view is within its bound the union
+ * is too, so a longer result already means one view is over it.
+ */
+export const LATEST_BALANCE_CANDIDATES_SQL = `SELECT * FROM (${latestBalancesInner(
+  "summaries",
+  "with flags",
+)}) ORDER BY id LIMIT ${2 * RESULT_BOUND + 1}`;
 
 /** The full append-only history over visible parse results, superseded rows included and marked. */
 export const BALANCE_HISTORY_SQL = `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,

@@ -17,11 +17,14 @@ import {
   createObservationReader,
   economicallySummable,
   evidenceExists,
+  type LatestBalanceCandidateRow,
+  latestBalanceCandidateSets,
   legacyPublishedParses,
   type ObservationReader,
   PAGE_LIMIT,
   parseWarnings,
   publishedParses,
+  readLatestBalanceCandidates,
   recordedParses,
   ResultLimitExceededError,
   scopePredicates,
@@ -867,6 +870,53 @@ describe("typed scope, ordering and paging", () => {
         NO_FILTER,
       ),
     ).rejects.toBeInstanceOf(Http413);
+  });
+
+  test("the capture's one latest-balance read refuses a set past the bound, not the union", async () => {
+    const row = (id: number, latest: boolean, summary: boolean): LatestBalanceCandidateRow => ({
+      id,
+      source_id: "s",
+      source_account: "a",
+      metric: "m",
+      instrument: "JPY",
+      amount_minor: "1",
+      amount_text: "1",
+      as_of: null,
+      observed_at: null,
+      parser: "p@1",
+      latest_in_group: latest ? 1 : 0,
+      is_summary: summary ? 1 : 0,
+    });
+    const rows = (count: number, from: number, latest: boolean, summary: boolean) =>
+      Array.from({ length: count }, (_, index) => row(from + index, latest, summary));
+    // 5,000 balances and 5,000 older statement months: every set is within
+    // the bound although the read returns 10,000 rows.
+    const full = latestBalanceCandidateSets([
+      ...rows(5000, 1, true, false),
+      ...rows(5000, 10_001, false, true),
+    ]);
+    expect([full.latest.length, full.balances.length, full.summaries.length]).toEqual([
+      5000, 5000, 5000,
+    ]);
+    // One ranked period total more puts the unfiltered list over the bound.
+    expect(() =>
+      latestBalanceCandidateSets([...rows(5000, 1, true, false), row(9000, true, true)]),
+    ).toThrow(ResultLimitExceededError);
+    expect(() => latestBalanceCandidateSets(rows(5001, 1, false, true))).toThrow(
+      ResultLimitExceededError,
+    );
+    const seen: string[] = [];
+    const executor: SqlExecutor = {
+      all: async <T>(text: string) => {
+        seen.push(text);
+        return rows(10_001, 1, false, true) as T[];
+      },
+      first: async () => null,
+    };
+    await expect(readLatestBalanceCandidates(executor)).rejects.toBeInstanceOf(
+      ResultLimitExceededError,
+    );
+    expect(seen[0]).toMatch(/ORDER BY id LIMIT 10001$/s);
   });
 });
 
