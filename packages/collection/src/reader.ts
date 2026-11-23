@@ -104,6 +104,7 @@ export async function readTerminalAt(
   const body = await bucket.get(key);
   if (!body) return { outcome: "missing", key };
   if (body.size > MAX_TERMINAL_BYTES) {
+    await body.body.cancel();
     return { outcome: "blocked", key, reasonCode: "terminal_too_large" };
   }
   let bytes: Uint8Array;

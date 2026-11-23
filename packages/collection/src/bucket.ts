@@ -37,6 +37,11 @@ export interface R2ObjectLike {
 }
 
 export interface R2ObjectBodyLike extends R2ObjectLike {
+  /**
+   * The bytes as a stream, for an object that must not be held whole: a
+   * terminal the reader refuses is hashed from it (`stream-digest.ts`).
+   */
+  readonly body: ReadableStream<Uint8Array>;
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 

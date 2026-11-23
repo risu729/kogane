@@ -177,3 +177,41 @@ describe("verifyReferencedObjects", () => {
     expect(withStreaming).toEqual({ outcome: "ok", checked: 1, problems: [] });
   });
 });
+
+describe("oversized terminal", () => {
+  test("is blocked terminal_too_large unread, its body cancelled", async () => {
+    const key = terminalKey(SYNTHETIC_SOURCE, "oversized");
+    let pulled = 0;
+    let cancelled = 0;
+    let buffered = 0;
+    const bucket = new FakeR2Bucket();
+    const object = {
+      key,
+      size: 8 * 1024 * 1024 + 1,
+      etag: "etag-synthetic",
+      checksums: {},
+      body: new ReadableStream<Uint8Array>(
+        {
+          pull() {
+            pulled += 1;
+          },
+          cancel() {
+            cancelled += 1;
+          },
+        },
+        new CountQueuingStrategy({ highWaterMark: 0 }),
+      ),
+      async arrayBuffer(): Promise<ArrayBuffer> {
+        buffered += 1;
+        throw new Error("synthetic_body_exceeds_memory");
+      },
+    };
+    bucket.get = async (requested) => (requested === key ? object : null);
+    expect(await readTerminal(bucket, SYNTHETIC_SOURCE, "oversized")).toEqual({
+      outcome: "blocked",
+      key,
+      reasonCode: "terminal_too_large",
+    });
+    expect({ pulled, cancelled, buffered }).toEqual({ pulled: 0, cancelled: 1, buffered: 0 });
+  });
+});

@@ -44,6 +44,7 @@
 import { readTerminal, type ReadTerminalResult } from "../../../collection/src/reader.ts";
 import type { R2BucketLike } from "../../../collection/src/bucket.ts";
 import { sha256Hex } from "../../../collection/src/digest.ts";
+import { sha256HexOfStream } from "../../../collection/src/stream-digest.ts";
 import type { TerminalArtifact, TerminalManifest } from "../../../collection/src/manifest.ts";
 import { verifyReferencedObjects } from "../../../collection/src/reader.ts";
 import { descriptorContractV1 } from "../../../evidence-contract/src/descriptor.ts";
@@ -825,10 +826,14 @@ async function recordBlockedTerminal(
 ): Promise<RegisterTerminalOutcome> {
   const { input, env } = context;
   // A second read, only on this path: the reader does not hand back the bytes
-  // of a terminal it refused, and an unreadable terminal is rare.
+  // of a terminal it refused, and an unreadable terminal is rare. The body is
+  // hashed as it streams, never buffered: a terminal refused as
+  // `terminal_too_large` can be any size R2 stores, larger than the Worker's
+  // memory. The digest is the same SHA-256 of the same bytes, so a run
+  // recorded when this read was buffered keeps its identity.
   const stored = await context.bucket.get(read.key);
   if (!stored) return { outcome: "missing" };
-  const digest = await sha256Hex(new Uint8Array(await stored.arrayBuffer()));
+  const digest = await sha256HexOfStream(stored.body);
   const identity = {
     source: input.source,
     runId: input.runId,
