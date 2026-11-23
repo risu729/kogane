@@ -326,11 +326,14 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
   let operator = true;
   let malformed = false;
   const reads: string[] = [];
+  /** Reads after the first wait for it and are refused, when set. */
+  let rereadRefused: Promise<void> | null = null;
 
   beforeEach(() => {
     operator = true;
     malformed = false;
     reads.length = 0;
+    rereadRefused = null;
   });
   beforeAll(async () => {
     for (const record of RECORDS.values())
@@ -351,6 +354,14 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
           if (request.method !== "GET")
             return Response.json({ error: "method_not_allowed" }, { status: 405 });
           if (!operator) return Response.json({ error: "approval_required" }, { status: 403 });
+          if (rereadRefused && reads.length > 1) {
+            await rereadRefused;
+            // The App's answer when the deployment's grant lists cannot be read.
+            return Response.json(
+              { error: "grants_misconfigured", requestId: "synthetic-request" },
+              { status: 503 },
+            );
+          }
           const record = RECORDS.get(url.pathname.slice(OPERATION_RECORD_PATH_PREFIX.length));
           if (!record) return Response.json({ error: "not_found" }, { status: 404 });
           return Response.json(malformed ? { ...record, status: "done" } : record);
@@ -493,6 +504,38 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
       ]);
       expect(reads).toEqual([WAITING, WAITING]);
     } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test("a refused re-read leaves the focus on 最新の状態を読み直す, and a press while it reads is ignored", async () => {
+    let release!: () => void;
+    rereadRefused = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/operations/${WAITING}`);
+      await page.getByRole("heading", { level: 2, name: "収集の実行" }).waitFor();
+      const button = page.getByRole("button", { name: "最新の状態を読み直す" });
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await button.and(page.locator('[aria-disabled="true"]')).waitFor();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      // Another press while the read is in flight reads nothing more.
+      await page.keyboard.press("Enter");
+      release();
+      await page
+        .getByRole("alert")
+        .filter({ hasText: "更新できませんでした。前回読み込んだ依頼の経過を表示しています。" })
+        .waitFor();
+      // The record read first stays, and the button with it.
+      expect(await text(page)).toContain("受付済み（未実行）");
+      expect(await button.getAttribute("aria-disabled")).toBeNull();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      expect(reads).toEqual([WAITING, WAITING]);
+    } finally {
+      release();
       await page.close();
     }
   }, 60_000);

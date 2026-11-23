@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { auditView } from "./a11y-audit.ts";
 import jobs from "../../../config/alarm-jobs.json";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
@@ -32,7 +32,9 @@ describe.if(runnable)("operator schedule administration", () => {
     // a relay that lost the Processor's answer does (`503
     // scheduling_unavailable`). `reservation` is what a stored write answers.
     writeAnswer: { before?: () => Response; after?: () => Response } | null = null,
-    reservation: "armed" | "pending" = "armed";
+    reservation: "armed" | "pending" = "armed",
+    /** Every write (settings, lease, collection request) waits for it once recorded. */
+    writeHeld: Promise<void> | null = null;
   let collections: { body: Record<string, unknown>; origin: string | null; type: string | null }[] =
     [];
   let writes: {
@@ -51,6 +53,7 @@ describe.if(runnable)("operator schedule administration", () => {
     readAfterWrite = null;
     writeAnswer = null;
     reservation = "armed";
+    writeHeld = null;
     snapshot = {
       schedules: jobs.map((job) => ({
         ...job,
@@ -120,6 +123,7 @@ describe.if(runnable)("operator schedule administration", () => {
             origin: request.headers.get("origin"),
             type: request.headers.get("content-type"),
           });
+          if (writeHeld) await writeHeld;
           if (collectionResponse) return collectionResponse();
           return Response.json(
             { operationId: `op_${"a".repeat(64)}`, status: "accepted" },
@@ -134,6 +138,7 @@ describe.if(runnable)("operator schedule administration", () => {
             origin: request.headers.get("origin"),
             marker: request.headers.get("x-kogane-settings"),
           });
+          if (writeHeld) await writeHeld;
           if (url.pathname.startsWith("/api/ops/v1/schedules/leases/") && leaseResponse)
             return leaseResponse();
           const refused = writeAnswer?.before?.();
@@ -1692,6 +1697,157 @@ describe.if(runnable)("operator schedule administration", () => {
       );
       expect(await page.locator(".schedule-card").count()).toBe(0);
       expect(await page.getByText("schedule_request_failed").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  /**
+   * Presses `button` from the keyboard while its write is held, presses it
+   * again, then lets the write be refused (`refused` waits for what the page
+   * says). The button waits with aria-disabled and keeps the focus throughout,
+   * and the second press sends nothing.
+   */
+  async function refusedInFlight(
+    page: Page,
+    button: Locator,
+    refused: () => Promise<void>,
+    sent: () => number,
+  ): Promise<void> {
+    let release!: () => void;
+    writeHeld = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await button.and(page.locator('[aria-disabled="true"]')).waitFor();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      await page.keyboard.press("Enter");
+    } finally {
+      release();
+    }
+    await refused();
+    expect(await button.getAttribute("aria-disabled")).toBeNull();
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(sent()).toBe(1);
+  }
+  const invalid = () => Response.json({ error: "invalid_request" }, { status: 400 });
+
+  test("a refused collection request leaves the focus on 依頼を送信, and a press while it is sent is ignored", async () => {
+    collectionResponse = async () => invalid();
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await refusedInFlight(
+        page,
+        card.getByRole("button", { name: /^(依頼を送信|送信中…)$/u }),
+        () => card.getByText("保存されていません（invalid_request）", { exact: false }).waitFor(),
+        () => collections.length,
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused schedule save leaves the focus on 設定を保存, and a press while it is saved is ignored", async () => {
+    writeAnswer = { before: invalid };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page
+        .locator(".schedule-card")
+        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+      await refusedInFlight(
+        page,
+        card.getByRole("button", { name: /^(設定を保存|保存中…)$/u }),
+        () =>
+          card
+            .getByRole("status")
+            .getByText("入力した時刻・出典・確認日時を確認してください。", { exact: true })
+            .waitFor(),
+        () => writes.length,
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused maintenance save leaves the focus on 停止時間を保存, and a press while it is saved is ignored", async () => {
+    writeAnswer = { before: invalid };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      await page.getByRole("button", { name: "停止時間を追加", exact: true }).click();
+      const form = page.locator(".maintenance-editor");
+      await form.getByLabel("設定名（半角英数字・ハイフン）").fill("synthetic-outage");
+      await form.getByLabel("開始（日本時間）", { exact: true }).fill("2026-10-06T01:00");
+      await form.getByLabel("終了（日本時間）", { exact: true }).fill("2026-10-06T05:00");
+      await form
+        .getByLabel("公式案内のURL", { exact: true })
+        .fill("https://example.test/maintenance");
+      await refusedInFlight(
+        page,
+        form.getByRole("button", { name: /^(停止時間を保存|保存中…)$/u }),
+        () =>
+          form
+            .getByRole("alert")
+            .getByText("入力した時刻・出典・確認日時を確認してください。", { exact: true })
+            .waitFor(),
+        () => writes.length,
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused survey decision leaves the focus on 却下, and a press while it is sent is ignored", async () => {
+    oneProposal();
+    writeAnswer = { before: invalid };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const proposal = page
+        .locator('section[aria-labelledby="maintenance-survey"] li')
+        .filter({ hasText: "停止時間の変更" });
+      await refusedInFlight(
+        page,
+        proposal.getByRole("button", { name: "却下", exact: true }),
+        () =>
+          proposal
+            .getByRole("alert")
+            .getByText("入力した時刻・出典・確認日時を確認してください。", { exact: true })
+            .waitFor(),
+        () => writes.length,
+      );
+      expect(writes[0]?.body).toEqual({ decision: "reject" });
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused lease release leaves the focus on its button through the read back, and a press meanwhile is ignored", async () => {
+    stoppedLease();
+    leaseResponse = async () => Response.json({ error: "scheduling_unavailable" }, { status: 503 });
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    try {
+      await page.goto(`${origin}/schedules`);
+      await refusedInFlight(
+        page,
+        page.getByRole("button", { name: /^(停止した実行を解除|解除中…)$/u }),
+        () =>
+          page
+            .getByRole("status")
+            .getByText("設定を確認できません。表示を更新して保存状態を確認してください。", {
+              exact: true,
+            })
+            .waitFor(),
+        () => writes.length,
+      );
     } finally {
       await page.close();
     }
