@@ -104,8 +104,10 @@ changes with their own test runs.
 
 ## Dependencies that resolve to more than one version
 
-These are what a single hoisted lockfile has to reconcile. Keeping the resolved version of
-each consumer is the requirement; where that is impossible the change must be called out.
+Each row is a dependency that packages here declare and resolve to different versions. The root
+`bun.lock` keeps one bare entry per name and scopes any other version under the workspace that
+pins it, and the isolated linker installs that version in the workspace's own `node_modules`; a
+`container/` package resolves from its own `package-lock.json`. Aligning them is a separate change.
 
 | dependency | resolved versions | by package (declared range → resolved) |
 | --- | --- | --- |
@@ -617,9 +619,9 @@ Lockfile: `bun.lock`.
 
 ## Transitive packages that resolve to more than one version
 
-Nothing declares these directly; they differ because each package resolved its own lockfile.
-A single hoisted lockfile picks one version per name, so every row here is a resolution U03
-has to decide and record rather than absorb silently.
+Nothing here declares these directly; they differ because a parent package asks for a range or
+pin the bare entry does not satisfy, and the root `bun.lock` scopes that version under the
+parent. A `container/` package resolves its own from its `package-lock.json`.
 
 | package | versions | resolved by |
 | --- | --- | --- |
@@ -629,9 +631,9 @@ has to decide and record rather than absorb silently.
 
 ## Closure digest per package
 
-SHA-256 over the package's sorted `name@version` closure. U03 regenerates this file after the
-workspace merge; a package whose digest is unchanged resolved to exactly the same closure, and
-a changed digest has to be explained dependency by dependency.
+SHA-256 over the package's sorted `name@version` closure, as resolved after the workspace merge.
+Between two regenerations, an unchanged digest means the package resolved to exactly the same
+closure; a changed one means a package in that closure changed version, appeared or went away.
 
 | package | lockfile | packages | closure sha256 |
 | --- | --- | --- | --- |

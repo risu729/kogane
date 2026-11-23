@@ -268,8 +268,10 @@ export function renderDependencyMarkdown(records: PackageRecord[]): string {
   if (conflicts.length === 0) lines.push("None.");
   else {
     lines.push(
-      "These are what a single hoisted lockfile has to reconcile. Keeping the resolved version of",
-      "each consumer is the requirement; where that is impossible the change must be called out.",
+      "Each row is a dependency that packages here declare and resolve to different versions. The root",
+      "`bun.lock` keeps one bare entry per name and scopes any other version under the workspace that",
+      "pins it, and the isolated linker installs that version in the workspace's own `node_modules`; a",
+      "`container/` package resolves from its own `package-lock.json`. Aligning them is a separate change.",
       "",
     );
     lines.push("| dependency | resolved versions | by package (declared range → resolved) |");
@@ -313,9 +315,9 @@ export function renderDependencyMarkdown(records: PackageRecord[]): string {
   lines.push("## Transitive packages that resolve to more than one version");
   lines.push("");
   lines.push(
-    "Nothing declares these directly; they differ because each package resolved its own lockfile.",
-    "A single hoisted lockfile picks one version per name, so every row here is a resolution U03",
-    "has to decide and record rather than absorb silently.",
+    "Nothing here declares these directly; they differ because a parent package asks for a range or",
+    "pin the bare entry does not satisfy, and the root `bun.lock` scopes that version under the",
+    "parent. A `container/` package resolves its own from its `package-lock.json`.",
   );
   lines.push("");
   lines.push("| package | versions | resolved by |");
@@ -342,9 +344,9 @@ export function renderDependencyMarkdown(records: PackageRecord[]): string {
   lines.push("## Closure digest per package");
   lines.push("");
   lines.push(
-    "SHA-256 over the package's sorted `name@version` closure. U03 regenerates this file after the",
-    "workspace merge; a package whose digest is unchanged resolved to exactly the same closure, and",
-    "a changed digest has to be explained dependency by dependency.",
+    "SHA-256 over the package's sorted `name@version` closure, as resolved after the workspace merge.",
+    "Between two regenerations, an unchanged digest means the package resolved to exactly the same",
+    "closure; a changed one means a package in that closure changed version, appeared or went away.",
   );
   lines.push("");
   lines.push("| package | lockfile | packages | closure sha256 |");
