@@ -1037,7 +1037,9 @@ Input: `since`, an ISO 8601 instant with a zone (`Z` or an offset), at most
 31 days before the call and not after it; `after`, optionally, a source id.
 Any other key is `400 invalid_request`; a `since` or `after` the service
 refuses is `400 invalid_query` with `since:format`, `since:future`,
-`since:too_old` or `after:format`. Output: `kogane-changes-since-v1` with the
+`since:too_old` or `after:format`; `since:format` is a value that is no real
+calendar time of that form (years as written, 0000 to 9999), and a real time
+outside the 31 days is `since:future` or `since:too_old`, whatever its year. Output: `kogane-changes-since-v1` with the
 canonical `since`, `asOf`, `basis: recorded`, the `bounds`, the positional
 `order` of each count, `sections` (`counted` or `unauthorized`), `sources`,
 `unchanged`, `next`, `events`, `handlers` and `notCovered`.
