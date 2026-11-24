@@ -84,6 +84,7 @@ import {
 } from "../../../packages/domain/src/pending-posted-review.ts";
 import {
   DEFAULT_MATCH_OPTIONS,
+  RECONCILIATION_POLICY_RELEASE,
   proposalIdentity,
   stageBProposals,
   type MatchFact,
@@ -115,7 +116,7 @@ import {
 } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { cardUsageFactOf } from "../../../packages/application/src/card-usage-fact.ts";
-import { abandonSweepPass, finishSweepPass, startSweepPass, sweepGate } from "./sweep-pass.ts";
+import { abandonSweepPass, finishSweepPass, openSweepTick } from "./sweep-pass.ts";
 
 /** Current usage rows one tick reads after the cursor. */
 export const SCAN_LIMIT = 500;
@@ -212,11 +213,19 @@ export { cardUsageFactOf };
 // unrelated input mutation dirtied the proof.
 const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v2";
 /**
- * What a complete recognition pass decides, for its gate (src/sweep-pass.ts):
- * the recognition policy, its writer release and the pass's own version. A
- * change to any of them runs a pass again although no input moved.
+ * The definitions of the views the recognition pass and its candidate pass
+ * read, as a digest that `test/sweep-pass.test.ts` checks against the
+ * migrated schema: a migration that redefines one moves no revision, so it
+ * changes this value, and with it the pass's policy, to run a pass again.
  */
-export const CARD_PURCHASE_SWEEP_POLICY = `${CARD_PURCHASE_WRITER_RELEASE}+recognition-pass-v1`;
+export const CARD_PURCHASE_SWEEP_VIEWS = "a42f7085a2212a8b";
+/**
+ * What a complete recognition pass decides, for its gate (src/sweep-pass.ts):
+ * the recognition writer release, the matcher's release and options, the
+ * views it reads and the pass's own version. A change to any of them runs a
+ * pass again although no input moved.
+ */
+export const CARD_PURCHASE_SWEEP_POLICY = `${CARD_PURCHASE_WRITER_RELEASE}+${RECONCILIATION_POLICY_RELEASE}+match:${JSON.stringify(DEFAULT_MATCH_OPTIONS)}+views:${CARD_PURCHASE_SWEEP_VIEWS}+recognition-pass-v1`;
 
 type Outcome = "written" | "conflict" | "failed";
 
@@ -365,20 +374,22 @@ async function recognitionPass(
   result: CardPurchaseSweepResult,
   limits: { scan: number; write: number },
   at: WriteAt,
-): Promise<{ rows: CurrentCardUsageRow[]; finished: boolean }> {
+): Promise<{ rows: CurrentCardUsageRow[]; finished: boolean; token: string | null }> {
   const cursor =
     (
       await db
         .prepare("SELECT last_observation_id FROM card_purchase_scan_cursor WHERE singleton=1")
         .first<{ last_observation_id: number }>()
     )?.last_observation_id ?? 0;
-  // A pass starts from the first row only when something on the CORE ledger
-  // moved since the last pass that read them all (src/sweep-pass.ts).
-  if (cursor === 0) {
-    const gate = await sweepGate(db, "card_purchase_recognition", CARD_PURCHASE_SWEEP_POLICY);
-    if (gate?.clean) return { rows: [], finished: false };
-    if (gate) await startSweepPass(db, "card_purchase_recognition", gate.revision);
-  }
+  // A pass starts from the first row only when something it reads moved
+  // since the last pass that read them all (src/sweep-pass.ts).
+  const tick = await openSweepTick(
+    db,
+    "card_purchase_recognition",
+    CARD_PURCHASE_SWEEP_POLICY,
+    cursor === 0,
+  );
+  if (tick.skip) return { rows: [], finished: false, token: null };
   const rows = await page<CurrentCardUsageRow>(
     db,
     currentCardUsageSql({ afterId: cursor, limit: limits.scan }),
@@ -464,7 +475,7 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
       )
       .bind(next, cursor)
       .run();
-  return { rows, finished };
+  return { rows, finished, token: tick.token };
 }
 
 /**
@@ -997,7 +1008,7 @@ export async function cardPurchaseSweep(
     result.deferred = true;
     return result;
   }
-  const { rows, finished } = await recognitionPass(
+  const { rows, finished, token } = await recognitionPass(
     db,
     result,
     {
@@ -1006,24 +1017,33 @@ export async function cardPurchaseSweep(
     },
     at,
   );
-  const { linked, limited } = await candidatePass(
-    db,
-    result,
-    rows,
-    {
-      write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
-      lookup: bounded(options.candidateLookupChunk, CANDIDATE_LOOKUP_CHUNK, CANDIDATE_LOOKUP_CHUNK),
-    },
-    now,
-  );
-  await mergeLinked(db, result, linked, at);
-  // The pass may wait for a change once its last page is read (src/sweep-pass.ts),
-  // unless some tick of it left work for later: a full candidate budget, links
-  // past the merge limit, or a failed write. Those rows are only reached again
-  // by a pass from the first row, so this pass marks nothing clean.
-  const incomplete = limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0;
-  if (incomplete) await abandonSweepPass(db, "card_purchase_recognition");
-  else if (finished)
-    await finishSweepPass(db, "card_purchase_recognition", CARD_PURCHASE_SWEEP_POLICY);
+  // The cursor has already left this page, so a tick that does not finish
+  // the page's candidates and merges leaves them to a pass from the first
+  // row: such a tick drops the pass (src/sweep-pass.ts), and so does one that
+  // throws here.
+  let incomplete = true;
+  try {
+    const { linked, limited } = await candidatePass(
+      db,
+      result,
+      rows,
+      {
+        write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
+        lookup: bounded(
+          options.candidateLookupChunk,
+          CANDIDATE_LOOKUP_CHUNK,
+          CANDIDATE_LOOKUP_CHUNK,
+        ),
+      },
+      now,
+    );
+    await mergeLinked(db, result, linked, at);
+    // Work left for later: a full candidate budget, links past the merge
+    // limit, or a failed write (a retirement's included, conservatively).
+    incomplete = limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0;
+  } finally {
+    if (incomplete) await abandonSweepPass(db, "card_purchase_recognition", token);
+  }
+  if (finished) await finishSweepPass(db, "card_purchase_recognition", token);
   return result;
 }

@@ -5,8 +5,20 @@
 import { afterAll, expect } from "bun:test";
 import { type Miniflare } from "miniflare";
 import { startPipeline } from "./harness.ts";
-import { CARD_SETTLEMENT_STATEMENTS_SQL, cardSettlementSweep } from "../src/card-settlement-job.ts";
-import { cardPurchaseSweep } from "../src/card-purchase-job.ts";
+import {
+  CARD_DEBIT_READING_MARK_SQL,
+  CARD_SETTLEMENT_STATEMENTS_SQL,
+  CARD_SETTLEMENT_SWEEP_POLICY,
+  CARD_SETTLEMENT_SWEEP_VIEWS,
+  cardSettlementSweep,
+} from "../src/card-settlement-job.ts";
+import {
+  CARD_PURCHASE_SWEEP_POLICY,
+  CARD_PURCHASE_SWEEP_VIEWS,
+  cardPurchaseSweep,
+} from "../src/card-purchase-job.ts";
+import { finishSweepPass, openSweepTick } from "../src/sweep-pass.ts";
+import { sweepViewsDigest } from "./support/sweep-views.ts";
 import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare, env: Env;
@@ -67,11 +79,13 @@ test("the settlement sweep reads its statements again only after the CORE revisi
   expect(cleaned?.clean_source_revision).not.toBeNull();
   expect(cleaned?.pass_source_revision).toBeNull();
 
-  // Nothing moved: the tick reads the cursor and the gate, and stops.
+  // Nothing moved: the tick reads the cursor, the card information mark and
+  // the gate, and stops.
   const quiet: string[] = [];
   const skipped = await cardSettlementSweep(recording(env.DB, quiet));
   expect(skipped).toMatchObject({ scanned: 0, proposed: 0, written: 0 });
-  expect(quiet).toHaveLength(2);
+  expect(quiet).toHaveLength(3);
+  expect(quiet).toContain(CARD_DEBIT_READING_MARK_SQL);
   expect(quiet).not.toContain(CARD_SETTLEMENT_STATEMENTS_SQL);
 
   // A ledger write starts the next pass.
@@ -83,7 +97,8 @@ test("the settlement sweep reads its statements again only after the CORE revisi
     cleaned!.clean_source_revision!,
   );
 
-  // So does a pass recorded under another policy (a deploy that changes what a pass decides).
+  // So does a pass recorded under another policy (a deploy that changes what
+  // a pass decides, or a new card information reading off the ledger).
   await env.DB.prepare(
     "UPDATE processor_sweep_passes SET clean_policy='an-older-sweep' WHERE sweep='card_settlement'",
   ).run();
@@ -95,8 +110,9 @@ test("the settlement sweep reads its statements again only after the CORE revisi
 test("a settlement pass under way when the gate was deployed marks nothing clean", async () => {
   await env.DB.prepare(
     `UPDATE processor_sweep_passes SET pass_source_revision=NULL, pass_visibility_revision=NULL,
-      pass_core_epoch=NULL, clean_source_revision=NULL, clean_visibility_revision=NULL,
-      clean_core_epoch=NULL, clean_policy=NULL WHERE sweep='card_settlement'`,
+      pass_core_epoch=NULL, pass_policy=NULL, pass_token=NULL, clean_source_revision=NULL,
+      clean_visibility_revision=NULL, clean_core_epoch=NULL, clean_policy=NULL
+     WHERE sweep='card_settlement'`,
   ).run();
   await env.DB.prepare(
     "UPDATE card_settlement_scan_cursor SET last_statement_id=1 WHERE singleton=1",
@@ -130,4 +146,38 @@ test("the purchase recognition pass reads its usage rows again only after the CO
   const moved: string[] = [];
   await cardPurchaseSweep(recording(env.DB, moved));
   expect(moved.some(usage)).toBe(true);
+});
+
+test("a pass's end marks only the pass it started, never one an overlapping tick started", async () => {
+  const sweep = "card_purchase_recognition";
+  const policy = "an-overlap-probe";
+  await ledgerWrite();
+  // Tick A starts a pass; an overlapping tick B starts another before A ends.
+  const a = await openSweepTick(env.DB, sweep, policy, true);
+  const b = await openSweepTick(env.DB, sweep, policy, true);
+  expect(a.skip || b.skip).toBe(false);
+  await finishSweepPass(env.DB, sweep, a.skip ? null : a.token);
+  expect((await gateRow(sweep))?.clean_policy).not.toBe(policy);
+  // A later tick of B's pass continues it, and its end marks it clean.
+  const later = await openSweepTick(env.DB, sweep, policy, false);
+  expect(later).toEqual({ skip: false, token: b.skip ? null : b.token });
+  await finishSweepPass(env.DB, sweep, later.skip ? null : later.token);
+  expect((await gateRow(sweep))?.clean_policy).toBe(policy);
+  expect(await openSweepTick(env.DB, sweep, policy, true)).toEqual({ skip: true });
+});
+
+test("each sweep's policy pins the views its code reads, and fits the gate's column", () => {
+  // A migration that redefines one of these views moves no revision: update
+  // the pin, which changes the policy and runs a pass again.
+  expect(sweepViewsDigest(`${import.meta.dir}/../src/card-settlement-job.ts`)).toBe(
+    CARD_SETTLEMENT_SWEEP_VIEWS,
+  );
+  expect(sweepViewsDigest(`${import.meta.dir}/../src/card-purchase-job.ts`)).toBe(
+    CARD_PURCHASE_SWEEP_VIEWS,
+  );
+  // The settlement policy also carries the card information mark (`@<id>`).
+  expect(`${CARD_SETTLEMENT_SWEEP_POLICY}@${Number.MAX_SAFE_INTEGER}`.length).toBeLessThanOrEqual(
+    256,
+  );
+  expect(CARD_PURCHASE_SWEEP_POLICY.length).toBeLessThanOrEqual(256);
 });

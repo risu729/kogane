@@ -10,7 +10,7 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `5919a6c2c351ec1109447ba185462204529ba929913af32393ade010f7c38dc6`
+Schema digest: `5b37008e6860b57114d3adf31eabdea04a09681495696bd9fb4dd46b57f7c796`
 
 ## Summary
 
@@ -152,7 +152,7 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `price_promotion_cursor` | operational-mutable | bounded price promotion scan progress | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `processor_lane_ticks` | operational-mutable | bounded processor lane tick records | yes | no | no | processor_lane_ticks_no_update | — | 7 | 0 | 1 | 2 |
 | `processor_read_budget_hours` | operational-mutable | bounded processor rows-read per hour | yes | no | no | — | — | 4 | 0 | 0 | 0 |
-| `processor_sweep_passes` | operational-mutable | cursor sweep pass gates | yes | no | no | — | — | 8 | 0 | 0 | 0 |
+| `processor_sweep_passes` | operational-mutable | cursor sweep pass gates | yes | no | no | — | — | 10 | 0 | 0 | 0 |
 | `producer_sources` | core-keep | sources, producers and routes | yes | yes | no | — | — | 3 | 2 | 0 | 0 |
 | `producers` | core-keep | sources, producers and routes | yes | no | no | — | — | 4 | 0 | 0 | 0 |
 | `projection_input_records` | core-keep | CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names | yes | no | yes | projection_input_records_no_update | projection_input_records_no_delete | 9 | 0 | 1 | 4 |

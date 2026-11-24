@@ -990,6 +990,41 @@ test("the candidate pass looks up stored pairs a bounded chunk at a time", async
   // not on the CORE dependency ledger: the pass gate (src/sweep-pass.ts)
   // holds, so the next tick looks nothing up.
   expect(await tick()).toEqual({ proposed: 0, lookups: [] });
+  // A pass that runs anyway (here under another policy) finds every pair
+  // stored, and writes nothing.
+  await w.db
+    .prepare(
+      "UPDATE processor_sweep_passes SET clean_policy='an-older-pass' WHERE sweep='card_purchase_recognition'",
+    )
+    .run();
+  expect(await tick()).toEqual({ proposed: 0, lookups: [2, 1] });
+  expect(await proposals(w)).toHaveLength(3);
+}, 120_000);
+
+test("a tick whose candidate pass throws drops its pass, so the pass marks nothing clean", async () => {
+  const w = await world();
+  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
+  const throwing = new Proxy(w.db, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql: string) => {
+        if (sql.includes("WHERE proposal_digest IN")) throw new Error("synthetic: D1 unavailable");
+        return target.prepare(sql);
+      };
+    },
+  });
+  // The page is read and the cursor leaves it before the candidate pass throws.
+  await expect(cardPurchaseSweep(throwing, { now: NOW })).rejects.toThrow("synthetic");
+  expect(
+    await w.all(
+      "SELECT pass_token FROM processor_sweep_passes WHERE sweep='card_purchase_recognition'",
+    ),
+  ).toEqual([{ pass_token: null }]);
+  // The next tick runs a pass from the first row and writes the proposals.
+  expect((await w.sweep()).proposed).toBeGreaterThan(0);
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
 

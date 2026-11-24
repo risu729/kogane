@@ -1420,7 +1420,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "578b5d0a176d07ebe4cafd73ef1567d80c14a81b1db7eaee6fa090426e18288a"
+      "sha256": "5752e47226e2fe2e2e77f6aadc3fac9d48c0a744947bb99515a04865b82d0e45"
     }
   ],
   "tables": [
@@ -14277,6 +14277,20 @@
           "pk": 0
         },
         {
+          "name": "pass_policy",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "pass_token",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
           "name": "clean_source_revision",
           "type": "INTEGER",
           "notNull": false,
@@ -14314,7 +14328,7 @@
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "6796b2e661984869"
+      "sqlSha256": "1cd9c8e45b4a2ea1"
     },
     {
       "name": "producer_sources",
@@ -23538,6 +23552,6 @@
       "0108_snapshot_selection_memo.sql",
       "0109_processor_sweep_passes.sql"
     ],
-    "schemaSha256": "5919a6c2c351ec1109447ba185462204529ba929913af32393ade010f7c38dc6"
+    "schemaSha256": "5b37008e6860b57114d3adf31eabdea04a09681495696bd9fb4dd46b57f7c796"
   }
 }

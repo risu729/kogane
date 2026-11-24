@@ -63,8 +63,9 @@ function rows(store: Database, sql: string, args: readonly unknown[]): unknown[]
 function restartSweep(store: Database): void {
   store.exec(`UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1;
     UPDATE processor_sweep_passes SET pass_source_revision=NULL, pass_visibility_revision=NULL,
-      pass_core_epoch=NULL, clean_source_revision=NULL, clean_visibility_revision=NULL,
-      clean_core_epoch=NULL, clean_policy=NULL WHERE sweep='card_settlement';`);
+      pass_core_epoch=NULL, pass_policy=NULL, pass_token=NULL, clean_source_revision=NULL,
+      clean_visibility_revision=NULL, clean_core_epoch=NULL, clean_policy=NULL
+     WHERE sweep='card_settlement';`);
 }
 
 function d1(store: Database, probe?: { bankReads: number; disableCache?: boolean }): D1Database {
@@ -563,8 +564,10 @@ async function sameDebitAccountRows(
     )
     .run(CARD_INFORMATION_READER_VERSION);
   // Ticks until one pass has read every statement: its last page puts the
-  // cursor back at the first one.
-  restartSweep(store);
+  // cursor back at the first one. The readings just stored are not on the
+  // CORE ledger; their high-water mark in the gate's policy is what starts
+  // this pass (src/sweep-pass.ts), so the gate is left as it stands.
+  store.exec("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1");
   const cursor = () =>
     (
       store.query("SELECT last_statement_id AS id FROM card_settlement_scan_cursor").get() as {
