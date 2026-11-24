@@ -222,6 +222,10 @@ describe("V Point Pay run counts are reported only when the collection finished"
       const { result, line } = await run({ stored: credential, failingPath });
       expect(result.status).toBe("failed");
       expect(line).toMatchObject({ status: "failed", failureCount: 1 });
+      // A stopped run states no month window, even after the balance response
+      // named its first month (docs/collection.md, `v-point-pay`).
+      expect([result.earliestMonth, result.latestMonth]).toEqual([null, null]);
+      expect(line).toMatchObject({ earliestMonth: null, latestMonth: null });
       for (const field of COUNT_FIELDS) {
         expect(Object.hasOwn(result, field)).toBe(false);
         expect(Object.hasOwn(line, field)).toBe(false);

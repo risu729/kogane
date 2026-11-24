@@ -774,8 +774,12 @@ Daily reported credit snapshots (ADR 0105) are independent
 card selection and durable binding. Alongside sanitized card inventory,
 selection and statement discovery, they store `credit/authori.json` and
 `credit/revo.json` in the existing `card-NNN` unit, plus the existing
-binding unit when derivable. The new credit sanitizer explicitly keeps
-observed Authori financial keys while removing authentication/card references;
+binding unit when derivable. A card whose credit snapshot fails persists a
+`failed` terminal with no artifact under the same run id; like the success, it
+names the session run id as `acquisitionSessionRef` and `attemptId`. Failed
+credit runs stored before this was fixed name `<session>-credit` there, a
+session no other run of the collection carries, and stay as stored. The new
+credit sanitizer explicitly keeps observed Authori financial keys while removing authentication/card references;
 statement sanitizer v1 output remains unchanged. Registration v8 maps only
 these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
 old meaning.
@@ -1084,9 +1088,10 @@ current JST month, one matching `requested-months` range with basis `source`,
 both stated as `YYYY-MM` (the collector's `yyyyMM` was refused by the ingest
 range contract, `invalid_start_value`, until ADR 0021),
 one unit (`account`/`collection`), and `providerOutcome` from the run status.
-When the month window is unknown — a run that failed before the balance
-response — the scope is `unspecified` and no range is stated rather than a
-guessed one.
+The window is stated only for a run whose collection finished: a run that
+stopped before `collectVPointPay` returned, including one that stopped at a
+month request after the balance response named its first month, states the
+scope `unspecified` and no range rather than a guessed one.
 
 Run outcome and log: the Durable Object's `runCollection` returns the run's
 manifest. Its failure entry is `{operation, errorType, message}` in closed

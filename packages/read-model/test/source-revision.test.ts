@@ -17,6 +17,8 @@ import {
   REVISION_EXCLUDED_TABLES,
   revisionTriggerNames,
   snapshotIdentity,
+  SNAPSHOT_INPUT_REVISION_LEDGER,
+  snapshotInputTriggerNames,
   SOURCE_REVISION_LEDGER,
   VISIBILITY_REVISION_LEDGER,
   type CoreRevisionRow,
@@ -350,4 +352,107 @@ test("G2-01: the snapshot identity is the digest of the input, the build and the
   expect(await snapshotIdentity(input, build, "projection-input-v2")).not.toBe(id);
   // The two halves are digests, never a revision or a row count.
   await expect(snapshotIdentity("12", build)).rejects.toThrow(/sha256 digests/u);
+});
+
+// The snapshot-input counter of migration 0108 (ADR 0129): the Processor's
+// stored snapshot sets are keyed on it, so a write that changes which capture
+// is current and does not move it would leave a stale set looking current.
+const SNAPSHOT_TRIGGERS_SQL = `SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger'
+  AND sql LIKE '%UPDATE core_snapshot_input_revision%' ORDER BY name`;
+const snapshotRevision = (db: Database): number =>
+  (
+    db.query("SELECT revision FROM core_snapshot_input_revision WHERE id=1").get() as {
+      revision: number;
+    }
+  ).revision;
+
+test("the snapshot-input triggers are exactly the declared snapshot-input ledger", () => {
+  const db = migratedDatabase();
+  const rows = db.query(SNAPSHOT_TRIGGERS_SQL).all() as {
+    name: string;
+    tbl_name: string;
+    sql: string;
+  }[];
+  expect(rows.map((row) => row.name)).toEqual(snapshotInputTriggerNames());
+  const ledger = new Set<string>(SNAPSHOT_INPUT_REVISION_LEDGER);
+  const coreLedger = new Set<string>([...SOURCE_REVISION_LEDGER, ...VISIBILITY_REVISION_LEDGER]);
+  for (const row of rows) {
+    expect(ledger.has(row.tbl_name)).toBe(true);
+    expect(row.sql).toContain(
+      "UPDATE core_snapshot_input_revision SET revision=revision+1 WHERE id=1",
+    );
+  }
+  // Every snapshot input is a CORE input too, so a CORE-keyed gate (the
+  // report job's) never holds across a change of the current snapshots.
+  for (const table of SNAPSHOT_INPUT_REVISION_LEDGER) expect(coreLedger.has(table)).toBe(true);
+  db.close();
+});
+
+test("a write to a snapshot input moves the snapshot-input revision, and only those do", () => {
+  const db = migratedDatabase();
+  const moved = (write: string): number => {
+    const before = snapshotRevision(db);
+    db.exec(write);
+    return snapshotRevision(db) - before;
+  };
+  expect(
+    moved(
+      `INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+       VALUES(1,1,'smbc-direct-balance','1','2026-09-07T00:00:00Z','ok','[]')`,
+    ),
+  ).toBe(1);
+  expect(
+    moved(
+      `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
+       VALUES(1,'smbc-direct-balance',1,'1','2026-09-07T00:00:00Z','normal')`,
+    ),
+  ).toBe(1);
+  expect(
+    moved(
+      `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
+       VALUES(1,'smbc-direct-balance',NULL,1,'normal','pipeline','parse_ok','2026-09-07T00:00:00Z')`,
+    ),
+  ).toBe(1);
+  expect(
+    moved(
+      `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,
+        observed_count,expected_count,evidence_refs_json,policy_version,failure_cause,absence_meaning,
+        parent_run_status,parent_run_failure_count)
+       VALUES(1,'c1','s1','complete-container','complete',1,1,1,'[]','coverage-v1',NULL,'not-applicable','success',0)`,
+    ),
+  ).toBe(1);
+  expect(
+    moved(
+      `INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id)
+       VALUES('smbc-bank','balance-revision-probe','smbc-direct-balance','coverage-v1')`,
+    ),
+  ).toBe(1);
+  expect(
+    moved(
+      `INSERT INTO fetch_run_annotations(fetch_run_id,annotation_kind,reason_code,recorded_at_ms)
+       VALUES(1,'exclude_from_financial_views','synthetic-probe',1)`,
+    ),
+  ).toBe(1);
+  expect(
+    moved("DELETE FROM dataset_snapshot_policies WHERE dataset='balance-revision-probe'"),
+  ).toBe(1);
+  // CORE inputs that do not decide which capture is current leave it alone.
+  expect(
+    moved(
+      `INSERT INTO evidence_use_restrictions(evidence_ref,restriction,since,affected_manifests_json,actor,reason)
+       VALUES('balance:1','no-reuse','2026-09-12','[]','operator:1','synthetic')`,
+    ),
+  ).toBe(0);
+  expect(
+    moved(
+      `INSERT INTO calculation_policies(policy_id,kind,version,definition_json,verification,evidence_refs_json,created_at)
+       VALUES('p1','rounding','v1','{}','verified','[]','2026-09-12T00:00:00Z')`,
+    ),
+  ).toBe(0);
+  // The counter is one row that is never removed.
+  expect(() => db.exec("DELETE FROM core_snapshot_input_revision")).toThrow();
+  expect(() =>
+    db.exec("INSERT INTO core_snapshot_input_revision(id,revision) VALUES(2,1)"),
+  ).toThrow();
+  db.close();
 });

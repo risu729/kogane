@@ -29,6 +29,7 @@ import { BusyButton } from "../busy-button.tsx";
 import { CodeList } from "../instrument-candidate-display.tsx";
 import { displayLabel } from "../labels.ts";
 import { Link, navigate } from "../router.tsx";
+import { PageBudgetNote } from "../reconciliation-display.tsx";
 import { Badge, EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
 import {
   PlanRefreshNotice,
@@ -424,6 +425,19 @@ export function AccountCandidatesPage(): ReactNode {
                       次の候補
                     </button>
                   </nav>
+                  {/* Items follow that the reader's row budget withholds
+                      (`paging.stoppedBy: "budget"`, ADR 0128): said, never
+                      shown as the end of the view (INV05). */}
+                  <PageBudgetNote
+                    nextPage={
+                      page.paging?.stoppedBy === "budget"
+                        ? "budget_exceeded"
+                        : page.nextOffset === null
+                          ? "none"
+                          : "offered"
+                    }
+                    list={`「${current.label}」の候補`}
+                  />
                 </>
               );
             }}

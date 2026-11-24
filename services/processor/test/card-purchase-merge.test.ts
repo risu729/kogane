@@ -989,3 +989,61 @@ test("the candidate pass looks up stored pairs a bounded chunk at a time", async
   expect(await tick()).toEqual({ proposed: 0, lookups: [2, 1] });
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
+
+test("a stored candidate keeps the ambiguity codes of the tick that proposed it (an open limit)", async () => {
+  const w = await world();
+  // Two purchases of one amount on one day at two merchants; the confirmed
+  // ledger shows one so far, the pending ledger first shows the same one.
+  const first: UsageRow = {
+    date: "2026/05/10",
+    merchant: "架空店舗J",
+    amount: "800",
+    paymentType: "1回払",
+  };
+  const second: UsageRow = { ...first, merchant: "架空店舗K" };
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    rows: [first],
+  });
+  const confirmed = await w.myjcb({
+    state: "confirmed",
+    period: "detailMonth-1",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    rows: [first],
+  });
+  expect(await w.sweep()).toMatchObject({ recognized: 2, proposed: 1, conflicts: 0, failed: 0 });
+  // The next pending capture also shows the second purchase: its pair with
+  // the one posted row is proposed as ambiguous, but the stored first pair is
+  // never rewritten, so it keeps the codes it was proposed with.
+  await w.myjcb({
+    state: "unconfirmed",
+    period: "detailMonth-0",
+    fetchedAt: "2026-06-13T00:00:00.000Z",
+    rows: [first, second],
+  });
+  expect(await w.sweep()).toMatchObject({ recognized: 1, proposed: 1, conflicts: 0, failed: 0 });
+  const posted = `transaction:${confirmed.observations[0]}`;
+  const byPending = (await proposals(w)).map((row) => {
+    const [pending, target] = JSON.parse(row.target_refs_json) as SourceFactRef[];
+    expect(target!.id).toBe(posted);
+    return [
+      Number(pending!.id.slice("transaction:".length)),
+      (JSON.parse(row.rationale_codes_json) as string[]).includes("multiple_candidates"),
+    ];
+  });
+  // Earlier pending row first: unmarked; the later one: marked.
+  expect(byPending.sort((a, b) => Number(a[0]) - Number(b[0])).map(([, marked]) => marked)).toEqual(
+    [false, true],
+  );
+  // Both are heuristic pairs: each carries the rejection condition, marked or not.
+  const conditions = await w.all<{ rejection_conditions_json: string }>(
+    "SELECT rejection_conditions_json FROM reconciliation_proposals ORDER BY id",
+  );
+  expect(
+    conditions.map((row) =>
+      (JSON.parse(row.rejection_conditions_json) as string[]).includes("candidate_not_unique"),
+    ),
+  ).toEqual([true, true]);
+}, 120_000);

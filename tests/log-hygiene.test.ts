@@ -175,6 +175,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "compared with the lease refusal code only; the message is never logged or returned",
   },
+  "services/processor/src/snapshot-memo-step.ts": {
+    count: 1,
+    reason:
+      "tested against the fixed SQLite text a stale snapshot memo raises; only a boolean is kept, the message is never retained or logged",
+  },
   "services/processor/src/schedule-alarm.ts": {
     count: 1,
     reason:
