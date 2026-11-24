@@ -364,9 +364,11 @@ Evaluation time is **the start of the UTC day containing the capture time (`YYYY
 
 Canonical fixed-input bytes use the same `projection-inputs/<digest>/input.json` (DATA R2) as balances, referenced by CORE `projection_input_records`. No table, prefix or recording mechanism is added.
 
-Every captured set is bounded and **refused rather than truncated** beyond its bound (`rule_set_too_large`, `claim_set_too_large`, `offer_set_too_large`). Fresh captures read no saved
+The rules, the bucket claims and the offers are each bounded and **refused rather than truncated** beyond their bound of 200 (`rule_set_too_large`, `claim_set_too_large`, `offer_set_too_large`). The provider display sections follow the bucket claims they belong to, so the claim bound also bounds them. Fresh captures read no saved
 simulations (`captureRewardInput` in `services/processor/src/reward-read-projection.ts`
-captures an empty set), so there is no simulation bound.
+captures an empty set), so there is no simulation bound. Limit: the membership claims have no
+bound. The capture reads every row `MEMBERSHIP_SQL` returns, the newest claim per programme,
+holding and tier, and no code refuses a large set. No code writes membership claims today.
 
 CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to the 0038 dependency ledger; `0077_reward_bucket_claims_v2.sql` adds the current claim table and revision trigger. Without these, r0/r1 capture cannot detect rule/claim changes. Projection outputs `expiry_estimates` / `conversion_simulations` remain **excluded** from the ledger, so outputs do not invalidate themselves. As a side effect, reward-claim promotion also marks balance-projection input as potentially changed. This over-detects rather than misses a change; balances recapture and settle on the same content digest.
 
