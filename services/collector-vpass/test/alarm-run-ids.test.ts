@@ -25,10 +25,15 @@ const cardRun = (n: number) => `${SESSION_RUN}-card-${String(n).padStart(3, "0")
 /**
  * An alarm over `cards` synthetic cards. A card with a month collects it and
  * persists a successful run; a card without one fails and persists a failed run.
+ * With `creditRefused`, each card's first credit snapshot read is refused, so
+ * the card persists a failed credit run beside its statement run.
  */
-async function alarmOver(cards: number, withMonths: boolean) {
+async function alarmOver(cards: number, withMonths: boolean, creditRefused = false) {
+  const records: Array<Record<string, unknown>> = [];
   for (const method of ["log", "error"] as const) {
-    const spy = spyOn(console, method).mockImplementation(() => {});
+    const spy = spyOn(console, method).mockImplementation((value) => {
+      records.push(JSON.parse(String(value)) as Record<string, unknown>);
+    });
     restores.push(() => spy.mockRestore());
   }
   const authSpies = [
@@ -70,8 +75,11 @@ async function alarmOver(cards: number, withMonths: boolean) {
         },
       }),
     );
-    for (let snapshotRead = 0; snapshotRead < 4; snapshotRead += 1)
-      responses.push(() => member({}));
+    if (creditRefused)
+      responses.push(() => Response.json({ header: { resultCode: 9 }, body: { content: {} } }));
+    else
+      for (let snapshotRead = 0; snapshotRead < 4; snapshotRead += 1)
+        responses.push(() => member({}));
     if (withMonths)
       responses.push(() =>
         member({
@@ -105,7 +113,20 @@ async function alarmOver(cards: number, withMonths: boolean) {
   const result = await alarmCollection(env, "0 21 * * *", Date.parse("2026-09-05T00:00:00Z"));
   expect(responses).toHaveLength(0);
   const terminals = [...data.entries.keys()].filter((key) => key.endsWith("/terminal.json"));
-  return { result, terminals };
+  const terminal = (key: string) =>
+    JSON.parse(new TextDecoder().decode(data.entries.get(key)!.bytes)) as Record<string, unknown>;
+  // What the persisted terminals list: the objects the collection stored.
+  const listedObjects = terminals.reduce(
+    (total, key) => total + (terminal(key).artifacts as unknown[]).length,
+    0,
+  );
+  return {
+    result,
+    terminals,
+    records,
+    listedObjects,
+    terminal: (runId: string) => terminal(`runs/vpass/${runId}/terminal.json`),
+  };
 }
 
 test("a collection of at most 100 runs completes and names every card run once", async () => {
@@ -137,4 +158,38 @@ test("a failed collection of more than 100 cards keeps its code and lists the fi
   const first = runs(cards).slice(0, MAX_RUN_IDS);
   expect(result).toEqual({ status: "failed", runIds: first, failureCode: "collection_failed" });
   expect(collectorOperationResult(result)).toEqual(result);
+});
+
+// Like every collector's persist log (`objects.length` of each persist
+// result), the daily summary counts the objects its runs' terminals list: a
+// successful card's credit and statement artifacts, none for a failed run.
+test.each([
+  ["successful", true, false],
+  ["failed", false, false],
+  ["credit-refused", true, true],
+])(
+  "the daily summary counts the objects the %s cards' runs stored",
+  async (_label, withMonths, creditRefused) => {
+    const { records, terminals, listedObjects } = await alarmOver(3, withMonths, creditRefused);
+    expect(terminals).toHaveLength(6);
+    const summary = records.filter((record) => record.event === "vpass-daily-collection-complete");
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!.objectCount).toBe(listedObjects);
+  },
+);
+
+test("a refused credit snapshot persists its failed run in the card's acquisition session", async () => {
+  const { result, terminals, terminal } = await alarmOver(1, true, true);
+  expect(result).toEqual({
+    status: "failed",
+    runIds: [creditRun(1), cardRun(1)],
+    failureCode: "collection_failed",
+  });
+  expect(terminals).toHaveLength(2);
+  const failed = terminal(creditRun(1));
+  expect(failed).toMatchObject({ runId: creditRun(1), providerOutcome: "failed" });
+  // Every run of one Vpass session names that session, as the successful
+  // credit and statement runs do (G1-16, ADR 0105).
+  expect([failed.acquisitionSessionRef, failed.attemptId]).toEqual([SESSION_RUN, SESSION_RUN]);
+  expect(terminal(cardRun(1)).acquisitionSessionRef).toBe(SESSION_RUN);
 });

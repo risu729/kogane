@@ -206,6 +206,32 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
     }
   }, 30_000);
 
+  test("the oldest proposal's date is its date in Asia/Tokyo, not in UTC", async () => {
+    refuse = false;
+    // 20:00 UTC on 30 September is 05:00 on 1 October in Tokyo. The time is
+    // written as the job stores it (`new Date().toISOString()`).
+    current = {
+      ...answer,
+      kinds: lines.map((line) =>
+        line.kind === "card-settlement.statement"
+          ? { ...line, oldestAt: "2026-09-30T20:00:00.000Z" }
+          : line,
+      ),
+    };
+    expect(validPendingDecisions(current)).toBe(true);
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/`);
+      const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+      const line = panel.locator("li").filter({ hasText: "カード請求と引落の照合" });
+      await line.waitFor();
+      expect(await line.locator(".dim").textContent()).toBe(" 最も古い提案 2026-10-01");
+    } finally {
+      current = answer;
+      await page.close();
+    }
+  }, 30_000);
+
   test("the total says 以上 exactly when some line is cut or could not be counted", async () => {
     refuse = false;
     // Every line counted and complete but for the change lifecycle, which

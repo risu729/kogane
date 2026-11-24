@@ -585,7 +585,11 @@ released`). The DB CHECK is unchanged.
   rejection condition for the reviewer, and equal-amount pairs come first. More
   than one heuristic candidate for one pending row, or for one posted row (two
   same-amount purchases on one day, one of them posted so far), marks all of
-  them `multiple_candidates` / `candidate_not_unique`. A pair the provider itself
+  them `multiple_candidates`, among the facts one pass pairs (a pair stored
+  before a second candidate appeared keeps its codes; see
+  [pending-to-posted links](#pending-to-posted-links)). Every heuristic pair,
+  marked or not, carries `candidate_not_unique` as a rejection condition for
+  the reviewer; a provider-linked pair carries neither. A pair the provider itself
   linked is proposed whatever its days. The window only removes pairs:
   `proposalIdentity` (kind, stage, method, policy release, targets) is
   unchanged, so every pair still proposed keeps its stored digest and a
@@ -984,8 +988,17 @@ whichever lane saw it first: kind `pending_to_posted`, stage `B`, method
 as `transaction:<id>` pinned to `parse_run:<id>`, inserted only
 `WHERE NOT EXISTS` a row with that digest (the 0032 no-replace trigger would
 abort a second insert of an id). A pair already stored, proposed or decided, is
-never written again and never takes the write budget, and the ambiguity codes
-(`multiple_candidates`, `candidate_not_unique`) are kept. The recognition cursor cycles through every
+never written again and never takes the write budget. Its ambiguity mark
+(the rationale `multiple_candidates`) is that of the tick that proposed it:
+ambiguity is judged among the events one tick pairs, and a stored pair is never
+rewritten. An open limit: a pair proposed while it was alone in its window
+stays without `multiple_candidates` once a second candidate for either row is
+recognised in a later tick (it still carries the rejection condition
+`candidate_not_unique`, as every heuristic pair does), and only the later pair
+is marked
+(`card-purchase-merge.test.ts`, "a stored candidate keeps the ambiguity codes
+of the tick that proposed it"). The codes are a rationale for the reviewer;
+neither kind of pair is ever merged without a decision. The recognition cursor cycles through every
 current row, so a pair is reached however many rows a source has. This pass
 is the only producer of Vpass and MyJCB pending-to-posted candidates: the
 reconciliation lane runs stage A only for them
@@ -1125,7 +1138,10 @@ pass follows the page.
 
 Before the retire pass materializes current usage, it reads the operational
 clean proof from migration 0064. An unchanged revision under the same read
-contract skips only retirement; recognition and candidates continue. Only an
+contract (`card-purchase-retirement-v2` since
+[ADR 0002's 2026-11-21 amendment](adr/0002-card-purchase-recognition.md#amendment-2026-11-21-a-merged-event-is-retired-by-its-posted-row)
+changed the selection; a proof of another release is read again) skips only
+retirement; recognition and candidates continue. Only an
 empty stale-key read can establish that proof, and its write checks that no
 input mutation overlapped the read. Publication, identity, decimal, decisions,
 restrictions, CORE epoch and live-recognition changes invalidate it. Failed,
