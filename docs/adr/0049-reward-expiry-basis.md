@@ -947,7 +947,7 @@ Option 3.
 
 ## Amendment: an instant counts on the rule's deadline calendar
 
-- Status: proposed
+- Status: accepted (merged 2026-11-24 in [#1654](https://github.com/risu729/kogane/pull/1654))
 - Date: 2026-11-23
 
 ### Context
