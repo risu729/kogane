@@ -10,6 +10,7 @@ import { ownEntry } from "./labels.ts";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getJson, useFeatures } from "./api.ts";
+import { tokyoDate } from "../../../packages/domain/src/collection-freshness.ts";
 import type {
   PendingDecisionKind,
   PendingDecisionLine,
@@ -74,7 +75,9 @@ function Line({ line }: { line: PendingDecisionLine }): ReactNode {
         {count}件{line.complete ? "" : "以上"}
       </Badge>
       {line.oldestAt !== null ? (
-        <span className="dim"> 最も古い提案 {line.oldestAt.slice(0, 10)}</span>
+        // The date in Asia/Tokyo, not the first ten characters of a UTC
+        // instant; a time that is no instant is shown as sent.
+        <span className="dim"> 最も古い提案 {tokyoDate(line.oldestAt) ?? line.oldestAt}</span>
       ) : null}
       {count > 0 && pageOf(line) !== "/" ? (
         <>

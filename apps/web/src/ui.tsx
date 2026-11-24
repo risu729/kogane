@@ -11,7 +11,11 @@
 //     on its way to the screen. Counts are printed as plain digits.
 //   * Timestamps are printed exactly as stored. `as_of` and `observed_at`
 //     mean different things and reformatting either would be a claim the
-//     store does not make.
+//     store does not make. The exceptions show an instant in Japan time:
+//     <Time> in changes-since.tsx (最近の変化's run and parse times, and the
+//     time the collection quality page read its answer, which only the
+//     client holds), keeping the instant in `<time dateTime>`, and the
+//     schedule settings' formatter.
 //
 // React escapes every string it renders, and dangerouslySetInnerHTML is used
 // nowhere in this client, which is what makes provider-authored text —
@@ -448,6 +452,7 @@ export function QueryBoundary<T>({
   isEmpty,
   empty,
   coverageNotice = true,
+  nextPageLabel = "次の500件",
   children,
 }: {
   query: UseQueryResult<T, Error>;
@@ -456,6 +461,8 @@ export function QueryBoundary<T>({
   empty?: ReactNode;
   /** Pages that page in memory render their own pager instead of the URL-based notice. */
   coverageNotice?: boolean;
+  /** The URL-based notice's next-window link; the page that renders the boundary names its list. */
+  nextPageLabel?: string;
   children: (data: T) => ReactNode;
 }): ReactNode {
   // The failure a pressed retry repeats stays until that read settles, so the
@@ -514,7 +521,7 @@ export function QueryBoundary<T>({
                 return `${window.location.pathname}?${params}`;
               })()}
             >
-              {window.location.pathname === "/balances" ? "履歴の次の500件" : "次の500件"}
+              {nextPageLabel}
             </Link>
           ) : null}
           {coverage.latestNextOffset != null ? (

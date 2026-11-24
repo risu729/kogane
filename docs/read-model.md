@@ -469,28 +469,29 @@ plan returns under the intended rules, not the shipped rows byte for byte.
 
 ### Rows read by the latest-state reads
 
-The reads the Processor tick makes of the current state read rows in
-proportion to the whole history on every call, not to what they return or to
-what changed (issue [#1491](https://github.com/risu729/kogane/issues/1491)).
-Their plans without table statistics, as D1 plans them (`EXPLAIN QUERY PLAN`
-on every CORE migration):
+The shipped latest-state reads (`listLatestBalances`, `listPositions`, the
+valuation pairs, the reward buckets) compute which capture of each container is
+current inside every statement, from the whole stored history (issue
+[#1491](https://github.com/risu729/kogane/issues/1491)). The app and MCP still
+read them that way, on request. The Processor's scheduled lanes read the
+[snapshot memo](#snapshot-memo) instead (ADR 0129, slice 2). The inline plans
+without table statistics, as D1 plans them (`EXPLAIN QUERY PLAN` on every CORE
+migration):
 
-- `listLatestBalances` (the balance projection's capture reads it three times,
-  `services/processor/src/balance-projection-job.ts`) scans `fetch_artifacts`
-  three times through `idx_fetch_artifacts_source_dataset_time`: its own
-  active chain, `eligible_snapshots` and `eligible_artifact_containers`. It
-  walks every terminal fetch-run report twice more, through an automatic index
-  on `report_kind`, for the MyJCB past months and the V Point runs, and reaches
+- `listLatestBalances` (`LATEST_BALANCE_CANDIDATES_SQL` in the app's form)
+  scans `fetch_artifacts` three times through
+  `idx_fetch_artifacts_source_dataset_time`: its own active chain,
+  `eligible_snapshots` and `eligible_artifact_containers`. It walks every
+  terminal fetch-run report twice more, through an automatic index on
+  `report_kind`, for the MyJCB past months and the V Point runs, and reaches
   every artifact of each run by `fetch_run_id`. Each scanned artifact runs
   correlated probes: the visible-run checks (annotation, seal, terminal
   report), its unit reports, the expected-artifact count, the unit policy and
   unit success, its parse, publication and coverage claim, and `json_each` over
   the parse's warnings. The window functions then rank the whole set.
-- `listPositions` (the report job reads it on every tick,
-  `services/processor/src/report-job.ts`) walks every terminal report for its
-  active chain and makes the two snapshot scans; its valuation pairs
-  (`POSITION_VALUATIONS_SQL`) reach the positions by id and make the two
-  snapshot scans again.
+- `listPositions` walks every terminal report for its active chain and makes
+  the two snapshot scans; its valuation pairs (`POSITION_VALUATIONS_SQL`)
+  reach the positions by id and make the two snapshot scans again.
 - `CURRENT_REWARD_BUCKETS_SQL` evaluates `ELIGIBLE_VPOINT_RUNS`, the same walk
   of every terminal report, whenever a current claim is a V Point one, and
   scans every reward bucket claim (`SCAN c USING INDEX
@@ -518,35 +519,103 @@ stale keys over 30 and 60 capture days
 `STATEMENT_CI_SCALE`, plus a V Point run, an SBI Securities positions run and
 their reward claims per day), copied into Miniflare D1:
 
-| Statement                      | Caller               | 30 days | 60 days | Growth | Rows returned |
-| ------------------------------ | -------------------- | ------: | ------: | -----: | ------------- |
-| `listLatestBalances`           | `captureFixedInput`  |  37,693 |  74,943 |   1.99 | 10 / 10       |
-| `listPositions`                | `runReportJob`       |  20,041 |  39,791 |   1.99 | 3 / 3         |
-| `POSITION_VALUATIONS_SQL`      | `runReportJob`       |  12,371 |  24,401 |   1.97 | 3 / 3         |
-| `CURRENT_REWARD_BUCKETS_SQL`   | `captureRewardInput` |   8,571 |  17,101 |   2.00 | 2 / 2         |
-| `STALE_CARD_PURCHASE_KEYS_SQL` | `cardPurchaseSweep`  |  17,755 |  32,588 |   1.84 | 5 / 5         |
-| `currentCardUsageSql` page     | `cardPurchaseSweep`  |  15,010 |  27,702 |   1.85 | 68 / 85       |
-| Vpass binding insert           | `identitySweep`      |  75,890 | 283,740 |   3.74 | (insert)      |
+| Statement                            | Caller               |        30 days |         60 days | Growth | Rows returned |
+| ------------------------------------ | -------------------- | -------------: | --------------: | -----: | ------------- |
+| `latestBalanceCandidatesSql("memo")` | `captureFixedInput`  | 6,705 (37,703) | 12,705 (74,953) |   1.89 | 20 / 20       |
+| `listPositions` on the memo          | `runReportJob`       | 3,102 (20,041) |  5,802 (39,791) |   1.87 | 3 / 3         |
+| `positionValuationsSql("memo")`      | `runReportJob`       |    79 (12,371) |     79 (24,401) |   1.00 | 3 / 3         |
+| `currentRewardBucketsSql("memo")`    | `captureRewardInput` |    290 (8,571) |    530 (17,101) |   1.83 | 2 / 2         |
+| the memo walk (`insertMembers`)      | `ensureSnapshotMemo` |            968 |           1,448 |   1.50 | (insert)      |
+| `STALE_CARD_PURCHASE_KEYS_SQL`       | `cardPurchaseSweep`  |         17,773 |          32,606 |   1.83 | 5 / 5         |
+| `currentCardUsageSql` page           | `cardPurchaseSweep`  |         15,010 |          27,702 |   1.85 | 68 / 85       |
+| Vpass binding insert                 | `identitySweep`      |         75,890 |         283,740 |   3.74 | (insert)      |
 
-Rows read are per call. Doubling the history about doubles every read (1.84
-to 2.00) and nearly quadruples the Vpass binding insert (3.74), while what they
-return stays the same (the card usage page returns the older statement months
-the longer history still holds as current). The report job's second run over
-unchanged inputs reads as much as its first (32,451 rows at 30 days, 64,231 at
-60; the first run reads 32,466 and 64,246) only to find the report it stored:
-it reads every position, valuation, decimal and price before it compares the
-manifest digest. The current-snapshot selections alone (container snapshots,
-MyJCB past months, V Point runs) are 45,503 of the 74,943 rows of one
-latest-balances read at 60 days; the rest is its active chain over every
-artifact. The test fails when a statement's growth exceeds a ceiling (2.4 for
-the linear reads, 4.8 for the Vpass binding insert), so a read that starts to
-grow faster with history fails it; a read made cheaper passes, and its PR
-restates the numbers above and lowers the ceiling. That these reads do not
-grow with history, issue #1491's acceptance, is a `test.todo` per statement:
-it does not hold today. `tick-query-plan.test.ts` accepts the scans among these
-steps by name and checks `SCAN` steps only, so the nested search of the Vpass
-insert, the automatic indexes and the per-row probes pass it; its one-capture
-store does not reach the Vpass binding insert at all.
+Rows read are per call; in brackets, the shipped inline read the lane made
+before ADR 0129's second slice. The memo-backed reads start from the
+memo's members: the valuations of the current positions no longer grow with
+history at all, and the walk that stores the memo runs once per
+snapshot-input revision, not per read. What still grows in the balance and
+position reads is the history parsers' parses (MyJCB statement totals and
+ledgers, Vpass statement pages, SMBC transactions: every published row of a
+parser that no snapshot rule governs is current), which the memo-backed reads
+still visit one index probe each, and in the balance read rank; ADR 0129's
+fourth slice bounds them. The card sweeps and the Vpass binding insert are
+its third. The report job's second run over unchanged inputs reads 3 rows at
+either size (its skip gate,
+[calculation and reports](calculation-and-reports.md)); before ADR 0129's
+first slice it read as much as its first, about 52,500 and 104,000 rows, only
+to find the report it stored, and its first run now reads 6,380 and 11,780.
+The current-snapshot selections alone (container snapshots, MyJCB past months,
+V Point runs) are 45,503 of the 74,953 rows of one inline latest-balances read
+at 60 days; the memo-backed read is 12,705.
+
+The test fails when a statement's growth exceeds its ceiling (2.2 for the
+memo-backed reads, 1.1 for the valuations, 1.8 for the walk, 2.4 for the card
+sweeps, 4.8 for the Vpass binding insert) or when a memo-backed read at 60
+days reads more than its measurement plus about a tenth, so a read that falls
+back to the inline selection, or starts to grow faster with history, fails it;
+a read made cheaper passes, and its PR restates the numbers above and lowers
+the ceiling. That these reads do not grow with history, issue #1491's
+acceptance, is a test for the valuations and a `test.todo` for the others.
+`tick-query-plan.test.ts` checks the `SCAN` steps of every statement a tick
+prepares: a whole read of a growing table is either bounded (with the reason)
+or an exception that names the issue removing it and an expiry date after
+which the test fails (ADR 0129, decision 8). Nested searches, automatic indexes
+and per-row probes pass it; its one-capture store does not reach the Vpass
+binding insert at all.
+
+### Snapshot memo
+
+`packages/read-model/src/snapshot-memo.ts`, migration 0108, ADR 0129 slice 2.
+
+- **Snapshot-input revision.** `core_snapshot_input_revision` is a one-row
+  counter that triggers move on every write of the tables that decide which
+  capture is current (`SNAPSHOT_INPUT_REVISION_LEDGER` in
+  `src/source-revision.ts`: parse runs, publications and their events,
+  coverage claims, snapshot policies, fetch run seals and annotations). Each
+  of them is also in the CORE ledger. The acquisition tables are not: a run's
+  rows are fixed once it is sealed, and the selections read sealed runs only.
+  `test/source-revision.test.ts` checks that the triggers are exactly the
+  ledger and that a write of each table moves the counter.
+- **Container registry.** `snapshot_selection_containers` holds each (source,
+  parser, dataset, unit, MyJCB connection) that has a published parse, filled
+  by a trigger on `published_parse_runs` and backfilled by the migration. A
+  shared dataset name (`realised-gains` of SBI and Sony) is walked only with
+  the parser that publishes it.
+- **The walk.** `SNAPSHOT_MEMBERS_SQL` starts at each registered container's
+  newest capture (`idx_fetch_artifacts_source_dataset_capture`, partial so that
+  no other plan moves to it) and stops at the first one the shipped rules call
+  eligible; tied captures are ranked by group id as `snapshotCtes` ranks them.
+  The V Point runs walk terminal reports newest first
+  (`idx_fetch_run_reports_terminal_completion`), and the MyJCB past months
+  walk each connection. Its members are ids: every sealed artifact of each
+  current group, with the parser (and the version the policy requires), and
+  the current V Point run. `test/snapshot-memo.test.ts` checks the members
+  against the shipped selection on random stores (`KOGANE_RANDOM_SEEDS`,
+  24 by default) and the scaled card store.
+- **Storing.** `ensureSnapshotMemo` (Processor,
+  `services/processor/src/snapshot-memo-step.ts`) reads whether this build's
+  key exists for the current revision and core epoch; if not, one batch drops
+  the keys of other revisions with their members, adds the key and inserts the
+  walk's members (`STORE_SNAPSHOT_MEMO_SQL`). The key's digest is the SHA-256
+  of the walk's text, pinned as `SNAPSHOT_SELECTION_DIGEST` (a test fails when
+  the walk changes and the pin does not), so two builds during a rollout keep
+  their own keys.
+- **Reading.** A memo-backed statement names this build's current key in its
+  own text. When there is none (a write moved the revision since the memo was
+  stored), it fails with SQLite's "malformed JSON" error as soon as it needs a
+  member, instead of reading an empty set; `withSnapshotSelection` then stores
+  the memo again and repeats the read, and after two attempts reads the
+  shipped selection inline. The balance and position reads start from
+  `memo_candidate_parses`: the published parses of member artifacts and of the
+  current V Point runs, and every published parse of a parser no snapshot rule
+  governs. It is a superset; the shipped predicates still decide each row.
+  `test/snapshot-memo.test.ts` checks every memo-backed read against its inline
+  text on the random stores and the scaled card store.
+- **What it does not change.** The app and MCP never read or write the memo.
+  The report job's skip gate stays keyed on the CORE revision: its inputs
+  include exact decimals (`observation_decimal_values`) and restrictions,
+  which move the CORE revision and not the snapshot-input one.
 
 ## Parity proof
 

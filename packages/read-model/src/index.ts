@@ -84,6 +84,22 @@ export {
 } from "./price-selection";
 export { createD1ObservationReader, d1Executor, type D1Like } from "./d1";
 export {
+  type LatestBalanceCandidateRow,
+  type LatestBalanceCandidateSets,
+  latestBalanceCandidateSets,
+  readLatestBalanceCandidates,
+} from "./latest-balance-candidates";
+export {
+  SNAPSHOT_MEMBERS_SQL,
+  SNAPSHOT_MEMO_KEY_SQL,
+  SNAPSHOT_MEMO_STALE_ERROR,
+  SNAPSHOT_SELECTION_DIGEST,
+  STORE_SNAPSHOT_MEMO_SQL,
+  snapshotSelectionDigest,
+  type SnapshotMemberRow,
+} from "./snapshot-memo";
+export { type SnapshotSource } from "./sql";
+export {
   DECIMAL_POLICY_RELEASE,
   DEFAULT_IDENTITY_READ_MODE,
   IDENTITY_READ_MODES,
@@ -137,6 +153,8 @@ export {
   PROJECTION_INPUT_CONTRACT_VERSION,
   REVISION_EXCLUDED_TABLES,
   revisionTriggerNames,
+  SNAPSHOT_INPUT_REVISION_LEDGER,
+  snapshotInputTriggerNames,
   snapshotIdentity,
   SOURCE_REVISION_LEDGER,
   VISIBILITY_REVISION_LEDGER,
@@ -177,6 +195,7 @@ export {
   CONVERSION_OFFERS_SQL,
   createRewardReader,
   CURRENT_REWARD_BUCKETS_SQL,
+  currentRewardBucketsSql,
   expiryRule,
   EXPIRY_RULES_SQL,
   HOLDING_CUT_BY_PAGE,

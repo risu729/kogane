@@ -34,14 +34,24 @@ Counts are printed as plain digits, without separators, and nothing in the
 client calls `toLocaleString` or `Intl.NumberFormat`. Provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
-Transaction filters, search, sort, and page selection, balance source/account,
-currency/unit and kind filters, plus position filters and page selection,
-survive visits to detail pages within the current tab. A page selection
-belongs to the server window it was chosen in: the next 500 rows or a changed
-server filter open at their first page. They reset on reload
-and are never written to URL parameters, browser history state, localStorage,
-or sessionStorage. Route changes update the document title and focus the new
-heading; typing and API refreshes do not move focus.
+Where the server filters the lists (`collectionFilters`, below), their filters
+are part of the page URL: `source`, `account`, `from`, `to` and `q` on 取引;
+`source`, `account`, `instrument` and `metric` on 残高 and 期間実績・請求; `source` and
+`account` on 保有資産; `source` on 原本・証跡; and the `offset`, `latestOffset` or
+`cursor` of the 500-row server window that 次の500件 opens. They survive a reload
+and back and forward as the URL does, and a list read sends only those the
+advertised capabilities allow (`listRequestSearch`). Without `collectionFilters`
+(the local store), client record controls take their place: transaction filters
+and search, balance source/account, currency/unit and kind filters, and position
+filters. Those controls, the zero-row toggle on 残高 and 期間実績・請求 (残高0を除外,
+0の実績・請求を除外; shown with either store), the transaction sort (offered while a
+response is the complete set rather than one server page) and the 50-row page
+selection on 取引 and 保有資産 are in-memory state that survives visits to detail
+pages within the current tab. A page selection belongs to the server window it
+was chosen in: the next 500 rows or a changed server filter open at their first
+page. In-memory state resets on reload and is never written to URL parameters,
+browser history state, localStorage, or sessionStorage. Route changes update the document title
+and focus the new heading; typing and API refreshes do not move focus.
 
 Response validation requires decimal-integer minor units, safe nonnegative
 numeric identifiers, matching requested/detail identifiers, and lowercase
@@ -246,7 +256,7 @@ failure, and `no-store` apply before any capability is read.
 | `paginationVersion`    | `none`, `offset-v1`     | `none`       | `offset-v1`                   | Coverage record, next-page links, no client column sort                                                                                                                                                                                                                                                                                                     |
 | `balancesV2`           | boolean                 | false        | sealed snapshot               | The `最新の残高` ("latest balances") read-model section exists; the v2 balance routes are requested                                                                                                                                                                                                                                                         |
 | `balancesV2Pagination` | `none`, `keyset-v2`     | `none`       | `keyset-v2` when `balancesV2` | Cursor paging over one fixed snapshot, with a "read the newest snapshot" action                                                                                                                                                                                                                                                                             |
-| `collectionFilters`    | boolean                 | false        | true                          | Server filter controls replace client record controls                                                                                                                                                                                                                                                                                                       |
+| `collectionFilters`    | boolean                 | false        | true                          | Server filter controls replace client record controls; a source, account, unit or kind in the page URL that the filter options do not list stays the selected option, marked `（現在は一覧にありません）` ("not in the list now"), never shown as "all"                                                                                                     |
 | `organizedDisplay`     | boolean                 | false        | true                          | Rows carry `organization`                                                                                                                                                                                                                                                                                                                                   |
 | `financialProducts`    | boolean                 | false        | true                          | Organized rows may carry a product claim                                                                                                                                                                                                                                                                                                                    |
 | `evidenceHistory`      | boolean                 | false        | true                          | The `取得履歴` ("capture history") route and link exist                                                                                                                                                                                                                                                                                                     |
