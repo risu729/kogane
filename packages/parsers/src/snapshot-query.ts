@@ -49,7 +49,7 @@ export const ARTIFACT_SNAPSHOT_CONTAINERS = [
   },
 ] as const;
 
-function artifactContainerMatch(artifact: string, policy: string): string {
+export function artifactContainerMatch(artifact: string, policy: string): string {
   return `${artifact}.source_id = ${policy}.source_id
     AND ${artifact}.artifact_key = ${policy}.artifact_key
     AND ${artifact}.fetch_unit_key = ${policy}.fetch_unit_key
@@ -149,7 +149,7 @@ export function unitScopePolicySql(
 }
 
 /** The pre-PR-14 rule and the default: the whole parent fetch run succeeded. */
-function runScopeSuccessSql(fetchRun: string): string {
+export function runScopeSuccessSql(fetchRun: string): string {
   return `${fetchRun}.status = 'success' AND ${fetchRun}.failure_count = 0`;
 }
 
@@ -253,21 +253,66 @@ const CUTOFF_PARAM = /^\?[1-9][0-9]{0,2}$/u;
  * retired importer's `primary` unit until 2026-09-10 and with no unit by the
  * native collector since; without the alias the importer's last capture
  * stayed current beside the native one (ADR 0109 amendment, 2026-11-19). */
-function snapshotPartitionUnitSql(): string {
+export function snapshotPartitionUnitSql(
+  columns: { sourceId: string; fetchUnitKey: string; parserName: string; dataset: string } = {
+    sourceId: "source_id",
+    fetchUnitKey: "fetch_unit_key",
+    parserName: "parser_name",
+    dataset: "dataset",
+  },
+): string {
+  const { sourceId, fetchUnitKey, parserName, dataset } = columns;
   return `CASE
-    WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
-      AND parser_name = 'sbi-income-payments' AND dataset = 'income-payments'
+    WHEN ${sourceId} = 'sbi-securities' AND ${fetchUnitKey} = 'domestic'
+      AND ${parserName} = 'sbi-income-payments' AND ${dataset} = 'income-payments'
       THEN 'income-history-income'
-    WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
-      AND parser_name = 'sbi-realised-gains' AND dataset = 'realised-gains'
+    WHEN ${sourceId} = 'sbi-securities' AND ${fetchUnitKey} = 'domestic'
+      AND ${parserName} = 'sbi-realised-gains' AND ${dataset} = 'realised-gains'
       THEN 'income-history-gains'
-    WHEN source_id = 'sbi-shinsei-bank' AND fetch_unit_key = 'primary'
-      AND ((parser_name = 'sbi-shinsei-top-balances-and-activity'
-            AND dataset = 'top-accounts-balance-and-activity')
-        OR (parser_name = 'sbi-shinsei-yen-deposit-account' AND dataset = 'yen-deposit-account')
-        OR (parser_name = 'sbi-shinsei-exchange-rate' AND dataset = 'exchange-rate'))
+    WHEN ${sourceId} = 'sbi-shinsei-bank' AND ${fetchUnitKey} = 'primary'
+      AND ((${parserName} = 'sbi-shinsei-top-balances-and-activity'
+            AND ${dataset} = 'top-accounts-balance-and-activity')
+        OR (${parserName} = 'sbi-shinsei-yen-deposit-account' AND ${dataset} = 'yen-deposit-account')
+        OR (${parserName} = 'sbi-shinsei-exchange-rate' AND ${dataset} = 'exchange-rate'))
       THEN NULL
-    ELSE fetch_unit_key END`;
+    ELSE ${fetchUnitKey} END`;
+}
+
+/**
+ * The `snapshot_policies` CTE every selection starts from: the dataset rows
+ * that select a container snapshot. `snapshot_selection = 0` rows carry an
+ * eligibility policy only (D13/PR-14); they must not make their dataset a
+ * container-snapshot dataset. Shared by the shipped selection and the
+ * Processor's walk (packages/read-model/src/snapshot-memo.ts).
+ */
+export function snapshotPoliciesCte(
+  policies: string = SNAPSHOT_POLICIES_TABLE,
+  prefix: string = "",
+): string {
+  return `${prefix}snapshot_policies(parser_name, dataset, required_version, policy_id, replaces_previous_on_complete_empty, unit_scope) AS (
+  SELECT parser_name, dataset, required_parser_version, policy_id, replaces_previous_on_complete_empty, unit_scope
+  FROM ${policies} WHERE snapshot_selection = 1
+)`;
+}
+
+/** `ARTIFACT_SNAPSHOT_CONTAINERS` as the `artifact_container_policies` CTE. */
+export function artifactContainerPoliciesCte(prefix: string = ""): string {
+  const artifactContainers = ARTIFACT_SNAPSHOT_CONTAINERS.map((container) =>
+    [
+      container.sourceId,
+      container.parserName,
+      container.artifactKey,
+      container.fetchUnitKey,
+      container.dataset,
+    ]
+      .map((value) => `'${value.replaceAll("'", "''")}'`)
+      .join(", "),
+  )
+    .map((values) => `(${values}, 1)`)
+    .join(",\n  ");
+  return `${prefix}artifact_container_policies(source_id, parser_name, artifact_key, fetch_unit_key, dataset, replaces_previous_on_complete_empty) AS (
+  VALUES ${artifactContainers}
+)`;
 }
 
 export function snapshotCtes(
@@ -288,25 +333,7 @@ export function snapshotCtes(
   const containerCutoff = cutoff === undefined ? "" : `\n    AND fa.fetched_at < ${cutoff}`;
   // The policy id is a fixed code-owned identifier, never provider input.
   const activePolicy = options.policy === undefined ? "policy.policy_id" : `'${options.policy}'`;
-  const artifactContainers = ARTIFACT_SNAPSHOT_CONTAINERS.map((container) =>
-    [
-      container.sourceId,
-      container.parserName,
-      container.artifactKey,
-      container.fetchUnitKey,
-      container.dataset,
-    ]
-      .map((value) => `'${value.replaceAll("'", "''")}'`)
-      .join(", "),
-  )
-    .map((values) => `(${values}, 1)`)
-    .join(",\n  ");
-  // `snapshot_selection = 0` rows carry an eligibility policy only (D13/PR-14);
-  // they must not make their dataset a container-snapshot dataset.
-  return `${p}snapshot_policies(parser_name, dataset, required_version, policy_id, replaces_previous_on_complete_empty, unit_scope) AS (
-  SELECT parser_name, dataset, required_parser_version, policy_id, replaces_previous_on_complete_empty, unit_scope
-  FROM ${policies} WHERE snapshot_selection = 1
-), ${p}eligible_snapshots AS (
+  return `${snapshotPoliciesCte(policies, p)}, ${p}eligible_snapshots AS (
   SELECT fa.source_id, policy.parser_name, policy.required_version, fa.dataset, fa.fetch_unit_key,
          fa.fetch_run_id, MAX(fa.fetched_at) AS fetched_at, MAX(fa.id) AS artifact_id
   FROM ${relations.fetchArtifacts} fa
@@ -343,9 +370,7 @@ export function snapshotCtes(
   ) AS snapshot_rank FROM ${p}eligible_snapshots
 ), ${p}current_snapshots AS (
   SELECT * FROM ${p}ranked_snapshots WHERE snapshot_rank = 1
-), ${p}artifact_container_policies(source_id, parser_name, artifact_key, fetch_unit_key, dataset, replaces_previous_on_complete_empty) AS (
-  VALUES ${artifactContainers}
-), ${p}eligible_artifact_containers AS (
+), ${artifactContainerPoliciesCte(p)}, ${p}eligible_artifact_containers AS (
   SELECT fa.id AS artifact_id, fa.source_id, container_policy.parser_name,
          fa.artifact_key, fa.fetch_unit_key, fa.fetched_at
   FROM ${relations.fetchArtifacts} fa

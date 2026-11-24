@@ -35,6 +35,7 @@ import {
   type PageSql,
   pagedCollection,
   periodMeasureSql,
+  RESULT_BOUND,
   scopePredicates,
 } from "./scope";
 import {
@@ -43,11 +44,79 @@ import {
   myjcbPastMonthsSnapshotCtes,
   SMBC_DIRECT_SNAPSHOT_CTES,
 } from "./current-captures";
+import {
+  MEMO_CURRENT_SNAPSHOT,
+  MEMO_MYJCB_PAST_MONTHS_CTES,
+  MEMO_SNAPSHOT_CTES,
+  MEMO_VPOINT_RUNS_CTES,
+  memoCandidateParsesCte,
+  memoObservationChain,
+} from "./snapshot-memo";
 
 const ACTIVE = activeStateProjection.predicate;
 const PARSE_CHAIN = activeStateProjection.parseChain;
 const SNAPSHOT_CTES = completeSnapshotCandidates.ctes;
 const CURRENT_SNAPSHOT = completeSnapshotCandidates.currentMember;
+
+/**
+ * Where a latest-state read takes the current snapshot set from: `inline`
+ * computes it in the statement (the shipped selections, every caller but the
+ * Processor's scheduled lanes); `memo` joins the members the Processor stored
+ * for the current snapshot-input revision (snapshot-memo.ts, ADR 0129). The
+ * two texts differ only in those CTEs and the membership predicate.
+ */
+export type SnapshotSource = "inline" | "memo";
+
+interface SnapshotSelectionText {
+  /** Defines `snapshot_policies`, `artifact_container_policies` and the current containers. */
+  ctes: string;
+  /** Whether parse `p` of artifact `fa` belongs to the current snapshot of its container. */
+  currentMember: string;
+  /** Defines `current_myjcb_snapshots(fetch_artifact_id)`. */
+  myjcbPastMonths: string;
+  /** Defines `current_vpoint_runs(fetch_run_id)`. */
+  vpointRuns: string;
+  /**
+   * The observation chain (`p`, `fa`, `f`) and any CTE it needs (with its
+   * leading comma). The memo's starts from the candidate parses; `governed`
+   * names the parsers the read admits only through a member.
+   */
+  chain(
+    table: ObservationTable,
+    alias: string,
+    governed: readonly string[],
+  ): { cte: string; from: string };
+}
+
+export const SNAPSHOT_SELECTION_TEXT: Readonly<Record<SnapshotSource, SnapshotSelectionText>> = {
+  inline: {
+    ctes: SNAPSHOT_CTES,
+    currentMember: CURRENT_SNAPSHOT,
+    myjcbPastMonths: myjcbPastMonthsSnapshotCtes(),
+    vpointRuns: ELIGIBLE_VPOINT_RUNS,
+    chain: (table, alias) => ({
+      cte: "",
+      from: activeStateProjection.observationChain(table, alias),
+    }),
+  },
+  memo: {
+    ctes: MEMO_SNAPSHOT_CTES,
+    currentMember: MEMO_CURRENT_SNAPSHOT,
+    myjcbPastMonths: MEMO_MYJCB_PAST_MONTHS_CTES,
+    vpointRuns: MEMO_VPOINT_RUNS_CTES,
+    chain: (table, alias, governed) => ({
+      cte: `, ${memoCandidateParsesCte(governed)}`,
+      from: memoObservationChain(table, alias),
+    }),
+  },
+};
+
+/** The parsers the latest-balance read admits only through a member (its own filters below). */
+const BALANCE_MEMBER_PARSERS = [
+  "myjcb-credit-past-month-balances",
+  "v-point-balance-info",
+  "v-point-smfg-point",
+] as const;
 
 /** Counted under their contract names; each name reads its visible relation. */
 export const COUNTED_RELATIONS: readonly (readonly [string, string])[] = [
@@ -610,16 +679,28 @@ export function undatedTransactionsSql(
  * instrument). The source is part of the key because `source_account` is only
  * the provider's own label. Computed on request and stored nowhere.
  */
-function latestBalancesInner(measureView: MeasureView | undefined): string {
+function latestBalancesInner(
+  measureView: MeasureView | undefined,
+  flags: "" | "with flags" = "",
+  source: SnapshotSource = "inline",
+): string {
+  const selection = SNAPSHOT_SELECTION_TEXT[source];
+  const chain = selection.chain("balance_observations", "b", BALANCE_MEMBER_PARSERS);
   // Period totals are one witness per statement month, so in the summaries
   // view every MyJCB payment amount is kept, not only the ranked latest.
   const keepPeriodTotals =
     measureView === "summaries"
       ? " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-credit-past-month-balances@%' AND metric = 'credit_statement_payment_amount')"
       : "";
-  return `WITH ${SNAPSHOT_CTES}, ${myjcbPastMonthsSnapshotCtes()}, ${ELIGIBLE_VPOINT_RUNS}
+  const flagColumns =
+    flags === "with flags"
+      ? `,
+              CASE WHEN rank_in_group = 1 THEN 1 ELSE 0 END AS latest_in_group,
+              CASE WHEN ${periodMeasureSql("source_id", "parser", "metric")} THEN 1 ELSE 0 END AS is_summary`
+      : "";
+  return `WITH ${selection.ctes}, ${selection.myjcbPastMonths}, ${selection.vpointRuns}${chain.cte}
        SELECT id, source_id, source_account, metric, instrument, amount_minor,
-              amount_text, as_of, observed_at, parser
+              amount_text, as_of, observed_at, parser${flagColumns}
        FROM (
          SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
                 CAST(b.amount_minor AS TEXT) AS amount_minor, b.amount_text,
@@ -654,9 +735,9 @@ function latestBalancesInner(measureView: MeasureView | undefined): string {
                       THEN 1 ELSE 0 END DESC,
                     b.id DESC
                 ) AS rank_in_group
-         FROM ${activeStateProjection.observationChain("balance_observations", "b")}
+         FROM ${chain.from}
          WHERE ${ACTIVE}
-           AND ${CURRENT_SNAPSHOT}
+           AND ${selection.currentMember}
            AND (
              p.parser_name <> 'myjcb-credit-past-month-balances'
              OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
@@ -684,6 +765,27 @@ export function latestBalancesSql(
   );
 }
 
+/**
+ * Every latest-balance candidate in one read, for the balance projection's
+ * capture: the summaries view's rows (the ranked latest of every group plus
+ * every MyJCB statement-month payment amount), each flagged with whether it is
+ * its group's ranked latest and whether it is a period total. The unfiltered
+ * list, the balances view and the summaries view are exact subsets of it
+ * (`latestBalanceCandidateSets`), so the capture no longer runs the same
+ * selection three times (ADR 0129, slice 1). The read takes up to twice the
+ * per-view bound plus one row: when every view is within its bound the union
+ * is too, so a longer result already means one view is over it.
+ */
+export function latestBalanceCandidatesSql(source: SnapshotSource = "inline"): string {
+  return `SELECT * FROM (${latestBalancesInner(
+    "summaries",
+    "with flags",
+    source,
+  )}) ORDER BY id LIMIT ${2 * RESULT_BOUND + 1}`;
+}
+
+export const LATEST_BALANCE_CANDIDATES_SQL = latestBalanceCandidatesSql();
+
 /** The full append-only history over visible parse results, superseded rows included and marked. */
 export const BALANCE_HISTORY_SQL = `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
               CAST(b.amount_minor AS TEXT) AS amount_minor,
@@ -705,16 +807,24 @@ export function balanceHistorySql(scope: CollectionScope, offset: number): PageS
   );
 }
 
-const POSITIONS_SQL = `WITH ${SNAPSHOT_CTES}
+const positionsBaseSql = (source: SnapshotSource): string => {
+  const selection = SNAPSHOT_SELECTION_TEXT[source];
+  const chain = selection.chain("position_observations", "po", []);
+  return `WITH ${selection.ctes}${chain.cte}
        SELECT po.id, fa.source_id, po.source_account, po.security_code, po.security_name,
               po.market, po.quantity_text, po.quantity_scale, po.currency, po.as_of,
               p.parser_name || '@' || p.parser_version AS parser
-       FROM ${activeStateProjection.observationChain("position_observations", "po")}
-       WHERE ${ACTIVE} AND ${CURRENT_SNAPSHOT}`;
+       FROM ${chain.from}
+       WHERE ${ACTIVE} AND ${selection.currentMember}`;
+};
 
-export function positionsSql(scope: CollectionScope, offset: number): PageSql {
+export function positionsSql(
+  scope: CollectionScope,
+  offset: number,
+  source: SnapshotSource = "inline",
+): PageSql {
   return pagedCollection(
-    POSITIONS_SQL,
+    positionsBaseSql(source),
     scope,
     ["source", "account"],
     "positionsByScope",
@@ -741,7 +851,9 @@ export function positionsSql(scope: CollectionScope, offset: number): PageSql {
  * row follows. A snapshot republished between two page reads replaces rows an
  * earlier page returned, so the check fails (INV06).
  */
-export const POSITION_CUT_SQL = `SELECT count(*) AS current_rows,
+export const positionCutSql = (
+  source: SnapshotSource = "inline",
+): string => `SELECT count(*) AS current_rows,
        coalesce(sum(id IN (SELECT value FROM json_each(?1))), 0) AS read_current,
        coalesce(sum((${ORDER_KEYS.positionsByScope}) <= (
          SELECT bound_fa.source_id, bound.source_account, bound.security_code, bound.id
@@ -750,7 +862,9 @@ export const POSITION_CUT_SQL = `SELECT count(*) AS current_rows,
          JOIN ${visibleEvidence.fetchArtifacts} bound_fa ON bound_fa.id = bound_p.fetch_artifact_id
          WHERE bound.id IN (SELECT value FROM json_each(?1))
          ORDER BY 1 DESC, 2 DESC, 3 DESC, 4 DESC LIMIT 1)), 0) AS prefix_rows
-  FROM (${POSITIONS_SQL})`;
+  FROM (${positionsBaseSql(source)})`;
+
+export const POSITION_CUT_SQL = positionCutSql();
 
 /**
  * The provider row a valuation `v` belongs to, beside position `po` of parse
@@ -773,7 +887,9 @@ export const POSITION_VALUATION_LOCATOR = `CASE p.parser_name
  * same parse snapshot and provider row. Source-specific locator guards keep
  * equal codes in two markets apart. Valuations are never summed or converted.
  */
-export const POSITION_VALUATIONS_SQL = `WITH ${SNAPSHOT_CTES}
+export const positionValuationsSql = (
+  source: SnapshotSource = "inline",
+): string => `WITH ${SNAPSHOT_SELECTION_TEXT[source].ctes}
     SELECT po.id AS position_id, v.id, fa.source_id, v.source_account, v.subject, v.metric,
       CAST(v.amount_minor AS TEXT) AS amount_minor, v.amount_text, v.currency, v.as_of,
       p.parser_name || '@' || p.parser_version AS parser
@@ -784,7 +900,9 @@ export const POSITION_VALUATIONS_SQL = `WITH ${SNAPSHOT_CTES}
     JOIN ${visibleEvidence.fetchArtifacts} fa ON fa.id = p.fetch_artifact_id
     JOIN ${visibleEvidence.fetchRuns} f ON f.id = fa.fetch_run_id
     WHERE po.id IN (SELECT value FROM json_each(?1))
-      AND ${ACTIVE} AND ${CURRENT_SNAPSHOT} AND ${POSITION_VALUATION_LOCATOR}`;
+      AND ${ACTIVE} AND ${SNAPSHOT_SELECTION_TEXT[source].currentMember} AND ${POSITION_VALUATION_LOCATOR}`;
+
+export const POSITION_VALUATIONS_SQL = positionValuationsSql();
 
 const observationCount = (table: ObservationTable, alias: string): string =>
   `(SELECT COUNT(*) FROM ${table} ${alias}

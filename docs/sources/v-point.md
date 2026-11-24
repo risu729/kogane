@@ -450,8 +450,10 @@ session or email notifications.
 
 The expected recovery path is already automatic: delete the expired session,
 request an email code, complete a fresh pending challenge from the delivered
-message, then collect again. The challenge freshness window is two minutes in
-our implementation; this is not the provider's session lifetime. A failed
+message, then collect again. The challenge freshness window is one minute in
+our implementation (`CHALLENGE_TTL_MS` in
+`services/collector-vpoint/src/session.ts`, the validity the provider's email
+states); this is not the provider's session lifetime. A failed
 challenge after an expired-session read now retains the explicit scheduled
 reason `human_required_session_refresh`, rather than a generic collection
 failure. A challenge still awaiting email remains `reauthentication_pending`.

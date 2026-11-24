@@ -203,7 +203,12 @@ export { cardUsageFactOf };
 
 // Bump when the retirement read's selection semantics change. A deployment
 // must not reuse an empty-result proof produced under a different contract.
-const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v1";
+// v2: a revision is decided by its posted keys when it holds one (ADR 0002,
+// amendment 2026-11-21). A v1 proof was certified while a merged event whose
+// posted row had left still counted as held by its current pending key, so
+// reusing it would keep that event captured beside its replacement until an
+// unrelated input mutation dirtied the proof.
+const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v2";
 
 type Outcome = "written" | "conflict" | "failed";
 
@@ -313,8 +318,10 @@ async function retirePass(
   for (const [eventId, rows] of byEvent) {
     const current = live.get(eventId);
     // The live revision read now must be the one the stale read reported,
-    // holding as many keys; the page may cut an event's keys, but each one
-    // it reports is stale, and so is every other key of that revision.
+    // holding as many keys; the page may cut an event's keys, but the read
+    // reports a revision only when none of its deciding keys is current, so
+    // the whole revision is stale (a merged event's pending key may still be
+    // current: it follows its posted row).
     if (
       !current ||
       current.revision.revision !== rows[0]!.revision ||

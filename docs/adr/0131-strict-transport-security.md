@@ -1,8 +1,9 @@
 # ADR 0131: Every App answer tells the browser to use only HTTPS for its host
 
-- Status: proposed. A change to the App Worker's response header policy:
-  **the owner's decision is needed before merge** on whether the Worker
-  should send the header itself, and on its lifetime (below).
+- Status: accepted (merged 2026-11-22 in [#1558](https://github.com/risu729/kogane/pull/1558)).
+  A change to the App Worker's response header policy: the owner's decision
+  was needed before merge on whether the Worker should send the header
+  itself, and on its lifetime (below).
 - Date: 2026-11-21
 - Related: [production evidence browser: response headers](../production-evidence-browser.md#response-headers),
   [ADR 0047](0047-mcp-client-connection.md) (what Access serves, not this

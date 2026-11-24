@@ -10,6 +10,7 @@
 // disagreement is `conflict`, not a silent choice. Nothing in this file
 // performs an exchange; `simulateConversion` and `findConversionPaths` return
 // bounded plans and the conditions that still need checking.
+import { civilDateOfInstant } from "./civil-date.ts";
 import { canonicalJson } from "./context.ts";
 import {
   hasExactKeys,
@@ -1088,9 +1089,19 @@ export function qualificationMeasures(
 
 // ── expiry estimation ────────────────────────────────────────────────
 
-function localDate(value: TemporalValue): CivilDate | null {
+/**
+ * The calendar day of a date, or of an instant on `calendar`'s days (the
+ * rule's deadline zone; the instant's own zone when the rule has no readable
+ * calendar), from the runtime's zone data (`civilDateOfInstant`, ADR 0056),
+ * never the date its offset was written in: `2026-09-30T20:00:00Z` is
+ * 2026-10-01 in Asia/Tokyo. A zone the runtime does not know establishes no day.
+ */
+function localDate(value: TemporalValue, calendar: string | null): CivilDate | null {
   if (value.kind === "local-date") return parseLocalDate(value.value);
-  if (value.kind === "instant") return parseLocalDate(value.value.slice(0, 10));
+  if (value.kind === "instant") {
+    const date = civilDateOfInstant(value.value, calendar ?? value.zone);
+    return date === null ? null : parseLocalDate(date);
+  }
   return null;
 }
 
@@ -1216,7 +1227,7 @@ export function estimateExpiry(
   // Read only when the calendar is known: an unreadable one is a rule failure
   // below, which derives no day at all.
   const zone = rule.deadlineCalendar?.zone ?? "";
-  const now = localDate(clock);
+  const now = localDate(clock, rule.deadlineCalendar?.zone ?? null);
   const basisOfRule = ruleBasis(rule);
   if (rule.deadlineCalendar?.zoneBasis === "assumed") {
     push(uncertaintyCodes, "deadline_zone_assumed");
@@ -1296,7 +1307,7 @@ export function estimateExpiry(
     for (const item of activity.activities) {
       if (policy.excludedKinds.includes(item.kind)) continue;
       if (!policy.kinds.includes(item.kind)) continue;
-      const date = localDate(activityDate(item, policy.dateBasis));
+      const date = localDate(activityDate(item, policy.dateBasis), zone);
       if (!date) {
         undated = true;
         push(uncertaintyCodes, "activity_date_unknown");

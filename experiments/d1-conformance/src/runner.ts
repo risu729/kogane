@@ -33,6 +33,13 @@ function closedError(error: unknown, codes: readonly string[]): string | null {
   }
   return codes.find((code) => parts.some((message) => message.includes(code))) ?? null;
 }
+/**
+ * CORE tables per count or snapshot statement: the snapshot's `json_array`
+ * stays below D1's 32 function arguments, and fewer statements keep the run
+ * under its submitted-statement bound as the schema grows (148 tables at
+ * migration 0108).
+ */
+const TABLES_PER_STATEMENT = 24;
 function assert(ok: boolean, code: string): asserts ok {
   if (!ok) throw new Error(code);
 }
@@ -112,10 +119,12 @@ async function snapshotSql(db: D1Database): Promise<string[]> {
       FROM (SELECT * FROM "${name}" ORDER BY ${quoted.join(",")}))`;
   });
   const chunks = Array.from(
-    { length: Math.ceil(expressions.length / 16) },
+    { length: Math.ceil(expressions.length / TABLES_PER_STATEMENT) },
     (_, index) =>
       "SELECT json_array(" +
-      expressions.slice(index * 16, (index + 1) * 16).join(",") +
+      expressions
+        .slice(index * TABLES_PER_STATEMENT, (index + 1) * TABLES_PER_STATEMENT)
+        .join(",") +
       ") AS state_json",
   );
   assert(
@@ -141,8 +150,10 @@ async function checkBaseline(db: D1Database): Promise<void> {
   const names = Object.keys(corpus.baselineCounts).sort();
   const expressions = names.map((name) => `(SELECT count(*) FROM "${name}") AS "${name}"`);
   const chunks = Array.from(
-    { length: Math.ceil(expressions.length / 16) },
-    (_, index) => "SELECT " + expressions.slice(index * 16, (index + 1) * 16).join(","),
+    { length: Math.ceil(expressions.length / TABLES_PER_STATEMENT) },
+    (_, index) =>
+      "SELECT " +
+      expressions.slice(index * TABLES_PER_STATEMENT, (index + 1) * TABLES_PER_STATEMENT).join(","),
   );
   const results = await db.batch<Record<string, number>>(chunks.map((sql) => db.prepare(sql)));
   const counts = Object.assign({}, ...results.flatMap((item) => item.results));
@@ -247,7 +258,7 @@ async function racing(db: D1Database, item: RaceCase): Promise<CaseReport> {
 
 export async function runConformance(db: D1Database, runtime: "local-miniflare" | "remote-d1") {
   const reports: CaseReport[] = [];
-  const chunks = Math.ceil(Object.keys(corpus.baselineCounts).length / 16);
+  const chunks = Math.ceil(Object.keys(corpus.baselineCounts).length / TABLES_PER_STATEMENT);
   const queryBudgetUpperBound =
     chunks +
     1 +

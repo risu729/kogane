@@ -147,11 +147,11 @@ export interface UpcomingAccountInput {
   /** When the reported balance was captured; null when there is none. */
   capturedAt: string | null;
   /**
-   * The latest card debit from the account due on or before the date that
-   * the caller knows of, or null. The service takes it from each card's
-   * newest accepted settlement per bank account and each card's newest
-   * statement already due, not from a card's older statements
-   * (docs/card-settlements.md, Upcoming bills, limits).
+   * The latest card debit from the account due on or before the date, or
+   * null. The service takes it from each card's newest accepted settlement
+   * per bank account, each card's newest statement already due, and each
+   * answered card's latest statement of an earlier month due by the date
+   * (docs/card-settlements.md, Upcoming bills).
    */
   previousDebit: string | null;
 }
@@ -318,6 +318,11 @@ export function upcomingCardBills(input: {
         if (account.balance.value.status !== "exact" || account.balance.unitRef !== unit)
           reasons.add("balance_not_exact");
         const captured = account.capturedAt === null ? null : captureDate(account.capturedAt);
+        // A capture time with no capture date cannot be placed against the
+        // previous debit or a bill's due date, so it is refused rather than
+        // compared as if it came after them.
+        if (account.capturedAt !== null && captured === null)
+          throw new Error("invalid_capture_time");
         // A balance captured on a counted bill's own due date (only the date
         // itself: no capture is later) may come before or after the bank
         // takes it; compared with that bill, a capture after it would count
