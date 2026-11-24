@@ -742,7 +742,7 @@ before; only the `proposed` filter changes.
 
 - Status: accepted (merged 2026-11-22 in [#1522](https://github.com/risu729/kogane/pull/1522))
 - Date: 2026-11-21
-- Owner approval: required before merge. No field, code or type changes, but
+- Owner approval: given 2026-11-24. No field, code or type changes, but
   on a bill's due date the published answer of
   `kogane.card-settlements.debit-accounts` with `view: "upcoming"` can read
   `unknown` with `balance_before_previous_debit` where it read `yes` or `no`
@@ -800,7 +800,7 @@ a card debit's day, so whether it shows the debit is unknown.
 
 ## Amendment 2026-11-23: a card's earlier statement is a previous debit
 
-- Status: proposed
+- Status: accepted (merged 2026-11-24 in [#1652](https://github.com/risu729/kogane/pull/1652))
 - Date: 2026-11-23
 - Owner approval: required before merge. No field, code or type changes, but
   the published answer of `kogane.card-settlements.debit-accounts` with
