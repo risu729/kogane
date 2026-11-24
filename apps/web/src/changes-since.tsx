@@ -159,7 +159,8 @@ const tokyoTime = (value: string): string =>
     timeStyle: "short",
   }).format(new Date(value));
 
-function Time({ value }: { value: string }): ReactNode {
+/** An instant shown in Japan time; the `<time>` element keeps the instant itself. */
+export function Time({ value }: { value: string }): ReactNode {
   return (
     <time className="cell-time" dateTime={value}>
       {tokyoTime(value)}
