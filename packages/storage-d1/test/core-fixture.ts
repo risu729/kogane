@@ -108,7 +108,11 @@ INSERT INTO observation_replay_plans(id,created_at_ms,updated_at_ms,source_id,da
  * and a test asserting "no rows" would pass for the wrong reason.
  */
 export function pilotDatabase(): Database {
-  const db = fullCoreDatabase();
+  return seedPilotRows(fullCoreDatabase());
+}
+
+/** The synthetic rows above, on a CORE database migrated some other way. */
+export function seedPilotRows(db: Database): Database {
   for (const statement of FIXTURE.split(";\n")) {
     const sql = statement.trim();
     if (sql.length > 0) db.run(sql);

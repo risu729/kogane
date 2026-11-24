@@ -395,6 +395,9 @@ describe("covers", () => {
     });
     // 00:30 on 3/11 in Tokyo is still 3/10 in UTC: the next day, after the debit.
     expect(run("2098-03-10T15:30:00.000Z")).toMatchObject({ covers: "yes", reasons: [] });
+    // A capture time with no capture date is never compared as if it came after the debit.
+    for (const at of ["2098-02-30T01:00:00.000Z", "2098-03-10T24:00:00.000Z", "2098-03-10"])
+      expect(() => run(at)).toThrow("invalid_capture_time");
   });
 
   test("a balance captured on a counted bill's own due date may already show it (INV06)", () => {

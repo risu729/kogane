@@ -105,6 +105,8 @@ Each bucket's `expiryBasis` has the following 3 parts. `validBucketExpiryBasis` 
 
 A computed expiry is a date only when the rule is verified, has a supported calculation family and a readable deadline calendar (§3), and applies on the evaluation day; the bucket kind is covered; an inactivity rule has no qualifying activity with an unknown date, at least 1 observed qualifying activity and history completeness other than `unknown` (`partial` lacks only older history, so derivation proceeds with `history_incomplete`); a tier-dependent rule has a tier claim covering the starting day; and both the starting day and derived deadline lie within that version's validity. No treatment across rule versions is inferred where the terms do not record it. Otherwise the result is `unavailable` with exactly 1 reason from the closed `COMPUTED_EXPIRY_REASONS` list.
 
+The evaluation day and each activity's date are calendar days on the rule's deadline calendar. A plain date is its own day (its zone is not compared with the rule's, a limit). An instant counts on the deadline zone's day (`civilDateOfInstant`, [ADR 0056](adr/0056-as-of-price-fx-selection.md)), never by the date its offset was written in: `2026-09-30T20:00:00Z` anchors an `Asia/Tokyo` rule on 2026-10-01, whatever zone the instant is stamped with. A zone the runtime does not know gives no day, so such an activity is `activity_date_unknown`. A clock in a zone the runtime does not know establishes no evaluation day: a version with a validity period is `rule_out_of_force` and no deadline is `deadline_passed`. A rule without a readable calendar computes no date; it reads an instant clock in the clock's own zone, which still decides `rule_out_of_force` (checked before `deadline_calendar_unreadable`) and `deadline_passed` on a provider display. The READ projection gives only a `local-date` clock and no activities (`evaluationClock` and `UNCLASSIFIED_REWARD_HISTORY` in `packages/read-model/src/reward-projection.ts`), so no stored snapshot changes ([ADR 0049 amendment of 2026-11-23](adr/0049-reward-expiry-basis.md#amendment-an-instant-counts-on-the-rules-deadline-calendar)).
+
 | reasonCode                           | Meaning                                                                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `rule_not_verified`                  | Terms have not been verified in the repository                                                                            |
@@ -255,6 +257,11 @@ All are GET routes, with no writes or external communications. `Page<T>` = `{row
 `/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` traverses bucket rows. Reads see only claims linked to published parse runs, so rolling back a publication pointer also removes them from reward presentation.
+A holding's `membership` lists the newest claim per tier of its own programme and holding
+reference (`MEMBERSHIP_SQL`), the key `estimateExpiry` also matches claims by; another
+programme's claim that names the same holding reference is not listed. `MEMBERSHIP_SQL`
+does not check publication: the published-parse-run filter above covers bucket claims, and
+rolling back a publication pointer does not remove a membership claim.
 A holding whose buckets a page cuts is listed on each page that holds some of them, with
 those buckets, but its `consumable` and every `byKind` quantity are `missing` with
 `holding_cut_by_page`, never the sum of the buckets on that page (INV05; 2026-11-18). The
@@ -357,9 +364,11 @@ Evaluation time is **the start of the UTC day containing the capture time (`YYYY
 
 Canonical fixed-input bytes use the same `projection-inputs/<digest>/input.json` (DATA R2) as balances, referenced by CORE `projection_input_records`. No table, prefix or recording mechanism is added.
 
-Every captured set is bounded and **refused rather than truncated** beyond its bound (`rule_set_too_large`, `claim_set_too_large`, `offer_set_too_large`). Fresh captures read no saved
+The rules, the bucket claims and the offers are each bounded and **refused rather than truncated** beyond their bound of 200 (`rule_set_too_large`, `claim_set_too_large`, `offer_set_too_large`). The provider display sections follow the bucket claims they belong to, so the claim bound also bounds them. Fresh captures read no saved
 simulations (`captureRewardInput` in `services/processor/src/reward-read-projection.ts`
-captures an empty set), so there is no simulation bound.
+captures an empty set), so there is no simulation bound. Limit: the membership claims have no
+bound. The capture reads every row `MEMBERSHIP_SQL` returns, the newest claim per programme,
+holding and tier, and no code refuses a large set. No code writes membership claims today.
 
 CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to the 0038 dependency ledger; `0077_reward_bucket_claims_v2.sql` adds the current claim table and revision trigger. Without these, r0/r1 capture cannot detect rule/claim changes. Projection outputs `expiry_estimates` / `conversion_simulations` remain **excluded** from the ledger, so outputs do not invalidate themselves. As a side effect, reward-claim promotion also marks balance-projection input as potentially changed. This over-detects rather than misses a change; balances recapture and settle on the same content digest.
 
@@ -487,7 +496,7 @@ To stop the writer, deploy processor `REWARD_READ_PROJECTION_ENABLED=false`. No 
 
 ### Synthetic verification (ADR 0049)
 
-- `packages/domain/test/reward-expiry-basis.test.ts` — Agreement/disagreement between displayed and computed expiry, unreadable displays, fixed-expiry lots, verified no-expiry, tier-claim records, deterministic same-day starting activity, each of the 13 reason codes (no date, 0 or "expired" is returned; cases match the closed list), 2 rule versions across validity boundaries (v1's last day/v2's first day, a starting day before v2, a deadline after v1, unreadable periods), every rule × history × kind × quantity × display combination retaining all buckets and unchanged quantities, `deadline_passed` only on evidenced civil dates, and validator refusals.
+- `packages/domain/test/reward-expiry-basis.test.ts` — Agreement/disagreement between displayed and computed expiry, unreadable displays, fixed-expiry lots, verified no-expiry, tier-claim records, deterministic same-day starting activity, each of the 13 reason codes (no date, 0 or "expired" is returned; cases match the closed list), 2 rule versions across validity boundaries (v1's last day/v2's first day, a starting day before v2, a deadline after v1, unreadable periods), every rule × history × kind × quantity × display combination retaining all buckets and unchanged quantities, `deadline_passed` only on evidenced civil dates, instant clocks and activity dates read on the rule's deadline calendar (an unknown zone dates nothing), and validator refusals.
 - `packages/read-model/test/reward-projection.test.ts` — Reads migration-seeded rules unchanged and applies them to synthetic V Point/V Point Pay/Mobile Suica buckets with the §3 results. A program without even 1 rule gets no expiry rows or dates.
 - `apps/web/test/rewards-contract.test.tsx` — Responses with `expiryBasis` pass the shared validator; damaged evidence is rejected; `null` and an absent field pass. The screen separates observation from derivation and labels missing/damaged evidence `記録がありません` ("no record").
 
@@ -522,7 +531,7 @@ Stopped flags, unapplied migrations, candidates the promoter keeps skipping, inc
 
 ## Provider expiry subsets (ADR 0068)
 
-J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
+J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. A section belongs only to a selected total: `captureProviderExpirySections` (`packages/read-model/src/reward-provider-expiry.ts`) attaches one to a J-POINT balance claim whose own fact is a `displayed_jpoint_total`, or whose fact cannot be read (its coverage is then `unknown`). When the reader selects a connection's complete acquisition history instead of its total ([ADR 0107](adr/0107-myjcb-point-history-and-document-boundary.md)), the lots carry their own observed expiry months and get no section, so no lot is listed as an unconfirmed provider expiry or counted as `provider_expiry_unavailable` by the summary; the total they replace is not selected, so that capture has no J-POINT section for the connection. The lots' months show in the holdings read, as each bucket's `observedExpiry`; J-POINT has no expiry rule, so the expiry read and its summary carry no estimate row for them either. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
 
 Not-displayed and unknown sections are stored even with zero display rows, and the UI calls the expiry unconfirmed. They never become zero or no expiry. READ 0005 adds provider display sections/checkpoints and immutable snapshot section counts. projection-input-v3 / projection-v4 fixed inputs and output digests include the bounded provider stream; publication waits for verification of every stream. Existing rule-derived estimates retain their rule-reference guards and pagination. Provider sections in the expiry response are a complete bounded companion set from the same resolved sealed snapshot.
 

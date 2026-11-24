@@ -24,6 +24,10 @@
 //   context id. A read past its row bound leaves every balance `missing` with
 //   `reported_state_limit_exceeded`, never cut into a partial answer.
 // - `ACCOUNT_LABELS_SQL`: the labels of the account entities named, by key.
+// - `EARLIER_STATEMENT_DUE_SQL`, once per card the answer names an account
+//   for: the latest due date on or before the date among the card's current
+//   statements of other months than its newest, a card debit already taken
+//   (or taken that day) that the newest statement alone does not show.
 //
 // It reads, and nothing else: no lane, table, writer or command uses it.
 import { CARD_DEBIT_ACCOUNT_ANSWER_RULE } from "../../../domain/src/card-debit-account-answer.ts";
@@ -76,6 +80,23 @@ export type UpcomingCardBillsOutcome =
 /** The labels of the account entities named (`?1` a JSON array of ids), each by its key. */
 export const ACCOUNT_LABELS_SQL = `SELECT a.id,a.label FROM json_each(?1) ids
  CROSS JOIN accounts a ON a.id=ids.value ORDER BY a.id`;
+
+/**
+ * One card's latest provider due date on or before the date among its
+ * current statements (`card_statement_facts`, migration 0044) of another
+ * month than its newest statement's: `?1` the card source, `?2` its source
+ * account, `?3` the date, `?4` the newest statement's period (null when it
+ * has none, which leaves out every statement without one). Only a civil
+ * `YYYY-MM-DD` value is a due date (`date(x)=x`, as `parseLocalDate`); a
+ * statement with an absent or unreadable one is not read as debited. The
+ * source and source account are the view's partition columns, so SQLite
+ * pushes them into its ranking and reaches the card's statement totals by
+ * `idx_bal_obs_account (source_account, metric)`, never ranking another
+ * card's statements (checked without table statistics).
+ */
+export const EARLIER_STATEMENT_DUE_SQL = `SELECT max(payment_date) AS payment_date FROM card_statement_facts
+ WHERE source_id=?1 AND source_account=?2 AND period IS NOT ?4
+ AND payment_date<=?3 AND date(payment_date)=payment_date`;
 
 /** Today's civil date in Asia/Tokyo at `now` (epoch milliseconds). */
 export function tokyoDate(now: number): string {
@@ -238,19 +259,36 @@ export async function reviewUpcomingCardBillsWith(
     ).map((row) => [row.id, row.label]),
   );
 
-  // The latest card debit from each account due on or before the date that
-  // this read knows of: each card's newest accepted settlement's debit per
-  // bank account, or the newest statement, when already due, of a card the
-  // account answers for; a card's older statements are not considered
-  // (docs/card-settlements.md, Upcoming bills, limits). A balance captured on
-  // or before it may not show it.
+  // Each answered card's latest statement due on or before the date, of
+  // another month than its newest statement (which is a bill when it is due
+  // on or after the date, and is counted below when it is already due): a
+  // card debit the newest statement alone does not show.
+  const earlier = await Promise.all(
+    items.map(async (item) => {
+      const statement = item.latestStatement;
+      if (named(item) === null || statement === null) return null;
+      const row = await sql.first<{ payment_date: string | null }>(EARLIER_STATEMENT_DUE_SQL, [
+        item.card.sourceId,
+        item.card.sourceAccount,
+        date,
+        statement.period,
+      ]);
+      return localDate(row?.payment_date);
+    }),
+  );
+
+  // The latest card debit from each account due on or before the date: each
+  // card's newest accepted settlement's debit per bank account, the newest
+  // statement, when already due, of a card the account answers for, or that
+  // card's latest statement of another month due by then. A balance captured
+  // on or before it may not show it.
   const previous = new Map<string, string>();
   const debited = (key: string, value: string | null) => {
     if (value === null || value > date) return;
     const known = previous.get(key);
     if (known === undefined || value > known) previous.set(key, value);
   };
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     for (const settled of item.settled)
       debited(
         resolve(settled.bankSourceId, settled.bankSourceAccount).key,
@@ -263,6 +301,7 @@ export async function reviewUpcomingCardBillsWith(
         : null,
     );
     if (account !== null && due !== null && due < date) debited(account.key, due);
+    if (account !== null) debited(account.key, earlier[index] ?? null);
   }
 
   const cards: UpcomingCardInput[] = items.map((item) => {

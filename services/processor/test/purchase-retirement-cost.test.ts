@@ -137,7 +137,7 @@ test("unchanged ticks skip the full retirement set while recognition and candida
           clean_policy: string;
         }
       ).clean_policy,
-    ).toBe("card-purchase-retirement-v1");
+    ).toBe("card-purchase-retirement-v2");
     await settle(db);
     db.run("UPDATE core_source_revision SET core_epoch='synthetic-restored' WHERE id=1");
     expect(check(db).revision).not.toBe(check(db).clean_revision);

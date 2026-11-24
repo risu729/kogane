@@ -149,8 +149,15 @@ modified or deleted by import or backfill.
 | `raw_object_verification_events` | Append-only later R2 integrity checks                                                    |
 
 All acquisition-history tables reject updates and deletes. Duplicate-insert
-guards also reject SQLite `INSERT OR REPLACE` on every uniqueness path,
-including artifact sequence and page position. Exact retries use
+guards on each table above also reject SQLite `INSERT OR REPLACE` on every
+uniqueness path, including artifact sequence and page position: each unique
+key (or a key it contains) and the rowid. Every table above but `raw_objects`
+has an INTEGER PRIMARY KEY its guard names, or no rowid; `raw_objects` keeps a
+hidden rowid, which its guard did not check until migration 0106 added
+`raw_objects_no_replace_rowid`
+([design: mutation policy](design.md#mutation-policy)). The run annotation
+table `fetch_run_annotations` (migration 0003) rejects updates and deletes
+but has no duplicate-insert guard, an open limit listed there. Exact retries use
 `INSERT ... SELECT ... WHERE NOT EXISTS`, followed by a read and immutable
 field comparison. Artifact scalar and child rows are validated and written in
 one D1 batch; seal, inventory items, and its complete ingestion attempt are
