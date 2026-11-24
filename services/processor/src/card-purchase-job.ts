@@ -1009,27 +1009,40 @@ export async function cardPurchaseSweep(
     },
     at,
   );
-  const { linked, limited } = await candidatePass(
-    db,
-    result,
-    rows,
-    {
-      write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
-      lookup: bounded(options.candidateLookupChunk, CANDIDATE_LOOKUP_CHUNK, CANDIDATE_LOOKUP_CHUNK),
-    },
-    now,
-  );
-  await mergeLinked(db, result, linked, at);
+  // A step that throws is counted like a failed write rather than holding
+  // the cursor on the page, so one page that keeps failing cannot stop
+  // recognition of the rows after it.
+  let linked: string[] = [];
+  let limited = false;
+  try {
+    ({ linked, limited } = await candidatePass(
+      db,
+      result,
+      rows,
+      {
+        write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
+        lookup: bounded(
+          options.candidateLookupChunk,
+          CANDIDATE_LOOKUP_CHUNK,
+          CANDIDATE_LOOKUP_CHUNK,
+        ),
+      },
+      now,
+    ));
+    await mergeLinked(db, result, linked, at);
+  } catch {
+    result.failed += 1;
+  }
   // Work left for later: a full candidate budget, links past the merge
-  // limit, or a failed write (a retirement's included, conservatively).
-  // Those rows are only reached again by a pass from the first row, so the
-  // pass marks nothing clean (src/sweep-pass.ts).
+  // limit, or a failure (a retirement's included, conservatively). Those
+  // rows are only reached again by a pass from the first row, so the pass
+  // marks nothing clean (src/sweep-pass.ts).
   if (limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0)
     await abandonSweepPass(db, "card_purchase_recognition", token);
-  // Only now does the cursor leave the page: a tick that throws or is cut
-  // off before here reads the page again (recognition writes nothing twice),
-  // so no page's candidates and merges are skipped by a pass that then ends
-  // clean. The update is conditional on the value this tick read, so a tick
+  // Only now does the cursor leave the page: a tick cut off before here (or
+  // one whose abandonment failed) reads the page again (recognition writes
+  // nothing twice), so no page's candidates and merges are skipped by a pass
+  // that then ends clean. The update is conditional on the value this tick read, so a tick
   // that overlapped this one and already moved the cursor is never pulled
   // back.
   if (next !== cursor)

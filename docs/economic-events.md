@@ -1136,11 +1136,12 @@ version. A tick that writes events moves the revision itself, so the next
 pass runs once more and writes nothing. A pass in which a tick left work for
 later marks nothing clean, since a later page would not come back to that
 work: the candidate write budget full, more linked events than one merge
-takes, or any failed write in the tick (a retirement's included). The next
+takes, or any failure in the tick (a failed write, a retirement's included,
+or a candidate or merge step that threw, each counted in `failed`). The next
 pass then runs from the first row. So a failure that repeats on every tick
 keeps the pass from ever closing, and the lane reads every row each tick as it
 did before the gate. The cursor leaves a page only once its candidates and
-merges are done, so a tick that throws or is cut off reads the page again
+merges are done, so a tick cut off before then reads the page again
 (recognition writes nothing twice). A tick reads its cursor and the recorded
 pass in one statement and a pass's end names the token its start recorded, so
 a pass started by an overlapping tick is never marked clean by another's end.

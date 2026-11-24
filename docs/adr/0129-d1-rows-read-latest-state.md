@@ -507,10 +507,11 @@ The draft's open questions, as the accepted design answers them:
   A pass whose own writes moved the revision (purchase events) is followed by
   one more, which writes nothing and closes the gate. A tick reads its cursor
   and the recorded pass in one statement. The purchase cursor leaves a page
-  only after its candidates and merges, so a tick that throws or is cut off
-  reads the page again. A purchase pass in which a tick left work for later
-  (the candidate budget full, more linked events than one merge takes, any
-  failed write) marks nothing clean; a failure that repeats keeps that pass
+  only after its candidates and merges, so a tick cut off before then reads
+  the page again. A purchase pass in which a tick left work for later (the
+  candidate budget full, more linked events than one merge takes, any failed
+  write, or a candidate or merge step that threw, counted as a failure so one
+  failing page never holds the cursor) marks nothing clean; a failure that repeats keeps that pass
   reading everything each tick. The settlement sweep's write budget stops the
   cursor on its statement, so a pass that reaches the end has written
   everything. A code change that no version string carries (a statement's

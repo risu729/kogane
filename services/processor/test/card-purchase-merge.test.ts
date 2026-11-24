@@ -1001,7 +1001,7 @@ test("the candidate pass looks up stored pairs a bounded chunk at a time", async
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
 
-test("a tick whose candidate pass throws leaves the cursor on its page, which the next tick reads again", async () => {
+test("a tick whose candidate pass throws counts a failure and drops its pass, and a later pass writes the page's proposals", async () => {
   const w = await world();
   await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
   const throwing = new Proxy(w.db, {
@@ -1016,18 +1016,24 @@ test("a tick whose candidate pass throws leaves the cursor on its page, which th
       };
     },
   });
-  // The page is recognised, then the candidate pass throws: the cursor stays
-  // before the page, so no later tick of the pass can end it clean without
-  // the page's candidates (src/sweep-pass.ts).
-  const cursor = () =>
-    w.all<{ id: number }>("SELECT last_observation_id AS id FROM card_purchase_scan_cursor");
-  const before = await cursor();
-  await expect(cardPurchaseSweep(throwing, { now: NOW, scanLimit: 1 })).rejects.toThrow(
-    "synthetic",
-  );
-  expect(await cursor()).toEqual(before);
-  // The next tick reads the page again and writes the proposals.
-  expect((await w.sweep()).proposed).toBeGreaterThan(0);
+  // The page is recognised, then the candidate pass throws: the failure is
+  // counted, the pass is dropped so it ends nothing clean, and the cursor
+  // still moves on, so the rows after the page are not held back.
+  const cursor = async () =>
+    (
+      await w.all<{ id: number }>("SELECT last_observation_id AS id FROM card_purchase_scan_cursor")
+    )[0]!.id;
+  expect(await cursor()).toBe(0);
+  expect((await cardPurchaseSweep(throwing, { now: NOW, scanLimit: 1 })).failed).toBe(1);
+  expect(await cursor()).not.toBe(0);
+  expect(
+    await w.all(
+      "SELECT pass_token FROM processor_sweep_passes WHERE sweep='card_purchase_recognition'",
+    ),
+  ).toEqual([{ pass_token: null }]);
+  // The rest of that pass, then a pass from the first row, write them.
+  await w.sweep();
+  await w.sweep();
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
 
