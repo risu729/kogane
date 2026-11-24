@@ -521,12 +521,16 @@ export function updateMailboxCookies(jar: MailboxCookie[], headers: Headers, ori
     for (const piece of pieces) {
       const split = piece.indexOf("=");
       const name = (split < 0 ? piece : piece.slice(0, split)).toLowerCase();
+      const value = split < 0 ? "" : piece.slice(split + 1);
+      // A repeat that says the same thing is not ambiguous: the mobile hand-off
+      // repeats `HttpOnly` (2026-11-24). A repeat with another value is refused.
+      if (attrs.get(name) === value) continue;
       if (attrs.has(name))
         throw new CookieRefusal(
           "cookie-attribute",
           COOKIE_ATTRIBUTES.find((known) => known === name) ?? "other",
         );
-      attrs.set(name, split < 0 ? "" : piece.slice(split + 1));
+      attrs.set(name, value);
     }
     const requestedDomain = attrs.get("domain")?.replace(/^\./u, "").toLowerCase();
     const domain = requestedDomain ?? origin.hostname;
