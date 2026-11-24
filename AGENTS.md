@@ -225,6 +225,14 @@ UTC.
   ([ADR 0004](docs/adr/0004-payment-type-shapes-from-evidence.md)).
 - Docs state what the code does today, never what it is meant to do; open
   limits are written down as limits ([roadmap](docs/roadmap.md#current-position)).
+- A statement that runs on a schedule (a Processor lane, sweep or capture)
+  reads rows in proportion to what changed or what it returns, never to the
+  stored history. A scan of a growing table, a ranking over every row, or a
+  per-row correlated subquery over one is allowed only in an on-demand read
+  with a stated bound. Until the slices of
+  [ADR 0129](docs/adr/0129-d1-rows-read-latest-state.md) land, the
+  statements its growth test (`services/processor/test/tick-rows-read.test.ts`)
+  names are the known exceptions; a new one is not.
 
 ## Production data
 

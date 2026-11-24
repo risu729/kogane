@@ -515,7 +515,7 @@ statement account is refused).
 
 ## Scheduled payments amendment — 2026-11-21
 
-- Status: proposed
+- Status: accepted (merged 2026-11-22 in [#1495](https://github.com/risu729/kogane/pull/1495))
 - Date: 2026-11-21
 - Issue: [#551](https://github.com/risu729/kogane/issues/551) (liabilities on
   a date), Phase 4 of the [roadmap](../roadmap.md#phase-4--non-card-events-and-dated-state)

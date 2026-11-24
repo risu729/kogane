@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { getJson } from "../api.ts";
+import { Time } from "../changes-since.tsx";
 import { Link, useLocation } from "../router.tsx";
 import { EmptyState, Kv, KvRow, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -339,7 +340,10 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
             （日本時間）までの日数です。4日以上前の取得は「古い」と表示し、本人の操作待ちや定期実行の停止が理由のときはそれぞれ「本人操作待ち」「定期実行の停止中」と表示します。
           </p>
           {query.dataUpdatedAt ? (
-            <p>表示を読んだ時刻: {new Date(query.dataUpdatedAt).toISOString()}</p>
+            <p>
+              表示を読んだ時刻: <Time value={new Date(query.dataUpdatedAt).toISOString()} />
+              （日本時間）
+            </p>
           ) : null}
           {data.cells.length === 0 ? (
             <EmptyState>

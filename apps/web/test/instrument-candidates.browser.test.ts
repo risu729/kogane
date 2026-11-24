@@ -24,6 +24,8 @@ import {
   type World,
 } from "../../../packages/application/test/instrument-resolution-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { validInstrumentCandidateReview } from "../../../packages/observation-shared/src/instrument-candidates-contract.ts";
+import { offsetPagedFields } from "../../../packages/observation-shared/src/paging-contract.ts";
 import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
@@ -214,6 +216,50 @@ describe.if(runnable)("instrument candidate review", () => {
     // Every request is a GET of the read: nothing was planned by opening the page.
     expect(posted).toEqual([]);
     expect(read.every((url) => url.searchParams.get("view") === "open")).toBe(true);
+    await tab.close();
+  });
+
+  test("a next page the reader's row budget withholds is said, never shown as the end", async () => {
+    // As the route answers a page past which its grant (`readerGrant`,
+    // 1,000 rows) may not read: items follow, no `next` and no
+    // `nextOffset`, and `paging.stoppedBy: "budget"`, built by the same
+    // `offsetPagedFields` the service uses. The world holds one page, so its
+    // first page is served as that stop, with one item counted after it.
+    reshape = (review) => {
+      const returned = review.items.length;
+      return {
+        ...review,
+        total: review.query.offset + returned + 1,
+        nextOffset: null,
+        ...offsetPagedFields({
+          limit: 50,
+          offset: review.query.offset,
+          returned,
+          hasMore: true,
+          withheld: true,
+        }),
+      };
+    };
+    const served = reshape(await page("open", 0)) as Record<string, any>;
+    expect(served["paging"]).toEqual({
+      limit: 50,
+      returned: served["items"].length,
+      hasMore: true,
+      stoppedBy: "budget",
+    });
+    expect(served["next"]).toBeNull();
+    expect(validInstrumentCandidateReview(served)).toBe(true);
+    const tab = await open();
+    const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
+    const note = panel.getByRole("note");
+    await note.waitFor();
+    expect(await note.textContent()).toBe(
+      "「確認待ち」の候補はこの先にもありますが、一度に先頭から読める件数の上限に達したため、ここより先は表示できません。続きがないという意味ではありません。",
+    );
+    expect(await panel.getByRole("button", { name: "次の候補", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    expect(await auditView(tab)).toEqual([]);
     await tab.close();
   });
 
