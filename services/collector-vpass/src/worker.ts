@@ -58,7 +58,6 @@ interface RunSummary {
   monthCount: number;
   pageCount: number;
   transactionCount: number;
-  objectCount: number;
 }
 interface AllCardsRunSummary {
   runId: string;
@@ -70,8 +69,14 @@ interface AllCardsRunSummary {
   monthCount: number;
   pageCount: number;
   transactionCount: number;
+  /** The objects the terminals of every run this collection persisted list. */
   objectCount: number;
 }
+/**
+ * Told of each run whose terminal was written, with the number of objects its
+ * terminal lists (0 for a failed run, which stores none).
+ */
+type OnPersisted = (runId: string, objectCount: number) => void;
 interface VpassSession {
   cookies: CookieBag;
   cardList: RawJsonResponse;
@@ -288,7 +293,7 @@ async function captureCard(
   selectedCardZeroBased: number,
   started: Date,
   runId: string,
-  onPersisted?: (runId: string) => void,
+  onPersisted?: OnPersisted,
 ): Promise<RunSummary> {
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
 
@@ -331,13 +336,13 @@ async function captureCard(
       );
       if (persisted.outcome !== "persisted" && persisted.outcome !== "already_persisted")
         throw new Error("credit_persist_incomplete");
-      onPersisted?.(`${runId}-credit-${cardLabel}`);
+      onPersisted?.(`${runId}-credit-${cardLabel}`, persisted.objects.length);
     } catch (error) {
       creditFailed = true;
       const persisted = await persistFailedCard(env, runId, cardLabel, started, "credit").catch(
         () => false,
       );
-      if (persisted) onPersisted?.(`${runId}-credit-${cardLabel}`);
+      if (persisted) onPersisted?.(`${runId}-credit-${cardLabel}`, 0);
       if (
         typeof error === "object" &&
         error !== null &&
@@ -381,7 +386,6 @@ async function captureCard(
       monthCount: months.length,
       pageCount,
       transactionCount,
-      objectCount: 2,
     };
     {
       // The shared target stores the sanitized artifact set directly and
@@ -401,7 +405,10 @@ async function captureCard(
       logVpassDiagnostic(sharedRunDiagnostic(runId, cardLabel, outcome));
       // A run whose terminal was not written is not a finished run (G1-01).
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");
-      onPersisted?.(`${runId}-${cardLabel}`);
+      onPersisted?.(
+        `${runId}-${cardLabel}`,
+        outcome.result.outcome === "conflict" ? 0 : outcome.result.objects.length,
+      );
       if (creditFailed) throw new Error("credit_snapshot_failed");
       return summary;
     }
@@ -415,7 +422,7 @@ async function captureCard(
         const persisted = await persistFailedCard(env, runId, cardLabel, started).catch(
           () => false,
         );
-        if (persisted) onPersisted?.(`${runId}-${cardLabel}`);
+        if (persisted) onPersisted?.(`${runId}-${cardLabel}`, 0);
       }
       throw error;
     }
@@ -451,6 +458,11 @@ async function collectAllCards(
   return withCollectionLease(env, "vpass", async (signal) => {
     const started = new Date(scheduledTime);
     const runId = safeRunId(started);
+    let objectCount = 0;
+    const recordPersisted: OnPersisted = (persistedRunId, objects) => {
+      objectCount += objects;
+      onPersisted?.(persistedRunId);
+    };
 
     const diagnostic = createDiagnostics("vpass", runId);
     let session: VpassSession;
@@ -473,7 +485,7 @@ async function collectAllCards(
       try {
         summaries.push(
           await diagnostic.step("card-collection", () =>
-            captureCard(env, session, index, started, runId, onPersisted),
+            captureCard(env, session, index, started, runId, recordPersisted),
           ),
         );
       } catch {
@@ -490,7 +502,7 @@ async function collectAllCards(
       monthCount: summaries.reduce((total, item) => total + item.monthCount, 0),
       pageCount: summaries.reduce((total, item) => total + item.pageCount, 0),
       transactionCount: summaries.reduce((total, item) => total + item.transactionCount, 0),
-      objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
+      objectCount,
     };
     logVpassDiagnostic({ event: "vpass-daily-collection-complete", ...summary });
     diagnostic.finish(
