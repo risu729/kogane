@@ -7,7 +7,7 @@ import type { BalanceRow } from "../../../packages/observation-shared/src/api-co
 import { balanceRow, type BalanceSqlRow } from "./mappers";
 import { ResultLimitExceededError, type SqlExecutor } from "./reader";
 import { RESULT_BOUND } from "./scope";
-import { LATEST_BALANCE_CANDIDATES_SQL } from "./sql";
+import { latestBalanceCandidatesSql, type SnapshotSource } from "./sql";
 
 export interface LatestBalanceCandidateSets {
   /** `listLatestBalances` without a measure view: each group's ranked latest. */
@@ -27,11 +27,16 @@ export interface LatestBalanceCandidateRow extends BalanceSqlRow {
  * Each set holds the same rows `listLatestBalances` returns for it, ordered by
  * id. Like the reader, it refuses with `ResultLimitExceededError` when any one
  * set is over the 5,000-row bound, rather than returning a partial set.
+ * `source` picks where the current snapshot set comes from (`SnapshotSource`).
  */
 export async function readLatestBalanceCandidates(
   executor: SqlExecutor,
+  source: SnapshotSource = "inline",
 ): Promise<LatestBalanceCandidateSets> {
-  const rows = await executor.all<LatestBalanceCandidateRow>(LATEST_BALANCE_CANDIDATES_SQL, []);
+  const rows = await executor.all<LatestBalanceCandidateRow>(
+    latestBalanceCandidatesSql(source),
+    [],
+  );
   // The union of the views is at most twice the bound while each is within it.
   if (rows.length > 2 * RESULT_BOUND) throw new ResultLimitExceededError();
   return latestBalanceCandidateSets(rows);

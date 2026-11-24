@@ -27,6 +27,7 @@ import type { OutboxRow } from "../src/decision-outbox.ts";
 import { applyTestReadMigrations } from "./migration-setup.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
 import { sha256Hex } from "../../../packages/domain/src/context.ts";
+import { STORE_SNAPSHOT_MEMO_SQL } from "../../../packages/read-model/src/index";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { settledTest } from "./support/settle.ts";
 
@@ -379,6 +380,10 @@ test("G0-09/G3-12: dropping every READ table leaves CORE and DATA untouched, and
 
 // The shortcut is observable as the absence of the historical candidate
 // query, not merely as the old "unchanged" status after doing those queries.
+/** A statement that selects current captures, other than the memo's store. */
+const latestStateRead = (sql: string): boolean =>
+  sql.includes("snapshot_policies") && sql !== STORE_SNAPSHOT_MEMO_SQL.insertMembers;
+
 test("an unchanged published context avoids historical capture; updates still capture", async () => {
   await seedBalances(env, ["smbc:read-fast"]);
   await runBalanceProjection(on());
@@ -406,14 +411,19 @@ test("an unchanged published context avoids historical capture; updates still ca
   const changed = await runBalanceProjection(counted);
   expect(changed.status).toBe("complete");
   expect(changed.inputDigest).not.toBe(first.inputDigest);
-  // One flagged latest-balance read gives all three candidate sets (ADR 0129).
-  expect(queries.filter((sql) => sql.includes("snapshot_policies"))).toHaveLength(1);
+  // One flagged latest-balance read gives all three candidate sets (ADR 0129),
+  // after the write moved the snapshot-input revision and the memo was stored
+  // again (slice 2).
+  expect(queries.filter(latestStateRead)).toHaveLength(1);
+  expect(queries.filter((sql) => sql === STORE_SNAPSHOT_MEMO_SQL.insertMembers)).toHaveLength(1);
   queries.length = 0;
   const deployed = await runBalanceProjection(counted, { buildDigest: "a".repeat(64) });
   expect(deployed.status).toBe("complete");
   expect(deployed.snapshotId).not.toBe(changed.snapshotId);
-  // One flagged latest-balance read gives all three candidate sets (ADR 0129).
-  expect(queries.filter((sql) => sql.includes("snapshot_policies"))).toHaveLength(1);
+  // One flagged latest-balance read gives all three candidate sets (ADR 0129),
+  // on the memo stored by the previous run.
+  expect(queries.filter(latestStateRead)).toHaveLength(1);
+  expect(queries.filter((sql) => sql === STORE_SNAPSHOT_MEMO_SQL.insertMembers)).toHaveLength(0);
 }, 60000);
 
 test("a CORE write racing the shortcut falls back to a stable capture", async () => {

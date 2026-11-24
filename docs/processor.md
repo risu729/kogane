@@ -768,6 +768,20 @@ as the hour's first. While throttled, an accepted decision's projection
 rebuild (`decision_outbox`) waits up to an hour, and the throttled lanes leave
 gaps of up to an hour in `processor_lane_ticks`.
 
+### 6.0.1 Snapshot memo (ADR 0129)
+
+The balance capture (`captureFixedInput`), the reward capture
+(`captureRewardInput`) and the report job's position cut take the current
+snapshot set from the memo, not from the shipped selection
+(`src/snapshot-memo-step.ts`, [read model](read-model.md#snapshot-memo)).
+`withSnapshotSelection` first runs `ensureSnapshotMemo`: one read of a few rows
+when this build's memo exists for the current snapshot-input revision, and
+otherwise one batch that replaces it (about 1,000 rows read on the harness's
+stores, once per revision). A memo-backed statement that finds the revision
+moved since fails instead of reading an empty set; the lane stores the memo
+again and repeats the read, and after two attempts reads the shipped selection
+inline. The lanes' revision checks and outcomes are unchanged.
+
 ### 6.1 Tick records
 
 Most lanes keep no state of their own, so until migration 0049 the only trace

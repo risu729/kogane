@@ -69,7 +69,7 @@ import {
 import {
   buildRewardProjection,
   CONVERSION_OFFERS_SQL,
-  CURRENT_REWARD_BUCKETS_SQL,
+  currentRewardBucketsSql,
   d1Executor,
   EXPIRY_RULES_SQL,
   MEMBERSHIP_SQL,
@@ -89,6 +89,7 @@ import {
   type RewardSimulationProjectionRow,
   type SavedSimulationSqlRow,
 } from "../../../packages/read-model/src/index";
+import { withSnapshotSelection } from "./snapshot-memo-step.ts";
 import { canonicalJson, sha256Hex } from "../../../packages/domain/src/context.ts";
 import {
   captureDigest,
@@ -241,11 +242,10 @@ export async function captureRewardInput(
     const rules = await sql.all<ExpiryRuleSqlRow>(EXPIRY_RULES_SQL, [null]);
     if (rules.length > RULE_BOUND)
       return { ok: false, status: "refused", code: "rule_set_too_large" };
-    const buckets = await sql.all<RewardBucketSqlRow>(CURRENT_REWARD_BUCKETS_SQL, [
-      PROMOTION_RELEASE,
-      null,
-      0,
-    ]);
+    // The latest V Point run comes from the memo (ADR 0129).
+    const buckets = await withSnapshotSelection(db, (source) =>
+      sql.all<RewardBucketSqlRow>(currentRewardBucketsSql(source), [PROMOTION_RELEASE, null, 0]),
+    );
     // The reader's page limit is a page, not a bound on the holding: a larger
     // set is refused rather than projected as if it were everything.
     if (buckets.length > REWARD_PAGE_LIMIT)

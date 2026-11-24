@@ -1395,6 +1395,21 @@
       "statementCount": 2,
       "insertStatements": [],
       "sha256": "a13f1baccd26fa69d72654351d24f0c4a708a5aabde22b6c4844f4807b699b56"
+    },
+    {
+      "file": "0108_snapshot_selection_memo.sql",
+      "statementCount": 37,
+      "insertStatements": [
+        {
+          "table": "core_snapshot_input_revision",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "snapshot_selection_containers",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "6828b3e59baee76c09c63fe8e1bfc02736d6b343f003463f6637f9f13e2b8d37"
     }
   ],
   "tables": [
@@ -5846,6 +5861,44 @@
       "sqlSha256": "8643ee1d79982638"
     },
     {
+      "name": "core_snapshot_input_revision",
+      "classification": "operational-mutable",
+      "planRow": "snapshot-input revision counter",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [
+        "core_snapshot_input_revision_no_delete",
+        "core_snapshot_input_revision_single_row"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "core_snapshot_input_revision_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "423e773942e2fc6b"
+    },
+    {
       "name": "core_source_revision",
       "classification": "core-keep",
       "planRow": "CORE: the change detector every dependency write bumps (05 §2); operational in shape, but it is the ordering of CORE itself and a restore has to carry it",
@@ -5982,11 +6035,24 @@
         "dataset"
       ],
       "foreignKeys": [],
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "idx_dataset_snapshot_policies_source_dataset",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "source_id",
+            "dataset"
+          ]
+        }
+      ],
       "triggers": [
         "dataset_snapshot_policies_bump_revision_delete",
         "dataset_snapshot_policies_bump_revision_insert",
-        "dataset_snapshot_policies_bump_revision_update"
+        "dataset_snapshot_policies_bump_revision_update",
+        "dataset_snapshot_policies_bump_snapshot_input_delete",
+        "dataset_snapshot_policies_bump_snapshot_input_insert",
+        "dataset_snapshot_policies_bump_snapshot_input_update"
       ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
@@ -8000,6 +8066,17 @@
           ]
         },
         {
+          "name": "idx_fetch_artifacts_source_dataset_capture",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "source_id",
+            "dataset",
+            "(expression)",
+            "id"
+          ]
+        },
+        {
           "name": "idx_fetch_artifacts_source_dataset_time",
           "unique": false,
           "partial": false,
@@ -8025,6 +8102,7 @@
         "fetch_artifact_page_within_declared_count",
         "fetch_artifact_reject_after_seal",
         "fetch_artifact_requires_active_route",
+        "fetch_artifacts_capture_time_before_10000",
         "fetch_artifacts_no_delete",
         "fetch_artifacts_no_update",
         "fetch_artifacts_reject_duplicate_insert",
@@ -8178,6 +8256,9 @@
         "fetch_run_annotations_bump_revision_delete",
         "fetch_run_annotations_bump_revision_insert",
         "fetch_run_annotations_bump_revision_update",
+        "fetch_run_annotations_bump_snapshot_input_delete",
+        "fetch_run_annotations_bump_snapshot_input_insert",
+        "fetch_run_annotations_bump_snapshot_input_update",
         "fetch_run_annotations_no_delete",
         "fetch_run_annotations_no_update"
       ],
@@ -8489,12 +8570,22 @@
             "recorded_at_ms",
             "id"
           ]
+        },
+        {
+          "name": "idx_fetch_run_reports_terminal_completion",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "completed_at_ms",
+            "fetch_run_id"
+          ]
         }
       ],
       "triggers": [
         "fetch_run_report_reject_after_seal",
         "fetch_run_report_reject_after_terminal",
         "fetch_run_report_requires_active_route",
+        "fetch_run_reports_completion_before_10000",
         "fetch_run_reports_no_delete",
         "fetch_run_reports_no_update",
         "fetch_run_reports_reject_duplicate_insert",
@@ -8577,6 +8668,9 @@
         "fetch_run_seals_bump_revision_delete",
         "fetch_run_seals_bump_revision_insert",
         "fetch_run_seals_bump_revision_update",
+        "fetch_run_seals_bump_snapshot_input_delete",
+        "fetch_run_seals_bump_snapshot_input_insert",
+        "fetch_run_seals_bump_snapshot_input_update",
         "fetch_run_seals_no_delete",
         "fetch_run_seals_no_update",
         "fetch_run_seals_reject_duplicate_insert",
@@ -13076,6 +13170,9 @@
         "parse_coverage_claims_bump_revision_delete",
         "parse_coverage_claims_bump_revision_insert",
         "parse_coverage_claims_bump_revision_update",
+        "parse_coverage_claims_bump_snapshot_input_delete",
+        "parse_coverage_claims_bump_snapshot_input_insert",
+        "parse_coverage_claims_bump_snapshot_input_update",
         "parse_coverage_claims_no_delete",
         "parse_coverage_claims_no_replace",
         "parse_coverage_claims_no_update"
@@ -13473,6 +13570,9 @@
         "parse_runs_bump_revision_delete",
         "parse_runs_bump_revision_insert",
         "parse_runs_bump_revision_update",
+        "parse_runs_bump_snapshot_input_delete",
+        "parse_runs_bump_snapshot_input_insert",
+        "parse_runs_bump_snapshot_input_update",
         "parse_runs_no_delete",
         "parse_runs_preserve_identity"
       ],
@@ -14649,6 +14749,9 @@
         "publication_events_bump_revision_delete",
         "publication_events_bump_revision_insert",
         "publication_events_bump_revision_update",
+        "publication_events_bump_snapshot_input_delete",
+        "publication_events_bump_snapshot_input_insert",
+        "publication_events_bump_snapshot_input_update",
         "publication_events_no_delete",
         "publication_events_no_self_reference",
         "publication_events_no_update",
@@ -14740,6 +14843,16 @@
       ],
       "indexes": [
         {
+          "name": "idx_published_parse_runs_parser",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "parser_name",
+            "fetch_artifact_id",
+            "parse_run_id"
+          ]
+        },
+        {
           "name": "published_parse_runs_run",
           "unique": true,
           "partial": false,
@@ -14752,7 +14865,12 @@
         "published_parse_runs_bump_revision_delete",
         "published_parse_runs_bump_revision_insert",
         "published_parse_runs_bump_revision_update",
+        "published_parse_runs_bump_snapshot_input_delete",
+        "published_parse_runs_bump_snapshot_input_insert",
+        "published_parse_runs_bump_snapshot_input_update",
         "published_parse_runs_no_delete",
+        "published_parse_runs_register_snapshot_container_insert",
+        "published_parse_runs_register_snapshot_container_update",
         "published_parse_runs_requires_ok_insert",
         "published_parse_runs_requires_ok_update"
       ],
@@ -16709,6 +16827,190 @@
       ],
       "appendOnly": false,
       "sqlSha256": "fefa304b7a94e313"
+    },
+    {
+      "name": "snapshot_selection_containers",
+      "classification": "operational-mutable",
+      "planRow": "snapshot container registry",
+      "strict": true,
+      "withoutRowid": true,
+      "columns": [
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "parser_name",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "dataset_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "unit_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 4
+        },
+        {
+          "name": "connection_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 5
+        }
+      ],
+      "primaryKey": [
+        "source_id",
+        "parser_name",
+        "dataset_key",
+        "unit_key",
+        "connection_key"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "b784e9ca46cc0f1d"
+    },
+    {
+      "name": "snapshot_selection_keys",
+      "classification": "operational-mutable",
+      "planRow": "stored current snapshot sets",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "snapshot_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "selection_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "computed_at_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "1f90971f768f345d"
+    },
+    {
+      "name": "snapshot_selection_members",
+      "classification": "operational-mutable",
+      "planRow": "stored current snapshot sets",
+      "strict": true,
+      "withoutRowid": true,
+      "columns": [
+        {
+          "name": "key_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "selection",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "parser_name",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "fetch_artifact_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 4
+        },
+        {
+          "name": "fetch_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 5
+        },
+        {
+          "name": "required_version",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "key_id",
+        "selection",
+        "parser_name",
+        "fetch_artifact_id",
+        "fetch_run_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "key_id",
+          "references": "snapshot_selection_keys(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "5ed0a041f17a36b7"
     },
     {
       "name": "source_accounts",
@@ -18848,6 +19150,20 @@
       "sqlSha256": "c292a42eeea23c0c"
     },
     {
+      "name": "core_snapshot_input_revision_no_delete",
+      "table": "core_snapshot_input_revision",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "b10c25e496f04341"
+    },
+    {
+      "name": "core_snapshot_input_revision_single_row",
+      "table": "core_snapshot_input_revision",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "32e26b53bce30e31"
+    },
+    {
       "name": "core_source_revision_forward_only",
       "table": "core_source_revision",
       "timing": "BEFORE",
@@ -18888,6 +19204,27 @@
       "timing": "AFTER",
       "event": "UPDATE",
       "sqlSha256": "82b0cf3adbb41c3d"
+    },
+    {
+      "name": "dataset_snapshot_policies_bump_snapshot_input_delete",
+      "table": "dataset_snapshot_policies",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "7856007a431208b8"
+    },
+    {
+      "name": "dataset_snapshot_policies_bump_snapshot_input_insert",
+      "table": "dataset_snapshot_policies",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "55d07d8dd611df80"
+    },
+    {
+      "name": "dataset_snapshot_policies_bump_snapshot_input_update",
+      "table": "dataset_snapshot_policies",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "2a706e1b77eebcad"
     },
     {
       "name": "decision_operations_no_delete",
@@ -19464,6 +19801,13 @@
       "sqlSha256": "410df7c06083f405"
     },
     {
+      "name": "fetch_artifacts_capture_time_before_10000",
+      "table": "fetch_artifacts",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "36d14ba4aad09916"
+    },
+    {
       "name": "fetch_artifacts_no_delete",
       "table": "fetch_artifacts",
       "timing": "BEFORE",
@@ -19541,6 +19885,27 @@
       "sqlSha256": "36bff529ff81afc4"
     },
     {
+      "name": "fetch_run_annotations_bump_snapshot_input_delete",
+      "table": "fetch_run_annotations",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "3c390b1b78625891"
+    },
+    {
+      "name": "fetch_run_annotations_bump_snapshot_input_insert",
+      "table": "fetch_run_annotations",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "1c7328a8f8696a16"
+    },
+    {
+      "name": "fetch_run_annotations_bump_snapshot_input_update",
+      "table": "fetch_run_annotations",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "2ad79a30f9898436"
+    },
+    {
       "name": "fetch_run_annotations_no_delete",
       "table": "fetch_run_annotations",
       "timing": "BEFORE",
@@ -19611,6 +19976,13 @@
       "sqlSha256": "ad70c81a70e08122"
     },
     {
+      "name": "fetch_run_reports_completion_before_10000",
+      "table": "fetch_run_reports",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "3fcf15c561cae666"
+    },
+    {
       "name": "fetch_run_reports_no_delete",
       "table": "fetch_run_reports",
       "timing": "BEFORE",
@@ -19672,6 +20044,27 @@
       "timing": "AFTER",
       "event": "UPDATE",
       "sqlSha256": "2562f3da280635a5"
+    },
+    {
+      "name": "fetch_run_seals_bump_snapshot_input_delete",
+      "table": "fetch_run_seals",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "12709550f61a00ff"
+    },
+    {
+      "name": "fetch_run_seals_bump_snapshot_input_insert",
+      "table": "fetch_run_seals",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "ec494ee020267c50"
+    },
+    {
+      "name": "fetch_run_seals_bump_snapshot_input_update",
+      "table": "fetch_run_seals",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "ac94985f2c15f048"
     },
     {
       "name": "fetch_run_seals_no_delete",
@@ -20752,6 +21145,27 @@
       "sqlSha256": "9b52a472c7c7271c"
     },
     {
+      "name": "parse_coverage_claims_bump_snapshot_input_delete",
+      "table": "parse_coverage_claims",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "3a5380081851864a"
+    },
+    {
+      "name": "parse_coverage_claims_bump_snapshot_input_insert",
+      "table": "parse_coverage_claims",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "46eadfeb63400ff6"
+    },
+    {
+      "name": "parse_coverage_claims_bump_snapshot_input_update",
+      "table": "parse_coverage_claims",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "c78f88064c968d0a"
+    },
+    {
       "name": "parse_coverage_claims_no_delete",
       "table": "parse_coverage_claims",
       "timing": "BEFORE",
@@ -20848,6 +21262,27 @@
       "timing": "AFTER",
       "event": "UPDATE",
       "sqlSha256": "139989c3b4c82e20"
+    },
+    {
+      "name": "parse_runs_bump_snapshot_input_delete",
+      "table": "parse_runs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "3931fdf2f8679e30"
+    },
+    {
+      "name": "parse_runs_bump_snapshot_input_insert",
+      "table": "parse_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "8e30c1fcf7f07e7b"
+    },
+    {
+      "name": "parse_runs_bump_snapshot_input_update",
+      "table": "parse_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "fa1823b9c7e9cfae"
     },
     {
       "name": "parse_runs_no_delete",
@@ -21025,6 +21460,27 @@
       "sqlSha256": "7fc6b58ff0e0e8d2"
     },
     {
+      "name": "publication_events_bump_snapshot_input_delete",
+      "table": "publication_events",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "8ea2d87ef1065168"
+    },
+    {
+      "name": "publication_events_bump_snapshot_input_insert",
+      "table": "publication_events",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "70514c3d196f9edf"
+    },
+    {
+      "name": "publication_events_bump_snapshot_input_update",
+      "table": "publication_events",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "7d02da7dd9012473"
+    },
+    {
       "name": "publication_events_no_delete",
       "table": "publication_events",
       "timing": "BEFORE",
@@ -21074,11 +21530,46 @@
       "sqlSha256": "dff38db534abbad1"
     },
     {
+      "name": "published_parse_runs_bump_snapshot_input_delete",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "df90e343cd0b509b"
+    },
+    {
+      "name": "published_parse_runs_bump_snapshot_input_insert",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "153dcdb48cb831cc"
+    },
+    {
+      "name": "published_parse_runs_bump_snapshot_input_update",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "cb0cfe41b41f105c"
+    },
+    {
       "name": "published_parse_runs_no_delete",
       "table": "published_parse_runs",
       "timing": "BEFORE",
       "event": "DELETE",
       "sqlSha256": "7d51854f2e24112f"
+    },
+    {
+      "name": "published_parse_runs_register_snapshot_container_insert",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "e303115f97fb92fe"
+    },
+    {
+      "name": "published_parse_runs_register_snapshot_container_update",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "089c5b6aaacc7c2e"
     },
     {
       "name": "published_parse_runs_requires_ok_insert",
@@ -22194,6 +22685,11 @@
       "sqlSha256": "21756bc88e60570f"
     },
     {
+      "name": "idx_dataset_snapshot_policies_source_dataset",
+      "table": "dataset_snapshot_policies",
+      "sqlSha256": "984ce79a607bcfaf"
+    },
+    {
       "name": "idx_fetch_artifacts_page",
       "table": "fetch_artifacts",
       "sqlSha256": "5e2f85aff3d91b53"
@@ -22212,6 +22708,11 @@
       "name": "idx_fetch_artifacts_sha256",
       "table": "fetch_artifacts",
       "sqlSha256": "e54de05453216ab3"
+    },
+    {
+      "name": "idx_fetch_artifacts_source_dataset_capture",
+      "table": "fetch_artifacts",
+      "sqlSha256": "56a3e3e9c32b0cbc"
     },
     {
       "name": "idx_fetch_artifacts_source_dataset_time",
@@ -22237,6 +22738,11 @@
       "name": "idx_fetch_run_reports_run",
       "table": "fetch_run_reports",
       "sqlSha256": "2269de9d6f2e5b11"
+    },
+    {
+      "name": "idx_fetch_run_reports_terminal_completion",
+      "table": "fetch_run_reports",
+      "sqlSha256": "dc3e61d2102b0129"
     },
     {
       "name": "idx_fetch_runs_source",
@@ -22307,6 +22813,11 @@
       "name": "idx_pos_obs_parse_run",
       "table": "position_observations",
       "sqlSha256": "a168aae7ec869291"
+    },
+    {
+      "name": "idx_published_parse_runs_parser",
+      "table": "published_parse_runs",
+      "sqlSha256": "331d4fc1d4b7aa10"
     },
     {
       "name": "idx_raw_object_verification",
@@ -22645,10 +23156,10 @@
     }
   ],
   "summary": {
-    "tableCount": 144,
+    "tableCount": 148,
     "viewCount": 44,
-    "triggerCount": 581,
-    "explicitIndexCount": 147,
+    "triggerCount": 608,
+    "explicitIndexCount": 151,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -22780,6 +23291,7 @@
         "collection_scan_state",
         "collection_schedule_occurrences",
         "collection_schedules",
+        "core_snapshot_input_revision",
         "maintenance_survey_cursors",
         "observation_lane_state",
         "observation_parse_jobs",
@@ -22792,7 +23304,10 @@
         "provider_maintenance_references",
         "reconciliation_scan_cursor",
         "report_job_gates",
-        "sbi_mailbox_progress"
+        "sbi_mailbox_progress",
+        "snapshot_selection_containers",
+        "snapshot_selection_keys",
+        "snapshot_selection_members"
       ],
       "unclassified-keep": [
         "dataset_snapshot_policies",
@@ -22817,6 +23332,7 @@
       "collection_scan_state",
       "collection_schedule_occurrences",
       "collection_schedules",
+      "core_snapshot_input_revision",
       "core_source_revision",
       "dataset_snapshot_policies",
       "decision_outbox",
@@ -22853,6 +23369,9 @@
       "retention_classes",
       "sbi_mailbox_progress",
       "settlement_relations",
+      "snapshot_selection_containers",
+      "snapshot_selection_keys",
+      "snapshot_selection_members",
       "source_external_ids",
       "sources"
     ],
@@ -22866,6 +23385,8 @@
       "origin_template_policies",
       "producer_sources",
       "run_inventory_items",
+      "snapshot_selection_containers",
+      "snapshot_selection_members",
       "source_external_ids"
     ],
     "migrationsWithInserts": [
@@ -22925,8 +23446,9 @@
       "0098_sbi_shinsei_savings_activity.sql",
       "0099_sbi_document_unit_eligibility.sql",
       "0100_sbi_supplemental_unit_eligibility.sql",
-      "0101_myjcb_document_unit_eligibility.sql"
+      "0101_myjcb_document_unit_eligibility.sql",
+      "0108_snapshot_selection_memo.sql"
     ],
-    "schemaSha256": "12d2cd386c84148eb86f2fe0e5b2631ab0f433799a4e68c4d628cdbed88f2db8"
+    "schemaSha256": "9e49a06b58f4f37d6a1de94f199c541544fe98c3494eeaf9278bab2fbfd4216e"
   }
 }

@@ -388,6 +388,26 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "report job skip gate",
   },
+  // The snapshot memo (0108, ADR 0129): the snapshot-input counter, the
+  // registry of containers with a published parse, and the Processor's stored
+  // current snapshot sets. All derived from CORE evidence; the sets are
+  // replaced whenever the counter moves.
+  core_snapshot_input_revision: {
+    classification: "operational-mutable",
+    planRow: "snapshot-input revision counter",
+  },
+  snapshot_selection_containers: {
+    classification: "operational-mutable",
+    planRow: "snapshot container registry",
+  },
+  snapshot_selection_keys: {
+    classification: "operational-mutable",
+    planRow: "stored current snapshot sets",
+  },
+  snapshot_selection_members: {
+    classification: "operational-mutable",
+    planRow: "stored current snapshot sets",
+  },
   // calculation_runs/results, report_artifacts/events → CORE + DATA R2
   calculation_results: { classification: "core-keep", planRow: "calculation runs and reports" },
   calculation_runs: { classification: "core-keep", planRow: "calculation runs and reports" },

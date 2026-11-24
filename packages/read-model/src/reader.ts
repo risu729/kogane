@@ -217,4 +217,9 @@ export interface SqlExecutor {
 export interface ReaderOptions {
   /** Build the error thrown when a list exceeds the bound (an HTTP layer maps it to 413). */
   limitExceeded?: () => Error;
+  /**
+   * Where `listPositions` takes the current snapshot set from (`SnapshotSource`
+   * in sql.ts). Only the Processor's scheduled lanes pass `memo`.
+   */
+  snapshotSource?: "inline" | "memo";
 }

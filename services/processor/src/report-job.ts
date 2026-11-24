@@ -44,11 +44,16 @@ import {
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
+import { STORE_SNAPSHOT_MEMO_SQL } from "../../../packages/read-model/src/snapshot-memo";
 import {
   POSITION_CUT_SQL,
   POSITION_VALUATIONS_SQL,
+  positionCutSql,
   positionsSql,
+  positionValuationsSql,
+  type SnapshotSource,
 } from "../../../packages/read-model/src/sql";
+import { withSnapshotSelection } from "./snapshot-memo-step.ts";
 import type { CoreRevisionRow } from "../../../packages/read-model/src/source-revision";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
@@ -233,10 +238,11 @@ async function recordedAfterCutoff(
  */
 async function readPositionCut(
   db: D1Database,
-  reader: ReturnType<typeof createD1ObservationReader>,
+  source: SnapshotSource,
   cutoffMs: number,
   maxRows: number,
 ): Promise<{ kept: PositionWithValuations[]; late: boolean } | null> {
+  const reader = createD1ObservationReader(db, { snapshotSource: source });
   for (let attempt = 0; attempt < POSITION_CUT_ATTEMPTS; attempt += 1) {
     const kept: PositionWithValuations[] = [];
     const seen = new Set<number>();
@@ -258,7 +264,7 @@ async function readPositionCut(
       if (kept.length > maxRows || ended) break;
     }
     const cut = await db
-      .prepare(POSITION_CUT_SQL)
+      .prepare(positionCutSql(source))
       .bind(JSON.stringify([...seen]))
       .first<{ current_rows: number; read_current: number; prefix_rows: number }>();
     if (
@@ -538,6 +544,10 @@ function readerTexts(): string[] {
     positionsSql({}, 0).sql,
     POSITION_VALUATIONS_SQL,
     POSITION_CUT_SQL,
+    positionsSql({}, 0, "memo").sql,
+    positionValuationsSql("memo"),
+    positionCutSql("memo"),
+    STORE_SNAPSHOT_MEMO_SQL.insertMembers,
     recordedAfterCutoffSql(1),
     knowledgeBoundarySql(1),
     decimalsSql(1),
@@ -660,7 +670,6 @@ export async function runReportJob(
   };
   if (!reportsEnabled(env.REPORTS_ENABLED)) return { ...empty, skipped: "flag_off" };
   const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS;
-  const reader = createD1ObservationReader(env.DB);
   const cutoffMs = Date.parse(options.knowledgeCutoff);
   if (!Number.isFinite(cutoffMs)) return { ...empty, skipped: "invalid_knowledge_cutoff" };
 
@@ -692,7 +701,10 @@ export async function runReportJob(
       gated: true,
     };
 
-  const cut = await readPositionCut(env.DB, reader, cutoffMs, maxRows);
+  // The positions take the current snapshots from the memo (ADR 0129).
+  const cut = await withSnapshotSelection(env.DB, (source) =>
+    readPositionCut(env.DB, source, cutoffMs, maxRows),
+  );
   if (cut === null) return { ...empty, skipped: "snapshot_changed" };
   const all = cut.kept;
   const truncated = all.length > maxRows;

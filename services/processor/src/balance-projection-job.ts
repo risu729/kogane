@@ -50,6 +50,7 @@ import {
   type EntityRelationRow,
   type ProjectionCandidate,
   type ProjectionInputs,
+  type SnapshotSource,
   type SubjectStatus,
 } from "../../../packages/read-model/src/index";
 import {
@@ -70,6 +71,7 @@ import {
   type ProjectionInputStore,
 } from "./projection-input.ts";
 import { readPublishedSnapshotAt, runReadProjection } from "./read-projection.ts";
+import { withSnapshotSelection } from "./snapshot-memo-step.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
 const CANDIDATE_BOUND = 5000;
@@ -185,12 +187,12 @@ type CandidateRow = BalanceRow & { measureView: "balances" | "summaries"; latest
  * view; the job records that refusal and seals nothing rather than projecting
  * a partial set.
  */
-async function readCandidates(db: D1Like): Promise<CandidateRow[]> {
+async function readCandidates(db: D1Like, source: SnapshotSource): Promise<CandidateRow[]> {
   let latest: BalanceRow[];
   let balances: BalanceRow[];
   let summaries: BalanceRow[];
   try {
-    ({ latest, balances, summaries } = await readLatestBalanceCandidates(d1Executor(db)));
+    ({ latest, balances, summaries } = await readLatestBalanceCandidates(d1Executor(db), source));
   } catch (error) {
     // The 5,000-row bound is the read contract, so the job reports the
     // refusal and seals nothing rather than projecting a silently partial set.
@@ -472,7 +474,8 @@ function projectionInput(
  * stays a conflict rather than being collapsed.
  */
 async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
-  const rows = await readCandidates(db);
+  // The candidates take the current snapshots from the memo (ADR 0129).
+  const rows = await withSnapshotSelection(db, (source) => readCandidates(db, source));
   const ids = rows.map((row) => row.id);
   const [organization, origins, decimals, coverage] = await Promise.all([
     readOrganization(db, ids),

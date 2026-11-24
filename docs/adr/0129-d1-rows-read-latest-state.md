@@ -418,6 +418,64 @@ The draft's open questions, as the accepted design answers them:
   tick record (`LANE_TICK_COUNTS` does not list it), so open question 5's
   closed count is left to the slice that gives it one.
 
+## Slice 2 as built (2026-11-23)
+
+- Snapshot-input revision: `core_snapshot_input_revision` (migration 0108)
+  with triggers on `SNAPSHOT_INPUT_REVISION_LEDGER`: parse runs,
+  `published_parse_runs`, `publication_events`, coverage claims, snapshot
+  policies, fetch run seals and annotations. Decision 1's "unit outcomes" are
+  not in it: unit reports, like every acquisition table, cannot change after
+  their run is sealed (migration 0001), and the selections read sealed runs
+  only, so the seal's own bump covers them. Every ledger table is also in the
+  CORE ledger, which a test checks.
+- Container registry: filled by a trigger on `published_parse_runs`, not on
+  `fetch_artifacts` insert, keyed by (source, parser, dataset, unit, MyJCB
+  connection). A container with captures but no published parse has no
+  current snapshot, and keying by parser keeps a shared dataset name
+  (`realised-gains` of SBI and Sony) from being walked for the other parser.
+- Walk index: `idx_fetch_artifacts_source_dataset_capture` on (source,
+  dataset, the sealed view's capture time, id) is partial on a condition that
+  always holds and that only the walks state. Without table statistics a plain
+  (source, dataset) index moved the plans of the card usage, card statement
+  and reward candidate reads to it; the partial index leaves every other plan
+  as it was. The walk orders by the raw time in ms, the shipped selections by
+  the view's text of it, which is NULL from year 10000 on; the two orders agree
+  only below that, so migration 0108 refuses a capture or terminal report timed
+  at or past it (production held none).
+- Memo key and reading: the digest is pinned in code
+  (`SNAPSHOT_SELECTION_DIGEST`, checked against the walk's text by a test) so
+  that the reading statements can name this build's key. A statement that finds
+  no key for the current revision fails ("malformed JSON") rather than reading
+  an empty set, and the Processor stores the memo again and retries, then falls
+  back to the shipped selection inline. A failure to store the memo fails the
+  lane instead of falling back, so it is seen. Only the Processor reads the memo; the
+  app and MCP keep the inline selection, so they never depend on a lane having
+  run.
+- Readers: the balance and position reads start from the candidate parses
+  (members' parses, the current V Point runs' parses, and every published parse
+  of a parser that no snapshot rule governs) and keep the shipped predicates,
+  so the candidates are a superset, never the filter. The valuation pairs no
+  longer grow with history. The reward bucket read joins the memo's V Point
+  run and still ranks every claim (an exception in the plan lint). The history
+  parsers' parses are still visited one index probe each, which slice 4
+  removes.
+- Report gate: stays keyed on the CORE revision, not the snapshot-input one.
+  The report also reads exact decimals and is bound by restrictions, which move
+  the CORE revision only, so the snapshot revision alone would let a stale
+  report pass the gate. With the memo, a build that the gate does not skip
+  reads 6,380 and 11,780 rows on the harness stores instead of about 52,500
+  and 104,000. `REPORT_GATE_VERSION` is unchanged; the gate id moves anyway,
+  since it digests the memo-backed statements' text.
+- Plan lint: `tick-query-plan.test.ts` keeps its per-statement entries, now
+  either `bounded` (with the reason) or an `exception` naming the issue that
+  removes it and an expiry date, after which the test fails. The latest-state
+  reads' entry is gone: the tick no longer prepares the inline selection.
+- Measured on the harness stores (30 and 60 days, rows read per call):
+  balances 6,705 and 12,705 (from 37,703 and 74,953), positions 3,102 and
+  5,802 (from 20,041 and 39,791), valuations 79 and 79 (from 12,371 and
+  24,401), reward buckets 290 and 530 (from 8,571 and 17,101), the walk 968
+  and 1,448 once per revision.
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each

@@ -82,7 +82,8 @@ counts, commit log, epoch/source revisions and supersede pointers all count.
 Small bounded queries avoid function-argument, compound-SELECT and SQL-length
 limits. The runner computes and enforces a conservative submitted-statement
 upper bound of 950 including its Worker control writes; the prepared 45-case
-corpus has upper bound 933, below Paid's 1000. The complete suite is designed for Workers Paid; Free's invocation
+corpus has upper bound 781 at migration 0108 (148 CORE tables, read 24
+per count or snapshot statement), below Paid's 1000. The complete suite is designed for Workers Paid; Free's invocation
 query allowance is insufficient. No limit increase is requested.
 
 The Worker has `workers_dev:false`, `preview_urls:false`, no routes, no

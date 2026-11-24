@@ -12,9 +12,10 @@
 // Miniflare D1 (support/d1-copy.ts) and each statement is run through its real
 // caller, on a binding that records `rows_read` per statement text:
 //
-//   latest balances      captureFixedInput (one flagged latest-balance read)
-//   positions            runReportJob (listPositions), twice: build, then reuse
-//   reward buckets       captureRewardInput (CURRENT_REWARD_BUCKETS_SQL)
+//   latest balances      captureFixedInput (one flagged latest-balance read, on the memo)
+//   positions            runReportJob (listPositions on the memo), twice: build, then reuse
+//   reward buckets       captureRewardInput (currentRewardBucketsSql on the memo)
+//   snapshot memo        ensureSnapshotMemo (the walk, once per snapshot-input revision)
 //   stale keys, usage    cardPurchaseSweep (STALE_CARD_PURCHASE_KEYS_SQL, currentCardUsageSql)
 //   Vpass binding insert identitySweep (the empty-parse batch)
 //
@@ -50,6 +51,7 @@ import {
   ELIGIBLE_VPOINT_RUNS,
   myjcbPastMonthsSnapshotCtes,
 } from "../../../packages/read-model/src/current-captures.ts";
+import { LATEST_BALANCE_CANDIDATES_SQL } from "../../../packages/read-model/src/sql.ts";
 import { identitySweep } from "../../../packages/storage-d1/src/core/identity-store.ts";
 import {
   CORE_MIGRATIONS_URL,
@@ -75,20 +77,29 @@ const DAY_MS = 86_400_000;
 /** A statement's text on one line, as the matchers below read it. */
 const collapsed = (sql: string) => sql.replace(/\s+/gu, " ").trim();
 
-/** The statements issue #1491 names, recognised by their collapsed text. */
+/**
+ * The statements issue #1491 names, recognised by their collapsed text. The
+ * latest-state reads are the memo-backed texts the lanes run since ADR 0129's
+ * slice 2 (`memo_members`), and `snapshotMemo` is the walk that stores the
+ * memo, run once per snapshot-input revision.
+ */
 const NAMED = {
   latestBalances: (sql: string) =>
-    sql.includes("snapshot_policies(parser_name") && sql.includes("rank_in_group"),
-  // The report job's one-cut check (POSITION_CUT_SQL) wraps the same text and
+    sql.includes("memo_members AS MATERIALIZED") && sql.includes("rank_in_group"),
+  // The report job's one-cut check (positionCutSql) wraps the same text and
   // returns one row, so it is not a page of positions.
   positions: (sql: string) =>
-    sql.includes("snapshot_policies(parser_name") &&
-    sql.includes("FROM position_observations po JOIN parse_runs p") &&
+    sql.includes("memo_members AS MATERIALIZED") &&
+    sql.includes(
+      "CROSS JOIN position_observations po ON po.parse_run_id = candidate.parse_run_id",
+    ) &&
     !sql.startsWith("SELECT count(*) AS current_rows"),
   positionValuations: (sql: string) =>
-    sql.includes("snapshot_policies(parser_name") &&
+    sql.includes("memo_members AS MATERIALIZED") &&
     sql.includes("JOIN valuation_observations v ON v.parse_run_id = po.parse_run_id"),
-  rewardBuckets: (sql: string) => sql.startsWith("WITH eligible_vpoint_runs"),
+  rewardBuckets: (sql: string) =>
+    sql.includes("memo_members AS MATERIALIZED") && sql.includes("FROM reward_bucket_claims_v2 c"),
+  snapshotMemo: (sql: string) => sql.startsWith("INSERT INTO snapshot_selection_members"),
   staleKeys: (sql: string) => sql.startsWith("WITH current_keys AS MATERIALIZED"),
   cardUsage: (sql: string) =>
     sql.startsWith("WITH ranked_myjcb_snapshots") && sql.includes("current_rows AS MATERIALIZED"),
@@ -99,18 +110,36 @@ type Named = keyof typeof NAMED;
 
 /**
  * The most each statement's rows read per call may grow from N to 2N capture
- * days (docs/read-model.md, Rows read by the latest-state reads). Today the
- * linear reads double (1.84 to 2.00) and the Vpass binding insert, which walks
- * every Vpass artifact once per binding artifact, nearly quadruples (3.74).
+ * days (docs/read-model.md, Rows read by the latest-state reads). The reads
+ * that still walk history double (1.83 to 1.89: the card sweeps, and the
+ * history parsers' parses the memo-backed reads still visit), the valuations
+ * of the current positions do not grow, and the Vpass binding insert, which
+ * walks every Vpass artifact once per binding artifact, nearly quadruples
+ * (3.74).
  */
 const GROWTH_CEILING: Record<Named, number> = {
-  latestBalances: 2.4,
-  positions: 2.4,
-  positionValuations: 2.4,
-  rewardBuckets: 2.4,
+  latestBalances: 2.2,
+  positions: 2.2,
+  positionValuations: 1.1,
+  rewardBuckets: 2.2,
+  snapshotMemo: 1.8,
   staleKeys: 2.4,
   cardUsage: 2.4,
   vpassBindingInsert: 4.8,
+};
+
+/**
+ * The most rows a memo-backed read (ADR 0129, slice 2) may read per call on
+ * the 60-day store: its measurement plus about a tenth. The inline selection
+ * they replaced read 74,953, 39,791, 24,401 and 17,101 rows there, so a read
+ * that falls back to it, or a memo that stops being used, fails here.
+ */
+const ROWS_CEILING_LARGE: Partial<Record<Named, number>> = {
+  latestBalances: 14_000,
+  positions: 6_400,
+  positionValuations: 90,
+  rewardBuckets: 600,
+  snapshotMemo: 1_750,
 };
 
 interface Tally {
@@ -284,6 +313,8 @@ interface Measured {
   reportReuse: number;
   /** Each snapshot selection the latest-balances read composes, computed alone once. */
   selections: Record<string, number>;
+  /** One latest-balance candidate read with the shipped inline selection, as the app composes it. */
+  inlineLatestBalances: number;
   /** The capture's one flagged read against the reader's three latest-balance lists. */
   candidates: CandidateComparison;
 }
@@ -392,6 +423,8 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
   const selections: Record<string, number> = {};
   for (const [name, sql] of Object.entries(SELECTIONS))
     selections[name] = (await db.prepare(sql).all()).meta.rows_read;
+  const inlineLatestBalances = (await db.prepare(LATEST_BALANCE_CANDIDATES_SQL).all()).meta
+    .rows_read;
   const scalar = async (sql: string) => (await db.prepare(sql).first<{ n: number }>())!.n;
   return {
     callers,
@@ -404,6 +437,7 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
     reportBuild: rowsReadBy(callers["report job (build)"]!),
     reportReuse: rowsReadBy(callers["report job (reuse)"]!),
     selections,
+    inlineLatestBalances,
   };
 }
 
@@ -503,6 +537,15 @@ test("rows read per call grow with the history no faster than today", () => {
   console.info(`artifacts: ${small.artifacts} / ${large.artifacts}`);
   console.table(table);
   console.table(lanes);
+  for (const [name, ceiling] of Object.entries(ROWS_CEILING_LARGE)) {
+    const perCall = Math.round(
+      large.named[name as Named].rowsRead / large.named[name as Named].executions,
+    );
+    expect({ statement: name, perCall, ceiling, withinCeiling: perCall <= ceiling }).toMatchObject({
+      statement: name,
+      withinCeiling: true,
+    });
+  }
   for (const row of table) {
     const ceiling = GROWTH_CEILING[row.statement as Named];
     // The received object names the measured growth and its ceiling.
@@ -516,9 +559,17 @@ test("rows read per call grow with the history no faster than today", () => {
 });
 
 // Issue #1491's acceptance: doubling the historical artifacts at the same
-// current state adds at most a small constant.
-for (const name of Object.keys(NAMED))
-  test.todo(`${name}: rows read per call at 2N within a small constant of N (issue #1491)`);
+// current state adds at most a small constant. A statement that reaches it
+// is a test; the others stay a `test.todo` until their slice.
+const CONSTANT_IN_HISTORY: readonly Named[] = ["positionValuations"];
+for (const name of Object.keys(NAMED) as Named[])
+  if (CONSTANT_IN_HISTORY.includes(name))
+    test(`${name}: rows read per call at 2N within a small constant of N (issue #1491)`, () => {
+      const perCall = (measured: Measured) =>
+        measured.named[name].rowsRead / measured.named[name].executions;
+      expect(Math.abs(perCall(large) - perCall(small))).toBeLessThanOrEqual(10);
+    });
+  else test.todo(`${name}: rows read per call at 2N within a small constant of N (issue #1491)`);
 
 test("the report job's second run over unchanged inputs reads only its gate", () => {
   console.info("report job: build vs reuse of the stored report", {
@@ -552,7 +603,7 @@ test("the Vpass binding insert's plan nests every Vpass artifact under every bin
   }
 });
 
-test("the snapshot selections alone are most of a latest-balances read", () => {
+test("the snapshot selections alone are most of an inline latest-balances read", () => {
   const rows = Object.keys(SELECTIONS).map((name) => ({
     selection: name,
     [`rows read once, ${DAYS} days`]: small.selections[name],
@@ -561,16 +612,22 @@ test("the snapshot selections alone are most of a latest-balances read", () => {
   console.table(rows);
   const once = (measured: Measured) =>
     Object.values(measured.selections).reduce((sum, value) => sum + value, 0);
-  const perCall = (measured: Measured) =>
+  // The shipped inline read, as the app still composes it; the Processor's
+  // lanes read the memo instead (ADR 0129, slice 2).
+  const perCall = (measured: Measured) => measured.inlineLatestBalances;
+  const memo = (measured: Measured) =>
     measured.named.latestBalances.rowsRead / measured.named.latestBalances.executions;
   console.info("latest balances: selections alone vs the whole read", {
     [`selections, ${2 * DAYS} days`]: once(large),
-    [`whole read, ${2 * DAYS} days`]: Math.round(perCall(large)),
+    [`whole inline read, ${2 * DAYS} days`]: Math.round(perCall(large)),
+    [`memo-backed read, ${2 * DAYS} days`]: Math.round(memo(large)),
   });
   for (const measured of [small, large]) {
     for (const value of Object.values(measured.selections)) expect(value).toBeGreaterThan(0);
     expect(once(measured)).toBeGreaterThan(0.5 * perCall(measured));
     expect(once(measured)).toBeLessThan(perCall(measured));
+    // The memo-backed read reads less than the selections alone.
+    expect(memo(measured)).toBeLessThan(once(measured));
   }
   expect(once(large)).toBeGreaterThan(1.6 * once(small));
 });
