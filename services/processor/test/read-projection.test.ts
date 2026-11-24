@@ -377,8 +377,8 @@ test("G0-09/G3-12: dropping every READ table leaves CORE and DATA untouched, and
   expect(await readInputRecord(env.DB, rebuilt.inputDigest!)).not.toBeNull();
 }, 90000);
 
-// The shortcut is observable as the absence of the three historical candidate
-// queries, not merely as the old "unchanged" status after doing those queries.
+// The shortcut is observable as the absence of the historical candidate
+// query, not merely as the old "unchanged" status after doing those queries.
 test("an unchanged published context avoids historical capture; updates still capture", async () => {
   await seedBalances(env, ["smbc:read-fast"]);
   await runBalanceProjection(on());
@@ -406,16 +406,14 @@ test("an unchanged published context avoids historical capture; updates still ca
   const changed = await runBalanceProjection(counted);
   expect(changed.status).toBe("complete");
   expect(changed.inputDigest).not.toBe(first.inputDigest);
-  expect(queries.filter((sql) => sql.includes("snapshot_policies")).length).toBeGreaterThanOrEqual(
-    3,
-  );
+  // One flagged latest-balance read gives all three candidate sets (ADR 0129).
+  expect(queries.filter((sql) => sql.includes("snapshot_policies"))).toHaveLength(1);
   queries.length = 0;
   const deployed = await runBalanceProjection(counted, { buildDigest: "a".repeat(64) });
   expect(deployed.status).toBe("complete");
   expect(deployed.snapshotId).not.toBe(changed.snapshotId);
-  expect(queries.filter((sql) => sql.includes("snapshot_policies")).length).toBeGreaterThanOrEqual(
-    3,
-  );
+  // One flagged latest-balance read gives all three candidate sets (ADR 0129).
+  expect(queries.filter((sql) => sql.includes("snapshot_policies"))).toHaveLength(1);
 }, 60000);
 
 test("a CORE write racing the shortcut falls back to a stable capture", async () => {

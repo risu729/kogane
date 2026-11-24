@@ -376,8 +376,12 @@ test("with the release flag off a targeted job publishes normally and no command
 }, 60000);
 
 test("0027 and 0028 apply to a store that already has metadata and parses, and backfill exactly", async () => {
+  // 0105 guards `parse_input_references`, which 0027 creates, so it is held
+  // back with the two and applied after them, in migration order.
   const upgrade = await startPipeline(
-    layerBMigrations().filter((name) => !name.startsWith("0027_") && !name.startsWith("0028_")),
+    layerBMigrations().filter(
+      (name) => !name.startsWith("0027_") && !name.startsWith("0028_") && !name.startsWith("0105_"),
+    ),
   );
   try {
     const db = upgrade.env.DB;
@@ -414,6 +418,7 @@ test("0027 and 0028 apply to a store that already has metadata and parses, and b
 
     await applyMigration(db, "0027_metadata_projections.sql");
     await applyMigration(db, "0028_parse_releases.sql");
+    await applyMigration(db, "0105_observation_no_replace.sql");
 
     // The legacy table is untouched, and every row became a projection of the
     // compatibility extractor with an honest 'unknown' digest.
