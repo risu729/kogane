@@ -475,8 +475,10 @@ what changed (issue [#1491](https://github.com/risu729/kogane/issues/1491)).
 Their plans without table statistics, as D1 plans them (`EXPLAIN QUERY PLAN`
 on every CORE migration):
 
-- `listLatestBalances` (the balance projection's capture reads it three times,
-  `services/processor/src/balance-projection-job.ts`) scans `fetch_artifacts`
+- `listLatestBalances` (the balance projection's capture reads the same
+  selection once, as `LATEST_BALANCE_CANDIDATES_SQL`, and splits the
+  unfiltered list and both measure views from it; it read it three times
+  before ADR 0129's first slice, `services/processor/src/balance-projection-job.ts`) scans `fetch_artifacts`
   three times through `idx_fetch_artifacts_source_dataset_time`: its own
   active chain, `eligible_snapshots` and `eligible_artifact_containers`. It
   walks every terminal fetch-run report twice more, through an automatic index
@@ -518,24 +520,24 @@ stale keys over 30 and 60 capture days
 `STATEMENT_CI_SCALE`, plus a V Point run, an SBI Securities positions run and
 their reward claims per day), copied into Miniflare D1:
 
-| Statement                      | Caller               | 30 days | 60 days | Growth | Rows returned |
-| ------------------------------ | -------------------- | ------: | ------: | -----: | ------------- |
-| `listLatestBalances`           | `captureFixedInput`  |  37,693 |  74,943 |   1.99 | 10 / 10       |
-| `listPositions`                | `runReportJob`       |  20,041 |  39,791 |   1.99 | 3 / 3         |
-| `POSITION_VALUATIONS_SQL`      | `runReportJob`       |  12,371 |  24,401 |   1.97 | 3 / 3         |
-| `CURRENT_REWARD_BUCKETS_SQL`   | `captureRewardInput` |   8,571 |  17,101 |   2.00 | 2 / 2         |
-| `STALE_CARD_PURCHASE_KEYS_SQL` | `cardPurchaseSweep`  |  17,755 |  32,588 |   1.84 | 5 / 5         |
-| `currentCardUsageSql` page     | `cardPurchaseSweep`  |  15,010 |  27,702 |   1.85 | 68 / 85       |
-| Vpass binding insert           | `identitySweep`      |  75,890 | 283,740 |   3.74 | (insert)      |
+| Statement                       | Caller               | 30 days | 60 days | Growth | Rows returned |
+| ------------------------------- | -------------------- | ------: | ------: | -----: | ------------- |
+| `LATEST_BALANCE_CANDIDATES_SQL` | `captureFixedInput`  |  37,703 |  74,953 |   1.99 | 20 / 20       |
+| `listPositions`                 | `runReportJob`       |  20,041 |  39,791 |   1.99 | 3 / 3         |
+| `POSITION_VALUATIONS_SQL`       | `runReportJob`       |  12,371 |  24,401 |   1.97 | 3 / 3         |
+| `CURRENT_REWARD_BUCKETS_SQL`    | `captureRewardInput` |   8,571 |  17,101 |   2.00 | 2 / 2         |
+| `STALE_CARD_PURCHASE_KEYS_SQL`  | `cardPurchaseSweep`  |  17,755 |  32,588 |   1.84 | 5 / 5         |
+| `currentCardUsageSql` page      | `cardPurchaseSweep`  |  15,010 |  27,702 |   1.85 | 68 / 85       |
+| Vpass binding insert            | `identitySweep`      |  75,890 | 283,740 |   3.74 | (insert)      |
 
 Rows read are per call. Doubling the history about doubles every read (1.84
 to 2.00) and nearly quadruples the Vpass binding insert (3.74), while what they
 return stays the same (the card usage page returns the older statement months
 the longer history still holds as current). The report job's second run over
-unchanged inputs reads as much as its first (32,451 rows at 30 days, 64,231 at
-60; the first run reads 32,466 and 64,246) only to find the report it stored:
-it reads every position, valuation, decimal and price before it compares the
-manifest digest. The current-snapshot selections alone (container snapshots,
+unchanged inputs reads 3 rows at either size (its skip gate,
+[calculation and reports](calculation-and-reports.md)); before ADR 0129's
+first slice it read as much as its first, about 52,500 and 104,000 rows, only
+to find the report it stored. The current-snapshot selections alone (container snapshots,
 MyJCB past months, V Point runs) are 45,503 of the 74,943 rows of one
 latest-balances read at 60 days; the rest is its active chain over every
 artifact. The test fails when a statement's growth exceeds a ceiling (2.4 for

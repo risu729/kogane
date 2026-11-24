@@ -5,11 +5,19 @@ import { navigate, useLocation } from "./router.tsx";
 import { QueryBoundary } from "./ui.tsx";
 import type { FilterOptions } from "../../../packages/observation-shared/src/api-contract.ts";
 
+/**
+ * A value the page URL filters by that the store's options do not list (an
+ * older link, a retired source) stays the selected option, marked as such:
+ * the controls name the filter the list applies, never "every" one.
+ */
+const UNLISTED = "（現在は一覧にありません）";
+
 export function CollectionControls({ kind }: { kind: string }) {
   const location = useLocation();
   const params = new URLSearchParams(location.split("?")[1]);
   const source = params.get("source") ?? "";
   const account = params.get("account") ?? "";
+  const accountValue = account ? JSON.stringify([source, account]) : "";
   const [draft, setDraft] = useState({
     from: params.get("from") ?? "",
     to: params.get("to") ?? "",
@@ -62,6 +70,12 @@ export function CollectionControls({ kind }: { kind: string }) {
                 onChange={(event) => change(event.target.value, "")}
               >
                 <option value="">すべての取得元</option>
+                {source && !data.sources.includes(source) ? (
+                  <option value={source}>
+                    {source}
+                    {UNLISTED}
+                  </option>
+                ) : null}
                 {data.sources.map((id) => (
                   <option key={id}>{id}</option>
                 ))}
@@ -72,7 +86,7 @@ export function CollectionControls({ kind }: { kind: string }) {
                 口座
                 <select
                   aria-label="全記録の口座"
-                  value={account ? JSON.stringify([source, account]) : ""}
+                  value={accountValue}
                   onChange={(event) => {
                     if (!event.target.value) change(source, "");
                     else {
@@ -85,6 +99,16 @@ export function CollectionControls({ kind }: { kind: string }) {
                   }}
                 >
                   <option value="">すべての口座</option>
+                  {account &&
+                  !data.accounts.some(
+                    (row) => JSON.stringify([row.source_id, row.source_account]) === accountValue,
+                  ) ? (
+                    <option value={accountValue}>
+                      {account}
+                      {source ? ` · ${source}` : ""}
+                      {UNLISTED}
+                    </option>
+                  ) : null}
                   {data.accounts
                     .filter((row) => !source || row.source_id === source)
                     .map((row) => (
@@ -110,20 +134,26 @@ export function CollectionControls({ kind }: { kind: string }) {
                       data.metrics ?? [],
                     ],
                   ] as const
-                ).map(([key, label, values]) => (
-                  <label className="filter-field" key={key}>
-                    {label}
-                    <select
-                      value={params.get(key) ?? ""}
-                      onChange={(event) => field(key, event.target.value)}
-                    >
-                      <option value="">すべて</option>
-                      {values.map((value) => (
-                        <option key={value}>{value}</option>
-                      ))}
-                    </select>
-                  </label>
-                ))
+                ).map(([key, label, values]) => {
+                  const current = params.get(key) ?? "";
+                  return (
+                    <label className="filter-field" key={key}>
+                      {label}
+                      <select value={current} onChange={(event) => field(key, event.target.value)}>
+                        <option value="">すべて</option>
+                        {current && !values.includes(current) ? (
+                          <option value={current}>
+                            {current}
+                            {UNLISTED}
+                          </option>
+                        ) : null}
+                        {values.map((value) => (
+                          <option key={value}>{value}</option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })
               : null}
           </div>
           {kind === "transactions" ? (

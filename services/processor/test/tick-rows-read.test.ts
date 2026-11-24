@@ -12,7 +12,7 @@
 // Miniflare D1 (support/d1-copy.ts) and each statement is run through its real
 // caller, on a binding that records `rows_read` per statement text:
 //
-//   latest balances      captureFixedInput (3 x listLatestBalances)
+//   latest balances      captureFixedInput (one flagged latest-balance read)
 //   positions            runReportJob (listPositions), twice: build, then reuse
 //   reward buckets       captureRewardInput (CURRENT_REWARD_BUCKETS_SQL)
 //   stale keys, usage    cardPurchaseSweep (STALE_CARD_PURCHASE_KEYS_SQL, currentCardUsageSql)
@@ -26,7 +26,7 @@
 // ceiling to its new measurement in the same PR. The issue's acceptance, a
 // cost that does not grow with history, is a `test.todo` per statement. The
 // last cases record facts of the shipped statements that the documents quote:
-// the report job's reuse of an unchanged report, the Vpass insert's plan, and
+// the report job's gated reuse of an unchanged report, the Vpass insert's plan, and
 // the snapshot selections' share of a latest-balances read. Every value is
 // synthetic.
 import type { Database } from "bun:sqlite";
@@ -39,6 +39,13 @@ import {
 } from "../../../packages/read-model/test/card-usage-scale-fixture.ts";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import { completeSnapshotCandidates } from "../../../packages/read-model/src/concepts.ts";
+import {
+  CANDIDATE_LIMIT,
+  createD1ObservationReader,
+  d1Executor,
+  type LatestBalanceCandidateSets,
+  readLatestBalanceCandidates,
+} from "../../../packages/read-model/src/index.ts";
 import {
   ELIGIBLE_VPOINT_RUNS,
   myjcbPastMonthsSnapshotCtes,
@@ -277,6 +284,38 @@ interface Measured {
   reportReuse: number;
   /** Each snapshot selection the latest-balances read composes, computed alone once. */
   selections: Record<string, number>;
+  /** The capture's one flagged read against the reader's three latest-balance lists. */
+  candidates: CandidateComparison;
+}
+
+interface CandidateComparison {
+  /** Ids per set: the reader's list, then the one read's split. */
+  reader: Record<keyof LatestBalanceCandidateSets, number[]>;
+  split: Record<keyof LatestBalanceCandidateSets, number[]>;
+}
+
+/**
+ * The reader's three lists the capture used to read (unfiltered, and each
+ * measure view), and the sets `readLatestBalanceCandidates` splits from its
+ * one read, as sorted ids.
+ */
+async function candidateDifference(db: D1Database): Promise<CandidateComparison> {
+  const reader = createD1ObservationReader(db);
+  const ids = (rows: readonly { id: number }[]) => rows.map((row) => row.id).sort((a, b) => a - b);
+  const [latest, balances, summaries] = await Promise.all([
+    reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT }),
+    reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "balances" }),
+    reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "summaries" }),
+  ]);
+  const split = await readLatestBalanceCandidates(d1Executor(db));
+  return {
+    reader: { latest: ids(latest), balances: ids(balances), summaries: ids(summaries) },
+    split: {
+      latest: ids(split.latest),
+      balances: ids(split.balances),
+      summaries: ids(split.summaries),
+    },
+  };
 }
 
 /**
@@ -301,6 +340,7 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
     return await body(recording(db, tallies));
   };
   const now = `${TODAY}T05:00:00.000Z`;
+  const candidates = await candidateDifference(db);
   const balances = await run("balance projection capture", (d) =>
     captureFixedInput(d as never, { now: () => now }),
   );
@@ -324,7 +364,7 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
     runReportJob({ DB: d, EVIDENCE: evidence, REPORTS_ENABLED: "true" }, options),
   );
   expect(built.generated).toBe(1);
-  expect(reused).toMatchObject({ reused: 1, reportId: built.reportId });
+  expect(reused).toMatchObject({ reused: 1, gated: true, reportId: built.reportId });
   await run("card purchase sweep", (d) => cardPurchaseSweep(d, { now }));
   // The lane's sweep takes the oldest unidentified parses, here card store
   // rows with observations; the V Point sweep reaches the batch that
@@ -356,6 +396,7 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
   return {
     callers,
     named,
+    candidates,
     currentBalances: balances.captured.input.content.candidates.length,
     currentPositions: named.positions.rowsReturned / Math.max(named.positions.executions, 1),
     currentRewardBuckets: rewards.captured.input.content.buckets.length,
@@ -424,8 +465,22 @@ test("every named statement runs through its caller on both stores", () => {
       expect({ name, ran: measured.named[name].executions > 0 }).toEqual({ name, ran: true });
       expect(measured.named[name].rowsRead).toBeGreaterThan(0);
     }
-  // captureFixedInput reads the latest balances three times (balance-projection-job.ts).
-  expect(small.named.latestBalances.executions).toBe(3);
+  // captureFixedInput reads the latest balances once (ADR 0129, slice 1).
+  expect(small.named.latestBalances.executions).toBe(1);
+});
+
+test("the capture's one read splits into exactly the reader's three latest-balance lists", () => {
+  for (const measured of [small, large]) {
+    const { reader, split } = measured.candidates;
+    expect(split).toEqual(reader);
+    // The stores reach every branch of the split: a period total that is not
+    // its group's ranked latest (an older MyJCB statement month), a ranked
+    // period total (the V Point SMFG balance) and plain balances.
+    const latest = new Set(reader.latest);
+    expect(reader.summaries.some((id) => !latest.has(id))).toBe(true);
+    expect(reader.summaries.some((id) => latest.has(id))).toBe(true);
+    expect(reader.balances.length).toBeGreaterThan(0);
+  }
 });
 
 test("rows read per call grow with the history no faster than today", () => {
@@ -465,18 +520,17 @@ test("rows read per call grow with the history no faster than today", () => {
 for (const name of Object.keys(NAMED))
   test.todo(`${name}: rows read per call at 2N within a small constant of N (issue #1491)`);
 
-test("the report job's second run over unchanged inputs reads as much as its first", () => {
+test("the report job's second run over unchanged inputs reads only its gate", () => {
   console.info("report job: build vs reuse of the stored report", {
     [`build, ${DAYS} days`]: small.reportBuild,
     [`reuse, ${DAYS} days`]: small.reportReuse,
     [`build, ${2 * DAYS} days`]: large.reportBuild,
     [`reuse, ${2 * DAYS} days`]: large.reportReuse,
   });
-  // runReportJob reads every position, valuation, decimal and price before it
-  // compares the manifest digest with the stored report.
-  for (const measured of [small, large])
-    expect(measured.reportReuse).toBeGreaterThan(0.95 * measured.reportBuild);
-  expect(large.reportReuse).toBeGreaterThan(1.6 * small.reportReuse);
+  // The skip gate (ADR 0129): the CORE revision row, the newest price claim
+  // and the stored gate, whatever the history holds.
+  for (const measured of [small, large]) expect(measured.reportReuse).toBeLessThan(10);
+  expect(large.reportReuse).toBe(small.reportReuse);
 });
 
 test("the Vpass binding insert's plan nests every Vpass artifact under every binding artifact", () => {

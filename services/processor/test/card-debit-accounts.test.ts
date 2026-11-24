@@ -9,7 +9,9 @@
 // one card ordinal whose candidate under the next ordinal, which the guard
 // refuses, is not listed as open; that the read writes nothing, is graded
 // before it reads, and reaches readings, decisions and settled months by key
-// without table statistics. Every value is synthetic.
+// without table statistics; and that the upcoming view's read of one card's
+// earlier statements reaches only that card's statement totals, by key.
+// Every value is synthetic.
 import { afterAll, beforeAll, expect } from "bun:test";
 import {
   CARD_DEBIT_ACCOUNT_CANDIDATES_SQL,
@@ -26,6 +28,7 @@ import {
   type Grant,
   type Principal,
 } from "../../../packages/application/src/index.ts";
+import { EARLIER_STATEMENT_DUE_SQL } from "../../../packages/application/src/query/card-upcoming-bills.ts";
 import { CARD_DEBIT_ACCOUNT_POLICY } from "../../../packages/domain/src/card-debit-account.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../packages/domain/src/myjcb-card-information.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -756,4 +759,32 @@ test("readings, decisions and settled months are reached by key, without table s
         "SEARCH m USING AUTOMATIC COVERING INDEX (card_source_id=? AND card_account_id=? AND period=?)",
       );
   }
+});
+
+test("upcoming bills reach one card's earlier statements by key, without table statistics", async () => {
+  // docs/card-settlements.md, Cost: per answered card, D1's SQLite pushes the
+  // source and source account into `card_statement_facts`' ranking, so only
+  // that card's statement totals are read, through `idx_bal_obs_account`.
+  // (This harness stubs the collector tables; the whole plan on the CORE
+  // schema is checked in packages/application/test/card-upcoming-bills.test.ts.)
+  // card-001's one statement is of 2098-01, due 2098-01-27: read when the
+  // newest is of another month, and not when it is that month.
+  const binds = ["vpass", "vpass:card-001", "2098-03-01", "2098-02"];
+  const plan = (
+    await db
+      .prepare("EXPLAIN QUERY PLAN " + EARLIER_STATEMENT_DUE_SQL)
+      .bind(...binds)
+      .all<{ detail: string }>()
+  ).results.map((row) => row.detail);
+  expect(plan).toContain(
+    "SEARCH b USING INDEX idx_bal_obs_account (source_account=? AND metric=?)",
+  );
+  expect(plan.filter((detail) => /^SCAN (b|balance_observations)\b/u.test(detail))).toEqual([]);
+  const due = async (period: string) =>
+    await db
+      .prepare(EARLIER_STATEMENT_DUE_SQL)
+      .bind("vpass", "vpass:card-001", "2098-03-01", period)
+      .first<{ payment_date: string | null }>();
+  expect(await due("2098-02")).toEqual({ payment_date: "2098-01-27" });
+  expect(await due("2098-01")).toEqual({ payment_date: null });
 });

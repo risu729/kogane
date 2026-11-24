@@ -84,6 +84,12 @@ export {
 } from "./price-selection";
 export { createD1ObservationReader, d1Executor, type D1Like } from "./d1";
 export {
+  type LatestBalanceCandidateRow,
+  type LatestBalanceCandidateSets,
+  latestBalanceCandidateSets,
+  readLatestBalanceCandidates,
+} from "./latest-balance-candidates";
+export {
   DECIMAL_POLICY_RELEASE,
   DEFAULT_IDENTITY_READ_MODE,
   IDENTITY_READ_MODES,
