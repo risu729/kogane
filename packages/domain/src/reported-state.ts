@@ -383,13 +383,25 @@ export function reportedStateCutoff(date: string): string {
   return new Date(Date.parse(`${next}T00:00:00.000Z`) - ZONE_OFFSET_MS).toISOString();
 }
 
-/** The civil date in Asia/Tokyo of a stored UTC instant, or null when it is not one. */
+/**
+ * The civil date in Asia/Tokyo of a stored UTC instant, or null when it is not
+ * one. The written fields are read as they are, never through `Date.parse`,
+ * which rolls an impossible day or `24:00` over to another date: a day that is
+ * not in its month, an hour past 23, a minute or second past 59, or a Tokyo
+ * date after 9999-12-31 is null.
+ */
 export function captureDate(capturedAt: string): string | null {
-  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z$/u.test(capturedAt))
-    return null;
-  const instant = Date.parse(capturedAt);
-  if (Number.isNaN(instant)) return null;
-  return new Date(instant + ZONE_OFFSET_MS).toISOString().slice(0, 10);
+  const match =
+    /^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?Z$/u.exec(
+      capturedAt,
+    );
+  const date = match === null ? null : parseLocalDate(match[1]!);
+  if (match === null || date === null) return null;
+  const hour = Number(match[2]);
+  if (hour > 23 || Number(match[3]) > 59 || Number(match[4]) > 59) return null;
+  // Asia/Tokyo is UTC+9 all year: from 15:00 UTC it is the next civil day there.
+  const tokyo = hour * 3_600_000 + ZONE_OFFSET_MS >= 86_400_000 ? addDays(date, 1) : date;
+  return tokyo.year > 9999 ? null : formatLocalDate(tokyo);
 }
 
 /** `dated-state-freshness-v1`: days from the capture's date to the asked date. */

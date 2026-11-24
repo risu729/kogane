@@ -230,7 +230,8 @@ seals, in milliseconds, and refuses above 500,000 (`budget_exceeded`,
 `budget:identityObservations=500000`). That is acceptable today for one owner
 reading the page behind Access; routine agent polling needs a written bound
 first. A reader pages to offset 950 of a view (no `nextOffset` past it; the
-950 page's `paging` says `stoppedBy: "budget"` when items follow, ADR 0128);
+950 page's `paging` says `stoppedBy: "budget"` when items follow, ADR 0128,
+and the page says under its pager that items follow which it cannot show);
 `identifierId` narrows a larger one. The page re-reads a candidate before it
 plans and plans nothing if the candidate, its commands or either
 identifier's mapping revision changed. Candidate adoption payloads carry the
@@ -364,6 +365,9 @@ the candidate again; approval and commit happen on the confirmation screen.
 As on the instrument page, an emptied later page says that it lists nothing
 and keeps its pager; only a view total of zero says the view is empty.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
+A reader pages to offset 950 of a view: past it the next page is withheld
+(`paging.stoppedBy: "budget"`, ADR 0128), and the page says under its pager
+that items follow which it cannot show.
 Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),
 refused whole past each. Every read is keyed (ADR 0077, Cost).

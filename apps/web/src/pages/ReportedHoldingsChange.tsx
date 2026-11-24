@@ -6,7 +6,8 @@
 // listed on one date only shows a status and no number (never a zero), and a
 // holding that cannot be compared shows its reasons. Nothing is totalled.
 // The route's source and account filters live in the page URL
-// (`changeSource`, `changeAccount`), so a narrowed comparison is a link.
+// (`changeSource`, `changeAccount`), so the narrowing is a link; the start
+// date, like the page's 基準日, is in-memory view state.
 import { useState, type ReactNode } from "react";
 import { validLocalDateText } from "../../../../packages/domain/src/time.ts";
 import {

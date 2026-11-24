@@ -453,6 +453,7 @@ export function QueryBoundary<T>({
   isEmpty,
   empty,
   coverageNotice = true,
+  nextPageLabel = "次の500件",
   children,
 }: {
   query: UseQueryResult<T, Error>;
@@ -461,6 +462,8 @@ export function QueryBoundary<T>({
   empty?: ReactNode;
   /** Pages that page in memory render their own pager instead of the URL-based notice. */
   coverageNotice?: boolean;
+  /** The URL-based notice's next-window link; the page that renders the boundary names its list. */
+  nextPageLabel?: string;
   children: (data: T) => ReactNode;
 }): ReactNode {
   // The failure a pressed retry repeats stays until that read settles, so the
@@ -519,7 +522,7 @@ export function QueryBoundary<T>({
                 return `${window.location.pathname}?${params}`;
               })()}
             >
-              {window.location.pathname === "/balances" ? "履歴の次の500件" : "次の500件"}
+              {nextPageLabel}
             </Link>
           ) : null}
           {coverage.latestNextOffset != null ? (

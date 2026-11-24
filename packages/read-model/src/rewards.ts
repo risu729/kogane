@@ -34,6 +34,8 @@ import { validTemporalValue, type TemporalValue } from "../../domain/src/time";
 import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/values";
 import type { SqlExecutor } from "./reader";
 import { ELIGIBLE_VPOINT_RUNS, VPOINT_MEMBER } from "./current-captures";
+import { MEMO_MEMBERS_CTE, MEMO_VPOINT_RUNS_CTES } from "./snapshot-memo";
+import type { SnapshotSource } from "./sql";
 import { activeStateProjection } from "./concepts";
 import {
   JPOINT_CURRENT_COHORT_CTES,
@@ -68,8 +70,11 @@ export function page<T>(rows: T[], offset: number, limit = REWARD_PAGE_LIMIT): P
  * with Transactions/Balances. An absent slot is absent, even when an older
  * run still has a published claim. Empty snapshots need no sentinel claim. `?1` is the
  * promotion release, `?2` an optional programme filter, `?3` the offset.
+ * `source` picks where the latest V Point run comes from (see `SnapshotSource`).
  */
-export const CURRENT_REWARD_BUCKETS_SQL = `WITH ${ELIGIBLE_VPOINT_RUNS}, ${JPOINT_CURRENT_COHORT_CTES}, ranked AS (
+export const currentRewardBucketsSql = (
+  source: SnapshotSource = "inline",
+): string => `WITH ${source === "memo" ? `${MEMO_MEMBERS_CTE}, ${MEMO_VPOINT_RUNS_CTES}` : ELIGIBLE_VPOINT_RUNS}, ${JPOINT_CURRENT_COHORT_CTES}, ranked AS (
   SELECT c.id,c.program_id,c.holding_ref,c.bucket_ref,c.bucket_kind,c.restriction_refs_json,
     c.unit_ref,c.quantity_coefficient,c.quantity_scale,c.quantity_status,c.observed_expiry_json,
     c.observed_at,c.parse_run_id,c.source_fact_kind,c.source_fact_id,
@@ -93,6 +98,8 @@ FROM ranked r JOIN reward_programs p ON p.program_id=r.program_id
 WHERE r.rank=1
 ORDER BY r.program_id,r.holding_ref,r.bucket_ref
 LIMIT ${REWARD_PAGE_LIMIT + 1} OFFSET ?3`;
+
+export const CURRENT_REWARD_BUCKETS_SQL = currentRewardBucketsSql();
 
 export const EXPIRY_RULES_SQL = `SELECT rule_id,version,family,program_id,applicability_json,
  qualifying_activity_policy_ref,deadline_calendar_ref,priority_policy_ref,evidence_refs_json,verification

@@ -7,8 +7,11 @@
 // stays under 8 KB for ten cards, writes nothing, is graded before it reads,
 // reads the reported state without the count of the statements before the
 // window or the scheduled payments and answers byte for byte as over the full
-// state (on random stores too), and reaches account labels by key without
-// table statistics. Every card, account, label, amount and date is invented.
+// state (on random stores too), and reaches account labels, and each answered
+// card's earlier statements, by key without table statistics. On random
+// stores, a card statement due between the balance's capture and the date
+// never leaves a line compared. Every card, account, label, amount and date
+// is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { validApiResponse } from "../../observation-shared/src/api-validation.ts";
@@ -23,7 +26,10 @@ import {
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
+import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
 import { DatedStore, type Capture } from "../../read-model/test/dated-state-fixture.ts";
+import { captureDate } from "../../domain/src/reported-state.ts";
+import { parseLocalDate } from "../../domain/src/time.ts";
 import type { Grant } from "../src/grants.ts";
 import {
   CARD_DEBIT_ACCOUNT_CANDIDATES_SQL,
@@ -33,6 +39,7 @@ import {
 import { SETTLEMENT_SQL } from "../src/query/card-purchases.ts";
 import {
   ACCOUNT_LABELS_SQL,
+  EARLIER_STATEMENT_DUE_SQL,
   reviewUpcomingCardBills,
   reviewUpcomingCardBillsWith,
   type UpcomingCardBillsReview,
@@ -604,12 +611,14 @@ describe("covers", () => {
     });
   });
 
-  test("a stated limit: a card's older statement no settlement pays is not a previous debit", async () => {
+  test("a card's older statement no settlement pays is a previous debit", async () => {
     // card-x: July accepted from bank B (07-27), August due 08-27 with no
     // settlement, September its newest statement and a bill. Bank B's balance
-    // was captured on 08-25, before the August debit, yet the previous debit
-    // the read knows of is July's, so the balance is compared with the bill
-    // (docs/card-settlements.md, Upcoming bills, limits).
+    // was captured on 08-25, before the August debit, so it may still hold
+    // the 60,000 the bank has since taken: comparing it with the bill is not
+    // an answer (ADR 0114: the latest card debit from the account). Before the
+    // read looked at a card's older statements, the previous debit was July's
+    // and the line read `yes`.
     const store = new DatedStore();
     const card = "vpass:card-x";
     const month = (period: string, paymentDate: string, minor: number) => {
@@ -632,11 +641,139 @@ describe("covers", () => {
         debitDate: "2026-09-28",
         cardBills: { value: "20000", status: "exact" },
         balance: { value: "70000", status: "exact", capturedAt: "2026-08-25T01:00:00.000Z" },
-        covers: "yes",
-        reasons: [],
+        covers: "unknown",
+        reasons: ["balance_before_previous_debit"],
       },
     ]);
+    // A balance captured after the August debit is compared with the bill.
+    balances(store, "2026-08-28T01:00:00Z", [[BANK_B, 70_000, "acct-bank-b"]]);
+    expect((await review(store)).byDebitAccount).toMatchObject([
+      { account: "acct-bank-b", covers: "yes", reasons: [] },
+    ]);
   });
+
+  test("on random stores, a statement due between the balance's capture and the date never leaves a line compared", async () => {
+    // Each card has one bank and statements of several months, some settled,
+    // some due on the date itself, some with no or an impossible due date
+    // (`-31` of a 30-day month). Wherever a line reads `yes` or `no`, no
+    // statement of a card answered to that bank is due on or after the
+    // balance's capture day and before the date (or on the date, unless it is
+    // the card's newest statement: a bill compared under the 2026-11-21 rule).
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x0f1;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const banks = [BANK_A, BANK_B, "smbc-bank:synthetic-c"] as const;
+    const seen = { compared: 0, unknown: 0, older: 0 };
+    for (let round = 0; round < 20; round += 1) {
+      const store = new DatedStore();
+      type Card = {
+        bank: string;
+        answered: boolean;
+        statements: { period: string; due: string | null }[];
+      };
+      const cards: Card[] = [];
+      for (let card = 0; card < 4; card += 1) {
+        const sourceAccount = `vpass:card-00${card}`;
+        const record: Card = { bank: banks[random(3)]!, answered: false, statements: [] };
+        const statements = record.statements;
+        for (let month = 6; month <= 11; month += 1) {
+          if (random(4) === 0) continue;
+          const period = `2026-${pad(month)}`;
+          const kind = random(25);
+          const due =
+            kind === 0 ? null : kind === 1 ? `${period}-31` : `${period}-${pad(20 + random(9))}`;
+          const capture = statement(store, {
+            card: sourceAccount,
+            period,
+            paymentDate: due,
+            minor: 1 + random(90_000),
+          });
+          store.identify(capture, "vpass", `acct-card-${card}`, "provider-local");
+          statements.push({ period, due });
+          if (random(2) === 0) {
+            accept(store, capture, {
+              card: sourceAccount,
+              period,
+              bank: record.bank,
+              debitDate: `${period}-${pad(20 + random(9))}`,
+            });
+            record.answered = true;
+          }
+        }
+        cards.push(record);
+      }
+      const dates = ["2026-07-25", "2026-08-24", "2026-09-26", "2026-10-28", "2026-11-30"];
+      // A capture up to 40 days before each date: before or after the debits
+      // of the month before it.
+      for (const date of dates)
+        balances(
+          store,
+          new Date(Date.parse(`${date}T01:00:00Z`) - random(40) * 86_400_000)
+            .toISOString()
+            .replace(".000", ""),
+          [
+            [BANK_A, random(300_000), "acct-bank-a"],
+            [BANK_B, random(300_000), "acct-bank-b"],
+          ],
+        );
+      for (const date of dates) {
+        const answer = await review(store, undefined, date);
+        for (const line of answer.byDebitAccount) {
+          if (line.covers === "unknown") {
+            seen.unknown += 1;
+            continue;
+          }
+          seen.compared += 1;
+          const captured = captureDate(line.balance!.capturedAt!)!;
+          for (const card of cards) {
+            if (!card.answered || card.bank !== line.sourceAccount) continue;
+            const newest = card.statements.at(-1)?.period;
+            for (const { period, due } of card.statements) {
+              if (due === null || parseLocalDate(due) === null) continue;
+              if (due > date || (due === date && period === newest)) continue;
+              // The context names the case when it fails.
+              expect({
+                date,
+                line: line.debitDate,
+                period,
+                due,
+                captured,
+                after: captured > due,
+              }).toMatchObject({ after: true });
+            }
+          }
+        }
+        // The case the read missed: an answered card whose newest statement is
+        // a bill and whose earlier statement is due after the bank's capture.
+        for (const card of cards) {
+          const newest = card.statements.at(-1);
+          if (!card.answered || newest?.due == null || newest.due < date) continue;
+          const line = answer.byDebitAccount.find((item) => item.sourceAccount === card.bank);
+          const captured = line?.balance?.capturedAt ? captureDate(line.balance.capturedAt) : null;
+          if (captured === null || captured === undefined) continue;
+          if (
+            card.statements
+              .slice(0, -1)
+              .some(
+                ({ due }) =>
+                  due !== null && parseLocalDate(due) !== null && due >= captured && due <= date,
+              )
+          )
+            seen.older += 1;
+        }
+      }
+    }
+    // The worlds reach compared and unknown lines, and the case itself.
+    expect(seen.compared).toBeGreaterThan(15);
+    expect(seen.unknown).toBeGreaterThan(20);
+    expect(seen.older).toBeGreaterThan(10);
+  }, 60_000);
 });
 
 describe("the answer as served", () => {
@@ -895,8 +1032,12 @@ describe("cost and authority", () => {
         DATED_STATEMENTS_SQL,
         SETTLEMENT_SQL,
         ACCOUNT_LABELS_SQL,
+        EARLIER_STATEMENT_DUE_SQL,
       ]),
     );
+    // One keyed read per card with a statement whose debit account is
+    // answered: card-001, -002, -004, -005 and -006 (card-003 has none).
+    expect(seen.filter((sql) => sql === EARLIER_STATEMENT_DUE_SQL)).toHaveLength(5);
   });
 
   test("a narrowed grant is refused before anything is read", async () => {
@@ -925,4 +1066,31 @@ describe("cost and authority", () => {
     ).toBe(true);
     expect(plan.filter((line) => /^SCAN a\b/u.test(line))).toEqual([]);
   });
+
+  test("without table statistics, one card's earlier statements are reached by key", () => {
+    // On the complete CORE schema (no `sqlite_stat*` table): the card's source
+    // and source account are pushed into `card_statement_facts`' ranking, so
+    // its statement totals come from `idx_bal_obs_account` and every other
+    // table by key; the only scan is of that card's own ranked rows.
+    const db = fullCoreSchema();
+    try {
+      expect(
+        db.query("SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").all(),
+      ).toEqual([]);
+      const plan = (
+        db
+          .query(`EXPLAIN QUERY PLAN ${EARLIER_STATEMENT_DUE_SQL}`)
+          .all("vpass", "vpass:card-001", DATE, "2026-09") as { detail: string }[]
+      ).map((row) => row.detail);
+      expect(plan).toContain(
+        "SEARCH b USING INDEX idx_bal_obs_account (source_account=? AND metric=?)",
+      );
+      expect(
+        plan.filter((line) => /^SCAN /u.test(line) && !/^SCAN \(subquery-\d+\)$/u.test(line)),
+      ).toEqual([]);
+      expect(plan.filter((line) => /AUTOMATIC/u.test(line))).toEqual([]);
+    } finally {
+      db.close();
+    }
+  }, 60_000);
 });
