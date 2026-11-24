@@ -416,11 +416,14 @@ sources or containers are told apart by ear as by eye. It shows counts per
 status and the coverage notes, never a total, valuation or sum of changes.
 
 The panel also takes the route's `source` and `account` filters (取得元 and
-口座 ID). They live in the page URL as `changeSource` and `changeAccount`, so a
-narrowed comparison is a link, and are applied with 比べる; 絞り込みを解除
-removes them. The fields suggest the sources and account ids the page's date
-lists holdings for (the page's own reported state, no request of its own) and
-take any other. The page sends exactly the route's parameters and checks them
+口座 ID). They live in the page URL as `changeSource` and `changeAccount`, so
+the narrowing is a link, and are applied with 比べる; 絞り込みを解除
+removes them. The dates are not in the URL: the page's 基準日 and the start
+date are in-memory view state of the tab, so a reload or an opened link starts
+on today's 基準日 with no start date and asks nothing until one is chosen.
+The fields suggest the sources and account ids the page's date lists holdings
+for (the page's own reported state, no request of its own) and take any
+other. The page sends exactly the route's parameters and checks them
 with the route's own shape rule, `holdingsChangeQueryRefusal` in the wire
 contract, before it asks: a field of the wrong shape is named and nothing is
 sent, and a URL holding a repeated, empty or malformed filter asks nothing and

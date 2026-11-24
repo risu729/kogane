@@ -78,7 +78,7 @@ import {
   PARSING_HEALTH_SQL,
   UNIT_UPDATES_SQL,
   parseRunObservationsSql,
-  POSITION_VALUATIONS_SQL,
+  positionValuationsSql,
   positionsSql,
   PROVENANCE_SQL,
   PUBLICATION_MARKS_SQL,
@@ -259,14 +259,15 @@ export function createObservationReader(
     },
 
     async listPositions({ offset, ...scope }): Promise<PositionWithValuations[]> {
-      const page = positionsSql(scope, offset);
+      const page = positionsSql(scope, offset, options.snapshotSource);
       const positions = (await list<PositionSqlRow>(page.sql, page.args)).map(positionRow);
       if (positions.length === 0) return [];
       // Only the 500 positions the caller can return need valuations; the
       // 501st row exists to report truncation.
-      const pairs = await list<ValuationSqlRow & { position_id: number }>(POSITION_VALUATIONS_SQL, [
-        JSON.stringify(positions.slice(0, 500).map((row) => row.id)),
-      ]);
+      const pairs = await list<ValuationSqlRow & { position_id: number }>(
+        positionValuationsSql(options.snapshotSource),
+        [JSON.stringify(positions.slice(0, 500).map((row) => row.id))],
+      );
       const byPosition = new Map<number, ReturnType<typeof valuationRow>[]>();
       for (const pair of pairs) {
         const bucket = byPosition.get(pair.position_id) ?? [];

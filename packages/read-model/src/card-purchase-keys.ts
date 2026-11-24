@@ -21,7 +21,11 @@ import type { PageSql } from "./scope";
 /** Largest page `staleCardPurchaseKeysSql` may request. */
 export const STALE_CARD_PURCHASE_KEY_LIMIT = 1000;
 
-/** One key of a live recognised revision whose provider row is no longer current. */
+/**
+ * One key of a live recognised revision none of whose deciding provider rows
+ * is current any more. Every key of that revision is reported, so a merged
+ * revision's pending key is reported even while its own row is current.
+ */
 export interface StaleCardPurchaseKeyRow {
   event_id: string;
   revision: number;

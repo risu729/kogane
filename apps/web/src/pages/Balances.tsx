@@ -50,7 +50,12 @@ export function BalancesPage({
       </div>
       {serverFilters ? <CollectionControls kind={view} /> : null}
       {balanceReadModel ? <BalancesLatestPage view={view} /> : null}
-      <QueryBoundary query={query} label={summaries ? "実績・請求" : "残高"}>
+      {/* Beside the latest-records link, the balance list's next window is its history's. */}
+      <QueryBoundary
+        query={query}
+        label={summaries ? "実績・請求" : "残高"}
+        {...(summaries ? {} : { nextPageLabel: "履歴の次の500件" })}
+      >
         {(data) => (
           <BalancesBody
             summaries={summaries}
