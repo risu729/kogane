@@ -1081,9 +1081,10 @@ current JST month, one matching `requested-months` range with basis `source`,
 both stated as `YYYY-MM` (the collector's `yyyyMM` was refused by the ingest
 range contract, `invalid_start_value`, until ADR 0021),
 one unit (`account`/`collection`), and `providerOutcome` from the run status.
-When the month window is unknown — a run that failed before the balance
-response — the scope is `unspecified` and no range is stated rather than a
-guessed one.
+The window is stated only for a run whose collection finished: a run that
+stopped before `collectVPointPay` returned, including one that stopped at a
+month request after the balance response named its first month, states the
+scope `unspecified` and no range rather than a guessed one.
 
 Run outcome and log: the Durable Object's `runCollection` returns the run's
 manifest. Its failure entry is `{operation, errorType, message}` in closed
