@@ -515,6 +515,13 @@ the navigation (a page's media type or form, an API answer, the response
 bound, a lost lease) still carry no `reason`. Still no header value, cookie
 name or provider text.
 
+The 2026-11-24 21:00 UTC run named it: step `landing`, hop 1, status 302,
+`reason` `cookie-attribute`, `cookieAttribute` `httponly`. The hand-off's
+redirect sets a cookie that repeats `HttpOnly`, and the jar refused every
+repeated attribute. A repeat with the same value says nothing new, so the jar
+now keeps it once; a repeat with another value (two `Path`, `Domain` or
+`Max-Age` values, for example) is still refused as ambiguous.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
