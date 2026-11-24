@@ -56,6 +56,17 @@ function rows(store: Database, sql: string, args: readonly unknown[]): unknown[]
 }
 
 /** `D1Database` over bun:sqlite: the calls the sweep makes, nothing more. */
+/**
+ * Puts the sweep back at its first statement with no clean pass, so the next
+ * call reads every statement again whatever ran before (src/sweep-pass.ts).
+ */
+function restartSweep(store: Database): void {
+  store.exec(`UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1;
+    UPDATE processor_sweep_passes SET pass_source_revision=NULL, pass_visibility_revision=NULL,
+      pass_core_epoch=NULL, clean_source_revision=NULL, clean_visibility_revision=NULL,
+      clean_core_epoch=NULL, clean_policy=NULL WHERE sweep='card_settlement';`);
+}
+
 function d1(store: Database, probe?: { bankReads: number; disableCache?: boolean }): D1Database {
   const prepare = (sql: string) => {
     let binds: SQLQueryBindings[] = [];
@@ -415,7 +426,7 @@ test(
   "revision-bound sharing preserves an existing-candidate replay and reduces repeated bank queries",
   async () => {
     const run = async (disableCache: boolean) => {
-      db.exec("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1");
+      restartSweep(db);
       const probe = { bankReads: 0, disableCache };
       const result = await cardSettlementSweep(d1(db, probe));
       return { result, bankReads: probe.bankReads };
@@ -551,24 +562,21 @@ async function sameDebitAccountRows(
       WHERE s.source_id='myjcb' ORDER BY s.id`,
     )
     .run(CARD_INFORMATION_READER_VERSION);
-  // Ticks until the cursor has passed every statement.
-  store.exec("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1");
+  // Ticks until one pass has read every statement: its last page puts the
+  // cursor back at the first one.
+  restartSweep(store);
   const cursor = () =>
     (
       store.query("SELECT last_statement_id AS id FROM card_settlement_scan_cursor").get() as {
         id: number;
       }
     ).id;
-  const last = (
-    store.query("SELECT coalesce(max(id),0) AS id FROM card_statement_facts").get() as {
-      id: number;
-    }
-  ).id;
-  for (let tick = 0; tick < 1000; tick += 1) {
+  let ticks = 0;
+  do {
     await cardSettlementSweep(d1(store));
-    if (cursor() === last) break;
-  }
-  expect(cursor()).toBe(last);
+    ticks += 1;
+  } while (cursor() !== 0 && ticks < 1000);
+  expect(cursor()).toBe(0);
   // Rows the sweep would not write but the evidence trigger accepts: each
   // candidate against every `read` reading of its card, whatever the page, so
   // a candidate whose own page was refused can still have a row.

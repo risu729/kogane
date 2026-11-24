@@ -1410,6 +1410,17 @@
         }
       ],
       "sha256": "6828b3e59baee76c09c63fe8e1bfc02736d6b343f003463f6637f9f13e2b8d37"
+    },
+    {
+      "file": "0109_processor_sweep_passes.sql",
+      "statementCount": 2,
+      "insertStatements": [
+        {
+          "table": "processor_sweep_passes",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "578b5d0a176d07ebe4cafd73ef1567d80c14a81b1db7eaee6fa090426e18288a"
     }
   ],
   "tables": [
@@ -14231,6 +14242,81 @@
       "sqlSha256": "e6ddebc1bab0a4f9"
     },
     {
+      "name": "processor_sweep_passes",
+      "classification": "operational-mutable",
+      "planRow": "cursor sweep pass gates",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "sweep",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "pass_source_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "pass_visibility_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "pass_core_epoch",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "clean_source_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "clean_visibility_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "clean_core_epoch",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "clean_policy",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "sweep"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "6796b2e661984869"
+    },
+    {
       "name": "producer_sources",
       "classification": "core-keep",
       "planRow": "sources, producers and routes",
@@ -23156,7 +23242,7 @@
     }
   ],
   "summary": {
-    "tableCount": 148,
+    "tableCount": 149,
     "viewCount": 44,
     "triggerCount": 608,
     "explicitIndexCount": 151,
@@ -23301,6 +23387,7 @@
         "price_promotion_cursor",
         "processor_lane_ticks",
         "processor_read_budget_hours",
+        "processor_sweep_passes",
         "provider_maintenance_references",
         "reconciliation_scan_cursor",
         "report_job_gates",
@@ -23359,6 +23446,7 @@
       "price_promotion_cursor",
       "processor_lane_ticks",
       "processor_read_budget_hours",
+      "processor_sweep_passes",
       "producer_sources",
       "producers",
       "provider_maintenance_references",
@@ -23447,8 +23535,9 @@
       "0099_sbi_document_unit_eligibility.sql",
       "0100_sbi_supplemental_unit_eligibility.sql",
       "0101_myjcb_document_unit_eligibility.sql",
-      "0108_snapshot_selection_memo.sql"
+      "0108_snapshot_selection_memo.sql",
+      "0109_processor_sweep_passes.sql"
     ],
-    "schemaSha256": "9e49a06b58f4f37d6a1de94f199c541544fe98c3494eeaf9278bab2fbfd4216e"
+    "schemaSha256": "5919a6c2c351ec1109447ba185462204529ba929913af32393ade010f7c38dc6"
   }
 }

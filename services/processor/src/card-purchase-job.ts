@@ -68,6 +68,7 @@ import {
   classifyCardUsage,
   CARD_PURCHASE_ACTOR,
   CARD_PURCHASE_POLICY,
+  CARD_PURCHASE_WRITER_RELEASE,
   nextCardPurchaseAction,
   recognitionKey,
   validCardPurchaseFacts,
@@ -114,6 +115,7 @@ import {
 } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { cardUsageFactOf } from "../../../packages/application/src/card-usage-fact.ts";
+import { abandonSweepPass, finishSweepPass, startSweepPass, sweepGate } from "./sweep-pass.ts";
 
 /** Current usage rows one tick reads after the cursor. */
 export const SCAN_LIMIT = 500;
@@ -209,6 +211,12 @@ export { cardUsageFactOf };
 // reusing it would keep that event captured beside its replacement until an
 // unrelated input mutation dirtied the proof.
 const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v2";
+/**
+ * What a complete recognition pass decides, for its gate (src/sweep-pass.ts):
+ * the recognition policy, its writer release and the pass's own version. A
+ * change to any of them runs a pass again although no input moved.
+ */
+export const CARD_PURCHASE_SWEEP_POLICY = `${CARD_PURCHASE_WRITER_RELEASE}+recognition-pass-v1`;
 
 type Outcome = "written" | "conflict" | "failed";
 
@@ -357,13 +365,20 @@ async function recognitionPass(
   result: CardPurchaseSweepResult,
   limits: { scan: number; write: number },
   at: WriteAt,
-): Promise<CurrentCardUsageRow[]> {
+): Promise<{ rows: CurrentCardUsageRow[]; finished: boolean }> {
   const cursor =
     (
       await db
         .prepare("SELECT last_observation_id FROM card_purchase_scan_cursor WHERE singleton=1")
         .first<{ last_observation_id: number }>()
     )?.last_observation_id ?? 0;
+  // A pass starts from the first row only when something on the CORE ledger
+  // moved since the last pass that read them all (src/sweep-pass.ts).
+  if (cursor === 0) {
+    const gate = await sweepGate(db, "card_purchase_recognition", CARD_PURCHASE_SWEEP_POLICY);
+    if (gate?.clean) return { rows: [], finished: false };
+    if (gate) await startSweepPass(db, "card_purchase_recognition", gate.revision);
+  }
   const rows = await page<CurrentCardUsageRow>(
     db,
     currentCardUsageSql({ afterId: cursor, limit: limits.scan }),
@@ -434,11 +449,14 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
     else result.failed += 1;
     handled = row.observation_id;
   }
-  // The last page wraps to the start: a row below the cursor can become
-  // current again (a reappearing row, a newly resolved identity). The update
-  // is conditional on the value this tick read, so a tick that overlapped
-  // this one and already moved the cursor is never pulled back.
-  const next = budgetReached ? handled : rows.length < limits.scan ? 0 : handled;
+  // The last page ends the pass and goes back to the start: a row below the
+  // cursor can become current again (a reappearing row, a newly resolved
+  // identity), and every such change moves the CORE revision, which starts
+  // the next pass. The update is conditional on the value this tick read, so
+  // a tick that overlapped this one and already moved the cursor is never
+  // pulled back.
+  const finished = !budgetReached && rows.length < limits.scan;
+  const next = finished ? 0 : handled;
   if (next !== cursor)
     await db
       .prepare(
@@ -446,7 +464,7 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
       )
       .bind(next, cursor)
       .run();
-  return rows;
+  return { rows, finished };
 }
 
 /**
@@ -680,7 +698,7 @@ async function candidatePass(
   rows: readonly CurrentCardUsageRow[],
   limits: { write: number; lookup: number },
   now: string,
-): Promise<string[]> {
+): Promise<{ linked: string[]; limited: boolean }> {
   const limit = limits.write;
   const groups = new Map<string, Group>();
   for (const row of rows) {
@@ -689,7 +707,7 @@ async function candidatePass(
     const entry = groupOf(fact.accountId, fact.sourceId, cardStatementPeriod(fact), fact.usageDate);
     groups.set(JSON.stringify(entry), entry);
   }
-  if (groups.size === 0) return [];
+  if (groups.size === 0) return { linked: [], limited: false };
   const facts = await page<GroupFactRow>(db, {
     sql: GROUP_FACTS_SQL,
     args: [JSON.stringify([...groups.values()]), CANDIDATE_READ_LIMIT + 1],
@@ -697,7 +715,7 @@ async function candidatePass(
   // A truncated read would pair a partial group; every group waits instead.
   if (facts.length > CANDIDATE_READ_LIMIT) {
     result.groupsSkipped += groups.size;
-    return [];
+    return { linked: [], limited: false };
   }
   const byGroup = new Map<string, { size: number; kinds: Map<string, MatchFact[]> }>();
   for (const row of facts) {
@@ -755,7 +773,8 @@ WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
       result.failed += 1;
     }
   }
-  return linked;
+  // A full budget may have left proposals of this page unwritten.
+  return { linked, limited: writes.length >= limit };
 }
 
 /**
@@ -978,7 +997,7 @@ export async function cardPurchaseSweep(
     result.deferred = true;
     return result;
   }
-  const rows = await recognitionPass(
+  const { rows, finished } = await recognitionPass(
     db,
     result,
     {
@@ -987,7 +1006,7 @@ export async function cardPurchaseSweep(
     },
     at,
   );
-  const linked = await candidatePass(
+  const { linked, limited } = await candidatePass(
     db,
     result,
     rows,
@@ -998,5 +1017,13 @@ export async function cardPurchaseSweep(
     now,
   );
   await mergeLinked(db, result, linked, at);
+  // The pass may wait for a change once its last page is read (src/sweep-pass.ts),
+  // unless some tick of it left work for later: a full candidate budget, links
+  // past the merge limit, or a failed write. Those rows are only reached again
+  // by a pass from the first row, so this pass marks nothing clean.
+  const incomplete = limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0;
+  if (incomplete) await abandonSweepPass(db, "card_purchase_recognition");
+  else if (finished)
+    await finishSweepPass(db, "card_purchase_recognition", CARD_PURCHASE_SWEEP_POLICY);
   return result;
 }

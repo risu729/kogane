@@ -476,6 +476,45 @@ The draft's open questions, as the accepted design answers them:
   24,401), reward buckets 290 and 530 (from 8,571 and 17,101), the walk 968
   and 1,448 once per revision.
 
+## Slice 3 as built (2026-11-24)
+
+- After slice 2, one hour of ticks (06:35 to 07:35 UTC) read about 2.5M
+  rows a tick, 65% of it in the card settlement sweep and the purchase
+  recognition pass: both page through their whole input every tick (52
+  current statements, about 86k rows of `card_statement_facts`; the current
+  card usage rows) because one pass fits in one tick and the cursor wraps.
+- Gate, not high-water mark: `processor_sweep_passes` (migration 0109) holds
+  one row per sweep. A pass from the first row records the CORE revision
+  (source revision, visibility revision, core epoch) it starts at; a pass that
+  reaches the end marks it clean with a code-owned policy
+  (`CARD_SETTLEMENT_SWEEP_POLICY`, `CARD_PURCHASE_SWEEP_POLICY`). While the
+  revision and policy equal the clean ones, a tick at cursor 0 reads the gate
+  row and stops. Everything both sweeps page through is on the CORE dependency
+  ledger; the tables off it that they read (settlement candidates, purchase
+  proposals) are written only by the sweeps themselves, never deleted, and a
+  proposal's decision writes a decision revision. So an unchanged revision
+  means the pass that started there saw what a new one would see. A pass whose
+  own writes moved the revision is followed by one more, which writes nothing
+  and closes the gate. A pass in which a tick left work for later (the
+  purchase candidate budget full, more linked events than one merge takes, a
+  rejected batch) marks nothing clean (`abandonSweepPass`); the settlement
+  sweep's write budget stops the cursor on its page, so a pass that reaches
+  the end has written everything.
+- Decision 7's "proportional to new rows" is not reached: a tick in which the
+  revision moved still runs a whole pass. Quiet ticks cost the gate read; the
+  first measured hour of production had a moving revision on every tick (the
+  parse backlog left by the stop: 1,080 pending parse jobs at 13:05 UTC, about
+  150 parses an hour), so the effect shows only once that backlog is done.
+  Reading only what changed would need the statement and usage readings keyed
+  by what moved, which the sweeps' rankings do not offer; it stays open under
+  issue #1491 with slice 4.
+- Measured on the harness: a quiet tick of either sweep prepares two
+  statements (the cursor and the gate), checked by
+  `services/processor/test/sweep-pass.test.ts`.
+- Not changed here: the Vpass binding insert (decision 4) and the stale-key
+  read of the retirement pass, which already skips while its own revision
+  check holds.
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each

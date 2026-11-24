@@ -1117,9 +1117,22 @@ runs twice per tick (stale keys, then the page): about 0.5 s and 0.4 s on the
 scaled store of [the read model's cost measurement](read-model.md#cost), since
 both start from the current captures rather than the whole store and the stale
 read looks up the revisions holding a current key once, not per live key.
-Nothing in the tick is skipped when no evidence changed: every tick that writes
-moves the CORE source revision itself (its decision revisions), and the cursor
-still has to page through the current rows.
+A pass that reaches the last row does not start again until something may
+have changed (ADR 0129, slice 3; migration `0109_processor_sweep_passes.sql`;
+`services/processor/src/sweep-pass.ts`). A pass from the first row records
+the CORE revision (source revision, visibility revision, core epoch) it starts
+at; a pass that reaches the end marks that revision clean under
+`CARD_PURCHASE_SWEEP_POLICY`. While the revision still equals the clean one
+under the same policy, a tick at cursor 0 reads one gate row instead of the
+page, and its candidate pass has no group to read. Every input of the pass is
+on the CORE dependency ledger (the captures, their publications and the
+recognitions' decision revisions), and the proposals the candidate pass looks
+up are only ever added or moved to a decision, which writes a decision
+revision. A tick that writes events moves the revision itself, so the next
+pass runs once more and writes nothing. A pass in which a tick left work for
+later (the candidate write budget full, more linked events than one merge
+takes, or a rejected batch) marks nothing clean, since a later page would not
+come back to that work; the next pass runs from the first row.
 
 The candidate pass then reads the recognised events of the groups the page
 touched, at most 2,000 in all (`CANDIDATE_READ_LIMIT`; a

@@ -986,7 +986,10 @@ test("the candidate pass looks up stored pairs a bounded chunk at a time", async
   expect(await tick()).toEqual({ proposed: 2, lookups: [2] });
   // The stored chunk takes no budget; the next chunk's new pair is written.
   expect(await tick()).toEqual({ proposed: 1, lookups: [2, 1] });
-  expect(await tick()).toEqual({ proposed: 0, lookups: [2, 1] });
+  // That pass wrote below its budget and reached the end, and a proposal is
+  // not on the CORE dependency ledger: the pass gate (src/sweep-pass.ts)
+  // holds, so the next tick looks nothing up.
+  expect(await tick()).toEqual({ proposed: 0, lookups: [] });
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
 

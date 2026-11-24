@@ -69,7 +69,8 @@ const days = (date: string, offset: number): string =>
 /**
  * `D1Database` over the given rows: the statement page and the bank window
  * (`debit_date` within three days, up to the bound limit) as the two reads
- * define them, a stable CORE revision, and every candidate insert recorded.
+ * define them, a stable CORE revision, no pass gate, and every candidate
+ * insert recorded.
  */
 function store(statements: Row[], debits: Row[]) {
   const inserts: unknown[][] = [];
@@ -112,6 +113,9 @@ function store(statements: Row[], debits: Row[]) {
           return { meta: { changes: 1 } };
         }
         if (sql.startsWith("UPDATE card_settlement_scan_cursor")) return { meta: { changes: 1 } };
+        // The pass gate (src/sweep-pass.ts): this store holds no gate row, so
+        // every call is a pass from the first statement and marks nothing.
+        if (sql.startsWith("UPDATE processor_sweep_passes")) return { meta: { changes: 0 } };
         throw new Error("unexpected write: " + sql);
       },
     };
