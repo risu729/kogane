@@ -257,6 +257,11 @@ All are GET routes, with no writes or external communications. `Page<T>` = `{row
 `/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` traverses bucket rows. Reads see only claims linked to published parse runs, so rolling back a publication pointer also removes them from reward presentation.
+A holding's `membership` lists the newest claim per tier of its own programme and holding
+reference (`MEMBERSHIP_SQL`), the key `estimateExpiry` also matches claims by; another
+programme's claim that names the same holding reference is not listed. `MEMBERSHIP_SQL`
+does not check publication: the published-parse-run filter above covers bucket claims, and
+rolling back a publication pointer does not remove a membership claim.
 A holding whose buckets a page cuts is listed on each page that holds some of them, with
 those buckets, but its `consumable` and every `byKind` quantity are `missing` with
 `holding_cut_by_page`, never the sum of the buckets on that page (INV05; 2026-11-18). The
