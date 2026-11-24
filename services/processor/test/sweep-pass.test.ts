@@ -79,12 +79,12 @@ test("the settlement sweep reads its statements again only after the CORE revisi
   expect(cleaned?.clean_source_revision).not.toBeNull();
   expect(cleaned?.pass_source_revision).toBeNull();
 
-  // Nothing moved: the tick reads the cursor, the card information mark and
-  // the gate, and stops.
+  // Nothing moved: the tick reads the card information mark, then its cursor
+  // and the gate in one statement, and stops.
   const quiet: string[] = [];
   const skipped = await cardSettlementSweep(recording(env.DB, quiet));
   expect(skipped).toMatchObject({ scanned: 0, proposed: 0, written: 0 });
-  expect(quiet).toHaveLength(3);
+  expect(quiet).toHaveLength(2);
   expect(quiet).toContain(CARD_DEBIT_READING_MARK_SQL);
   expect(quiet).not.toContain(CARD_SETTLEMENT_STATEMENTS_SQL);
 
@@ -151,19 +151,29 @@ test("the purchase recognition pass reads its usage rows again only after the CO
 test("a pass's end marks only the pass it started, never one an overlapping tick started", async () => {
   const sweep = "card_purchase_recognition";
   const policy = "an-overlap-probe";
+  // Stand-ins for the sweep's cursor: at the first row, or on a later page.
+  const first = "SELECT 0";
+  const later = "SELECT 7";
   await ledgerWrite();
   // Tick A starts a pass; an overlapping tick B starts another before A ends.
-  const a = await openSweepTick(env.DB, sweep, policy, true);
-  const b = await openSweepTick(env.DB, sweep, policy, true);
-  expect(a.skip || b.skip).toBe(false);
-  await finishSweepPass(env.DB, sweep, a.skip ? null : a.token);
+  const a = await openSweepTick(env.DB, sweep, policy, first);
+  const b = await openSweepTick(env.DB, sweep, policy, first);
+  if (a.skip || b.skip) throw new Error("no pass started");
+  expect(a.token).not.toBe(b.token);
+  await finishSweepPass(env.DB, sweep, a.token);
   expect((await gateRow(sweep))?.clean_policy).not.toBe(policy);
   // A later tick of B's pass continues it, and its end marks it clean.
-  const later = await openSweepTick(env.DB, sweep, policy, false);
-  expect(later).toEqual({ skip: false, token: b.skip ? null : b.token });
-  await finishSweepPass(env.DB, sweep, later.skip ? null : later.token);
+  const next = await openSweepTick(env.DB, sweep, policy, later);
+  expect(next).toEqual({ skip: false, cursor: 7, token: b.token });
+  await finishSweepPass(env.DB, sweep, b.token);
   expect((await gateRow(sweep))?.clean_policy).toBe(policy);
-  expect(await openSweepTick(env.DB, sweep, policy, true)).toEqual({ skip: true });
+  expect(await openSweepTick(env.DB, sweep, policy, first)).toEqual({ skip: true });
+  // A tick past the first row of a pass no longer recorded marks nothing.
+  expect(await openSweepTick(env.DB, sweep, policy, later)).toEqual({
+    skip: false,
+    cursor: 7,
+    token: null,
+  });
 });
 
 test("each sweep's policy pins the views its code reads, and fits the gate's column", () => {

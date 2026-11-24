@@ -19,12 +19,19 @@ function importClosure(entry: string): string[] {
   const seen = new Set<string>();
   const texts: string[] = [];
   const visit = (file: string) => {
-    if (seen.has(file) || !existsSync(file)) return;
+    if (seen.has(file)) return;
     seen.add(file);
     const text = readFileSync(file, "utf8");
     texts.push(text);
-    for (const match of text.matchAll(/(?:from|import\()\s*"(\.{1,2}\/[^"]+\.ts)"/g))
-      visit(resolve(dirname(file), match[1]!));
+    // Relative imports, written with or without the `.ts` extension.
+    for (const match of text.matchAll(/(?:from|import\()\s*"(\.{1,2}\/[^"]+)"/g)) {
+      const target = resolve(dirname(file), match[1]!);
+      for (const candidate of [target, `${target}.ts`, `${target}/index.ts`])
+        if (candidate.endsWith(".ts") && existsSync(candidate)) {
+          visit(candidate);
+          break;
+        }
+    }
   };
   visit(resolve(entry));
   return texts;

@@ -1001,7 +1001,7 @@ test("the candidate pass looks up stored pairs a bounded chunk at a time", async
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
 
-test("a tick whose candidate pass throws drops its pass, so the pass marks nothing clean", async () => {
+test("a tick whose candidate pass throws leaves the cursor on its page, which the next tick reads again", async () => {
   const w = await world();
   await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
   const throwing = new Proxy(w.db, {
@@ -1016,14 +1016,17 @@ test("a tick whose candidate pass throws drops its pass, so the pass marks nothi
       };
     },
   });
-  // The page is read and the cursor leaves it before the candidate pass throws.
-  await expect(cardPurchaseSweep(throwing, { now: NOW })).rejects.toThrow("synthetic");
-  expect(
-    await w.all(
-      "SELECT pass_token FROM processor_sweep_passes WHERE sweep='card_purchase_recognition'",
-    ),
-  ).toEqual([{ pass_token: null }]);
-  // The next tick runs a pass from the first row and writes the proposals.
+  // The page is recognised, then the candidate pass throws: the cursor stays
+  // before the page, so no later tick of the pass can end it clean without
+  // the page's candidates (src/sweep-pass.ts).
+  const cursor = () =>
+    w.all<{ id: number }>("SELECT last_observation_id AS id FROM card_purchase_scan_cursor");
+  const before = await cursor();
+  await expect(cardPurchaseSweep(throwing, { now: NOW, scanLimit: 1 })).rejects.toThrow(
+    "synthetic",
+  );
+  expect(await cursor()).toEqual(before);
+  // The next tick reads the page again and writes the proposals.
   expect((await w.sweep()).proposed).toBeGreaterThan(0);
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);

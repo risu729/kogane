@@ -1331,19 +1331,27 @@ test("cursor: an exactly full last page wraps on the next tick, a row below the 
   // An overlapping tick moves the cursor after this tick read it: this tick's
   // own update is conditional on the value it read, so it leaves that move.
   const moved = late.observations[0]!;
+  // The tick reads its cursor together with its pass gate (src/sweep-pass.ts).
   const overlapping = {
     prepare(sql: string) {
-      if (!sql.startsWith("SELECT last_observation_id FROM card_purchase_scan_cursor"))
+      if (!(sql.startsWith("SELECT") && sql.includes("FROM card_purchase_scan_cursor")))
         return w.db.prepare(sql);
       return {
-        async first() {
-          const read = await w.db.prepare(sql).first();
-          await w.db
-            .prepare("UPDATE card_purchase_scan_cursor SET last_observation_id=? WHERE singleton=1")
-            .bind(moved)
-            .run();
-          return read;
-        },
+        bind: (...args: unknown[]) => ({
+          async first() {
+            const read = await w.db
+              .prepare(sql)
+              .bind(...args)
+              .first();
+            await w.db
+              .prepare(
+                "UPDATE card_purchase_scan_cursor SET last_observation_id=? WHERE singleton=1",
+              )
+              .bind(moved)
+              .run();
+            return read;
+          },
+        }),
       };
     },
     batch: (statements: D1PreparedStatement[]) => w.db.batch(statements),

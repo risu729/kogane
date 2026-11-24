@@ -150,12 +150,6 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     no_debit_in_window: 0,
     no_equal_amount_debit: 0,
   };
-  const cursor =
-    (
-      await db
-        .prepare("SELECT last_statement_id FROM card_settlement_scan_cursor WHERE singleton=1")
-        .first<{ last_statement_id: number }>()
-    )?.last_statement_id ?? 0;
   // A pass starts from the first statement only when something it reads
   // moved since the last pass that read them all (src/sweep-pass.ts).
   const mark = (await db.prepare(CARD_DEBIT_READING_MARK_SQL).first<{ id: number }>())?.id ?? 0;
@@ -163,9 +157,10 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     db,
     "card_settlement",
     `${CARD_SETTLEMENT_SWEEP_POLICY}@${mark}`,
-    cursor === 0,
+    "SELECT last_statement_id FROM card_settlement_scan_cursor WHERE singleton=1",
   );
   if (tick.skip) return { scanned: 0, proposed: 0, written: 0, debitAccountEvidence: 0, unmatched };
+  const cursor = tick.cursor;
   const statements = await db
     .prepare(CARD_SETTLEMENT_STATEMENTS_SQL)
     .bind(cursor, STATEMENT_PAGE)

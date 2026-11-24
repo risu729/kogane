@@ -1136,12 +1136,17 @@ version. A tick that writes events moves the revision itself, so the next
 pass runs once more and writes nothing. A pass in which a tick left work for
 later marks nothing clean, since a later page would not come back to that
 work: the candidate write budget full, more linked events than one merge
-takes, any failed write in the tick (a retirement's included), or a candidate
-or merge step that throws after the cursor left the page. The next pass then
-runs from the first row. So a failure that repeats on every tick keeps the
-pass from ever closing, and the lane reads every row each tick as it did
-before the gate. A pass's end names the token its start recorded, so a pass
-started by an overlapping tick is never marked clean by another's end.
+takes, or any failed write in the tick (a retirement's included). The next
+pass then runs from the first row. So a failure that repeats on every tick
+keeps the pass from ever closing, and the lane reads every row each tick as it
+did before the gate. The cursor leaves a page only once its candidates and
+merges are done, so a tick that throws or is cut off reads the page again
+(recognition writes nothing twice). A tick reads its cursor and the recorded
+pass in one statement and a pass's end names the token its start recorded, so
+a pass started by an overlapping tick is never marked clean by another's end.
+A change to the code that a version string does not carry (a statement's text,
+a domain rule) runs no pass by itself; the pass after the next CORE write
+applies it, or a bump of the pass's version.
 
 The candidate pass then reads the recognised events of the groups the page
 touched, at most 2,000 in all (`CANDIDATE_READ_LIMIT`; a

@@ -1361,8 +1361,8 @@ slice 3; migration `0109_processor_sweep_passes.sql`;
 statement records the CORE revision (source revision, visibility revision,
 core epoch) and the sweep's policy it starts at, and a pass that reaches the
 last statement marks that start clean. While both still equal the clean ones,
-a tick reads its cursor, the card information mark and one gate row, and
-stops. The statements, debits, owners and decisions it pages through are on
+a tick reads the card information mark, then its cursor and the gate in one
+statement, and stops. The statements, debits, owners and decisions it pages through are on
 the CORE dependency ledger. The rest is in the policy:
 `CARD_SETTLEMENT_SWEEP_POLICY` (the matching, debit-account and card
 information reader versions, a digest of the views the sweep's code reads,
@@ -1373,12 +1373,14 @@ readings in its own time and off the ledger. The candidates and debit-account
 evidence it checks for are written only by the sweep and never deleted. So
 the pass that started there saw what a new one would see. The sweep's own
 writes are off the ledger and move nothing; a deploy that changes the policy
-runs a pass again. A pass's end names the token its start recorded, so a pass
+runs a pass again; a change to the code that no version carries (a
+statement's text) is applied by the pass after the next CORE write, or by a
+bump of `sweep-v1`. A pass's end names the token its start recorded, so a pass
 started by an overlapping tick is never marked clean by another's end. A
 tick that stops at the write budget leaves the cursor on its statement, so a
 pass that reaches the end has written everything.
 `services/processor/test/sweep-pass.test.ts` checks that a quiet tick
-prepares those three statements only. In production on 2026-11-24 a pass over
+prepares those two statements only. In production on 2026-11-24 a pass over
 52 current statements read about 86,000 rows of `card_statement_facts` on
 every 5-minute tick before the gate.
 

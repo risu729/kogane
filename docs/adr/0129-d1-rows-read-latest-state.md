@@ -505,13 +505,17 @@ The draft's open questions, as the accepted design answers them:
     revision, and none is deleted.
 
   A pass whose own writes moved the revision (purchase events) is followed by
-  one more, which writes nothing and closes the gate. A purchase pass in which
-  a tick left work for later (the candidate budget full, more linked events
-  than one merge takes, any failed write, or a candidate or merge step that
-  threw after the cursor left the page) marks nothing clean; a failure that
-  repeats keeps that pass reading everything each tick. The settlement
-  sweep's write budget stops the cursor on its statement, so a pass that
-  reaches the end has written everything.
+  one more, which writes nothing and closes the gate. A tick reads its cursor
+  and the recorded pass in one statement. The purchase cursor leaves a page
+  only after its candidates and merges, so a tick that throws or is cut off
+  reads the page again. A purchase pass in which a tick left work for later
+  (the candidate budget full, more linked events than one merge takes, any
+  failed write) marks nothing clean; a failure that repeats keeps that pass
+  reading everything each tick. The settlement sweep's write budget stops the
+  cursor on its statement, so a pass that reaches the end has written
+  everything. A code change that no version string carries (a statement's
+  text written in TypeScript, a domain rule) runs no pass by itself: the pass
+  after the next CORE write applies it, or a bump of the sweep's version.
 
 - Decision 7's "proportional to new rows" is not reached: a tick in which the
   revision moved still runs a whole pass. Quiet ticks cost the gate read; the
@@ -521,8 +525,8 @@ The draft's open questions, as the accepted design answers them:
   Reading only what changed would need the statement and usage readings keyed
   by what moved, which the sweeps' rankings do not offer; it stays open under
   issue #1491 with slice 4.
-- Measured on the harness: a quiet settlement tick prepares three statements
-  (the cursor, the card information mark and the gate), and a quiet purchase
+- Measured on the harness: a quiet settlement tick prepares two statements
+  (the card information mark, then the cursor and the gate together), and a quiet purchase
   tick reads the gate instead of the usage page, checked by
   `services/processor/test/sweep-pass.test.ts`.
 - Not changed here: the Vpass binding insert (decision 4) and the stale-key

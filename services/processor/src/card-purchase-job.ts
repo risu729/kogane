@@ -218,7 +218,7 @@ const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v2";
  * migrated schema: a migration that redefines one moves no revision, so it
  * changes this value, and with it the pass's policy, to run a pass again.
  */
-export const CARD_PURCHASE_SWEEP_VIEWS = "a42f7085a2212a8b";
+export const CARD_PURCHASE_SWEEP_VIEWS = "965c621cd38dddbd";
 /**
  * What a complete recognition pass decides, for its gate (src/sweep-pass.ts):
  * the recognition writer release, the matcher's release and options, the
@@ -374,22 +374,23 @@ async function recognitionPass(
   result: CardPurchaseSweepResult,
   limits: { scan: number; write: number },
   at: WriteAt,
-): Promise<{ rows: CurrentCardUsageRow[]; finished: boolean; token: string | null }> {
-  const cursor =
-    (
-      await db
-        .prepare("SELECT last_observation_id FROM card_purchase_scan_cursor WHERE singleton=1")
-        .first<{ last_observation_id: number }>()
-    )?.last_observation_id ?? 0;
+): Promise<{
+  rows: CurrentCardUsageRow[];
+  cursor: number;
+  next: number;
+  finished: boolean;
+  token: string | null;
+}> {
   // A pass starts from the first row only when something it reads moved
   // since the last pass that read them all (src/sweep-pass.ts).
   const tick = await openSweepTick(
     db,
     "card_purchase_recognition",
     CARD_PURCHASE_SWEEP_POLICY,
-    cursor === 0,
+    "SELECT last_observation_id FROM card_purchase_scan_cursor WHERE singleton=1",
   );
-  if (tick.skip) return { rows: [], finished: false, token: null };
+  if (tick.skip) return { rows: [], cursor: 0, next: 0, finished: false, token: null };
+  const cursor = tick.cursor;
   const rows = await page<CurrentCardUsageRow>(
     db,
     currentCardUsageSql({ afterId: cursor, limit: limits.scan }),
@@ -463,19 +464,10 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
   // The last page ends the pass and goes back to the start: a row below the
   // cursor can become current again (a reappearing row, a newly resolved
   // identity), and every such change moves the CORE revision, which starts
-  // the next pass. The update is conditional on the value this tick read, so
-  // a tick that overlapped this one and already moved the cursor is never
-  // pulled back.
+  // the next pass. The sweep moves the cursor once the page's candidates and
+  // merges are done.
   const finished = !budgetReached && rows.length < limits.scan;
-  const next = finished ? 0 : handled;
-  if (next !== cursor)
-    await db
-      .prepare(
-        "UPDATE card_purchase_scan_cursor SET last_observation_id=?1 WHERE singleton=1 AND last_observation_id=?2",
-      )
-      .bind(next, cursor)
-      .run();
-  return { rows, finished, token: tick.token };
+  return { rows, cursor, next: finished ? 0 : handled, finished, token: tick.token };
 }
 
 /**
@@ -1008,7 +1000,7 @@ export async function cardPurchaseSweep(
     result.deferred = true;
     return result;
   }
-  const { rows, finished, token } = await recognitionPass(
+  const { rows, cursor, next, finished, token } = await recognitionPass(
     db,
     result,
     {
@@ -1017,33 +1009,36 @@ export async function cardPurchaseSweep(
     },
     at,
   );
-  // The cursor has already left this page, so a tick that does not finish
-  // the page's candidates and merges leaves them to a pass from the first
-  // row: such a tick drops the pass (src/sweep-pass.ts), and so does one that
-  // throws here.
-  let incomplete = true;
-  try {
-    const { linked, limited } = await candidatePass(
-      db,
-      result,
-      rows,
-      {
-        write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
-        lookup: bounded(
-          options.candidateLookupChunk,
-          CANDIDATE_LOOKUP_CHUNK,
-          CANDIDATE_LOOKUP_CHUNK,
-        ),
-      },
-      now,
-    );
-    await mergeLinked(db, result, linked, at);
-    // Work left for later: a full candidate budget, links past the merge
-    // limit, or a failed write (a retirement's included, conservatively).
-    incomplete = limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0;
-  } finally {
-    if (incomplete) await abandonSweepPass(db, "card_purchase_recognition", token);
-  }
+  const { linked, limited } = await candidatePass(
+    db,
+    result,
+    rows,
+    {
+      write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
+      lookup: bounded(options.candidateLookupChunk, CANDIDATE_LOOKUP_CHUNK, CANDIDATE_LOOKUP_CHUNK),
+    },
+    now,
+  );
+  await mergeLinked(db, result, linked, at);
+  // Work left for later: a full candidate budget, links past the merge
+  // limit, or a failed write (a retirement's included, conservatively).
+  // Those rows are only reached again by a pass from the first row, so the
+  // pass marks nothing clean (src/sweep-pass.ts).
+  if (limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0)
+    await abandonSweepPass(db, "card_purchase_recognition", token);
+  // Only now does the cursor leave the page: a tick that throws or is cut
+  // off before here reads the page again (recognition writes nothing twice),
+  // so no page's candidates and merges are skipped by a pass that then ends
+  // clean. The update is conditional on the value this tick read, so a tick
+  // that overlapped this one and already moved the cursor is never pulled
+  // back.
+  if (next !== cursor)
+    await db
+      .prepare(
+        "UPDATE card_purchase_scan_cursor SET last_observation_id=?1 WHERE singleton=1 AND last_observation_id=?2",
+      )
+      .bind(next, cursor)
+      .run();
   if (finished) await finishSweepPass(db, "card_purchase_recognition", token);
   return result;
 }
