@@ -771,8 +771,12 @@ Daily reported credit snapshots (ADR 0105) are independent
 card selection and durable binding. Alongside sanitized card inventory,
 selection and statement discovery, they store `credit/authori.json` and
 `credit/revo.json` in the existing `card-NNN` unit, plus the existing
-binding unit when derivable. The new credit sanitizer explicitly keeps
-observed Authori financial keys while removing authentication/card references;
+binding unit when derivable. A card whose credit snapshot fails persists a
+`failed` terminal with no artifact under the same run id; like the success, it
+names the session run id as `acquisitionSessionRef` and `attemptId`. Failed
+credit runs stored before this was fixed name `<session>-credit` there, a
+session no other run of the collection carries, and stay as stored. The new
+credit sanitizer explicitly keeps observed Authori financial keys while removing authentication/card references;
 statement sanitizer v1 output remains unchanged. Registration v8 maps only
 these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
 old meaning.

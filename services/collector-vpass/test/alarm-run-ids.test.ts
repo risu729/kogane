@@ -25,8 +25,10 @@ const cardRun = (n: number) => `${SESSION_RUN}-card-${String(n).padStart(3, "0")
 /**
  * An alarm over `cards` synthetic cards. A card with a month collects it and
  * persists a successful run; a card without one fails and persists a failed run.
+ * With `creditRefused`, each card's first credit snapshot read is refused, so
+ * the card persists a failed credit run beside its statement run.
  */
-async function alarmOver(cards: number, withMonths: boolean) {
+async function alarmOver(cards: number, withMonths: boolean, creditRefused = false) {
   for (const method of ["log", "error"] as const) {
     const spy = spyOn(console, method).mockImplementation(() => {});
     restores.push(() => spy.mockRestore());
@@ -70,8 +72,11 @@ async function alarmOver(cards: number, withMonths: boolean) {
         },
       }),
     );
-    for (let snapshotRead = 0; snapshotRead < 4; snapshotRead += 1)
-      responses.push(() => member({}));
+    if (creditRefused)
+      responses.push(() => Response.json({ header: { resultCode: 9 }, body: { content: {} } }));
+    else
+      for (let snapshotRead = 0; snapshotRead < 4; snapshotRead += 1)
+        responses.push(() => member({}));
     if (withMonths)
       responses.push(() =>
         member({
@@ -105,7 +110,11 @@ async function alarmOver(cards: number, withMonths: boolean) {
   const result = await alarmCollection(env, "0 21 * * *", Date.parse("2026-09-05T00:00:00Z"));
   expect(responses).toHaveLength(0);
   const terminals = [...data.entries.keys()].filter((key) => key.endsWith("/terminal.json"));
-  return { result, terminals };
+  const terminal = (runId: string) =>
+    JSON.parse(
+      new TextDecoder().decode(data.entries.get(`runs/vpass/${runId}/terminal.json`)!.bytes),
+    ) as Record<string, unknown>;
+  return { result, terminals, terminal };
 }
 
 test("a collection of at most 100 runs completes and names every card run once", async () => {
@@ -137,4 +146,20 @@ test("a failed collection of more than 100 cards keeps its code and lists the fi
   const first = runs(cards).slice(0, MAX_RUN_IDS);
   expect(result).toEqual({ status: "failed", runIds: first, failureCode: "collection_failed" });
   expect(collectorOperationResult(result)).toEqual(result);
+});
+
+test("a refused credit snapshot persists its failed run in the card's acquisition session", async () => {
+  const { result, terminals, terminal } = await alarmOver(1, true, true);
+  expect(result).toEqual({
+    status: "failed",
+    runIds: [creditRun(1), cardRun(1)],
+    failureCode: "collection_failed",
+  });
+  expect(terminals).toHaveLength(2);
+  const failed = terminal(creditRun(1));
+  expect(failed).toMatchObject({ runId: creditRun(1), providerOutcome: "failed" });
+  // Every run of one Vpass session names that session, as the successful
+  // credit and statement runs do (G1-16, ADR 0105).
+  expect([failed.acquisitionSessionRef, failed.attemptId]).toEqual([SESSION_RUN, SESSION_RUN]);
+  expect(terminal(cardRun(1)).acquisitionSessionRef).toBe(SESSION_RUN);
 });
