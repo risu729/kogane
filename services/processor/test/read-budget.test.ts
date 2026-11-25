@@ -205,6 +205,7 @@ test("over the budget, a first tick whose lanes leave D1 failing still claims th
     return Promise.reject(new Error("D1_ERROR: overloaded"));
   };
   const firstLines: string[] = [];
+  const firstAlerts: string[] = [];
   await meteredInvocation(
     "scheduled",
     failing,
@@ -212,12 +213,18 @@ test("over the budget, a first tick whose lanes leave D1 failing still claims th
       runScheduled(metered, stages, () => {}, context, {
         now: () => NOW,
         budget: 300,
-        alert: () => {},
+        alert: (line) => firstAlerts.push(line),
       }),
     (line) => firstLines.push(line),
     () => NOW,
   );
   expect(broken.now).toBe(true);
+  expect(firstAlerts.map((line) => (JSON.parse(line) as { event: string }).event)).toEqual([
+    "d1_read_budget_exceeded",
+  ]);
+  expect(firstLines.map((line) => (JSON.parse(line) as { event: string }).event)).toContain(
+    "invocation_budget",
+  );
   broken.now = false;
 
   const laterRan: string[] = [];
@@ -251,33 +258,104 @@ test("over the budget, a tick that cannot count itself skips the derived lanes",
     undefined,
     { now: () => NOW, budget: 300, alert: (line) => alerts.push(line) },
   );
-  expect(lines).toContainEqual({ event: "read_budget_claim_failed" });
   expect(ran).toEqual([
     "observation_sweep",
     "collection_scan",
     "operation_dispatch",
     "audit_overflow",
   ]);
-  expect(alerts).toEqual([]);
+  // The failed count is the error line; the budget line waits for a counted first tick.
+  expect(alerts.map((line) => JSON.parse(line))).toEqual([
+    { event: "read_budget_claim_failed", over: true },
+  ]);
 });
 
 test("under the budget, a tick that cannot count itself still runs every lane", async () => {
   const failing = breakable({ now: true, sql: /RETURNING scheduled_ticks/u });
   const ran: string[] = [];
-  const lines: Record<string, unknown>[] = [];
-  await runScheduled(
-    failing,
-    stagesThatRecord(ran),
-    (line) => lines.push(JSON.parse(line)),
-    undefined,
-    {
-      now: () => NOW,
-      alert: () => ran.push("alert"),
-    },
-  );
-  expect(lines).toContainEqual({ event: "read_budget_claim_failed" });
+  const alerts: string[] = [];
+  await runScheduled(failing, stagesThatRecord(ran), () => {}, undefined, {
+    now: () => NOW,
+    alert: (line) => alerts.push(line),
+  });
+  expect(ran).toContain("balance_projection");
+  expect(alerts.map((line) => JSON.parse(line))).toEqual([
+    { event: "read_budget_claim_failed", over: false },
+  ]);
+});
+
+test("a tick whose budget read fails runs every lane and still counts itself", async () => {
+  await recordRowsRead(env.DB, NOW - 3 * HOUR, 400, "scheduled");
+  const failing = breakable({ now: true, sql: /SELECT coalesce\(sum\(rows_read\)/u });
+  const ran: string[] = [];
+  await runScheduled(failing, stagesThatRecord(ran), () => {}, undefined, {
+    now: () => NOW,
+    budget: 300,
+    alert: () => ran.push("alert"),
+  });
   expect(ran).toContain("balance_projection");
   expect(ran).not.toContain("alert");
+  // The next tick of the hour reads the budget and sees this one.
+  expect(await readBudgetState(env.DB, NOW + 5 * 60_000, 300)).toMatchObject({
+    over: true,
+    throttled: true,
+  });
+});
+
+test("over the budget, of two ticks that overlap at the start of an hour only one runs the derived lanes", async () => {
+  await recordRowsRead(env.DB, NOW - 3 * HOUR, 400, "scheduled");
+  const ran: string[] = [];
+  const alerts: string[] = [];
+  // Both read the budget before either counts itself.
+  let reads = 0;
+  let release!: () => void;
+  const bothRead = new Promise<void>((resolve) => (release = resolve));
+  const gated: Env = {
+    ...env,
+    DB: new Proxy(env.DB, {
+      get(target, property) {
+        if (property === "prepare")
+          return (sql: string) => {
+            const statement = target.prepare(sql);
+            if (!sql.includes("RETURNING scheduled_ticks")) return statement;
+            return new Proxy(statement, {
+              get(inner, key) {
+                const value = Reflect.get(inner, key, inner) as unknown;
+                if (key === "bind")
+                  return (...values: unknown[]) => {
+                    const bound = inner.bind(...values);
+                    return {
+                      all: async () => {
+                        reads += 1;
+                        if (reads === 2) release();
+                        await bothRead;
+                        return bound.all();
+                      },
+                    };
+                  };
+                return typeof value === "function" ? value.bind(inner) : value;
+              },
+            });
+          };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as D1Database,
+  } as Env;
+  await Promise.all(
+    [0, 1].map(() =>
+      runScheduled(gated, stagesThatRecord(ran), () => {}, undefined, {
+        now: () => NOW,
+        budget: 300,
+        alert: (line) => alerts.push(line),
+      }),
+    ),
+  );
+  expect(reads).toBe(2);
+  expect(ran.filter((lane) => lane === "identity_sweep")).toHaveLength(1);
+  expect(alerts.map((line) => (JSON.parse(line) as { event: string }).event)).toEqual([
+    "d1_read_budget_exceeded",
+  ]);
 });
 
 test("under the budget every lane runs on every tick", async () => {
@@ -309,6 +387,7 @@ test("without its table the budget throttles nothing and the invocation still su
     expect(await readBudgetState(env.DB, NOW, 0)).toBeNull();
     const ran: string[] = [];
     const lines: string[] = [];
+    const alerts: string[] = [];
     await meteredInvocation(
       "scheduled",
       env,
@@ -316,13 +395,16 @@ test("without its table the budget throttles nothing and the invocation still su
         runScheduled(metered, stagesThatRecord(ran), () => {}, context, {
           now: () => NOW,
           budget: 0,
-          alert: () => ran.push("alert"),
+          alert: (line) => alerts.push(line),
         }),
       (line) => lines.push(line),
       () => NOW,
     );
     expect(ran).toContain("balance_projection");
-    expect(ran).not.toContain("alert");
+    // No budget line; the tick's failed count is reported as an error.
+    expect(alerts.map((line) => JSON.parse(line))).toEqual([
+      { event: "read_budget_claim_failed", over: null },
+    ]);
     // The failed record does not displace the probe as the invocation's last line.
     expect((JSON.parse(lines.at(-1)!) as { event: string }).event).toBe("invocation_budget");
   } finally {

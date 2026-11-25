@@ -2,7 +2,8 @@
 //
 // Every metered invocation adds the rows D1 reported reading to its hour's row
 // in `processor_read_budget_hours`. Before its lanes run, the scheduled tick
-// sums the last 24 rows and counts itself in its hour. Above the budget it
+// sums the last 24 rows and counts itself in its hour (even when the sum could
+// not be read; a failed count is an error line). Above the budget it
 // logs one error line per hour, which Workers Issues reports, and runs the
 // derived lanes only on the first scheduled tick of each hour, so a read
 // regression costs cents and is reported the same day instead of running

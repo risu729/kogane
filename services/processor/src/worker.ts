@@ -2037,21 +2037,22 @@ export async function runScheduled(
   const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
   // ADR 0129: above the daily read budget, the derived lanes run on the first
   // scheduled tick of each hour only, and that tick logs the error once. The
-  // tick counts itself before any lane runs; over the budget, a tick that
-  // cannot count itself runs as throttled, since D1 is then likely unable to
-  // record the hour's first tick at all (src/read-budget.ts).
+  // tick counts itself before any lane runs, even when the budget could not be
+  // read. A count that fails is logged at error level; over the budget the
+  // tick then runs as throttled, since D1 is likely unable to record the
+  // hour's first tick at all (src/read-budget.ts).
+  const alert = guard.alert ?? ((line: string) => console.error(line));
   const nowMs = (guard.now ?? Date.now)();
   const budget = await readBudgetState(env.DB, nowMs, guard.budget);
   let throttled = budget?.throttled ?? false;
-  if (budget)
-    try {
-      if ((await claimScheduledTick(env.DB, nowMs)) > 1 && budget.over) throttled = true;
-    } catch {
-      log(JSON.stringify({ event: "read_budget_claim_failed" }));
-      if (budget.over) throttled = true;
-    }
+  try {
+    if ((await claimScheduledTick(env.DB, nowMs)) > 1 && budget?.over) throttled = true;
+  } catch {
+    alert(JSON.stringify({ event: "read_budget_claim_failed", over: budget?.over ?? null }));
+    if (budget?.over) throttled = true;
+  }
   if (budget?.over && !throttled)
-    (guard.alert ?? ((line: string) => console.error(line)))(
+    alert(
       JSON.stringify({
         event: "d1_read_budget_exceeded",
         rowsRead24h: budget.rowsRead24h,

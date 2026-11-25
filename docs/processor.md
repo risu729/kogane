@@ -749,7 +749,8 @@ rows. Above
 `D1_ROWS_READ_DAILY_BUDGET` (300 million rows, about a third of the 25 billion
 the plan includes per month):
 
-- the first scheduled tick of each hour runs every lane and logs one
+- the first scheduled tick that counts itself in each hour runs every lane
+  and logs one
   `{"event":"d1_read_budget_exceeded","rowsRead24h":…,"budget":…}` line at error
   level, which Workers Issues reports;
 - the later ticks of that hour skip the lanes that recompute from stored state
@@ -766,12 +767,16 @@ metadata and is not counted (`d1RowsRead.missing`). A failed budget read
 throttles nothing. A tick is counted before its lanes, not when it ends: on
 2026-11-25 the identity sweep left D1 answering every later statement of the
 tick as overloaded, the end-of-tick record failed, and every tick of the hour
-ran as its first (about 9.5M rows each). Over the budget, a tick whose count
-fails logs `read_budget_claim_failed` and runs as throttled; under it, the
-tick runs every lane. The count answers how many ticks the hour has, so of two
-ticks that overlap at the start of an hour only the first counted runs the
-derived lanes. A failed rows-read record at the end loses that invocation's
-rows and logs `read_budget_record_failed`. While throttled, an accepted
+ran as its first (about 9.5M rows each). The tick counts itself even when the
+budget read failed. A count that fails logs
+`{"event":"read_budget_claim_failed","over":…}` at error level, which Workers
+Issues reports; over the budget the tick then runs as throttled, and under it
+(or when the budget could not be read) it runs every lane. A count that was
+stored but whose answer was lost therefore leaves the hour with no derived
+run. The count answers how many ticks the hour has, so of two ticks that
+overlap at the start of an hour only the first counted runs the derived lanes.
+A failed rows-read record at the end loses that invocation's rows and logs
+`read_budget_record_failed`. While throttled, an accepted
 decision's projection rebuild (`decision_outbox`) waits up to an hour, and the
 throttled lanes leave gaps of up to an hour in `processor_lane_ticks`.
 
