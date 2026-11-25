@@ -506,3 +506,70 @@ test("report persistence refuses binary text re-encoding and an invalid report m
     ).rejects.toThrow("shared_report_invalid");
   }
 });
+
+test("a stored monthly report is a complete document unit with its month range and report", async () => {
+  const bytes = new TextEncoder().encode("%PDF-synthetic");
+  const plan = await buildSharedRunPlan({
+    manifest: manifestOf(),
+    artifacts: [
+      {
+        dataset: "monthly-report-pdf",
+        filename: "monthly-report-2099-01.pdf",
+        mediaType: "application/pdf",
+        body: bytes.buffer,
+      },
+    ],
+    identity: IDENTITY,
+  });
+  const pdf = plan.artifacts.find((artifact) => artifact.role === "provider_document")!;
+  expect(pdf.artifactKey).toBe(`monthly-report-2099-01-${pdf.sha256}.pdf`);
+  expect(pdf.unitKey).toBe("monthly-report-2099-01");
+  expect(plan.run.requestedScope).toEqual({
+    scopeKind: "full_snapshot",
+    startValue: null,
+    endValue: null,
+    unitKeys: [],
+  });
+  expect(plan.run.units).toEqual([
+    {
+      unitKey: "monthly-report-2099-01",
+      unitKind: "document",
+      artifactCount: 1,
+      coverageStatus: "complete",
+    },
+  ]);
+  expect(plan.run.ranges).toEqual([
+    {
+      rangeKey: "monthly-report-2099-01:month",
+      rangeKind: "declared_coverage",
+      precision: "month",
+      basis: "source",
+      startValue: "2099-01",
+      endValue: "2099-01",
+      unitKey: "monthly-report-2099-01",
+    },
+  ]);
+  expect(plan.run.reports).toEqual([
+    {
+      reportRef: "monthly-report-2099-01-terminal",
+      reportKind: "terminal",
+      scope: "unit",
+      outcome: "success",
+      unitKey: "monthly-report-2099-01",
+    },
+  ]);
+  expect(plan.run.transformations).toEqual([
+    {
+      transformationId: `${pdf.artifactKey}:decoded`,
+      stepKind: "extracted",
+      transformerId: "sbi-shinsei-report-pdf-extractor",
+      transformerVersion: "v1",
+      inputArtifactKeys: [],
+      outputArtifactKey: pdf.artifactKey,
+    },
+  ]);
+  // The run's manifest names no unit.
+  expect(
+    plan.artifacts.find((artifact) => artifact.artifactKey === "manifest.json")?.unitKey,
+  ).toBeUndefined();
+});
