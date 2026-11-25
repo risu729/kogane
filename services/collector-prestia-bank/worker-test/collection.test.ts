@@ -126,6 +126,59 @@ describe("PRESTIA bank Worker shared DATA acquisition", () => {
     expect(terminal.manifest.artifacts).toHaveLength(0);
     expect(collect).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    [new PrestiaBankError("login-challenge-required"), "login-challenge-required"],
+    [new Error("synthetic-provider-notice private-account-label"), "balance-parse-error"],
+  ])(
+    "the Processor alarm path logs the run's closed failure code, never provider text (%#)",
+    async (thrown, code) => {
+      const collect = vi.fn(async () => {
+        throw thrown;
+      });
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        const result = await createHandler({ collect }).alarmCollection(env);
+        expect(result).toMatchObject({ status: "failed", failureCode: "collection_failed" });
+        const lines = log.mock.calls.map(([value]) => String(value));
+        const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(records).toEqual([
+          {
+            event: "prestia-bank-scheduled-collection",
+            runId: result.runIds[0],
+            status: "failed",
+            persistence: "persisted",
+            artifactCount: 0,
+            error: code,
+          },
+        ]);
+        for (const privateValue of ["synthetic-provider-notice", "private-account-label"])
+          expect(lines.join("\n")).not.toContain(privateValue);
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
+  it("the scheduled handler logs one result line per run", async () => {
+    const controller = { scheduledTime: Date.now(), cron: "30 21 * * *", noRetry: vi.fn() };
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await createHandler({ collect: async () => collection() }).scheduled(
+        controller as unknown as ScheduledController,
+        env,
+      );
+      const records = log.mock.calls.map(([value]) => JSON.parse(String(value)));
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        event: "prestia-bank-scheduled-collection",
+        status: "success",
+        persistence: "persisted",
+        artifactCount: 1,
+      });
+      expect(controller.noRetry).toHaveBeenCalledTimes(1);
+    } finally {
+      log.mockRestore();
+    }
+  });
   it("never persists executable or authentication material injected into a body", async () => {
     const collect = vi.fn(async () => ({
       ...collection(),
