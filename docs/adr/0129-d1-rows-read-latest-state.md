@@ -559,6 +559,25 @@ The draft's open questions, as the accepted design answers them:
   clause is an inner join in SQLite, so only the order, not the rows, can
   differ.
 
+## Guard counts the tick first (2026-11-25)
+
+- From 03:00 UTC on 2026-11-25, every 5-minute tick ran the derived lanes and
+  read about 9.5M rows, though the guard was over its budget. The identity
+  sweep's binding insert left CORE answering every later statement of the
+  tick as overloaded, including the guard's own record at the tick's end, so
+  the hour never showed a tick and each tick ran as its first.
+- A scheduled tick now counts itself in its hour before any lane, even when
+  the budget read failed (`claimScheduledTick`,
+  `services/processor/src/read-budget.ts`), and the record at the end adds
+  only rows. A count that fails is logged at error level
+  (`read_budget_claim_failed`); over the budget the tick then runs as
+  throttled. The count's answer also keeps two ticks that overlap at the start
+  of an hour from both running the derived lanes.
+- No migration: the count writes the same `processor_read_budget_hours` row.
+  The rows of a tick whose end record fails are still lost from the sum, so
+  the guard can release early after such an hour; the hour's throttling does
+  not depend on them.
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each
