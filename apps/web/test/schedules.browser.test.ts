@@ -507,6 +507,26 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   });
 
+  test("a schedule's times are shown in Japan time whatever the browser's zone, and a missing one as 未設定", async () => {
+    // 15:30 UTC on 2026-10-05 is 00:30 Japan time on 2026-10-06: the dates differ.
+    const sony = snapshot.schedules.find((job) => job.id === "sony-bank")!;
+    sony.nextNominalAt = "2026-10-05T15:30:00.000Z";
+    sony.nextRunAt = null;
+    const page = await browser.newPage({ timezoneId: "UTC" });
+    try {
+      await page.goto(`${origin}/schedules`);
+      await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
+      const card = page
+        .locator(".schedule-card")
+        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+      const shown = (term: string) => card.locator(`dt:text-is("${term}") + dd`).textContent();
+      expect(await shown("本来の次回予定")).toBe("2026/10/06 0:30");
+      expect(await shown("メンテナンスを考慮した予定")).toBe("未設定");
+    } finally {
+      await page.close();
+    }
+  });
+
   for (const width of [1280, 390])
     test(`daily time edits persist and exact evidence links remain visible at ${width}px`, async () => {
       const page = await browser.newPage({ viewport: { width, height: 960 } });
