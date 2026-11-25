@@ -771,9 +771,9 @@ fails logs `read_budget_claim_failed` and runs as throttled; under it, the
 tick runs every lane. The count answers how many ticks the hour has, so of two
 ticks that overlap at the start of an hour only the first counted runs the
 derived lanes. A failed rows-read record at the end loses that invocation's
-rows and logs `read_budget_record_failed`. While throttled, an accepted decision's projection
-rebuild (`decision_outbox`) waits up to an hour, and the throttled lanes leave
-gaps of up to an hour in `processor_lane_ticks`.
+rows and logs `read_budget_record_failed`. While throttled, an accepted
+decision's projection rebuild (`decision_outbox`) waits up to an hour, and the
+throttled lanes leave gaps of up to an hour in `processor_lane_ticks`.
 
 ### 6.0.1 Snapshot memo (ADR 0129)
 
