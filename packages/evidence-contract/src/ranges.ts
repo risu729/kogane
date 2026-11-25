@@ -47,7 +47,12 @@ function canonicalRangeValue(value: unknown, precision: string, field: string): 
     const date = new Date(`${parsed}T00:00:00.000Z`);
     if (!Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === parsed) return parsed;
   }
-  if (precision === "instant") {
+  // A four-digit year, as for date and month precision: `toISOString` writes a
+  // year outside 0000–9999 as a signed six-digit year (`+010000-…`,
+  // `-000001-…`), whose text order is not its time order, so the
+  // reversed-range check below and the stored `start_value <= end_value`
+  // CHECK would compare it wrongly.
+  if (precision === "instant" && /^\d{4}-/.test(parsed)) {
     const date = new Date(parsed);
     if (!Number.isNaN(date.valueOf()) && date.toISOString() === parsed) return parsed;
   }
