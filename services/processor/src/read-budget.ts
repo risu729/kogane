@@ -50,21 +50,21 @@ export const READ_BUDGET_THROTTLED_LANES: ReadonlySet<string> = new Set([
 const DRAIN_RECORD_MAX_AGE_MS = 15 * 60_000;
 
 /**
- * Whether the identity sweep is draining a backlog: its latest tick record is
- * from the last 15 minutes, ran, made progress (sealed a run or identified an
- * observation) and took a full page (`pageRuns` parse runs, or its
- * observation cap, which can stop inside one large parse before it seals). While it is, the sweep
- * runs on every tick even above the budget, so a parse backlog is identified
- * in hours rather than days: every identity run moves the CORE revision, and
- * the card sweeps then read their whole input again on each hourly tick until
- * identity catches up.
+ * Whether the identity sweep is draining a backlog: its latest tick record
+ * is from the last 15 minutes, ran, made progress (sealed a run or
+ * identified an observation) and took a full page (`pageRuns` parse runs, or
+ * its observation cap, which can stop inside one large parse before it
+ * seals). While it is, the sweep runs on every tick even above the budget,
+ * so a parse backlog is identified in hours rather than days: every identity
+ * run moves the CORE revision, and the card sweeps then read their whole
+ * input again on each hourly tick until identity catches up.
  *
  * Anything else ends it: a short page; a failed sweep; a page that made no
  * progress (runs that are selected again on every tick but never sealed at
  * their required policy would otherwise keep a full page for ever); and a
  * sweep whose own record was lost (the latest record is then older than the
- * draining cadence), so a sweep that keeps failing, or keeps D1 from recording
- * it, goes back to once an hour. A failed read answers false.
+ * draining cadence), so a sweep that keeps failing, or keeps D1 from
+ * recording it, goes back to once an hour. A failed read answers false.
  */
 export async function identityBacklogDraining(
   db: D1Database,
