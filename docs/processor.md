@@ -760,7 +760,16 @@ the plan includes per month):
   `price_promotion`, `report_job`, `decision_outbox`), each with a
   `{"event":<lane>,"skipped":"read_budget"}` line and no tick record. Collection,
   parsing, operation dispatch, the maintenance survey and the audit overflow
-  keep their cadence.
+  keep their cadence;
+- the identity sweep is the exception while it drains a backlog: when its
+  latest tick record ran and took a full page (`IDENTITY_RUNS_PER_TICK` parse
+  runs, or its 200-observation cap), it runs on every tick
+  (`identityBacklogDraining`). Each identity run moves the CORE revision, and
+  the card sweeps read their whole input again on the next hourly tick after
+  any move; at one page an hour, the 4,262 parse runs left unidentified after
+  the parse backlog of 2026-11-24 would have taken about six days, each hour
+  rereading about 2M card rows. A page smaller than full, or a failed sweep,
+  ends the exemption.
 
 The sum is what D1 reports: a statement read with `first()` returns no
 metadata and is not counted (`d1RowsRead.missing`). A failed budget read

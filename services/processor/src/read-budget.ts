@@ -46,6 +46,41 @@ export const READ_BUDGET_THROTTLED_LANES: ReadonlySet<string> = new Set([
   "decision_outbox",
 ]);
 
+/**
+ * Whether the identity sweep is draining a backlog: its latest recorded tick
+ * took a full page (`IDENTITY_RUNS_PER_TICK` runs, or its 200-observation
+ * cap). While it is, the sweep runs on every tick even above the budget, so a
+ * parse backlog is identified in hours rather than days: every hourly
+ * identity run moves the CORE revision, and the card sweeps then read their
+ * whole input again on each hourly tick until identity catches up. A sweep
+ * that took less than a page, or failed, stops the exemption (a sweep that
+ * keeps failing goes back to once an hour); a failed or missing read answers
+ * false.
+ */
+export async function identityBacklogDraining(
+  db: D1Database,
+  pageRuns: number,
+  pageObservations = 200,
+): Promise<boolean> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT outcome,json_extract(counts_json,'$.processedRuns') AS runs,
+           json_extract(counts_json,'$.identifiedObservations') AS observations
+         FROM processor_lane_ticks WHERE lane='identity_sweep'
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .all<{ outcome: string; runs: number | null; observations: number | null }>();
+    const latest = row.results[0];
+    if (latest?.outcome !== "ran") return false;
+    return (
+      Number(latest.runs ?? 0) >= pageRuns || Number(latest.observations ?? 0) >= pageObservations
+    );
+  } catch {
+    return false;
+  }
+}
+
 export interface ReadBudgetState {
   /** Rows read in the current hour and the 23 before it. */
   rowsRead24h: number;

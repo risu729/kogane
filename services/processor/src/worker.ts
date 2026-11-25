@@ -111,6 +111,7 @@ import {
   D1_ROWS_READ_DAILY_BUDGET,
   READ_BUDGET_THROTTLED_LANES,
   claimScheduledTick,
+  identityBacklogDraining,
   readBudgetState,
   recordRowsRead,
 } from "./read-budget.ts";
@@ -2132,11 +2133,20 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // While throttled, the identity sweep still runs on every tick if its last
+  // run took a full page, so a backlog drains in hours (src/read-budget.ts).
+  const identityDraining =
+    throttled && (await identityBacklogDraining(env.DB, IDENTITY_RUNS_PER_TICK));
   // One correlation id for the lane audit records of this invocation.
   const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
-    if (throttled && enabled && READ_BUDGET_THROTTLED_LANES.has(event)) {
+    if (
+      throttled &&
+      enabled &&
+      READ_BUDGET_THROTTLED_LANES.has(event) &&
+      !(event === "identity_sweep" && identityDraining)
+    ) {
       // Not a tick of the lane: it did not run, and its flag is not off.
       log(JSON.stringify({ event, skipped: "read_budget" }));
       continue;

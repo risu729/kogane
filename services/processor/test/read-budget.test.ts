@@ -12,6 +12,7 @@ import {
   readBudgetState,
   recordRowsRead,
 } from "../src/read-budget.ts";
+import { IDENTITY_RUNS_PER_TICK } from "../src/lane-budgets.ts";
 import { meteredInvocation, runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
 
@@ -356,6 +357,64 @@ test("over the budget, of two ticks that overlap at the start of an hour only on
   expect(alerts.map((line) => (JSON.parse(line) as { event: string }).event)).toEqual([
     "d1_read_budget_exceeded",
   ]);
+});
+
+test("over the budget, an identity sweep that took a full page keeps running on every tick until it takes less", async () => {
+  await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
+  await recordRowsRead(env.DB, NOW - 3 * HOUR, 400, "scheduled");
+  const page = {
+    processedRuns: IDENTITY_RUNS_PER_TICK,
+    identifiedRuns: 1,
+    identifiedObservations: 0,
+  };
+  const tick = async (at: number, identity: typeof page) => {
+    const ran: string[] = [];
+    const stages = stagesThatRecord(ran);
+    stages.identity = () => {
+      ran.push("identity_sweep");
+      return Promise.resolve(identity);
+    };
+    await meteredInvocation(
+      "scheduled",
+      env,
+      (metered, context) =>
+        runScheduled(metered, stages, () => {}, context, {
+          now: () => at,
+          budget: 300,
+          alert: () => {},
+        }),
+      () => {},
+      () => at,
+    );
+    return ran;
+  };
+  // The hour's first tick runs every lane; its sweep takes a full page.
+  expect(await tick(NOW, page)).toContain("balance_projection");
+  // A later tick of the hour still runs the identity sweep, and only it.
+  const draining = await tick(NOW + 5 * 60_000, { ...page, processedRuns: 3 });
+  expect(draining).toContain("identity_sweep");
+  expect(draining).not.toContain("balance_projection");
+  expect(draining).not.toContain("instrument_auto_adoption");
+  // That sweep took less than a page, so the next tick skips it again.
+  expect(await tick(NOW + 10 * 60_000, page)).not.toContain("identity_sweep");
+  // The 200-observation cap counts as a full page too.
+  await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
+  expect(
+    await tick(NOW + HOUR, { ...page, processedRuns: 5, identifiedObservations: 200 }),
+  ).toContain("balance_projection");
+  expect(await tick(NOW + HOUR + 5 * 60_000, page)).toContain("identity_sweep");
+  // A failed sweep stops the exemption: one that keeps failing runs once an hour.
+  await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
+  expect(await tick(NOW + 2 * HOUR, page)).toContain("balance_projection");
+  const failing: string[] = [];
+  const stages = stagesThatRecord(failing);
+  stages.identity = () => Promise.reject(new Error("D1_ERROR: overloaded"));
+  await runScheduled(env, stages, () => {}, undefined, {
+    now: () => NOW + 2 * HOUR + 5 * 60_000,
+    budget: 300,
+    alert: () => {},
+  });
+  expect(await tick(NOW + 2 * HOUR + 10 * 60_000, page)).not.toContain("identity_sweep");
 });
 
 test("under the budget every lane runs on every tick", async () => {
