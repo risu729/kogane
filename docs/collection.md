@@ -488,8 +488,11 @@ artifact, and `unknown` for a failure. The null start names the
 provider's retention, not proved account-opening coverage.
 
 The realised-gains and documents runs, read only after the core steps succeed,
-share the core run's ID as `acquisitionSessionRef`. The realised-gains run has
-no `request-window` (`full_snapshot` with null bounds); its units are
+share the core run's ID as `acquisitionSessionRef` and as `attemptId`, since
+the same attempt writes all three runs. Supplementary runs stored before this
+was fixed name their own run ID as `attemptId`, an attempt no other run
+carries, and stay as stored. The realised-gains run has no `request-window`
+(`full_snapshot` with null bounds); its units are
 `realised-evidence` and `realised-year-YYYY` for what it stored. The documents
 run requests the five-year `date_range` ending yesterday, and each stored PDF
 has its own complete `document` unit (`delivered-document-NNNN`) with a unit

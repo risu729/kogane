@@ -155,9 +155,13 @@ export async function runSharedCollection(
         : [];
     let supplementalPersistenceFailed = false;
     for (const supplement of supplements) {
+      // A supplement is its own run written by the same attempt: like the
+      // core run, it names the session as its acquisition session (ADR 0100)
+      // and as the attempt that wrote it (collection contract).
       const supplementalInput = {
         ...input,
         runId: crypto.randomUUID(),
+        attemptId: runId,
         acquisitionSessionRef: runId,
         status:
           supplement.failures.length === 0
