@@ -403,6 +403,30 @@ test("over the budget, an identity sweep that took a full page keeps running on 
     await tick(NOW + HOUR, { ...page, processedRuns: 5, identifiedObservations: 200 }),
   ).toContain("balance_projection");
   expect(await tick(NOW + HOUR + 5 * 60_000, page)).toContain("identity_sweep");
+  // A full page that identified nothing stops it: runs selected again on every
+  // tick but never sealed would otherwise keep a full page for ever.
+  await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
+  expect(await tick(NOW + 3 * HOUR, { ...page, identifiedRuns: 0 })).toContain(
+    "balance_projection",
+  );
+  expect(await tick(NOW + 3 * HOUR + 5 * 60_000, page)).not.toContain("identity_sweep");
+  // A full page whose record is older than the draining cadence stops it: a
+  // sweep whose own record was lost must not run every tick on a stale row.
+  // Tick records carry the wall clock, so the stale one is written directly.
+  const fullPage = async (startedAtMs: number) => {
+    await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
+    await env.DB.prepare(
+      `INSERT INTO processor_lane_ticks(lane,started_at_ms,finished_at_ms,outcome,counts_json)
+       VALUES('identity_sweep',?1,?1,'ran',?2)`,
+    )
+      .bind(startedAtMs, JSON.stringify(page))
+      .run();
+  };
+  expect(await tick(NOW + 4 * HOUR, page)).toContain("balance_projection");
+  await fullPage(Date.now() - 20 * 60_000);
+  expect(await tick(NOW + 4 * HOUR + 5 * 60_000, page)).not.toContain("identity_sweep");
+  await fullPage(Date.now() - 5 * 60_000);
+  expect(await tick(NOW + 4 * HOUR + 10 * 60_000, page)).toContain("identity_sweep");
   // A failed sweep stops the exemption: one that keeps failing runs once an hour.
   await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
   expect(await tick(NOW + 2 * HOUR, page)).toContain("balance_projection");

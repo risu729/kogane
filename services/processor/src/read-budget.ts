@@ -46,33 +46,51 @@ export const READ_BUDGET_THROTTLED_LANES: ReadonlySet<string> = new Set([
   "decision_outbox",
 ]);
 
+/** How recent the identity sweep's latest tick record must be to keep it draining. */
+const DRAIN_RECORD_MAX_AGE_MS = 15 * 60_000;
+
 /**
- * Whether the identity sweep is draining a backlog: its latest recorded tick
- * took a full page (`IDENTITY_RUNS_PER_TICK` runs, or its 200-observation
- * cap). While it is, the sweep runs on every tick even above the budget, so a
- * parse backlog is identified in hours rather than days: every hourly
- * identity run moves the CORE revision, and the card sweeps then read their
- * whole input again on each hourly tick until identity catches up. A sweep
- * that took less than a page, or failed, stops the exemption (a sweep that
- * keeps failing goes back to once an hour); a failed or missing read answers
- * false.
+ * Whether the identity sweep is draining a backlog: its latest tick record is
+ * from the last 15 minutes, ran, identified at least one run and took a full
+ * page (`pageRuns` parse runs, or its observation cap). While it is, the sweep
+ * runs on every tick even above the budget, so a parse backlog is identified
+ * in hours rather than days: every identity run moves the CORE revision, and
+ * the card sweeps then read their whole input again on each hourly tick until
+ * identity catches up.
+ *
+ * Anything else ends it: a short page; a failed sweep; a page that identified
+ * nothing (runs that are selected again on every tick but never sealed at
+ * their required policy would otherwise keep a full page for ever); and a
+ * sweep whose own record was lost (the latest record is then older than the
+ * draining cadence), so a sweep that keeps failing, or keeps D1 from recording
+ * it, goes back to once an hour. A failed read answers false.
  */
 export async function identityBacklogDraining(
   db: D1Database,
+  nowMs: number,
   pageRuns: number,
-  pageObservations = 200,
+  pageObservations: number,
 ): Promise<boolean> {
   try {
     const row = await db
       .prepare(
-        `SELECT outcome,json_extract(counts_json,'$.processedRuns') AS runs,
+        `SELECT outcome,started_at_ms,json_extract(counts_json,'$.processedRuns') AS runs,
+           json_extract(counts_json,'$.identifiedRuns') AS identified,
            json_extract(counts_json,'$.identifiedObservations') AS observations
          FROM processor_lane_ticks WHERE lane='identity_sweep'
          ORDER BY id DESC LIMIT 1`,
       )
-      .all<{ outcome: string; runs: number | null; observations: number | null }>();
+      .all<{
+        outcome: string;
+        started_at_ms: number;
+        runs: number | null;
+        identified: number | null;
+        observations: number | null;
+      }>();
     const latest = row.results[0];
     if (latest?.outcome !== "ran") return false;
+    if (nowMs - Number(latest.started_at_ms) > DRAIN_RECORD_MAX_AGE_MS) return false;
+    if (Number(latest.identified ?? 0) < 1) return false;
     return (
       Number(latest.runs ?? 0) >= pageRuns || Number(latest.observations ?? 0) >= pageObservations
     );
