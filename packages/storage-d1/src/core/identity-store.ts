@@ -551,10 +551,10 @@ export async function identifyParse(
   return total;
 }
 
-/** Runs on the existing private pipeline. No new public service or credentials. */
 /** The observations one identity sweep identifies before it stops. */
 export const IDENTITY_SWEEP_OBSERVATIONS = 200;
 
+/** Runs on the existing private pipeline. No new public service or credentials. */
 export async function identitySweep(
   db: D1Like,
   resolver: IdentityResolver,

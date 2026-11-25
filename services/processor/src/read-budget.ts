@@ -51,15 +51,16 @@ const DRAIN_RECORD_MAX_AGE_MS = 15 * 60_000;
 
 /**
  * Whether the identity sweep is draining a backlog: its latest tick record is
- * from the last 15 minutes, ran, identified at least one run and took a full
- * page (`pageRuns` parse runs, or its observation cap). While it is, the sweep
+ * from the last 15 minutes, ran, made progress (sealed a run or identified an
+ * observation) and took a full page (`pageRuns` parse runs, or its
+ * observation cap, which can stop inside one large parse before it seals). While it is, the sweep
  * runs on every tick even above the budget, so a parse backlog is identified
  * in hours rather than days: every identity run moves the CORE revision, and
  * the card sweeps then read their whole input again on each hourly tick until
  * identity catches up.
  *
- * Anything else ends it: a short page; a failed sweep; a page that identified
- * nothing (runs that are selected again on every tick but never sealed at
+ * Anything else ends it: a short page; a failed sweep; a page that made no
+ * progress (runs that are selected again on every tick but never sealed at
  * their required policy would otherwise keep a full page for ever); and a
  * sweep whose own record was lost (the latest record is then older than the
  * draining cadence), so a sweep that keeps failing, or keeps D1 from recording
@@ -90,7 +91,8 @@ export async function identityBacklogDraining(
     const latest = row.results[0];
     if (latest?.outcome !== "ran") return false;
     if (nowMs - Number(latest.started_at_ms) > DRAIN_RECORD_MAX_AGE_MS) return false;
-    if (Number(latest.identified ?? 0) < 1) return false;
+    // Progress: a sealed run, or observations of a parse the cap cut short.
+    if (Number(latest.identified ?? 0) < 1 && Number(latest.observations ?? 0) < 1) return false;
     return (
       Number(latest.runs ?? 0) >= pageRuns || Number(latest.observations ?? 0) >= pageObservations
     );

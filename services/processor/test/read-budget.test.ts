@@ -403,12 +403,17 @@ test("over the budget, an identity sweep that took a full page keeps running on 
     await tick(NOW + HOUR, { ...page, processedRuns: 5, identifiedObservations: 200 }),
   ).toContain("balance_projection");
   expect(await tick(NOW + HOUR + 5 * 60_000, page)).toContain("identity_sweep");
+  // A cap page inside one large parse seals nothing but made progress: it drains.
+  await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
+  const capPage = { processedRuns: 1, identifiedRuns: 0, identifiedObservations: 200 };
+  expect(await tick(NOW + 5 * HOUR, capPage)).toContain("balance_projection");
+  expect(await tick(NOW + 5 * HOUR + 5 * 60_000, page)).toContain("identity_sweep");
   // A full page that identified nothing stops it: runs selected again on every
   // tick but never sealed would otherwise keep a full page for ever.
   await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='identity_sweep'").run();
-  expect(await tick(NOW + 3 * HOUR, { ...page, identifiedRuns: 0 })).toContain(
-    "balance_projection",
-  );
+  expect(
+    await tick(NOW + 3 * HOUR, { ...page, identifiedRuns: 0, identifiedObservations: 0 }),
+  ).toContain("balance_projection");
   expect(await tick(NOW + 3 * HOUR + 5 * 60_000, page)).not.toContain("identity_sweep");
   // A full page whose record is older than the draining cadence stops it: a
   // sweep whose own record was lost must not run every tick on a stale row.

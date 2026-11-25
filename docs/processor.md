@@ -762,17 +762,18 @@ the plan includes per month):
   parsing, operation dispatch, the maintenance survey and the audit overflow
   keep their cadence;
 - the identity sweep is the exception while it drains a backlog: when its
-  latest tick record is from the last 15 minutes, ran, identified at least one
-  run and took a full page (`IDENTITY_RUNS_PER_TICK` parse runs, or
-  `IDENTITY_SWEEP_OBSERVATIONS`), it runs on every tick
-  (`identityBacklogDraining`). Each identity run moves the CORE revision, and
-  the card sweeps read their whole input again on the next hourly tick after
-  any move; at one page an hour, the 4,262 parse runs left unidentified after
-  the parse backlog of 2026-11-24 would have taken about six days, each hour
-  rereading about 2M card rows. A short page, a failed sweep, a page that
-  identified nothing (runs selected again but never sealed at their required
-  policy) and a lost record (the latest is then too old) each end the
-  exemption, so a sweep that keeps failing goes back to once an hour.
+  latest tick record is from the last 15 minutes, ran, made progress (sealed a
+  run or identified an observation) and took a full page
+  (`IDENTITY_RUNS_PER_TICK` parse runs, or `IDENTITY_SWEEP_OBSERVATIONS`), it
+  runs on every tick (`identityBacklogDraining`). Each identity run moves the
+  CORE revision, and the card sweeps read their whole input again on the next
+  hourly tick after any move; at one page an hour, the 4,262 parse runs left
+  unidentified after the parse backlog of 2026-11-24 would have taken about
+  six days, each hour rereading about 2M card rows. A short page, a failed
+  sweep, a page without progress (runs selected again but never sealed at
+  their required policy) and a lost record (within about two ticks the latest
+  is too old) each end the exemption, so a sweep that keeps failing goes back
+  to once an hour.
 
 The sum is what D1 reports: a statement read with `first()` returns no
 metadata and is not counted (`d1RowsRead.missing`). A failed budget read

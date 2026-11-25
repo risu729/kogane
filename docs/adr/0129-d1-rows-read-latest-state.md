@@ -583,11 +583,10 @@ The draft's open questions, as the accepted design answers them:
   04:00 and 05:00 UTC against 4,262 unidentified parse runs, and each moved
   the CORE revision. The gate was right to reopen, since identity decides the
   card accounts (396 of 402 usages were waiting on it). While its latest tick
-  record is recent, identified something and took a full page, the identity
-  sweep now runs on every tick above the budget, which drains such a backlog
-  in about nine hours if every tick takes a page of 40, at about 270k rows a
-  tick; a short page, a failure, a page that identified nothing or a lost
-  record ends that.
+  record is recent, made progress and took a full page, the identity sweep now
+  runs on every tick above the budget, which drains such a backlog in about
+  nine hours if every tick takes a page of 40, at about 270k rows a tick; a
+  short page, a failure, a page without progress or a lost record ends that.
 
 ## Verification
 
