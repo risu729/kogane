@@ -585,8 +585,7 @@ The draft's open questions, as the accepted design answers them:
   of 402 usages were waiting on it). While its latest tick took a full page,
   the identity sweep now runs on every tick above the budget, which drains
   such a backlog in about nine hours if every tick takes a page of 40, at
-  about 270k rows a tick; a short page
-  or a failure ends that.
+  about 270k rows a tick; a short page or a failure ends that.
 
 ## Verification
 
