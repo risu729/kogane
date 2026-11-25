@@ -551,6 +551,9 @@ export async function identifyParse(
   return total;
 }
 
+/** The observations one identity sweep identifies before it stops. */
+export const IDENTITY_SWEEP_OBSERVATIONS = 200;
+
 /** Runs on the existing private pipeline. No new public service or credentials. */
 export async function identitySweep(
   db: D1Like,
@@ -637,13 +640,13 @@ export async function identitySweep(
   const fastIds = new Set(empty.map((parse) => parse.id));
   for (const parse of candidates.results) {
     if (fastIds.has(parse.id)) continue;
-    if (observations >= 200) break;
+    if (observations >= IDENTITY_SWEEP_OBSERVATIONS) break;
     observations += await identifyParse(
       db,
       parse,
       resolver,
       IDENTITY_POLICY_VERSION,
-      200 - observations,
+      IDENTITY_SWEEP_OBSERVATIONS - observations,
     );
     processedRuns++;
     const sealed = await db

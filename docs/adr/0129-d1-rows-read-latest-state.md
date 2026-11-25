@@ -577,6 +577,16 @@ The draft's open questions, as the accepted design answers them:
   The rows of a tick whose end record fails are still lost from the sum, so
   the guard can release early after such an hour; the hour's throttling does
   not depend on them.
+- Once the parse backlog drained (04:25 UTC), the card sweeps still read their
+  whole input on every hourly tick (about 1M rows each): the identity sweep,
+  throttled to the same tick, wrote 25 and 39 identity runs in the hours from
+  04:00 and 05:00 UTC against 4,262 unidentified parse runs, and each moved
+  the CORE revision. The gate was right to reopen, since identity decides the
+  card accounts (396 of 402 usages were waiting on it). While its latest tick
+  record is recent, made progress and took a full page, the identity sweep now
+  runs on every tick above the budget, which drains such a backlog in about
+  nine hours if every tick takes a page of 40, at about 270k rows a tick; a
+  short page, a failure, a page without progress or a lost record ends that.
 
 ## Verification
 

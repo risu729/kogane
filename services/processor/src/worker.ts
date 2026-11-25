@@ -20,7 +20,11 @@ import {
   balanceProjectionOutboxProcessor,
   runBalanceProjection,
 } from "./balance-projection-job.ts";
-import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
+import {
+  IDENTITY_POLICY_VERSION,
+  IDENTITY_SWEEP_OBSERVATIONS,
+  identitySweep,
+} from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
@@ -111,6 +115,7 @@ import {
   D1_ROWS_READ_DAILY_BUDGET,
   READ_BUDGET_THROTTLED_LANES,
   claimScheduledTick,
+  identityBacklogDraining,
   readBudgetState,
   recordRowsRead,
 } from "./read-budget.ts";
@@ -2132,11 +2137,27 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // While throttled, the identity sweep still runs on every tick if its last
+  // run took a full page, so a backlog drains in hours (src/read-budget.ts).
+  const identityDraining =
+    throttled &&
+    (await identityBacklogDraining(
+      env.DB,
+      // The lane tick records' own clock (the loop below), not the guard's.
+      Date.now(),
+      IDENTITY_RUNS_PER_TICK,
+      IDENTITY_SWEEP_OBSERVATIONS,
+    ));
   // One correlation id for the lane audit records of this invocation.
   const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
-    if (throttled && enabled && READ_BUDGET_THROTTLED_LANES.has(event)) {
+    if (
+      throttled &&
+      enabled &&
+      READ_BUDGET_THROTTLED_LANES.has(event) &&
+      !(event === "identity_sweep" && identityDraining)
+    ) {
       // Not a tick of the lane: it did not run, and its flag is not off.
       log(JSON.stringify({ event, skipped: "read_budget" }));
       continue;
