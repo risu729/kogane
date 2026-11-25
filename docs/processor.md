@@ -743,7 +743,9 @@ Every metered invocation, scheduled tick or queue batch, adds the D1 rows it
 read (the `invocation_budget` line's `d1RowsRead.reported`) to its starting
 hour's row in `processor_read_budget_hours` (migration 0107), in one batch that
 also drops rows older than 48 hours (`src/read-budget.ts`). Before its lanes,
-the scheduled tick sums the current hour and the 23 before it. Above
+the scheduled tick sums the current hour and the 23 before it, then counts
+itself in its hour (`claimScheduledTick`); a queue batch is counted with its
+rows. Above
 `D1_ROWS_READ_DAILY_BUDGET` (300 million rows, about a third of the 25 billion
 the plan includes per month):
 
@@ -761,10 +763,15 @@ the plan includes per month):
 
 The sum is what D1 reports: a statement read with `first()` returns no
 metadata and is not counted (`d1RowsRead.missing`). A failed budget read
-throttles nothing; a failed write loses that invocation's count and logs
-`read_budget_record_failed`. A tick is counted when it ends, so two ticks that
-overlap at the start of an hour, or a first tick whose record failed, both run
-as the hour's first. While throttled, an accepted decision's projection
+throttles nothing. A tick is counted before its lanes, not when it ends: on
+2026-11-25 the identity sweep left D1 answering every later statement of the
+tick as overloaded, the end-of-tick record failed, and every tick of the hour
+ran as its first (about 9.5M rows each). Over the budget, a tick whose count
+fails logs `read_budget_claim_failed` and runs as throttled; under it, the
+tick runs every lane. The count answers how many ticks the hour has, so of two
+ticks that overlap at the start of an hour only the first counted runs the
+derived lanes. A failed rows-read record at the end loses that invocation's
+rows and logs `read_budget_record_failed`. While throttled, an accepted decision's projection
 rebuild (`decision_outbox`) waits up to an hour, and the throttled lanes leave
 gaps of up to an hour in `processor_lane_ticks`.
 

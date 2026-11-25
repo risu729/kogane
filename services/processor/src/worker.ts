@@ -110,6 +110,7 @@ import { reportsEnabled, runReportJob } from "./report-job.ts";
 import {
   D1_ROWS_READ_DAILY_BUDGET,
   READ_BUDGET_THROTTLED_LANES,
+  claimScheduledTick,
   readBudgetState,
   recordRowsRead,
 } from "./read-budget.ts";
@@ -2035,9 +2036,21 @@ export async function runScheduled(
 ): Promise<void> {
   const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
   // ADR 0129: above the daily read budget, the derived lanes run on the first
-  // scheduled tick of each hour only, and that tick logs the error once.
-  const budget = await readBudgetState(env.DB, (guard.now ?? Date.now)(), guard.budget);
-  if (budget?.over && !budget.throttled)
+  // scheduled tick of each hour only, and that tick logs the error once. The
+  // tick counts itself before any lane runs; over the budget, a tick that
+  // cannot count itself runs as throttled, since D1 is then likely unable to
+  // record the hour's first tick at all (src/read-budget.ts).
+  const nowMs = (guard.now ?? Date.now)();
+  const budget = await readBudgetState(env.DB, nowMs, guard.budget);
+  let throttled = budget?.throttled ?? false;
+  if (budget)
+    try {
+      if ((await claimScheduledTick(env.DB, nowMs)) > 1 && budget.over) throttled = true;
+    } catch {
+      log(JSON.stringify({ event: "read_budget_claim_failed" }));
+      if (budget.over) throttled = true;
+    }
+  if (budget?.over && !throttled)
     (guard.alert ?? ((line: string) => console.error(line)))(
       JSON.stringify({
         event: "d1_read_budget_exceeded",
@@ -2122,7 +2135,7 @@ export async function runScheduled(
   const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
-    if (budget?.throttled && enabled && READ_BUDGET_THROTTLED_LANES.has(event)) {
+    if (throttled && enabled && READ_BUDGET_THROTTLED_LANES.has(event)) {
       // Not a tick of the lane: it did not run, and its flag is not off.
       log(JSON.stringify({ event, skipped: "read_budget" }));
       continue;
