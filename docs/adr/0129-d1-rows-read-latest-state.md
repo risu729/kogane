@@ -530,9 +530,28 @@ The draft's open questions, as the accepted design answers them:
   (the card information mark, then the cursor and the gate together), and a quiet purchase
   tick reads the gate instead of the usage page, checked by
   `services/processor/test/sweep-pass.test.ts`.
-- Not changed here: the Vpass binding insert (decision 4) and the stale-key
-  read of the retirement pass, which already skips while its own revision
-  check holds.
+- Not changed here: the stale-key read of the retirement pass, which already
+  skips while its own revision check holds.
+
+## Decision 4 as built (2026-11-25)
+
+- After slice 3, the Processor's hourly read guard (decision 8) was holding
+  the derived lanes to one tick an hour (24-hour sum above 300M since 18:05
+  UTC on 2026-11-24), at about 13M rows an hour. About 9.7M of each such tick
+  was the Vpass binding insert of the identity sweep. All rows read were
+  billed, the period's included rows being spent (43B since 2026-10-25), so
+  2026-11-24's 1.0B rows cost about $1.00 and the guarded rate about $0.33 a
+  day.
+- `VPASS_BINDING_INSERT_SQL` is the shipped text with its three joins as
+  `CROSS JOIN`s; the view is unchanged and there is no migration. Its plan's
+  only scan is the batch's candidates (checked by `tick-rows-read.test.ts`),
+  and on the harness it reads 3 rows a call at both sizes, against 75,890 and
+  283,740 before. The frozen text selects the same rows on both scaled stores,
+  for every policy-2 identity run whether or not its parse is empty or already
+  pinned. Option 2a named `vpass-binding-view.test.ts`'s random stores too;
+  they hold only the view's own tables, not identity runs or parses, and a
+  `CROSS JOIN` with an `ON` clause is an inner join in SQLite, so only the
+  order, not the rows, can differ.
 
 ## Verification
 

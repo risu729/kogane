@@ -30,6 +30,24 @@ export type IdentityResolver = (input: IdentityInput) => IdentityPlan;
 export { BASE_IDENTITY_POLICY_VERSION, IDENTITY_POLICY_VERSION, identityKey };
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 
+/**
+ * The pins of a batch's trusted Vpass policy-2 runs (ADR 0129, decision 4).
+ * `CROSS JOIN`, which SQLite never reorders, makes the batch's candidates the
+ * only scan: each reaches its identity run, parse and bindings by key. With
+ * plain joins the planner started from every binding artifact and searched
+ * every Vpass artifact for each, about 6M rows a call in production
+ * (2026-11-22). The rows are those of the plain joins
+ * (`services/processor/test/vpass-binding-insert.test.ts`).
+ */
+export const VPASS_BINDING_INSERT_SQL = `INSERT INTO identity_vpass_bindings
+        SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
+        CROSS JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]')
+          AND r.policy_version=json_extract(candidate.value,'$[2]') AND r.policy_version=2
+        CROSS JOIN parse_runs p ON p.id=r.parse_run_id AND p.id=json_extract(candidate.value,'$[1]')
+        CROSS JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id
+        WHERE p.status='ok' AND ${EMPTY_PARSE_SQL}
+          AND NOT EXISTS(SELECT 1 FROM identity_vpass_bindings pin WHERE pin.identity_run_id=r.id)`;
+
 /** Automatic policy yields to the latest effective decision (migration 0029):
  * an active manual override, or a manual row the log does not describe. */
 const PROTECTED_SQL = (subjectKind: "account_mapping" | "instrument_mapping") =>
@@ -596,16 +614,7 @@ export async function identitySweep(
         WHERE NOT EXISTS(SELECT 1 FROM identity_run_policies existing WHERE existing.identity_run_id=r.id)
           AND NOT EXISTS(SELECT 1 FROM identity_run_seals sealed WHERE sealed.identity_run_id=r.id)`)
         .bind(values),
-      db
-        .prepare(`INSERT INTO identity_vpass_bindings
-        SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
-        JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]')
-          AND r.policy_version=json_extract(candidate.value,'$[2]') AND r.policy_version=2
-        JOIN parse_runs p ON p.id=r.parse_run_id AND p.id=json_extract(candidate.value,'$[1]')
-        JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id
-        WHERE p.status='ok' AND ${EMPTY_PARSE_SQL}
-          AND NOT EXISTS(SELECT 1 FROM identity_vpass_bindings pin WHERE pin.identity_run_id=r.id)`)
-        .bind(values),
+      db.prepare(VPASS_BINDING_INSERT_SQL).bind(values),
       db
         .prepare(`INSERT INTO identity_run_seals
         SELECT r.id,0,? FROM json_each(?) candidate

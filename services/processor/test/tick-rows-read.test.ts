@@ -21,7 +21,7 @@
 //
 // What it asserts is a ceiling on today's growth: the ratio of rows read at 2N
 // to rows read at N stays at or under what the current plans do (linear in
-// the history, quadratic for the Vpass insert), so a change that makes one of
+// the history, constant for the valuations and the Vpass insert), so a change that makes one of
 // these reads grow faster with history fails here. A change that makes a read
 // cheaper passes; it restates the cost in docs/read-model.md and lowers the
 // ceiling to its new measurement in the same PR. The issue's acceptance, a
@@ -52,7 +52,10 @@ import {
   myjcbPastMonthsSnapshotCtes,
 } from "../../../packages/read-model/src/current-captures.ts";
 import { LATEST_BALANCE_CANDIDATES_SQL } from "../../../packages/read-model/src/sql.ts";
-import { identitySweep } from "../../../packages/storage-d1/src/core/identity-store.ts";
+import {
+  identitySweep,
+  VPASS_BINDING_INSERT_SQL,
+} from "../../../packages/storage-d1/src/core/identity-store.ts";
 import {
   CORE_MIGRATIONS_URL,
   migrationFiles,
@@ -68,6 +71,7 @@ import { captureRewardInput } from "../src/reward-read-projection.ts";
 import { runReportJob } from "../src/report-job.ts";
 import { copyIntoD1 } from "./support/d1-copy.ts";
 import { settledTest } from "./support/settle.ts";
+import { VPASS_BINDING_INSERT_LEGACY_SQL } from "./vpass-binding-insert-legacy-sql.ts";
 
 /** Capture days of the smaller store; the larger one has twice as many, ending the same day. */
 const DAYS = 30;
@@ -113,9 +117,9 @@ type Named = keyof typeof NAMED;
  * days (docs/read-model.md, Rows read by the latest-state reads). The reads
  * that still walk history double (1.83 to 1.89: the card sweeps, and the
  * history parsers' parses the memo-backed reads still visit), the valuations
- * of the current positions do not grow, and the Vpass binding insert, which
- * walks every Vpass artifact once per binding artifact, nearly quadruples
- * (3.74).
+ * of the current positions and the Vpass binding insert, which starts from
+ * its candidates (ADR 0129, decision 4; it walked every Vpass artifact once per
+ * binding artifact and nearly quadrupled, 3.74), do not grow.
  */
 const GROWTH_CEILING: Record<Named, number> = {
   latestBalances: 2.2,
@@ -125,7 +129,7 @@ const GROWTH_CEILING: Record<Named, number> = {
   snapshotMemo: 1.8,
   staleKeys: 2.4,
   cardUsage: 2.4,
-  vpassBindingInsert: 4.8,
+  vpassBindingInsert: 1.1,
 };
 
 /**
@@ -317,6 +321,8 @@ interface Measured {
   inlineLatestBalances: number;
   /** The capture's one flagged read against the reader's three latest-balance lists. */
   candidates: CandidateComparison;
+  /** The Vpass binding insert's rows, by the frozen and the current text. */
+  vpassBindings: { legacy: unknown[]; current: unknown[] };
 }
 
 interface CandidateComparison {
@@ -362,6 +368,23 @@ const SELECTIONS = {
 
 const rowsReadBy = (tallies: Tallies) =>
   [...tallies.values()].reduce((sum, tally) => sum + tally.rowsRead, 0);
+
+/**
+ * The rows a Vpass binding insert's select returns for every policy-2
+ * identity run of the store, whether or not its parse is empty or already
+ * pinned: the join is what the rewrite changed, so the comparison keeps every
+ * run that reaches it.
+ */
+async function vpassBindingRows(db: D1Database, insert: string): Promise<unknown[]> {
+  const select = insert
+    .slice(insert.indexOf("SELECT"))
+    .replace(/ AND NOT EXISTS\(SELECT 1 FROM transaction_observations[\s\S]*$/u, "");
+  const runs = await db
+    .prepare("SELECT id, parse_run_id FROM identity_runs WHERE policy_version=2")
+    .all<{ id: string; parse_run_id: number }>();
+  const candidates = JSON.stringify(runs.results.map((run) => [run.id, run.parse_run_id, 2]));
+  return (await db.prepare(`${select} ORDER BY 1,2,3,4`).bind(candidates).all()).results;
+}
 
 async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
   const callers: Record<string, Tallies> = {};
@@ -426,7 +449,12 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
   const inlineLatestBalances = (await db.prepare(LATEST_BALANCE_CANDIDATES_SQL).all()).meta
     .rows_read;
   const scalar = async (sql: string) => (await db.prepare(sql).first<{ n: number }>())!.n;
+  const vpassBindings = {
+    legacy: await vpassBindingRows(db, VPASS_BINDING_INSERT_LEGACY_SQL),
+    current: await vpassBindingRows(db, VPASS_BINDING_INSERT_SQL),
+  };
   return {
+    vpassBindings,
     callers,
     named,
     candidates,
@@ -561,7 +589,7 @@ test("rows read per call grow with the history no faster than today", () => {
 // Issue #1491's acceptance: doubling the historical artifacts at the same
 // current state adds at most a small constant. A statement that reaches it
 // is a test; the others stay a `test.todo` until their slice.
-const CONSTANT_IN_HISTORY: readonly Named[] = ["positionValuations"];
+const CONSTANT_IN_HISTORY: readonly Named[] = ["positionValuations", "vpassBindingInsert"];
 for (const name of Object.keys(NAMED) as Named[])
   if (CONSTANT_IN_HISTORY.includes(name))
     test(`${name}: rows read per call at 2N within a small constant of N (issue #1491)`, () => {
@@ -584,22 +612,28 @@ test("the report job's second run over unchanged inputs reads only its gate", ()
   expect(large.reportReuse).toBe(small.reportReuse);
 });
 
-test("the Vpass binding insert's plan nests every Vpass artifact under every binding artifact", () => {
+test("the Vpass binding insert starts from its candidates and reads nothing else whole (ADR 0129, decision 4)", () => {
   const shipped = [...small.callers["identity sweep (v-point, empty parses)"]!.keys()].find((sql) =>
     NAMED.vpassBindingInsert(collapsed(sql)),
   )!;
+  expect(shipped).toBe(VPASS_BINDING_INSERT_SQL);
   const db = fullCoreDatabase();
   try {
     const plan = planOf(db, shipped, ["[]"]);
-    // The binding artifacts first, then every Vpass artifact for each; the
-    // batch's candidates are the innermost loop.
-    expect(plan[0]).toStartWith("SEARCH ba USING INDEX idx_fetch_artifacts_source_dataset_time");
-    expect(plan).toContain(
-      "SEARCH fa USING INDEX idx_fetch_artifacts_source_dataset_time (source_id=?)",
-    );
-    expect(plan.at(-1)).toStartWith("SCAN candidate VIRTUAL TABLE");
+    // The batch's candidates are the outer loop and the only scan; before,
+    // the binding artifacts came first and every Vpass artifact was searched
+    // for each.
+    expect(plan[0]).toStartWith("SCAN candidate VIRTUAL TABLE");
+    expect(plan.filter((step) => step.startsWith("SCAN"))).toHaveLength(1);
   } finally {
     db.close();
+  }
+});
+
+test("the Vpass binding insert selects the rows its frozen text did, on both stores", () => {
+  for (const measured of [small, large]) {
+    expect(measured.vpassBindings.legacy.length).toBeGreaterThan(0);
+    expect(measured.vpassBindings.current).toEqual(measured.vpassBindings.legacy);
   }
 });
 

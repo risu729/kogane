@@ -499,17 +499,17 @@ migration):
 - The card usage page and the stale-key read make the passes in
   [Cost](#cost) above.
 - The Vpass binding insert of `identitySweep`'s empty-parse batch
-  (`packages/storage-d1/src/core/identity-store.ts`) joins
-  `trusted_vpass_card_bindings` (migration 0057) by artifact, but its plan
-  starts from every binding artifact (`SEARCH ba USING INDEX
-  idx_fetch_artifacts_source_dataset_time (source_id=? AND artifact_role=? AND
-  dataset=?)`) and, for each, searches every Vpass artifact (`SEARCH fa ...
-  (source_id=?)`); the batch's candidates are the innermost loop. It reads
-  binding artifacts times Vpass artifacts whatever the batch holds, and it runs
-  whenever the batch holds an empty parse of any source. The keyed lookup
-  `SELECT ... FROM trusted_vpass_card_bindings WHERE financial_artifact_id=?`
-  is keyed (`services/processor/test/binding-query-plan.test.ts`); the insert's
-  join is not.
+  (`VPASS_BINDING_INSERT_SQL`, `packages/storage-d1/src/core/identity-store.ts`)
+  joins `trusted_vpass_card_bindings` (migration 0057) by artifact. Until ADR
+  0129's decision 4 (2026-11-25) its plan started from every binding artifact
+  and, for each, searched every Vpass artifact, with the batch's candidates
+  the innermost loop: binding artifacts times Vpass artifacts whatever the
+  batch held, whenever it held an empty parse of any source (about 9.7M rows a
+  run in production on 2026-11-25). Its joins are now `CROSS JOIN`s, which
+  SQLite never reorders, so the candidates are the outer loop and the only
+  scan, and each reaches its run, parse and bindings by key. The frozen text
+  (`services/processor/test/vpass-binding-insert-legacy-sql.ts`) selects the
+  same rows on both scaled stores (`tick-rows-read.test.ts`).
 
 `services/processor/test/tick-rows-read.test.ts` measures workerd's own
 `meta.rows_read` per call through each statement's real caller, on two
@@ -528,7 +528,7 @@ their reward claims per day), copied into Miniflare D1:
 | the memo walk (`insertMembers`)      | `ensureSnapshotMemo` |            968 |           1,448 |   1.50 | (insert)      |
 | `STALE_CARD_PURCHASE_KEYS_SQL`       | `cardPurchaseSweep`  |         17,773 |          32,606 |   1.83 | 5 / 5         |
 | `currentCardUsageSql` page           | `cardPurchaseSweep`  |         15,010 |          27,702 |   1.85 | 68 / 85       |
-| Vpass binding insert                 | `identitySweep`      |         75,890 |         283,740 |   3.74 | (insert)      |
+| Vpass binding insert                 | `identitySweep`      |     3 (75,890) |     3 (283,740) |   1.00 | (insert)      |
 
 Rows read are per call; in brackets, the shipped inline read the lane made
 before ADR 0129's second slice. The memo-backed reads start from the
@@ -539,8 +539,9 @@ position reads is the history parsers' parses (MyJCB statement totals and
 ledgers, Vpass statement pages, SMBC transactions: every published row of a
 parser that no snapshot rule governs is current), which the memo-backed reads
 still visit one index probe each, and in the balance read rank; ADR 0129's
-fourth slice bounds them. The card sweeps and the Vpass binding insert are
-its third. The report job's second run over unchanged inputs reads 3 rows at
+fourth slice bounds them. The card sweeps are its third; the Vpass binding
+insert reads a few rows per candidate (in brackets, the joins' order before
+decision 4). The report job's second run over unchanged inputs reads 3 rows at
 either size (its skip gate,
 [calculation and reports](calculation-and-reports.md)); before ADR 0129's
 first slice it read as much as its first, about 52,500 and 104,000 rows, only
@@ -551,18 +552,19 @@ at 60 days; the memo-backed read is 12,705.
 
 The test fails when a statement's growth exceeds its ceiling (2.2 for the
 memo-backed reads, 1.1 for the valuations, 1.8 for the walk, 2.4 for the card
-sweeps, 4.8 for the Vpass binding insert) or when a memo-backed read at 60
+sweeps, 1.1 for the Vpass binding insert) or when a memo-backed read at 60
 days reads more than its measurement plus about a tenth, so a read that falls
 back to the inline selection, or starts to grow faster with history, fails it;
 a read made cheaper passes, and its PR restates the numbers above and lowers
 the ceiling. That these reads do not grow with history, issue #1491's
-acceptance, is a test for the valuations and a `test.todo` for the others.
+acceptance, is a test for the valuations and the Vpass binding insert and a
+`test.todo` for the others.
 `tick-query-plan.test.ts` checks the `SCAN` steps of every statement a tick
 prepares: a whole read of a growing table is either bounded (with the reason)
 or an exception that names the issue removing it and an expiry date after
 which the test fails (ADR 0129, decision 8). Nested searches, automatic indexes
 and per-row probes pass it; its one-capture store does not reach the Vpass
-binding insert at all.
+binding insert, whose plan `tick-rows-read.test.ts` checks instead.
 
 ### Snapshot memo
 
