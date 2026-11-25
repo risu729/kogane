@@ -321,8 +321,8 @@ interface Measured {
   inlineLatestBalances: number;
   /** The capture's one flagged read against the reader's three latest-balance lists. */
   candidates: CandidateComparison;
-  /** The Vpass binding insert's rows, by the frozen and the current text. */
-  vpassBindings: { legacy: unknown[]; current: unknown[] };
+  /** The Vpass binding insert's select over every policy-2 run, by the frozen and the current text. */
+  vpassBindings: { candidates: number; legacy: VpassBindingRead; current: VpassBindingRead };
 }
 
 interface CandidateComparison {
@@ -369,21 +369,27 @@ const SELECTIONS = {
 const rowsReadBy = (tallies: Tallies) =>
   [...tallies.values()].reduce((sum, tally) => sum + tally.rowsRead, 0);
 
+interface VpassBindingRead {
+  rows: unknown[];
+  rowsRead: number;
+}
+
 /**
- * The rows a Vpass binding insert's select returns for every policy-2
- * identity run of the store, whether or not its parse is empty or already
- * pinned: the join is what the rewrite changed, so the comparison keeps every
- * run that reaches it.
+ * What a Vpass binding insert's select returns, and reads, for every policy-2
+ * identity run of the store as one batch, whether or not its parse is empty
+ * or already pinned: the join is what the rewrite changed, so the comparison
+ * keeps every run that reaches it.
  */
-async function vpassBindingRows(db: D1Database, insert: string): Promise<unknown[]> {
+async function vpassBindingRead(
+  db: D1Database,
+  insert: string,
+  candidates: string,
+): Promise<VpassBindingRead> {
   const select = insert
     .slice(insert.indexOf("SELECT"))
     .replace(/ AND NOT EXISTS\(SELECT 1 FROM transaction_observations[\s\S]*$/u, "");
-  const runs = await db
-    .prepare("SELECT id, parse_run_id FROM identity_runs WHERE policy_version=2")
-    .all<{ id: string; parse_run_id: number }>();
-  const candidates = JSON.stringify(runs.results.map((run) => [run.id, run.parse_run_id, 2]));
-  return (await db.prepare(`${select} ORDER BY 1,2,3,4`).bind(candidates).all()).results;
+  const result = await db.prepare(`${select} ORDER BY 1,2,3,4`).bind(candidates).all();
+  return { rows: result.results, rowsRead: result.meta.rows_read };
 }
 
 async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
@@ -449,9 +455,14 @@ async function measure(db: D1Database, evidence: R2Bucket): Promise<Measured> {
   const inlineLatestBalances = (await db.prepare(LATEST_BALANCE_CANDIDATES_SQL).all()).meta
     .rows_read;
   const scalar = async (sql: string) => (await db.prepare(sql).first<{ n: number }>())!.n;
+  const policyTwo = await db
+    .prepare("SELECT id, parse_run_id FROM identity_runs WHERE policy_version=2")
+    .all<{ id: string; parse_run_id: number }>();
+  const batch = JSON.stringify(policyTwo.results.map((run) => [run.id, run.parse_run_id, 2]));
   const vpassBindings = {
-    legacy: await vpassBindingRows(db, VPASS_BINDING_INSERT_LEGACY_SQL),
-    current: await vpassBindingRows(db, VPASS_BINDING_INSERT_SQL),
+    candidates: policyTwo.results.length,
+    legacy: await vpassBindingRead(db, VPASS_BINDING_INSERT_LEGACY_SQL, batch),
+    current: await vpassBindingRead(db, VPASS_BINDING_INSERT_SQL, batch),
   };
   return {
     vpassBindings,
@@ -625,16 +636,34 @@ test("the Vpass binding insert starts from its candidates and reads nothing else
     // for each.
     expect(plan[0]).toStartWith("SCAN candidate VIRTUAL TABLE");
     expect(plan.filter((step) => step.startsWith("SCAN"))).toHaveLength(1);
+    // No index built over a whole table per call either.
+    expect(plan.filter((step) => /AUTOMATIC|BLOOM/u.test(step))).toEqual([]);
   } finally {
     db.close();
   }
 });
 
-test("the Vpass binding insert selects the rows its frozen text did, on both stores", () => {
+test("the Vpass binding insert selects the rows its frozen text did, reading a constant per Vpass candidate", () => {
+  const perCandidate = (read: VpassBindingRead, measured: Measured) =>
+    read.rowsRead / measured.vpassBindings.candidates;
+  console.info("Vpass binding insert over every policy-2 run: rows read per candidate", {
+    [`frozen, ${DAYS} days`]: Math.round(perCandidate(small.vpassBindings.legacy, small)),
+    [`current, ${DAYS} days`]: Math.round(perCandidate(small.vpassBindings.current, small)),
+    [`frozen, ${2 * DAYS} days`]: Math.round(perCandidate(large.vpassBindings.legacy, large)),
+    [`current, ${2 * DAYS} days`]: Math.round(perCandidate(large.vpassBindings.current, large)),
+    [`candidates, ${DAYS} / ${2 * DAYS} days`]: `${small.vpassBindings.candidates} / ${large.vpassBindings.candidates}`,
+  });
   for (const measured of [small, large]) {
-    expect(measured.vpassBindings.legacy.length).toBeGreaterThan(0);
-    expect(measured.vpassBindings.current).toEqual(measured.vpassBindings.legacy);
+    expect(measured.vpassBindings.legacy.rows.length).toBeGreaterThan(0);
+    expect(measured.vpassBindings.current.rows).toEqual(measured.vpassBindings.legacy.rows);
   }
+  // Rows read per candidate do not grow with the history.
+  expect(
+    Math.abs(
+      perCandidate(large.vpassBindings.current, large) -
+        perCandidate(small.vpassBindings.current, small),
+    ),
+  ).toBeLessThanOrEqual(10);
 });
 
 test("the snapshot selections alone are most of an inline latest-balances read", () => {

@@ -537,16 +537,18 @@ The draft's open questions, as the accepted design answers them:
 
 - After slice 3, the Processor's hourly read guard (decision 8) was holding
   the derived lanes to one tick an hour (24-hour sum above 300M since 18:05
-  UTC on 2026-11-24), at about 13M rows an hour. About 9.7M of each such tick
+  UTC on 2026-11-24), at about 13M rows an hour. About 9.4M of such a tick (02:02 UTC on 2026-11-25)
   was the Vpass binding insert of the identity sweep. All rows read were
   billed, the period's included rows being spent (43B since 2026-10-25), so
   2026-11-24's 1.0B rows cost about $1.00 and the guarded rate about $0.33 a
   day.
 - `VPASS_BINDING_INSERT_SQL` is the shipped text with its three joins as
   `CROSS JOIN`s; the view is unchanged and there is no migration. Its plan's
-  only scan is the batch's candidates (checked by `tick-rows-read.test.ts`),
-  and on the harness it reads 3 rows a call at both sizes, against 75,890 and
-  283,740 before. The frozen text selects the same rows on both scaled stores,
+  only scan is the batch's candidates (checked by `tick-rows-read.test.ts`).
+  On the harness, a batch of every policy-2 identity run (260 and 510) reads
+  37 and 38 rows per candidate at 30 and 60 days, against 1,766 and 3,500
+  before, and the table's call, which reaches no Vpass run, reads 3 rows
+  against 75,890 and 283,740. The frozen text selects the same rows on both scaled stores,
   for every policy-2 identity run whether or not its parse is empty or already
   pinned. Option 2a named `vpass-binding-view.test.ts`'s random stores too;
   they hold only the view's own tables, not identity runs or parses, and a

@@ -504,12 +504,14 @@ migration):
   0129's decision 4 (2026-11-25) its plan started from every binding artifact
   and, for each, searched every Vpass artifact, with the batch's candidates
   the innermost loop: binding artifacts times Vpass artifacts whatever the
-  batch held, whenever it held an empty parse of any source (about 9.7M rows a
-  run in production on 2026-11-25). Its joins are now `CROSS JOIN`s, which
+  batch held, whenever it held an empty parse of any source (about 9.4M rows in
+  the run of 02:02 UTC on 2026-11-25). Its joins are now `CROSS JOIN`s, which
   SQLite never reorders, so the candidates are the outer loop and the only
   scan, and each reaches its run, parse and bindings by key. The frozen text
   (`services/processor/test/vpass-binding-insert-legacy-sql.ts`) selects the
-  same rows on both scaled stores (`tick-rows-read.test.ts`).
+  same rows on both scaled stores (`tick-rows-read.test.ts`), and over every
+  policy-2 identity run of those stores (260 and 510) the insert reads 37 and
+  38 rows per candidate, against 1,766 and 3,500 before.
 
 `services/processor/test/tick-rows-read.test.ts` measures workerd's own
 `meta.rows_read` per call through each statement's real caller, on two
@@ -540,8 +542,8 @@ ledgers, Vpass statement pages, SMBC transactions: every published row of a
 parser that no snapshot rule governs is current), which the memo-backed reads
 still visit one index probe each, and in the balance read rank; ADR 0129's
 fourth slice bounds them. The card sweeps are its third; the Vpass binding
-insert reads a few rows per candidate (in brackets, the joins' order before
-decision 4). The report job's second run over unchanged inputs reads 3 rows at
+insert reads a constant per candidate (the table's call reaches no Vpass run;
+in brackets, the joins' order before decision 4). The report job's second run over unchanged inputs reads 3 rows at
 either size (its skip gate,
 [calculation and reports](calculation-and-reports.md)); before ADR 0129's
 first slice it read as much as its first, about 52,500 and 104,000 rows, only

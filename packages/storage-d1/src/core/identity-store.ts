@@ -35,9 +35,9 @@ const kinds = ["transaction", "balance", "position", "valuation"] as const;
  * `CROSS JOIN`, which SQLite never reorders, makes the batch's candidates the
  * only scan: each reaches its identity run, parse and bindings by key. With
  * plain joins the planner started from every binding artifact and searched
- * every Vpass artifact for each, about 6M rows a call in production
- * (2026-11-22). The rows are those of the plain joins
- * (`services/processor/test/vpass-binding-insert.test.ts`).
+ * every Vpass artifact for each, 9.4M rows in one production run on
+ * 2026-11-25. The rows are those of the plain joins
+ * (`services/processor/test/tick-rows-read.test.ts`).
  */
 export const VPASS_BINDING_INSERT_SQL = `INSERT INTO identity_vpass_bindings
         SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
