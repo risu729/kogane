@@ -549,8 +549,8 @@ The draft's open questions, as the accepted design answers them:
   its select reads 37 and 38 rows per candidate at 30 and 60 days, against
   1,766 and 3,500 before. The insert adds a constant per candidate on top
   (the observation and pin probes, and per pinned row the provenance and
-  revision triggers), so a pinned Vpass candidate costs roughly twice that,
-  still flat in history. The table's call, which reaches no Vpass run, reads
+  revision triggers), so a pinned Vpass candidate costs an estimated twice
+  that (read from the plans, not measured), still flat in history. The table's call, which reaches no Vpass run, reads
   3 rows against 75,890 and 283,740. The frozen text selects the same rows on
   both scaled stores, for every policy-2 identity run whether or not its
   parse is empty or already pinned. Option 2a named
