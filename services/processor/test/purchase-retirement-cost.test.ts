@@ -102,7 +102,7 @@ test("the no-statistics bytecode dependency closure is covered by direct trigger
   }
 });
 
-test("unchanged ticks skip the full retirement set while recognition and candidates continue; low-id publication and epoch changes invalidate", async () => {
+test("unchanged ticks skip the full retirement set and the recognition pass; low-id publication and epoch changes invalidate", async () => {
   const db = copy();
   try {
     await settle(db);
@@ -112,11 +112,13 @@ test("unchanged ticks skip the full retirement set while recognition and candida
       return sql;
     });
     const before = check(db);
+    const recognitionPage = (sql: string) =>
+      sql.includes("FROM keyed") && sql.includes("observation_id > ?1");
     for (let tick = 0; tick < 3; tick++) await cardPurchaseSweep(count, { now: NOW });
     expect(sqls.filter(staleSql)).toHaveLength(0);
-    expect(
-      sqls.some((sql) => sql.includes("FROM keyed") && sql.includes("observation_id > ?1")),
-    ).toBe(true);
+    // The recognition pass that settled the store read every row at this CORE
+    // revision, so it waits for a change too (ADR 0129, slice 3).
+    expect(sqls.some(recognitionPage)).toBe(false);
     expect(check(db)).toEqual(before);
     // Same count, same maximum id; a low-id adopted pointer UPDATE still invalidates.
     db.run(
@@ -126,6 +128,7 @@ test("unchanged ticks skip the full retirement set while recognition and candida
     sqls.length = 0;
     await cardPurchaseSweep(count, { now: NOW });
     expect(sqls.filter(staleSql)).toHaveLength(1);
+    expect(sqls.some(recognitionPage)).toBe(true);
     await settle(db);
     db.run("UPDATE card_purchase_retirement_check SET clean_policy='old-contract'");
     sqls.length = 0;

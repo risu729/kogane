@@ -408,6 +408,12 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "stored current snapshot sets",
   },
+  // The cursor sweeps' gates (0109, ADR 0129): the revision each sweep's last
+  // complete pass started at. Rewritten in place, one row per sweep.
+  processor_sweep_passes: {
+    classification: "operational-mutable",
+    planRow: "cursor sweep pass gates",
+  },
   // calculation_runs/results, report_artifacts/events → CORE + DATA R2
   calculation_results: { classification: "core-keep", planRow: "calculation runs and reports" },
   calculation_runs: { classification: "core-keep", planRow: "calculation runs and reports" },

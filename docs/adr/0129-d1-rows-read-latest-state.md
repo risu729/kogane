@@ -476,6 +476,64 @@ The draft's open questions, as the accepted design answers them:
   24,401), reward buckets 290 and 530 (from 8,571 and 17,101), the walk 968
   and 1,448 once per revision.
 
+## Slice 3 as built (2026-11-24)
+
+- After slice 2, one hour of ticks (06:35 to 07:35 UTC) read about 2.5M
+  rows a tick, 65% of it in the card settlement sweep and the purchase
+  recognition pass: both page through their whole input every tick (52
+  current statements, about 86k rows of `card_statement_facts`; the current
+  card usage rows) because one pass fits in one tick and the cursor wraps.
+- Gate, not high-water mark: `processor_sweep_passes` (migration 0109) holds
+  one row per sweep. A pass from the first row records the CORE revision
+  (source revision, visibility revision, core epoch), the sweep's policy and a
+  token; a pass that reaches the end with its work done marks that start
+  clean, naming the token, so an overlapping tick's pass is never marked by
+  another's end. While the revision and the policy equal the clean ones, a
+  tick at cursor 0 reads the gate row and stops. What the sweeps read off the
+  CORE dependency ledger is folded in or argued:
+  - the policy carries code-owned versions (the matching, debit-account and
+    card information reader versions; the recognition writer and the
+    matcher's release and options) and a digest of the views each sweep's
+    code reads, which `test/sweep-pass.test.ts` checks against the migrated
+    schema, so a migration that redefines one of them fails until the pin
+    moves;
+  - the settlement policy also carries the highest card information reading
+    id, since the debit-account lane writes those readings off the ledger;
+  - the settlement candidates and debit-account evidence are written only by
+    that sweep, the purchase proposals only added (by the sweep, or under
+    other digests by the reconciliation sweep) or decided through a decision
+    revision, and none is deleted.
+
+  A pass whose own writes moved the revision (purchase events) is followed by
+  one more, which writes nothing and closes the gate. A tick reads its cursor
+  and the recorded pass in one statement. The purchase cursor leaves a page
+  only after its candidates and merges, so a tick cut off before then reads
+  the page again. A purchase pass in which a tick left work for later (the
+  candidate budget full, more linked events than one merge takes, any failed
+  write, or a candidate or merge step that threw, counted as a failure so one
+  failing page never holds the cursor) marks nothing clean; a failure that repeats keeps that pass
+  reading everything each tick. The settlement sweep's write budget stops the
+  cursor on its statement, so a pass that reaches the end has written
+  everything. A code change that no version string carries (a statement's
+  text written in TypeScript, a domain rule) runs no pass by itself: the pass
+  after the next CORE write applies it, or a bump of the sweep's version.
+
+- Decision 7's "proportional to new rows" is not reached: a tick in which the
+  revision moved still runs a whole pass. Quiet ticks cost the gate read; the
+  first measured hour of production had a moving revision on every tick (the
+  parse backlog left by the stop: 1,080 pending parse jobs at 13:05 UTC, about
+  150 parses an hour), so the effect shows only once that backlog is done.
+  Reading only what changed would need the statement and usage readings keyed
+  by what moved, which the sweeps' rankings do not offer; it stays open under
+  issue #1491 with slice 4.
+- Measured on the harness: a quiet settlement tick prepares two statements
+  (the card information mark, then the cursor and the gate together), and a quiet purchase
+  tick reads the gate instead of the usage page, checked by
+  `services/processor/test/sweep-pass.test.ts`.
+- Not changed here: the Vpass binding insert (decision 4) and the stale-key
+  read of the retirement pass, which already skips while its own revision
+  check holds.
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each

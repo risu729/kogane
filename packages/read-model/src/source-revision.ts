@@ -149,6 +149,9 @@ export const REVISION_EXCLUDED_TABLES = [
   "snapshot_selection_containers",
   "snapshot_selection_keys",
   "snapshot_selection_members",
+  // ADR 0129's sweep gates (migration 0109): where a cursor sweep's last
+  // complete pass started. Keyed on this very revision, like the report gate.
+  "processor_sweep_passes",
 ] as const;
 
 export type LedgerTable =

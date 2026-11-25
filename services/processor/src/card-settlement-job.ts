@@ -3,6 +3,8 @@ import {
   type CoreRevisionRow,
 } from "../../../packages/read-model/src/source-revision.ts";
 import { createSettlementBankReader } from "./card-settlement-bank-cache.ts";
+import { finishSweepPass, openSweepTick } from "./sweep-pass.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../../packages/domain/src/myjcb-card-information.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   cardSettlementCandidate,
@@ -39,6 +41,30 @@ type Row = CardSettlementSweepRow & {
   bank_key: string;
 };
 const LIMIT = CARD_SETTLEMENT_BANK_DEBITS_LIMIT;
+/** Statements a tick reads. */
+const STATEMENT_PAGE = 100;
+/**
+ * The definitions of the views the sweep reads, as a digest that
+ * `test/sweep-pass.test.ts` checks against the migrated schema: a migration
+ * that redefines one moves no revision, so it changes this value, and with it
+ * the sweep's policy, to run a pass again.
+ */
+export const CARD_SETTLEMENT_SWEEP_VIEWS = "91965967c608ce81";
+/**
+ * What a complete pass of the sweep decides, for its gate (src/sweep-pass.ts):
+ * the matching and debit-account policies, the card information reader, the
+ * views it reads and the sweep's own version. A change to any of them runs a
+ * pass again although no input moved.
+ */
+export const CARD_SETTLEMENT_SWEEP_POLICY = `${CARD_SETTLEMENT_POLICY}+${CARD_DEBIT_ACCOUNT_POLICY}+${CARD_INFORMATION_READER_VERSION}+views:${CARD_SETTLEMENT_SWEEP_VIEWS}+sweep-v1`;
+/**
+ * The newest card information reading. The debit-account lane writes those
+ * readings in its own time and they are not on the CORE ledger, so the
+ * sweep's gate policy carries this high-water mark: a new reading runs a
+ * pass again.
+ */
+export const CARD_DEBIT_READING_MARK_SQL =
+  "SELECT coalesce(max(id),0) AS id FROM card_debit_account_statement";
 /**
  * The next page of current provider statements after the cursor, with their
  * owners. The page is chosen first and only its statements are owned, through
@@ -118,35 +144,31 @@ export interface CardSettlementSweepResult {
 export async function cardSettlementSweep(db: D1Database): Promise<CardSettlementSweepResult> {
   // Cache only numberless baseline references. Observed context stays debit-local.
   const bankAccountsBySource = new Map<string, BankAccountReference[] | null>();
-  const cursor = await db
-    .prepare("SELECT last_statement_id FROM card_settlement_scan_cursor WHERE singleton=1")
-    .first<{ last_statement_id: number }>();
-  if (
-    cursor?.last_statement_id &&
-    !(await db
-      .prepare("SELECT 1 FROM card_statement_facts WHERE id>? LIMIT 1")
-      .bind(cursor.last_statement_id)
-      .first())
-  ) {
-    await db
-      .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1")
-      .run();
-    cursor.last_statement_id = 0;
-  }
-  const statements = await db
-    .prepare(CARD_SETTLEMENT_STATEMENTS_SQL)
-    .bind(cursor?.last_statement_id ?? 0, 100)
-    .all<Row>();
-  let proposed = 0,
-    written = 0,
-    debitAccountEvidence = 0,
-    scanned = statements.results.length;
   const unmatched: Record<CardSettlementUnmatchedCode, number> = {
     statement_total_refund_or_zero: 0,
     statement_not_comparable: 0,
     no_debit_in_window: 0,
     no_equal_amount_debit: 0,
   };
+  // A pass starts from the first statement only when something it reads
+  // moved since the last pass that read them all (src/sweep-pass.ts).
+  const mark = (await db.prepare(CARD_DEBIT_READING_MARK_SQL).first<{ id: number }>())?.id ?? 0;
+  const tick = await openSweepTick(
+    db,
+    "card_settlement",
+    `${CARD_SETTLEMENT_SWEEP_POLICY}@${mark}`,
+    "SELECT last_statement_id FROM card_settlement_scan_cursor WHERE singleton=1",
+  );
+  if (tick.skip) return { scanned: 0, proposed: 0, written: 0, debitAccountEvidence: 0, unmatched };
+  const cursor = tick.cursor;
+  const statements = await db
+    .prepare(CARD_SETTLEMENT_STATEMENTS_SQL)
+    .bind(cursor, STATEMENT_PAGE)
+    .all<Row>();
+  let proposed = 0,
+    written = 0,
+    debitAccountEvidence = 0,
+    scanned = statements.results.length;
   const readBanks = createSettlementBankReader<Row>(
     () => db.prepare(CORE_REVISION_SQL).first<CoreRevisionRow>(),
     async (date) =>
@@ -260,9 +282,13 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
       .bind(statement.id)
       .run();
   }
-  if (statements.results.length === 0)
+  // The last page ends the pass: the cursor goes back to the first statement,
+  // and the next pass waits for a change instead of starting on the next tick.
+  if (statements.results.length < STATEMENT_PAGE) {
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1")
       .run();
+    await finishSweepPass(db, "card_settlement", tick.token);
+  }
   return { scanned, proposed, written, debitAccountEvidence, unmatched };
 }
