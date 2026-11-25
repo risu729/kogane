@@ -307,7 +307,7 @@ test("over the budget, of two ticks that overlap at the start of an hour only on
   const ran: string[] = [];
   const alerts: string[] = [];
   // Both read the budget before either counts itself.
-  let reads = 0;
+  let claims = 0;
   let release!: () => void;
   const bothRead = new Promise<void>((resolve) => (release = resolve));
   const gated: Env = {
@@ -326,8 +326,8 @@ test("over the budget, of two ticks that overlap at the start of an hour only on
                     const bound = inner.bind(...values);
                     return {
                       all: async () => {
-                        reads += 1;
-                        if (reads === 2) release();
+                        claims += 1;
+                        if (claims === 2) release();
                         await bothRead;
                         return bound.all();
                       },
@@ -351,7 +351,7 @@ test("over the budget, of two ticks that overlap at the start of an hour only on
       }),
     ),
   );
-  expect(reads).toBe(2);
+  expect(claims).toBe(2);
   expect(ran.filter((lane) => lane === "identity_sweep")).toHaveLength(1);
   expect(alerts.map((line) => (JSON.parse(line) as { event: string }).event)).toEqual([
     "d1_read_budget_exceeded",
