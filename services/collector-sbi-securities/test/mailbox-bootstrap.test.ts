@@ -74,7 +74,6 @@ test("rejects executable variations and incomplete or ambiguous storage material
     script.replace("function()", "function(parameter)"),
     script.replace("autoRedirect();", "autoRedirect(1);"),
     script.replace("autoRedirect();", "autoRedirect?.();"),
-    script.replace("window.location.href", "location.href"),
     script.replace('plus.e-shishobako.ne.jp" +', 'plus.e-shishobako.ne.jp.evil.invalid" +'),
     script.replace('"/dp_apl/usr/"', '"/dp_apl/usr/?unexpected=1"'),
     script.replace('"/dp_apl/usr/"', '"/dp_apl/usr/#fragment"'),
@@ -154,7 +153,60 @@ test("a refused bootstrap names the grammar part it departed from, never the pag
     ],
     [html(script.replace('"dp-sfn"', '"dp-synthetic-secret"')), { rule: "storage" }],
     [html(script.replace("autoRedirect();\n}", "synthetic();\n}")), { rule: "redirect-call" }],
-    [html(script.replace('"/dp_apl/usr/"', '"/synthetic-secret/"')), { rule: "redirect-function" }],
+    [html(script.replace('"/dp_apl/usr/"', '"/synthetic-secret/"')), { rule: "redirect-path" }],
+    [
+      html(
+        script.replace('"https://plus.e-shishobako.ne.jp"', '"https://synthetic-secret.invalid"'),
+      ),
+      { rule: "redirect-origin" },
+    ],
+    [html(script.replace('"/dp_apl/usr/"', "secret")), { rule: "redirect-dynamic" }],
+    [
+      html(
+        script
+          .replace("window.location.href =", "fetch(")
+          .replace('"/dp_apl/usr/";', '"/dp_apl/usr/");'),
+      ),
+      { rule: "redirect-navigation" },
+    ],
+    [
+      html(script.replace("window.location.href =", "document.location.href =")),
+      { rule: "redirect-navigation" },
+    ],
+    [
+      html(
+        script.replace(
+          "function autoRedirect() {\n",
+          "function autoRedirect() {\nvar synthetic = 1;\n",
+        ),
+      ),
+      { rule: "redirect-function", count: 2 },
+    ],
   ] as const)
     expect(rule(page)).toEqual(expected);
+});
+
+test("any spelling of the redirect is accepted only when it names the application", () => {
+  const witnessed = mailboxBootstrap(html());
+  const navigation = 'window.location.href = "https://plus.e-shishobako.ne.jp" + "/dp_apl/usr/";';
+  expect(script).toContain(navigation);
+  for (const spelling of [
+    'window.location.href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location.href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'window.location = "https://plus.e-shishobako.ne.jp" + "/dp_apl/" + "usr/";',
+    'location.replace("https://plus.e-shishobako.ne.jp" + "/dp_apl/usr/");',
+    "window.location.assign(`https://plus.e-shishobako.ne.jp/dp_apl/usr/`);",
+  ])
+    expect(mailboxBootstrap(html(script.replace(navigation, spelling)))).toEqual(witnessed);
+  for (const spelling of [
+    'window.location.href += "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location.reload("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
+    "location.href = `https://plus.e-shishobako.ne.jp/${secret}`;",
+    'window["location"].href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location?.replace("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
+    'location.replace("https://plus.e-shishobako.ne.jp/dp_apl/usr/", 1);',
+  ])
+    expect(() => mailboxBootstrap(html(script.replace(navigation, spelling)))).toThrow(
+      "sbi_mailbox_bootstrap_unobserved",
+    );
 });

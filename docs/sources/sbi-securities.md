@@ -534,6 +534,19 @@ for a count rule `bootstrapCount`, how many scripts, statements or handler
 actions the page had (at most 99). Never the page text, a script, a key or a
 value.
 
+The 2026-11-27 21:00 UTC run named it: `bootstrapRule` `redirect-function`. The
+page still had one script that stored the eight known keys and then called
+`autoRedirect()`, but the redirect function no longer matched the witnessed
+`window.location.href = origin + path` form. The client never executes the
+page and opens the application itself, so the redirect now only has to be a
+navigation (`[window.]location[.href] = X` or `[window.]location.assign(X)` /
+`.replace(X)`) whose destination is a constant string (literals, an
+expression-free template, or `+` of those) equal to the application URL. A
+refusal there names `redirect-function` (declaration shape, or the number of
+statements in its body as `bootstrapCount`), `redirect-navigation` (another
+statement), `redirect-dynamic` (a destination that is not a constant),
+`redirect-origin` or `redirect-path`.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

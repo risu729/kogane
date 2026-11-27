@@ -48,7 +48,11 @@ export type BootstrapRule =
   | "onload"
   | "storage"
   | "redirect-call"
-  | "redirect-function";
+  | "redirect-function"
+  | "redirect-navigation"
+  | "redirect-dynamic"
+  | "redirect-origin"
+  | "redirect-path";
 
 /** A refused bootstrap page, with the rule and, for a count rule, the count. */
 export class BootstrapRefusal extends MailboxError {
@@ -191,24 +195,84 @@ function extractBootstrap(html: string): BootstrapMaterial {
   if (syntax(redirect.id).type !== "Identifier" || syntax(redirect.id).name !== "autoRedirect")
     refuse();
   const redirectBody = nodes(syntax(redirect.body).body);
-  if (redirectBody.length !== 1) refuse();
-  const navigation = expression(redirectBody[0]!);
-  if (navigation.type !== "AssignmentExpression" || navigation.operator !== "=") refuse();
-  const target = syntax(navigation.left);
-  if (target.type !== "MemberExpression" || target.computed !== false || target.optional !== false)
+  if (redirectBody.length !== 1) refuse(redirectBody.length);
+  stage = "redirect-navigation";
+  const destination = navigationDestination(expression(redirectBody[0]!));
+  // The page is never executed: the client opens the application itself, so
+  // any spelling of the navigation is accepted only when its destination is a
+  // constant string equal to the application (2026-11-27: the witnessed
+  // `window.location.href = origin + path` form no longer matched).
+  stage = "redirect-dynamic";
+  const href = constantString(destination, 0);
+  if (href !== MAILBOX_APPLICATION) {
+    stage = href.startsWith(`${MAILBOX_ORIGIN}/`) ? "redirect-path" : "redirect-origin";
     refuse();
-  member(target.object, "window", "location");
-  if (syntax(target.property).type !== "Identifier" || syntax(target.property).name !== "href")
-    refuse();
-  const destination = syntax(navigation.right);
-  if (
-    destination.type !== "BinaryExpression" ||
-    destination.operator !== "+" ||
-    literal(syntax(destination.left)) !== MAILBOX_ORIGIN ||
-    literal(syntax(destination.right)) !== "/dp_apl/usr/"
-  )
-    refuse();
+  }
   return { csrf: values.get("dp-csrf")!, riyoCd: values.get("dp-riyoCd")! };
+}
+
+/**
+ * The destination of `[window.]location[.href] = X` or
+ * `[window.]location.{assign,replace}(X)`; any other statement is refused.
+ */
+function navigationDestination(statement: SyntaxNode): SyntaxNode {
+  if (statement.type === "AssignmentExpression") {
+    if (statement.operator !== "=") refuse();
+    const target = syntax(statement.left);
+    if (!isLocation(target) && !(locationProperty(target) === "href")) refuse();
+    return syntax(statement.right);
+  }
+  if (statement.type === "CallExpression" && statement.optional === false) {
+    const method = locationProperty(syntax(statement.callee));
+    const args = nodes(statement.arguments);
+    if ((method === "assign" || method === "replace") && args.length === 1) return args[0]!;
+  }
+  refuse();
+}
+
+/** `location` or `window.location`. */
+function isLocation(node: SyntaxNode): boolean {
+  if (node.type === "Identifier") return node.name === "location";
+  return (
+    node.type === "MemberExpression" &&
+    node.computed === false &&
+    node.optional === false &&
+    syntax(node.object).type === "Identifier" &&
+    syntax(node.object).name === "window" &&
+    syntax(node.property).type === "Identifier" &&
+    syntax(node.property).name === "location"
+  );
+}
+
+/** The non-computed property name of a member of `[window.]location`, else undefined. */
+function locationProperty(node: SyntaxNode): string | undefined {
+  if (
+    node.type !== "MemberExpression" ||
+    node.computed !== false ||
+    node.optional !== false ||
+    !isLocation(syntax(node.object)) ||
+    syntax(node.property).type !== "Identifier"
+  )
+    return undefined;
+  return String(syntax(node.property).name);
+}
+
+/** A string literal, an expression-free template, or a `+` of those; nothing is evaluated. */
+function constantString(node: SyntaxNode, depth: number): string {
+  if (depth > 8) refuse();
+  if (node.type === "Literal") return literal(node);
+  if (node.type === "TemplateLiteral") {
+    const quasis = nodes(node.quasis);
+    if (nodes(node.expressions).length !== 0 || quasis.length !== 1) refuse();
+    const cooked = (quasis[0]!.value as { cooked?: unknown } | undefined)?.cooked;
+    if (typeof cooked !== "string") refuse();
+    return cooked;
+  }
+  if (node.type === "BinaryExpression" && node.operator === "+")
+    return (
+      constantString(syntax(node.left), depth + 1) + constantString(syntax(node.right), depth + 1)
+    );
+  refuse();
 }
 
 function syntax(value: unknown): SyntaxNode {
