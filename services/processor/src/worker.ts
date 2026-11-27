@@ -26,6 +26,7 @@ import {
   identitySweep,
 } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { identitySweepLane } from "./identity-sweep-lane.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
@@ -1930,7 +1931,9 @@ const defaultStages: ScheduledStages = {
   // Sized to what the incremental and repair lanes publish per tick, so a
   // re-parse is identified on the tick that published it unless the sweep's
   // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
-  identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
+  // Reads only its gate row while nothing it reads has moved since a tick
+  // found no candidate (src/identity-sweep-lane.ts, migration 0110).
+  identity: (env) => identitySweepLane(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   instrumentAutoAdoption: (env) => instrumentAutoAdoptionLane(env.DB),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).

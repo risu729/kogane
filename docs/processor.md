@@ -712,6 +712,16 @@ published it unless the sweep's 200-observation cap or an older backlog defers
 it to the next ticks; the repair budget sets how fast a parser version bump drains
 ([observation-lanes.md](observation-lanes.md#repair-budget-and-drain-rate)).
 
+The scheduled `identity_sweep` and `reward_claims_sweep` each read their whole
+candidate set in one statement, so they wait for a change like the card sweeps
+(`services/processor/src/sweep-pass.ts`, migration 0110): a tick whose candidate
+read found nothing marks the CORE revision it started at clean, and later ticks
+read only their gate row in `processor_sweep_passes` until the revision or the
+sweep's policy moves (the policy carries a digest of the candidate statement
+and of the views the code reads). A tick that found candidates closes nothing,
+so the next tick reads again. The private `POST /identity-sweep` route calls
+the sweep directly and is not gated.
+
 `collection_scan` sits after the parse sweep and before identity so a run
 found this tick can reach identity and parsing on the same tick.
 `operation_dispatch` sits before `decision_outbox`, which stays after every
