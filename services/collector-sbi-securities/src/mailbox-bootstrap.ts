@@ -225,7 +225,12 @@ function navigationDestination(statement: SyntaxNode): SyntaxNode {
   if (statement.type === "CallExpression" && statement.optional === false) {
     const method = locationProperty(syntax(statement.callee));
     const args = nodes(statement.arguments);
-    if ((method === "assign" || method === "replace") && args.length === 1) return args[0]!;
+    if (
+      (method === "assign" || method === "replace") &&
+      args.length === 1 &&
+      args[0]!.type !== "SpreadElement"
+    )
+      return args[0]!;
   }
   refuse();
 }

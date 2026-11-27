@@ -193,6 +193,7 @@ test("any spelling of the redirect is accepted only when it names the applicatio
   for (const spelling of [
     'window.location.href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
     'location.href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location = "https:\\/\\/plus.e-shishobako.ne.jp/dp_apl/usr/";',
     'window.location = "https://plus.e-shishobako.ne.jp" + "/dp_apl/" + "usr/";',
     'location.replace("https://plus.e-shishobako.ne.jp" + "/dp_apl/usr/");',
     "window.location.assign(`https://plus.e-shishobako.ne.jp/dp_apl/usr/`);",
@@ -205,6 +206,8 @@ test("any spelling of the redirect is accepted only when it names the applicatio
     'window["location"].href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
     'location?.replace("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
     'location.replace("https://plus.e-shishobako.ne.jp/dp_apl/usr/", 1);',
+    'location.replace?.("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
+    'location.assign(...["https://plus.e-shishobako.ne.jp/dp_apl/usr/"]);',
   ])
     expect(() => mailboxBootstrap(html(script.replace(navigation, spelling)))).toThrow(
       "sbi_mailbox_bootstrap_unobserved",
