@@ -588,6 +588,38 @@ The draft's open questions, as the accepted design answers them:
   nine hours if every tick takes a page of 40, at about 270k rows a tick; a
   short page, a failure, a page without progress or a lost record ends that.
 
+## One-page sweeps wait for a change too (2026-11-27)
+
+- Once the identity backlog was drained, the Processor read about 6.25M rows
+  an hour outside the collection hours, about 520k a 5-minute tick, and
+  2026-11-26 read 291M rows on CORE (about $0.29). Of a quiet tick (06:30 to
+  07:05 UTC on 2026-11-27), the identity sweep read 197k rows and the reward
+  claim promotion 187k with nothing to do: each reads its whole candidate set
+  in one statement on every tick (about 110M rows a day between them).
+- Both get a row in `processor_sweep_passes` (migration 0110, which rebuilds
+  the table to widen its `sweep` CHECK and keeps the card rows) and run as a
+  pass of one page: the cursor is always 0, and only a candidate read that
+  returned nothing ends the pass clean. A tick that found a candidate leaves
+  its pass open, so the next tick reads again, as before the gate. For the
+  identity sweep a tick with candidates always processes at least one, so
+  `processedRuns === 0` is exactly an empty read; for the promotion it is
+  `scanned === 0`.
+- What the reads depend on off the CORE ledger is argued in
+  `services/processor/src/identity-sweep-lane.ts` and at `rewardClaimsStage`
+  (`services/processor/src/reward-claims-job.ts`): fetch reports, units and
+  artifacts are written before a run is sealed and only sealed runs are read;
+  the trusted Vpass card bindings need both runs sealed. The policies carry a
+  digest of each candidate statement's text (and, for the promotion, its bound
+  values and release), so the gap slice 3 names for a statement written in
+  TypeScript does not apply here, and a digest of the views each module's code
+  reads, checked by `test/sweep-pass.test.ts` like the card sweeps' pins.
+- Not gated: the private `POST /identity-sweep` route, and
+  `rewardPromotionPending`, which reads one candidate for the READ capture.
+- Expected: about 110M fewer rows a day, leaving the quiet tick mostly
+  `observation_sweep` (about 104k rows) and the collection hours, in which
+  new rows move the revision and the card sweeps read everything on every
+  tick (about 43M rows an hour from 21:00 to 00:00 UTC on 2026-11-26).
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each

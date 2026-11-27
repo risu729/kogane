@@ -11,10 +11,34 @@
 // pass that started there saw what a new one would see. A pass whose own
 // writes moved the revision is followed by one more, which writes nothing and
 // closes the gate.
+//
+// A sweep that reads its whole candidate set in one statement (the identity
+// sweep, the reward claim promotion; migration 0110) is a pass of one page: its
+// cursor is always 0 (`ONE_PAGE_CURSOR_SQL`), and it ends its pass clean only
+// when the page found nothing to write.
 
 import { type CoreRevisionRow } from "../../../packages/read-model/src/source-revision.ts";
 
-export type SweepName = "card_settlement" | "card_purchase_recognition";
+export type SweepName =
+  | "card_settlement"
+  | "card_purchase_recognition"
+  | "identity_sweep"
+  | "reward_claims";
+
+/** The cursor of a sweep whose every tick reads from the first row. */
+export const ONE_PAGE_CURSOR_SQL = "SELECT 0";
+
+/**
+ * The first 16 hex digits of the SHA-256 of `text`: a one-page sweep's policy
+ * carries its candidate statement this way, so a change to the statement's
+ * text reads again.
+ */
+export async function shortDigest(text: string): Promise<string> {
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+  );
+  return [...bytes.slice(0, 8)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /**
  * One statement, so the cursor and the recorded pass are read together: a

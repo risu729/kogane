@@ -1,7 +1,8 @@
 // The cursor sweeps wait for a change once a pass has read every row (ADR
 // 0129, slice 3; migration 0109; src/sweep-pass.ts): a tick after a complete
 // pass reads the gate and stops, and a write on the CORE dependency ledger,
-// or a new sweep policy, starts the next pass.
+// or a new sweep policy, starts the next pass. The one-page sweeps (identity,
+// reward claims; migration 0110) do the same after a read that found nothing.
 import { afterAll, expect } from "bun:test";
 import { type Miniflare } from "miniflare";
 import { startPipeline } from "./harness.ts";
@@ -18,6 +19,23 @@ import {
   cardPurchaseSweep,
 } from "../src/card-purchase-job.ts";
 import { finishSweepPass, openSweepTick } from "../src/sweep-pass.ts";
+import {
+  IDENTITY_SWEEP_VIEWS,
+  identitySweepLane,
+  identitySweepPolicy,
+} from "../src/identity-sweep-lane.ts";
+import {
+  REWARD_CLAIMS_VIEWS,
+  REWARD_PROMOTION_BATCH,
+  REWARD_PROMOTION_RELEASE,
+  rewardCandidateQuery,
+  rewardClaimsPolicy,
+  rewardClaimsStage,
+} from "../src/reward-claims-job.ts";
+import { sweep as parseSweep } from "../src/worker.ts";
+import { identitySweepCandidatesSql } from "../../../packages/storage-d1/src/core/identity-sweep-sql.ts";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
+import { seedArtifact } from "./harness.ts";
 import { sweepViewsDigest } from "./support/sweep-views.ts";
 import { settledTest } from "./support/settle.ts";
 
@@ -190,4 +208,149 @@ test("each sweep's policy pins the views its code reads, and fits the gate's col
     256,
   );
   expect(CARD_PURCHASE_SWEEP_POLICY.length).toBeLessThanOrEqual(256);
+  expect(sweepViewsDigest(`${import.meta.dir}/../src/identity-sweep-lane.ts`)).toBe(
+    IDENTITY_SWEEP_VIEWS,
+  );
+  expect(sweepViewsDigest(`${import.meta.dir}/../src/reward-claims-job.ts`)).toBe(
+    REWARD_CLAIMS_VIEWS,
+  );
+});
+
+test("each one-page sweep's policy carries its candidate statement, and fits the gate's column", async () => {
+  const identity = await identitySweepPolicy();
+  const reward = await rewardClaimsPolicy();
+  expect(identity).toMatch(/^identity-sweep-v1\+sql:[0-9a-f]{16}\+views:[0-9a-f]{16}$/);
+  expect(reward).toMatch(/\+sql:[0-9a-f]{16}\+views:[0-9a-f]{16}$/);
+  expect(reward).toContain(REWARD_PROMOTION_RELEASE);
+  expect(identity.length).toBeLessThanOrEqual(256);
+  expect(reward.length).toBeLessThanOrEqual(256);
+  // The same code gives the same policy, so a quiet tick finds it clean.
+  expect(await identitySweepPolicy()).toBe(identity);
+  expect(await rewardClaimsPolicy()).toBe(reward);
+});
+
+test("the identity sweep reads its candidates again only after the CORE revision moves", async () => {
+  const candidates = identitySweepCandidatesSql(false);
+  // Nothing to identify: the read comes back empty and closes the gate.
+  await parseSweep(env);
+  const first: string[] = [];
+  expect(await identitySweepLane(recording(env.DB, first), resolveIdentity, 40)).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  expect(first).toContain(candidates);
+  const cleaned = await gateRow("identity_sweep");
+  expect(cleaned).toMatchObject({
+    pass_source_revision: null,
+    clean_policy: await identitySweepPolicy(),
+  });
+
+  // Nothing moved: one statement, the gate, and no candidate read.
+  const quiet: string[] = [];
+  expect(await identitySweepLane(recording(env.DB, quiet), resolveIdentity, 40)).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  expect(quiet).toHaveLength(1);
+
+  // A new sealed run parsed: the parse run moves the revision, the sweep
+  // reads again and identifies it, and its pass stays open.
+  await seedArtifact(env, 9100, "smbc-bank", "balance-normalized", "balance.normalized.json", {
+    amount: 1,
+    currency: "JPY",
+    observedAt: "2026-11-27T00:00:00.000Z",
+  });
+  await parseSweep(env);
+  const busy: string[] = [];
+  const identified = await identitySweepLane(recording(env.DB, busy), resolveIdentity, 40);
+  expect(busy).toContain(candidates);
+  expect(identified.processedRuns).toBeGreaterThan(0);
+  expect((await gateRow("identity_sweep"))?.clean_source_revision).toBe(
+    cleaned!.clean_source_revision,
+  );
+
+  // The next tick reads again, finds nothing, and closes the gate at the
+  // revision its predecessor's writes left.
+  const after: string[] = [];
+  expect(
+    (await identitySweepLane(recording(env.DB, after), resolveIdentity, 40)).processedRuns,
+  ).toBe(0);
+  expect(after).toContain(candidates);
+  expect((await gateRow("identity_sweep"))!.clean_source_revision).toBeGreaterThan(
+    cleaned!.clean_source_revision!,
+  );
+  const closed: string[] = [];
+  await identitySweepLane(recording(env.DB, closed), resolveIdentity, 40);
+  expect(closed).toHaveLength(1);
+
+  // A ledger write, or a policy recorded by another build, reads again.
+  await ledgerWrite();
+  const moved: string[] = [];
+  await identitySweepLane(recording(env.DB, moved), resolveIdentity, 40);
+  expect(moved).toContain(candidates);
+  await env.DB.prepare(
+    "UPDATE processor_sweep_passes SET clean_policy='an-older-sweep' WHERE sweep='identity_sweep'",
+  ).run();
+  const redeployed: string[] = [];
+  await identitySweepLane(recording(env.DB, redeployed), resolveIdentity, 40);
+  expect(redeployed).toContain(candidates);
+}, 60000);
+
+test("the reward promotion reads its candidates again only after the CORE revision moves", async () => {
+  const candidates = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, REWARD_PROMOTION_BATCH).sql;
+  const stage = (db: D1Database) => rewardClaimsStage({ ...env, DB: db });
+  const first: string[] = [];
+  expect(await stage(recording(env.DB, first))).toMatchObject({ scanned: 0, promoted: 0 });
+  expect(first).toContain(candidates);
+  const cleaned = await gateRow("reward_claims");
+  expect(cleaned).toMatchObject({
+    pass_source_revision: null,
+    clean_policy: await rewardClaimsPolicy(),
+  });
+
+  const quiet: string[] = [];
+  expect(await stage(recording(env.DB, quiet))).toMatchObject({ scanned: 0, promoted: 0 });
+  expect(quiet).toHaveLength(1);
+
+  // A read that returns a candidate the rules skip writes nothing, and still
+  // leaves the pass open: only an empty read closes the gate.
+  await ledgerWrite();
+  const skipping = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          sql === candidates
+            ? {
+                bind: () => ({
+                  all: async () => ({
+                    results: [
+                      { id: 1, parse_run_id: 1, source_id: "no-rule", parser_name: "none" },
+                    ],
+                  }),
+                }),
+              }
+            : target.prepare(sql);
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  expect(await stage(skipping)).toMatchObject({ scanned: 1, skipped: 1, promoted: 0 });
+  expect((await gateRow("reward_claims"))?.clean_source_revision).toBe(
+    cleaned!.clean_source_revision,
+  );
+  const next: string[] = [];
+  await stage(recording(env.DB, next));
+  expect(next).toContain(candidates);
+  expect((await gateRow("reward_claims"))!.clean_source_revision).toBeGreaterThan(
+    cleaned!.clean_source_revision!,
+  );
+
+  await env.DB.prepare(
+    "UPDATE processor_sweep_passes SET clean_policy='an-older-sweep' WHERE sweep='reward_claims'",
+  ).run();
+  const redeployed: string[] = [];
+  await stage(recording(env.DB, redeployed));
+  expect(redeployed).toContain(candidates);
 });

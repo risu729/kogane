@@ -24,6 +24,7 @@ import {
 import type { D1Like as RewardReadD1 } from "../../../packages/storage-d1/src/d1.ts";
 import type { BucketKind } from "../../../packages/domain/src/rewards.ts";
 import { validTemporalValue, type TemporalValue } from "../../../packages/domain/src/time.ts";
+import { finishSweepPass, ONE_PAGE_CURSOR_SQL, openSweepTick, shortDigest } from "./sweep-pass.ts";
 
 /** Bump to re-promote every published row under new mapping rules. */
 export const REWARD_PROMOTION_RELEASE = "reward-promotion-v2";
@@ -491,7 +492,60 @@ export function rewardClaimsEnabled(value: string | undefined): boolean {
   return value === "1" || value === "true";
 }
 
-/** The scheduled lane. `runScheduled` skips it entirely while the flag is off. */
-export async function rewardClaimsStage(env: Env): Promise<object> {
-  return await promoteRewardClaims(env.DB);
+/**
+ * The definitions of the views the promotion's code can read, as a digest
+ * that `test/sweep-pass.test.ts` checks against the migrated schema: a
+ * migration that redefines one moves no revision, so it changes this value,
+ * and with it the gate's policy, to read again.
+ */
+export const REWARD_CLAIMS_VIEWS = "ba736c878b995006";
+
+/**
+ * The gate policy of the scheduled promotion (src/sweep-pass.ts): the release,
+ * a digest of the candidate statement and its bound values (which carry the
+ * promotion rules), and the views it reads.
+ */
+export async function rewardClaimsPolicy(): Promise<string> {
+  const query = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, REWARD_PROMOTION_BATCH);
+  const text = `${query.sql}\n${JSON.stringify(query.bindings)}`;
+  return `reward-claims-v1+${REWARD_PROMOTION_RELEASE}+sql:${await shortDigest(text)}+views:${REWARD_CLAIMS_VIEWS}`;
+}
+
+/**
+ * The scheduled lane. `runScheduled` skips it entirely while the flag is off.
+ *
+ * The candidate read is one statement over every published balance row, so
+ * with nothing to promote it still read about 187k rows a tick in production
+ * (2026-11-27). It is a one-page pass of `src/sweep-pass.ts` (migration 0110):
+ * a tick whose read returned no candidate marks the CORE revision it started
+ * at clean, and later ticks read only the gate row while the revision and the
+ * policy stay the same. Everything the read depends on is on the CORE ledger
+ * (balance rows, their decimals, parse runs and their publication, coverage
+ * claims, fetch run seals, and the claims it writes itself), written before a
+ * run is sealed (reports, units, artifacts), or code carried in the policy;
+ * it has no clock. Only an empty read closes the gate, so a candidate the
+ * rules skip keeps it open, as before. A gated tick reads no cursor and
+ * reports 0.
+ */
+export async function rewardClaimsStage(env: Env): Promise<RewardPromotionResult> {
+  const tick = await openSweepTick(
+    env.DB,
+    "reward_claims",
+    await rewardClaimsPolicy(),
+    ONE_PAGE_CURSOR_SQL,
+  );
+  if (tick.skip)
+    return {
+      enabled: true,
+      scanned: 0,
+      promoted: 0,
+      known: 0,
+      skipped: 0,
+      quantity_incomplete: 0,
+      cursor: 0,
+      release: REWARD_PROMOTION_RELEASE,
+    };
+  const result = await promoteRewardClaims(env.DB);
+  if (result.scanned === 0) await finishSweepPass(env.DB, "reward_claims", tick.token);
+  return result;
 }

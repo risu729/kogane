@@ -10,11 +10,11 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `5b37008e6860b57114d3adf31eabdea04a09681495696bd9fb4dd46b57f7c796`
+Schema digest: `0726bd7480c08a0ebe805c68bcd7354d9c4f21cc95d217d1ebcd29b42a49a071`
 
 ## Summary
 
-- Migrations applied: 102
+- Migrations applied: 103
 - Tables: 149 (all `STRICT`: yes)
 - Views: 44
 - Triggers: 608
@@ -306,5 +306,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0101_myjcb_document_unit_eligibility.sql` | 1 | dataset_snapshot_policies |
 | `0108_snapshot_selection_memo.sql` | 37 | core_snapshot_input_revision, snapshot_selection_containers |
 | `0109_processor_sweep_passes.sql` | 2 | processor_sweep_passes |
+| `0110_processor_sweep_passes_one_page.sql` | 5 | processor_sweep_passes, processor_sweep_passes_v2 |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql, 0078_maintenance_change_provenance.sql, 0079_instrument_temporal_journal.sql, 0082_collection_lease_heartbeat.sql, 0083_parse_runs_pending_index.sql, 0084_csv_reader_release_snapshot_policies.sql, 0086_collection_provider_failure_code.sql, 0102_vpass_authori_transition_policy.sql, 0103_sbi_income_policy_version_0_1_3.sql, 0104_vpass_credit_card_name_policy.sql, 0105_observation_no_replace.sql, 0106_no_replace_rowid.sql, 0107_scheduled_read_guards.sql

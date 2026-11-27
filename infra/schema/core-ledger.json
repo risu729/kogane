@@ -1421,6 +1421,21 @@
         }
       ],
       "sha256": "5752e47226e2fe2e2e77f6aadc3fac9d48c0a744947bb99515a04865b82d0e45"
+    },
+    {
+      "file": "0110_processor_sweep_passes_one_page.sql",
+      "statementCount": 5,
+      "insertStatements": [
+        {
+          "table": "processor_sweep_passes_v2",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "processor_sweep_passes",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "f4c4e6fd62ca1256d9ba12595a0959d7001d05dbe072fdb53e0da64315389d7d"
     }
   ],
   "tables": [
@@ -14328,7 +14343,7 @@
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "1cd9c8e45b4a2ea1"
+      "sqlSha256": "7984edc4cea38dc4"
     },
     {
       "name": "producer_sources",
@@ -23550,8 +23565,9 @@
       "0100_sbi_supplemental_unit_eligibility.sql",
       "0101_myjcb_document_unit_eligibility.sql",
       "0108_snapshot_selection_memo.sql",
-      "0109_processor_sweep_passes.sql"
+      "0109_processor_sweep_passes.sql",
+      "0110_processor_sweep_passes_one_page.sql"
     ],
-    "schemaSha256": "5b37008e6860b57114d3adf31eabdea04a09681495696bd9fb4dd46b57f7c796"
+    "schemaSha256": "0726bd7480c08a0ebe805c68bcd7354d9c4f21cc95d217d1ebcd29b42a49a071"
   }
 }
