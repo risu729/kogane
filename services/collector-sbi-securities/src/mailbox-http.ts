@@ -90,7 +90,7 @@ interface MailboxDiagnosis {
   cookieAttribute?: (typeof COOKIE_ATTRIBUTES)[number] | "other";
   /** For a refused bootstrap page, the grammar part it departed from. */
   bootstrapRule?: BootstrapRule;
-  /** For a count rule, how many scripts, statements or actions the page had (at most 99). */
+  /** For a count rule, how many scripts, statements, handler actions or redirect statements (at most 99). */
   bootstrapCount?: number;
 }
 /**
