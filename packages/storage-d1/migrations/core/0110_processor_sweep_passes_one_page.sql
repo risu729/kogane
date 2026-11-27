@@ -6,8 +6,9 @@
 -- in one statement, so with nothing to do it still read about 197k rows
 -- (identity) and 187k rows (reward claims) every five minutes in production on
 -- 2026-11-27, about 110M rows a day between them. With a gate row, a sweep
--- that found nothing to write marks the CORE revision and its policy clean,
--- and the next tick reads only the gate row until one of them moves.
+-- whose candidate read returned nothing marks the CORE revision and its
+-- policy clean, and the next tick reads only the gate row until one of them
+-- moves.
 --
 -- SQLite cannot change a CHECK in place, so the table is rebuilt with the two
 -- new names and the rows already recorded are kept as they are. The table is

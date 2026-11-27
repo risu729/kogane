@@ -15,7 +15,7 @@
 // A sweep that reads its whole candidate set in one statement (the identity
 // sweep, the reward claim promotion; migration 0110) is a pass of one page: its
 // cursor is always 0 (`ONE_PAGE_CURSOR_SQL`), and it ends its pass clean only
-// when the page found nothing to write.
+// when its one read returned no candidate.
 
 import { type CoreRevisionRow } from "../../../packages/read-model/src/source-revision.ts";
 
