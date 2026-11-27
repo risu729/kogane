@@ -522,6 +522,18 @@ repeated attribute. A repeat with the same value says nothing new, so the jar
 now keeps it once; a repeat with another value (two `Path`, `Domain` or
 `Max-Age` values, for example) is still refused as ambiguous.
 
+The 2026-11-25 and 2026-11-26 21:00 UTC runs passed the hand-off, the entry and
+the connecting page, then refused at step `sso`, hop 1, status 200 `text/html`
+with `sbi_mailbox_bootstrap_unobserved`: the SSO redirect reached the bootstrap
+page, but that page departed from the witnessed grammar (one script that stores
+eight known `sessionStorage` keys and then redirects to the application). The
+refusal line now also carries `bootstrapRule`, the part of that grammar the page
+departed from (`html`, `elements`, `script-element`, `script-parse`,
+`statements`, `onload`, `storage`, `redirect-call`, `redirect-function`), and
+for a count rule `bootstrapCount`, how many scripts, statements or handler
+actions the page had (at most 99). Never the page text, a script, a key or a
+value.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

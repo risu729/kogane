@@ -592,6 +592,33 @@ test("a refusal at the hand-off names the rule that refused, never the provider'
   expect(logged.join("\n")).not.toMatch(/synthetic|secret/iu);
 });
 
+test("a refused bootstrap page logs its grammar rule and count, never the page", async () => {
+  const logged: string[] = [];
+  const original = console.log;
+  console.log = (line: string) => logged.push(line);
+  try {
+    const { fetcher } = sequence();
+    const client = new MailboxHttp([], async (input, init) =>
+      new URL(input instanceof Request ? input.url : input.toString()).href === MAILBOX_BOOTSTRAP
+        ? html(mailboxBootstrapHtml().replace("</body>", "<script>var secret = 1;</script></body>"))
+        : fetcher(input, init),
+    );
+    await expect(client.open()).rejects.toThrow("sbi_mailbox_bootstrap_unobserved");
+    expect(client.lastDiagnosis).toEqual({
+      step: "sso",
+      hop: 1,
+      status: 200,
+      contentType: "text/html",
+      bootstrapRule: "script-element",
+      bootstrapCount: 2,
+    });
+  } finally {
+    console.log = original;
+  }
+  expect(logged).toHaveLength(1);
+  expect(logged[0]).not.toMatch(/secret|synthetic/iu);
+});
+
 test("calls the fetcher unbound, as the Workers runtime's fetch requires", async () => {
   const { fetcher, calls } = sequence();
   // workerd's fetch refuses any receiver other than the global scope.

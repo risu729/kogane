@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mailboxBootstrap } from "../src/mailbox-bootstrap";
+import { BootstrapRefusal, mailboxBootstrap } from "../src/mailbox-bootstrap";
 
 const keys = [
   "dp-csrf",
@@ -118,4 +118,43 @@ test("parser failures expose only a closed code and no source or opaque value", 
     expect(JSON.stringify(error)).not.toContain("SYNTHETIC_PRIVATE_SENTINEL");
     expect((error as Error).cause).toBeUndefined();
   }
+});
+
+test("a refused bootstrap names the grammar part it departed from, never the page text", () => {
+  const rule = (page: string) => {
+    try {
+      mailboxBootstrap(page);
+    } catch (error) {
+      expect(error).toBeInstanceOf(BootstrapRefusal);
+      expect((error as Error).message).toBe("sbi_mailbox_bootstrap_unobserved");
+      const { rule, count } = error as BootstrapRefusal;
+      return count === undefined ? { rule } : { rule, count };
+    }
+    throw new Error("accepted");
+  };
+  const extra = 'sessionStorage.setItem("dp-synthetic-secret", "synthetic-secret");';
+  for (const [page, expected] of [
+    ["x".repeat(300 * 1024), { rule: "html" }],
+    [html().replace("<body>", "<body><template>synthetic</template>"), { rule: "html" }],
+    [
+      html().replace("</body>", '<form action="/synthetic-secret"></form></body>'),
+      { rule: "elements" },
+    ],
+    [
+      html().replace("</body>", "<script>var synthetic = 1;</script></body>"),
+      { rule: "script-element", count: 2 },
+    ],
+    [html().replace("<script>", '<script src="/synthetic-secret.js">'), { rule: "script-element" }],
+    [html("window.onload = function( {"), { rule: "script-parse" }],
+    [html(`${script}\nvar synthetic = 1;`), { rule: "statements", count: 3 }],
+    [html(script.replace("window.onload", "document.onload")), { rule: "onload" }],
+    [
+      html(script.replace("autoRedirect();\n}", `${extra}\nautoRedirect();\n}`)),
+      { rule: "onload", count: 10 },
+    ],
+    [html(script.replace('"dp-sfn"', '"dp-synthetic-secret"')), { rule: "storage" }],
+    [html(script.replace("autoRedirect();\n}", "synthetic();\n}")), { rule: "redirect-call" }],
+    [html(script.replace('"/dp_apl/usr/"', '"/synthetic-secret/"')), { rule: "redirect-function" }],
+  ] as const)
+    expect(rule(page)).toEqual(expected);
 });
