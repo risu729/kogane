@@ -12,10 +12,10 @@
     "@cloudflare/vitest-plugin": "1.9.2",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "26.6.11",
-    "@vitest/coverage-istanbul": "5.1.1",
+    "@vitest/coverage-istanbul": "5.1.2",
     "cf": "1.0.0-rc.6",
     "typescript": "7.0.2",
-    "vitest": "5.1.1",
+    "vitest": "5.1.2",
     "wrangler": "4.168.0"
   }
 }
