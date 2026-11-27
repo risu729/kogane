@@ -35,6 +35,31 @@ export class MailboxError extends Error {
   }
 }
 
+/**
+ * The part of the witnessed bootstrap grammar a page departed from, in closed
+ * names only: never the page's text, script source, key or value.
+ */
+export type BootstrapRule =
+  | "html"
+  | "elements"
+  | "script-element"
+  | "script-parse"
+  | "statements"
+  | "onload"
+  | "storage"
+  | "redirect-call"
+  | "redirect-function";
+
+/** A refused bootstrap page, with the rule and, for a count rule, the count. */
+export class BootstrapRefusal extends MailboxError {
+  constructor(
+    readonly rule: BootstrapRule,
+    readonly count?: number,
+  ) {
+    super("sbi_mailbox_bootstrap_unobserved");
+  }
+}
+
 interface BootstrapMaterial {
   readonly csrf: string;
   readonly riyoCd: string;
@@ -45,13 +70,19 @@ type SyntaxNode = { type: string; [key: string]: unknown };
 
 /** Extract the witnessed literal grammar without executing any provider code. */
 export function mailboxBootstrap(html: string): BootstrapMaterial {
+  stage = "html";
   try {
     return extractBootstrap(html);
-  } catch {
-    // Parser diagnostics can contain source fragments and must never escape.
-    throw new MailboxError("sbi_mailbox_bootstrap_unobserved");
+  } catch (error) {
+    // Parser diagnostics can contain source fragments and must never escape;
+    // only the closed rule and count of our own refusal are kept.
+    if (error instanceof BootstrapRefusal) throw new BootstrapRefusal(error.rule, error.count);
+    throw new BootstrapRefusal(stage);
   }
 }
+
+/** The grammar part being checked; a refusal inside a shared helper names it. */
+let stage: BootstrapRule = "html";
 
 function extractBootstrap(html: string): BootstrapMaterial {
   if (html.length > MAX_HTML_CHARACTERS) refuse();
@@ -71,6 +102,7 @@ function extractBootstrap(html: string): BootstrapMaterial {
     if ("content" in node) refuse();
   };
   visit(document, 0);
+  stage = "elements";
   let fallbackAnchors = 0;
   const text = (node: HtmlNode): string =>
     "value" in node ? node.value : "childNodes" in node ? node.childNodes.map(text).join("") : "";
@@ -95,8 +127,9 @@ function extractBootstrap(html: string): BootstrapMaterial {
     )
       refuse();
   }
+  stage = "script-element";
   const scripts = elements.filter((element) => element.tagName === "script");
-  if (scripts.length !== 1) refuse();
+  if (scripts.length !== 1) refuse(scripts.length);
   const script = scripts[0]!;
   if (
     script.namespaceURI !== "http://www.w3.org/1999/xhtml" ||
@@ -108,9 +141,12 @@ function extractBootstrap(html: string): BootstrapMaterial {
     refuse();
   const source = script.childNodes.map((child) => ("value" in child ? child.value : "")).join("");
   if (source.length > MAX_SCRIPT_CHARACTERS) refuse();
+  stage = "script-parse";
   const program = syntax(parseJavaScript(source, { ecmaVersion: 2022, sourceType: "script" }));
+  stage = "statements";
   const statements = nodes(program.body);
-  if (statements.length !== 2) refuse();
+  if (statements.length !== 2) refuse(statements.length);
+  stage = "onload";
   const assignment = expression(statements[0]!);
   if (assignment.type !== "AssignmentExpression" || assignment.operator !== "=") refuse();
   member(assignment.left, "window", "onload");
@@ -118,7 +154,8 @@ function extractBootstrap(html: string): BootstrapMaterial {
   functionShape(handler, "FunctionExpression");
   if (handler.id !== null) refuse();
   const actions = nodes(syntax(handler.body).body);
-  if (actions.length !== STORAGE_KEYS.length + 1) refuse();
+  if (actions.length !== STORAGE_KEYS.length + 1) refuse(actions.length);
+  stage = "storage";
   const values = new Map<string, string>();
   for (const action of actions.slice(0, -1)) {
     const call = expression(action);
@@ -138,6 +175,7 @@ function extractBootstrap(html: string): BootstrapMaterial {
       refuse();
     values.set(key, value);
   }
+  stage = "redirect-call";
   const redirectCall = expression(actions.at(-1)!);
   if (
     redirectCall.type !== "CallExpression" ||
@@ -147,6 +185,7 @@ function extractBootstrap(html: string): BootstrapMaterial {
     nodes(redirectCall.arguments).length !== 0
   )
     refuse();
+  stage = "redirect-function";
   const redirect = statements[1]!;
   functionShape(redirect, "FunctionDeclaration");
   if (syntax(redirect.id).type !== "Identifier" || syntax(redirect.id).name !== "autoRedirect")
@@ -218,6 +257,6 @@ function functionShape(node: SyntaxNode, type: string): void {
     refuse();
 }
 
-function refuse(): never {
-  throw new MailboxError("sbi_mailbox_bootstrap_unobserved");
+function refuse(count?: number): never {
+  throw new BootstrapRefusal(stage, count === undefined ? undefined : Math.min(count, 99));
 }
