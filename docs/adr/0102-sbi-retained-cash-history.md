@@ -32,8 +32,8 @@ dividend-labelled receipts, without authorizing a second income publication.
   retention, and no operation parameter or cursor is added.
 - Use only observed GET paths, filters, sort and page size 10. Yen page 2
   changes only `pageNumber`; walk the declared contiguous chain, bounded by
-  2,000 pages / 20,000 rows. Foreign continuation remains unsupported: a
-  multi-page response stops with `sbi_foreign_cash_pagination_unobserved`.
+  2,000 pages / 20,000 rows. Foreign continuation remained unsupported until
+  the 2026-11-28 amendment below.
 - The exact original JSON grammar, duplicate keys (including escaped aliases),
   numeric integer tokens and the closed response/row fields are audited before
   retaining raw page bytes. Unknown/private envelopes are refused. Known
@@ -82,3 +82,12 @@ capture identity; missing/reordered/changed pages, unknown codes, impossible or
 out-of-range dates, raw-number rounding, duplicate keys and malformed JSON;
 source inventory and terminal lineage; and real shared-R2 registration,
 parse/publication and the production reader across two overlapping captures.
+
+## Amendment 2026-11-28: USD continuation
+
+A USD statement of 12 rows was observed in the official UI: page 2 changes
+only `pageNumber` and holds the remainder rows, as for yen. The foreign chain
+is now walked like the yen chain, and `sbi_foreign_cash_pagination_unobserved`
+is retired. Each page must repeat page 1's totals, so a row arriving between
+requests fails closed (`sbi_cash_history_total`), since USD rows carry no id
+(docs/sources/sbi-securities.md, 2026-11-28).

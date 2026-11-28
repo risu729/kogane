@@ -1099,8 +1099,9 @@ and the retained USD statement, preserving per-page raw inputs. Unknown labels,
 positive transfer controls, unknown currencies, changed totals or missing pages
 keep coverage partial. Scheduled runs now publish every retained yen page and
 the USD statement with complete coverage; the catalogue remains partial under
-#446 because a USD statement longer than one page has not been observed and is
-refused. Dividend-labelled cash rows
+#446 (positive yen transfer controls and non-USD statements are unobserved; a
+USD statement longer than one page was refused until 2026-11-28, below).
+Dividend-labelled cash rows
 publish settlement cash only; they establish no separate income dataset.
 
 ## 2026-11-10: My Assets income and realised gains
@@ -1245,3 +1246,27 @@ Parser `sbi-domestic-trade-records` 0.2.2 reads only a calendar `YYYY-MM-DD`
 date as a record's `as_of`; any other stated value is a warning and no `as_of`,
 the value staying in the record's `extra`
 ([release note](../observations.md#sbi-securities-a-domestic-trade-date-that-is-not-a-date-is-no-as_of-trade-records-022)).
+
+## 2026-11-28: USD statement page 2
+
+The last published USD statement is the 2026-11-23 21:00 UTC capture; later
+runs did not publish one while the statement grew past ten rows, which the
+collector refused as `sbi_foreign_cash_pagination_unobserved`. A read-only
+check in the owner's signed-in Chrome (UI and request URLs only; counts, no
+values copied) selected the five-year preset with all currencies: the list
+declared 12 rows over two pages. Clicking page 2 issued the same
+`GET /banking/api/fc/detail-history/search` with only `pageNumber=2`, HTTP 200,
+and the UI showed rows 11-12 (two rows, the `min(10, total - 10)` remainder),
+continuing newest-first from page 1 with the same columns. The page-2 response
+body was not read; it is held to the page-1 shape.
+
+The collector now walks the declared USD chain exactly as the yen chain, with
+the USD filter `currencyCode=011` and only `pageNumber` changing, retaining
+each page under its page-qualified key. Every page must repeat page 1's
+`totalCount` and `pageCount` and hold exactly its share of rows, and dates may
+not rise across pages. USD rows have no id, so a row arriving between page
+requests shows only as a changed total and fails closed with
+`sbi_cash_history_total`. Occurrence identities count across the whole bundle,
+so a row keeps its identity when a later capture moves it to another page.
+`sbi-foreign-cash-history@0.1.4` and `sbi-yen-detail-history@1.1.4` (shared
+schema module) publish these bundles; neither has a pinned snapshot policy.

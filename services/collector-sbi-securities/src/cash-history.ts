@@ -73,8 +73,6 @@ export async function collectCashHistory(options: {
       body: null,
     });
     const metadata = cashPageMetadata(body, options.kind, pageNumber);
-    if (options.kind === "foreign" && metadata.pageCount > 1)
-      throw new CashHistoryError("sbi_foreign_cash_pagination_unobserved");
     if (pageNumber === 1) pageCount = Math.max(1, metadata.pageCount);
     pages.push(metadata.page);
   }

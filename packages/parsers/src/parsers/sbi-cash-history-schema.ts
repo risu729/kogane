@@ -24,8 +24,7 @@ export type CashHistoryCode =
   | "sbi_cash_history_range"
   | "sbi_cash_history_unknown_code"
   | "sbi_cash_history_fetch_failed"
-  | "sbi_cash_history_source_inventory"
-  | "sbi_foreign_cash_pagination_unobserved";
+  | "sbi_cash_history_source_inventory";
 export class CashHistoryError extends Error {
   readonly code: CashHistoryCode;
 
@@ -263,8 +262,6 @@ export function validateCashHistory(value: unknown, kind: CashHistoryKind): Cash
     const first = cashPageMetadata(pages[0], kind, 1);
     if (bundle["totalCount"] !== first.totalCount || pages.length !== Math.max(1, first.pageCount))
       throw new CashHistoryError("sbi_cash_history_total");
-    if (kind === "foreign" && first.pageCount > 1)
-      throw new CashHistoryError("sbi_foreign_cash_pagination_unobserved");
     let previousDate = to;
     const seenIds = new Set<number>();
     const directional: Record<"入金" | "出金", ExactDecimal[]> = { 入金: [], 出金: [] };
