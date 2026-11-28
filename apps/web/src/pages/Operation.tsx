@@ -7,8 +7,7 @@
 // time. The page sends no request of its own and re-reads only when asked.
 import type { ReactNode } from "react";
 import { ApiError } from "../api.ts";
-import { AUDIT_ROUTE } from "../audit-api.ts";
-import { displayLabel } from "../labels.ts";
+import { displayLabel, ownEntry } from "../labels.ts";
 import {
   EVIDENCE_RUN_ID,
   EXECUTION_REASON_LABELS,
@@ -18,6 +17,7 @@ import {
   OPERATION_STAGE_LABELS,
   OPERATION_STAGE_STATE_LABELS,
   OPERATION_STATUS_LABELS,
+  OPERATIONS_ROUTE,
   PROVIDER_OUTCOME_LABELS,
   RUN_STATE_LABELS,
   useOperation,
@@ -25,6 +25,7 @@ import {
   type OperationRecordRunWire,
   type OperationRecordWire,
 } from "../operations-api.ts";
+import { BusyButton } from "../busy-button.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, Kv, KvRow, Notice, Panel, QueryBoundary, type Tone } from "../ui.tsx";
 
@@ -114,7 +115,7 @@ function Summary({ record }: { record: OperationRecordWire }): ReactNode {
             <Coded
               labels={OPERATION_STATUS_LABELS}
               value={record.status}
-              tone={STATUS_TONES[record.status]}
+              tone={ownEntry(STATUS_TONES, record.status)}
             />
           </KvRow>
           <KvRow label="待機・停止の理由">
@@ -190,7 +191,7 @@ function Stages({ record }: { record: OperationRecordWire }): ReactNode {
                     {displayLabel(OPERATION_STAGE_LABELS, stage.stage)} <Code value={stage.stage} />
                   </th>
                   <td>
-                    <Badge tone={STAGE_TONES[stage.state] ?? "neutral"}>
+                    <Badge tone={ownEntry(STAGE_TONES, stage.state) ?? "neutral"}>
                       {displayLabel(OPERATION_STAGE_STATE_LABELS, stage.state)}
                     </Badge>
                   </td>
@@ -222,7 +223,7 @@ function Run({ run }: { run: OperationRecordRunWire }): ReactNode {
         <Code value={run.runId} />
       </th>
       <td>
-        <Badge tone={RUN_TONES[run.state] ?? "neutral"}>
+        <Badge tone={ownEntry(RUN_TONES, run.state) ?? "neutral"}>
           {displayLabel(RUN_STATE_LABELS, run.state)}
         </Badge>
         {run.reasonCode === null ? null : (
@@ -307,7 +308,7 @@ function Execution({ execution }: { execution: OperationRecordExecutionWire }): 
             <Coded
               labels={EXECUTION_STATE_LABELS}
               value={execution.state}
-              tone={EXECUTION_TONES[execution.state]}
+              tone={ownEntry(EXECUTION_TONES, execution.state)}
             />
           </KvRow>
           <KvRow label="理由">
@@ -422,7 +423,7 @@ export function OperationPage({ operationId }: { operationId: string }): ReactNo
     <section>
       <div className="page-head">
         <div className="breadcrumb">
-          <Link to={AUDIT_ROUTE}>監査ログ</Link> / 依頼の経過
+          <Link to={OPERATIONS_ROUTE}>依頼の一覧</Link> / 依頼の経過
         </div>
         <h1>依頼の経過</h1>
         <p className="lede">
@@ -450,14 +451,9 @@ export function OperationPage({ operationId }: { operationId: string }): ReactNo
                 </>
               )}
               <div className="panel-body">
-                <button
-                  className="button"
-                  type="button"
-                  disabled={query.isFetching}
-                  onClick={() => void query.refetch()}
-                >
+                <BusyButton busy={query.isFetching} onClick={() => void query.refetch()}>
                   最新の状態を読み直す
-                </button>
+                </BusyButton>
               </div>
             </>
           )}

@@ -4,7 +4,7 @@
 // once coverage is declared (a complete cell with an unexplained difference),
 // which no store can produce today: the page must show it as unexplained, with
 // its figure, never as an adjustment or a zero. Every value is invented.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -20,9 +20,12 @@ import {
   WORLD_FROM,
   WORLD_NO_GUARD,
   WORLD_NO_TIME,
+  WORLD_SCOPE_BANK,
+  WORLD_SCOPE_SAVINGS,
   WORLD_TO,
 } from "../../../packages/application/test/reconstructed-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -35,8 +38,13 @@ const UNEXPLAINED = "acct-unexplained";
 /** Not a world: the bank answer with its start figure reshaped to a liability-positive metric. */
 const LIABILITY = "acct-liability";
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("reconstructed state", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
@@ -90,7 +98,8 @@ describe.if(runnable)("reconstructed state", () => {
             if (negated.value.status === "exact")
               negated.value.value = { ...negated.value.value, coefficient: "-10000" };
             start.oriented = negated;
-            return Response.json({ ...body, account: LIABILITY });
+            // The scope stays the bank account's: the client checks it against the fold's.
+            return Response.json(body);
           }
           if (!unexplained) return Response.json(outcome.body);
           const body = structuredClone(outcome.body);
@@ -101,7 +110,7 @@ describe.if(runnable)("reconstructed state", () => {
           cell.explanation.reasonCode = null;
           // The fold reaches a complete cell only when the families are evented.
           body.reconstruction!.accounts[0]!.familyCoverage = "evented";
-          return Response.json({ ...body, account: UNEXPLAINED, status: "complete", reasons: [] });
+          return Response.json({ ...body, status: "complete", reasons: [] });
         }
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -112,7 +121,6 @@ describe.if(runnable)("reconstructed state", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -174,14 +182,14 @@ describe.if(runnable)("reconstructed state", () => {
     await ask(page, WORLD_BANK);
     const main = await answered(page);
     const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
-    expect(table).toContain("10000 JPY");
-    expect(table).toContain("9000 JPY");
-    expect(table).toContain("8500 JPY");
+    expect(table).toContain("10,000 JPY");
+    expect(table).toContain("9,000 JPY");
+    expect(table).toContain("8,500 JPY");
     // reported − reconstructed, exact; not a zero and not an adjustment.
     expect(table).toContain("-500 JPY");
     expect(table).toContain("比較できない");
     expect(table).toContain("reconstruction_incomplete");
-    expect(table).toContain("適用 1 件 -1000 JPY");
+    expect(table).toContain("適用 1 件 -1,000 JPY");
     // The status and every reason as closed codes.
     expect(main).toContain("一部のみ");
     expect(main).toContain("family_not_evented");
@@ -199,6 +207,12 @@ describe.if(runnable)("reconstructed state", () => {
       .getByRole("region", { name: "イベントの扱いの一覧" })
       .innerText();
     expect(dispositions).toContain("ev-settle@1#0");
+    // A row with no gap says so in words, never a dash (INV05).
+    const reasons = await page
+      .getByRole("region", { name: "イベントの扱いの一覧" })
+      .locator("tbody tr td:last-child")
+      .allInnerTexts();
+    expect(reasons).toEqual(["なし", "なし"]);
     expect(requests.at(-1)?.searchParams.get("account")).toBe(WORLD_BANK);
     await page.close();
   }, 30_000);
@@ -243,8 +257,8 @@ describe.if(runnable)("reconstructed state", () => {
     await ask(page, LIABILITY);
     await answered(page);
     const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
-    expect(table).toContain("-10000 JPY");
-    expect(table).toContain("取得元の表示 10000 JPY");
+    expect(table).toContain("-10,000 JPY");
+    expect(table).toContain("取得元の表示 10,000 JPY");
     expect(table).toContain("符号を反転");
     // The asset-positive end figure carries no such note.
     expect(table.match(/符号を反転/gu)).toHaveLength(1);
@@ -254,7 +268,7 @@ describe.if(runnable)("reconstructed state", () => {
   test("refusals are shown as refusals with their codes", async () => {
     const page = await open();
     await ask(page, "acct-nowhere");
-    await page.getByText("この口座 ID は登録されていません。").waitFor();
+    await page.getByText("登録されていない口座 ID があります。").waitFor();
     expect(await page.locator("main").innerText()).toContain("unknown_account");
     // A cut past the log's end, asked by sequence.
     await page.getByLabel("口座 ID", { exact: true }).fill(WORLD_BANK);
@@ -287,6 +301,61 @@ describe.if(runnable)("reconstructed state", () => {
     main = await page.locator("main").innerText();
     expect(main).toContain("再構成の対象外");
     expect(main).toContain("0 という意味ではありません");
+    await page.close();
+  }, 30_000);
+
+  test("several accounts are asked at once and shown per account, never added", async () => {
+    const page = await open();
+    await ask(page, `${WORLD_SCOPE_SAVINGS}, ${WORLD_SCOPE_BANK}`);
+    const main = await answered(page);
+    // As typed, one parameter per account; the answer lists them sorted.
+    expect(requests.at(-1)?.searchParams.getAll("account")).toEqual([
+      WORLD_SCOPE_SAVINGS,
+      WORLD_SCOPE_BANK,
+    ]);
+    expect(main).toContain("口座（2件）");
+    expect(main).toContain("判定と理由は指定した口座全体のものです。");
+    const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
+    expect(table).toContain(WORLD_SCOPE_BANK);
+    expect(table).toContain(WORLD_SCOPE_SAVINGS);
+    expect(table).toContain("9,000 JPY");
+    expect(table).toContain("49,900 JPY");
+    expect(table).toContain("49,800 JPY");
+    // Nothing totalled across the two accounts, grouped or not.
+    for (const total of ["58,900", "58,800", "58900", "58800"]) expect(table).not.toContain(total);
+    const accounts = await page
+      .getByRole("region", { name: "口座ごとの状況", exact: true })
+      .innerText();
+    expect(accounts).toContain(WORLD_SCOPE_BANK);
+    expect(accounts).toContain(WORLD_SCOPE_SAVINGS);
+    const dispositions = await page
+      .getByRole("region", { name: "イベントの扱いの一覧" })
+      .innerText();
+    expect(dispositions).toContain("ev-scope-savings@1#0");
+    expect(await auditView(page)).toEqual([]);
+    // A repeated id is named before anything is sent.
+    const sent = requests.length;
+    await page
+      .getByLabel("口座 ID", { exact: true })
+      .fill(`${WORLD_SCOPE_BANK} ${WORLD_SCOPE_BANK}`);
+    await page.getByText("同じ口座 ID が2回以上入力されています。").waitFor();
+    expect(await page.getByRole("button", { name: "表示する", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    expect(requests).toHaveLength(sent);
+    await page.close();
+  }, 60_000);
+
+  test("one account shows no per-account columns", async () => {
+    const page = await open();
+    await ask(page, WORLD_BANK);
+    await answered(page);
+    expect(await page.getByRole("region", { name: "口座ごとの状況", exact: true }).count()).toBe(0);
+    const header = await page
+      .getByRole("region", { name: "残高ごとの比較" })
+      .locator("thead")
+      .innerText();
+    expect(header).not.toContain("口座");
     await page.close();
   }, 30_000);
 

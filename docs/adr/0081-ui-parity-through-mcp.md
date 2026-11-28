@@ -492,7 +492,7 @@ expired confirmation on an expired plan is `confirmation_expired`.
 
 ## Amendment: no card settlement page offers a next page its budget refuses (2026-11-08)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-10 in [#1274](https://github.com/risu729/kogane/pull/1274))
 - Date: 2026-11-08
 
 ### Context
@@ -579,3 +579,415 @@ the grouped and unmatched pagers, the disabled button and the accessibility
 audit, and `apps/web/test/card-settlement-contract.test.ts` and
 `packages/observation-shared/test/card-statements-unmatched-contract.test.ts`
 the validators.
+
+## Amendment: a read tool's store failure is its route's answer (2026-11-18)
+
+- Status: accepted (merged 2026-11-20 in [#1402](https://github.com/risu729/kogane/pull/1402))
+- Date: 2026-11-18
+
+### Context
+
+The Worker runs every UI read route in `catalogue` (`services/app/src/read.ts`),
+so a store failure inside a route's read is `503 catalogue_read_failed`. The
+MCP page reads (`page-read-tools.ts`) run their route's reader the same way
+and answer that code as the tool's result. Since 2026-11-08 the checks that a
+read's tables exist answer it too, on the route and on both agent paths. The
+other read tools did not: once their check passed, a store failure inside the
+read was an exception. On `/api/agent/v1/*` it was `500 internal_error`; on
+`/mcp` the SDK's answer was replaced by the Worker's `500 internal_error`
+for the whole request. The UI route over the same service answered `503
+catalogue_read_failed`. [Agent API](../agent-api.md) recorded this as a
+limit. It covered every read tool with a UI route outside the page reads:
+the card settlement reads, the purchase explanation, the reported and
+reconstructed state, the identity and audit reads, economic readiness and the
+shared query.
+
+Point 2 asks the route and the tool to answer alike, since both are adapters
+over one service. Here they did not. An MCP client got a failed request where
+the page got a closed, retryable code.
+
+### Options considered
+
+1. **Keep the limit.** The exception is logged with a closed code and nothing
+   leaks, but the two paths disagree. A client cannot tell a transient store
+   failure from a bug, and on `/mcp` it gets no tool result.
+2. **Answer the whole request `503 catalogue_read_failed`**, as a failing
+   table check does. The paths would share the code, but on `/mcp` a store
+   failure inside a read would still not be a tool result. A page read already
+   answers the same failure as a tool result, so two read tools would differ
+   in shape.
+3. **Run each read tool's read in `catalogue` and answer the code as the
+   tool's result (chosen)**, as the page reads do.
+
+### Decision
+
+Option 3. `catalogueTool` in `services/app/src/read.ts` runs a read tool's
+read in `catalogue`, the function the Worker wraps each route in. Any
+`HttpError` the read ends in becomes the tool's result: `{ status, body:
+{ error } }`. A store failure is `503 catalogue_read_failed`, an `isError:
+true` result on `/mcp` and that status and body on `/api/agent/v1/*`. The
+failure's text is dropped, and the call is recorded once as `failed` with
+that code. `callReadTool` (`read-tools.ts`) runs every tool of its file
+through it. `callTool` (`agent-service.ts`) runs `kogane.capabilities`,
+`.context.open`, `.financial.query`, `.explain`, `.instruments.candidates`,
+`.purchases.explain` and `.reconstructed-state.read` through it.
+`kogane.reconcile.propose` is left out: it writes a proposal, so a failure
+there is not a read's. It stays an exception, `500 internal_error`.
+
+A refusal a read raises as an `HttpError` is answered the same way, with its
+status and code alone. An example is the observation reader's `413
+result_limit_exceeded` past 5,000 rows, which the shared query, the context
+and the explanation can raise. Before, on `/mcp` such a refusal was the
+whole request's answer with that status. `callReadTool` and the page reads
+already answered theirs as results. Like `callReadTool` before it, the
+wrapper drops the error's `refs` (`invalid_request` names the fields it
+refuses on the route and on a page read, not on these tools): an existing
+difference this amendment keeps, since closing it adds a wire field.
+
+A read whose service answers its own store failure keeps that answer:
+`kogane.economic-readiness.read` is `503` with `readiness_store_unavailable`
+on its route and its tool alike, as before. The schedule reads and the
+operations tools are out of scope too. Their routes (`/api/ops/v1/*`) are not
+run in `catalogue`, so route and tool already agree.
+
+### Consequences
+
+- A client reads a store failure inside any read tool as a tool result with
+  a closed code it can retry, the same code the page shows. Before, it got a
+  failed request.
+- The request log line of such a call carries the transport's status (`200`
+  on `/mcp`, `503` on the HTTP path) and no `errorCode`, as for a page read;
+  the audit record carries `catalogue_read_failed`. Before, the line carried
+  `500 internal_error`.
+- As on the routes, `catalogue` does not tell a store failure from a bug
+  inside the read: an unexpected exception there is also `503
+  catalogue_read_failed`. Nothing of it reaches the answer, log or record.
+- An exception outside a read tool's read is still the Worker's `500
+  internal_error`. That covers a proposal, an operations or decision tool,
+  and the dispatcher or SDK itself (ADR 0047). So does a failure of the
+  delegation figures `kogane.capabilities` adds for an MCP client after its
+  read.
+- No wire field is added. The change is the status and code of an answer that
+  was a failed request; the owner approves it before this merges.
+
+### Verification
+
+`services/app/test/agent-read-store-failure.test.ts` covers every read tool
+outside the page reads; a guard fails when a tool is added without being
+covered, whether to a tool list of `agent-service.ts` or `read-tools.ts` or
+as any other tool `/mcp` publishes and `callTool` runs. Its store fails every
+statement except the audit record's writes and the table checks; for `kogane.capabilities`, whose only reads are those
+checks, the checks fail too. Each tool must then answer `503
+catalogue_read_failed` on `/api/agent/v1/*` and as an `isError: true` result
+on `/mcp`, and its UI route, where one exists, answers the same code. The
+economic readiness tool must answer its route's own `503` body. Each call
+must be recorded once, `failed` with that code, and the failure's text must
+reach no answer, log line or record. A proposal under the same store must
+stay `500 internal_error`. `catalogueTool` must answer a raised `413
+result_limit_exceeded` with that status and code alone. Before the fix, the
+test of every tool but economic readiness failed (19 of 20); the coverage
+guard and the proposal passed. `test/mcp-client.test.ts` (G3-08) now throws through a proposal in
+both eras and on the HTTP path, and checks a read's tool result in both eras.
+`test/audit.test.ts` records the proposal's exception once and the read's
+`catalogue_read_failed` once.
+
+## Amendment: activity filters on `kogane.events.read` (2026-11-20)
+
+- Status: accepted (merged 2026-11-21 in [#1493](https://github.com/risu729/kogane/pull/1493)). The tool's input schema, its description and the
+  activity route's answer gain fields: published changes, so the owner's
+  approval was required before merge, as for every published tool change.
+- Date: 2026-11-20
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414), gap
+  G3 of the MCP everyday-questions audit; the next slice
+  [ADR 0127](0127-changes-since-digest.md) names
+- Related: [ADR 0119](0119-cursor-page-size.md) and
+  [ADR 0123](0123-summary-detail-for-large-reads.md) (cursor binding,
+  `mustMatch`), [read model: cost](../read-model.md#cost) (a query rewrite
+  is proven equal to the shipped text)
+
+### Context
+
+`kogane.events.read` (plan D19) answers `GET /api/v2/activity` and
+`/api/v2/obligations` through the routes' own `readEventsRoute`. The activity
+list pages every current event revision with a leg on one basis, 200 a page by
+`offset`, with no filter. [ADR 0127](0127-changes-since-digest.md) counts the
+event revisions recorded since an instant, and names `kogane.events.read` as
+the read that lists them, but an agent could not ask that read for only those
+revisions, nor for one account's or one source's: it paged the whole list and
+filtered it itself.
+
+What the projection holds for a filter (CORE 0032):
+
+- `created_at`, when a writer recorded the revision. No index has it; the
+  changes digest compares it in `strftime('%Y-%m-%dT%H:%M:%fZ', …)` form.
+- The legs, by `(event_id, revision)`: each names a subject. An account is
+  `account:<id>` (card purchases, every new writer) or the bare id (card
+  settlements, the 0044 tolerance); the knowledge selector reads both forms.
+- `evidence_support_json`: the SourceFactRefs, a transaction or balance fact
+  with `revision: parse_run:<id>`, or a typed claim (`reader:<version>`). A
+  parse run's capture (`fetch_artifacts`) names its source.
+- `effective_time_json`: a role-typed time (an instant with its offset, a
+  local date, a period, or unknown with a reason), not a date column.
+
+The shipped activity text walks `economic_event_revisions_current` (live
+revisions, in `(event_id, revision)` order) and checks each revision's basis
+leg by key until `LIMIT` and `OFFSET` are met.
+
+### Options considered
+
+1. **Add the filters to the shipped text and keep `offset`.** A sparse filter
+   would walk every live revision to fill a page or reach a deep offset: the
+   cost grows with the store, and an offset counts rows of a list the filter
+   changes.
+2. **An index on `created_at` and an additive migration.** Only the time
+   filter would use it, its order differs from the list's, and the walk below
+   needs none.
+3. **A bounded keyset walk in the shipped order (chosen).** The filtered list
+   walks the same partial index from a key, a fixed number of live revisions a
+   call, and continues after the last one it walked.
+4. **A window on the event's own date.** A rule per time kind (which civil day
+   an instant falls on, whether a period straddling the edge is inside, what an
+   unknown time does) is a decision no observed need asks for yet, and the
+   digest's handler needs the recording window. Left for its own amendment.
+
+### Decision
+
+1. **Filters.** `activity` takes, each optional: `since` (inclusive) and
+   `before` (exclusive), ISO 8601 instants with a zone, on `created_at`
+   compared as the digest compares it; `account`, an account id or
+   `account:<id>`, which a leg of the revision names in either form; `source`,
+   a source id, the source of a capture a parse run the evidence cites
+   (`parse_run:<id>`) was read from. A typed claim or a parse run that does not
+   exist names no source. `obligations` takes none (`400 invalid_query`, as
+   before).
+2. **Closed refusals.** A malformed value is `400 invalid_query` with a ref per
+   refused filter: `since:format`, `before:format` (no zone, no time, no
+   real calendar time, or one whose UTC form leaves the years 0000 to 9999
+   that `created_at` is compared in), `account:format`, `source:format` (the
+   evidence browser's source charset); `since` at or after `before` is
+   `window:empty`.
+   An `offset` beside a filter or a cursor is `400 invalid_query` with
+   `refs: ["offset"]`.
+3. **The unfiltered list is the shipped one.** Without a filter or a cursor,
+   `activityEventsSql` is unchanged byte for byte, paged by `offset`, with the
+   next offset as `nextCursor` and the same fields, so a cursor issued before
+   this change still continues.
+4. **The filtered list** (`filteredActivityEventsSql`,
+   `packages/read-model/src/events.ts`) walks at most 5,000 live revisions
+   (`ACTIVITY_FILTER_WALK`) after a key through
+   `economic_event_revisions_current` (one index range), tests the recording
+   window on the row it holds, then the basis leg and the account leg by the
+   legs' primary key, then each evidence reference's parse run and capture by
+   primary key; it lists the first 200 that pass, in the shipped order. Its
+   cursor continues after the last revision listed when more matched than the
+   page holds, else after the last one walked when the walk reached its bound,
+   so a page may be short or empty and still continue. The answer adds
+   `filters` (each in its compared form, null when absent) and `walk`
+   (`bound`, `walked`), and speaks the paging surface ADR 0128 proposes
+   (branch `claude/adoring-faraday-co4por-mcp-consistency`, not merged):
+   `next` is `{ arguments: { cursor } }` while something follows, else null,
+   and `paging` is `{ limit: 200, returned, hasMore, stoppedBy }`, with
+   `stoppedBy` `limit` for a full page, `walk` for a page the walk bound
+   ended before it filled, null at the end. `nextCursor` carries the same
+   cursor, as the unfiltered list's `nextCursor` carries its offset. ADR
+   0128's closed list of stops (`limit`, `bytes`, `budget`) has no stop for
+   a scan bound; `walk` is proposed for it, and its validator must admit it
+   (with `returned` below `limit`) before the two branches merge.
+5. **The cursor binds the filters.** It is the keyset cursor of
+   `packages/domain/src/paging.ts` (scope `economic-events:activity`, the
+   last key, and the digest of the route, the basis and the four filters in
+   their compared form). Read with another basis or filter, or with no
+   filter, it is `400 cursor_mismatch` with `mustMatch` naming `collection`,
+   `basis`, `since`, `before`, `account` and `source` (ADR 0123); a cursor it
+   did not issue is `400 invalid_cursor`.
+6. **One reader, one grant.** The route and both agent paths call
+   `readEventsRoute`, as before; the tool's grant (`records.read` over the
+   whole store) is graded before its arguments are read.
+7. **The digest's handler.** ADR 0127's events handler names `sinceArgument:
+   since` ([its amendment](0127-changes-since-digest.md#amendment-the-events-handler-names-since-2026-11-20)).
+
+### Consequences
+
+- "Which events were recorded since yesterday", "this account's events" and
+  "this source's events" each take one filtered walk instead of the whole list.
+- A call reads a fixed number of rows whatever the store holds: on workerd's
+  D1, the first page reads 15,005 to 35,005 rows (by filter) over a history
+  5,100 or 15,300 revisions long (`events-filters-cost.test.ts`), each
+  revision citing one evidence reference. `source` reads a parse run and a
+  capture for each reference it tests, so its rows grow with the references a
+  revision cites (two for a card settlement, one for each card usage a card
+  purchase recognises), not with the store.
+  Listing a sparse filter over a store of N live revisions takes about
+  N / 5,000 calls, most of them short or empty.
+- The list is in event-id order, not recording order: the revisions recorded
+  since are spread over the walk.
+- The pages read the live projection, not a snapshot: each call walks the
+  revisions live at that moment after its key. A revision recorded between
+  calls is listed only if its key sorts after the cursor, and a revision that
+  replaces one already listed, under the same event id, is listed again in its
+  new revision when it sorts after the cursor (the shipped list's offset pages
+  shift the same way).
+- Where one event has two live revisions (an inconsistency
+  `economic_event_live_conflicts` lists, which no writer leaves), the item
+  view gathers legs and evidence by event id, as the shipped list does, so
+  such an item shows what its page holds of both; the filters decide on each
+  revision's own legs and evidence.
+- No migration and no index: the walk uses `economic_event_revisions_current`
+  and primary keys only.
+- No filter on the event's own date (`effectiveTime`), and none on
+  obligations.
+
+### Verification
+
+- `packages/read-model/test/events-activity-legacy-sql.ts` freezes the shipped
+  text; `events-filters.test.ts` asserts `activityEventsSql` equals it, and
+  compares every filtered read, paged to its end at page sizes 1 to 200 and
+  walk bounds 2 to 5,000, with the frozen text's rows narrowed in memory by a
+  restatement of each filter over the base tables: on 40 random stores (both
+  account forms, superseded revisions, a merge across event ids, live
+  conflicts, evidence with no parse run, a missing or malformed parse run,
+  non-object references, recording times with and without milliseconds, at
+  +09:00, as a bare date and unreadable), the listed revisions in order on
+  every store and every item whole on stores without live conflicts; with no
+  filter it returns the shipped list; on a scaled store of 11,234 live
+  revisions every page walks at most the bound. A boundary, an account form,
+  each source case and a walk that stops at its bound are checked by name.
+  Changing `>=` to `>` on `since`, dropping the bare account form, accepting a
+  malformed parse run reference, or ending a walk that stopped at its bound
+  instead of continuing it makes it fail.
+- `packages/read-model/test/statement-plans.test.ts`, without table
+  statistics: one range of `economic_event_revisions_current` from the key, the
+  legs by primary key, the parse run and capture by primary key, no other
+  table scanned.
+- `services/processor/test/events-filters-cost.test.ts`, on workerd's D1 with
+  every CORE migration and no `sqlite_stat` table: the same plan steps; each
+  filter's first page reads the same rows and answers the same over a history
+  three times larger; D1 answers what bun:sqlite answers.
+- `services/app/test/page-read-events-filters.test.ts`: the route, the agent
+  HTTP route and MCP answer the same for each filter, both account forms and
+  an offset-written `since`; the pages of a filtered list join with nothing
+  repeated or skipped, each page's `next` naming its `cursor` and its
+  `paging` saying how it ended (`walk` for a short page with a cursor);
+  another filter, basis or no filter is
+  `cursor_mismatch` with `mustMatch`; each malformed filter, a foreign cursor
+  and an `offset` beside a filter are refused with their codes; the grant is
+  graded before a filter is read; the unfiltered answer keeps its fields and
+  its offset cursor; every argument a changes-digest handler names is in its
+  tool's schema, and the events handler's `since` lists the revisions
+  recorded since.
+
+## Amendment: explain reads the detail route's organization (2026-11-21)
+
+- Status: accepted (merged 2026-11-22 in [#1505](https://github.com/risu729/kogane/pull/1505))
+- Date: 2026-11-21
+
+### Context
+
+`kogane.explain` (`packages/application/src/explain.ts`) builds a graph of
+ids for a result ref. For an observation it writes `account_mapping:`,
+`instrument_mapping:` (`adopted-claim`, depth 2) and `identity-decision:`
+(depth 3) nodes from the organization on the observation detail its reader
+returns. The Worker passed the evidence reader, whose `getObservation`
+returns no organization (`packages/read-model/src/observation-reader.ts`), so
+a served graph never had those levels; only a stub test reader produced them.
+The observation detail route adds the organization beside the same reader,
+with `observationOrganizations`, the function point 2 moved into
+`packages/application` so every route and tool organizes rows through one
+read. `explain` was the one answer that names organization levels without
+reading them that way.
+
+The answer's `contextId` pins `identity:latest:current-mappings-v1` and a
+whole-second clock, never a mapping revision. Reading the organization raises
+the question whether `explain` must now pin the revisions it reads (INV09).
+
+### Options considered
+
+1. **Keep the limit and document it.** The graph shape the code and the
+   published node kinds promise is never served, and the reader the code is
+   written against does not exist outside a test.
+2. **Teach the evidence reader to return the organization.** A second read of
+   the organization, inside `packages/read-model`, beside the one the routes
+   use; the detail route would then have two.
+3. **Give `explain` an organization read that is the detail route's function
+   (chosen),** called only after the grant has allowed the row, under the
+   context's identity mode.
+
+On INV09:
+
+a. **Pin the revisions read in the `contextId`.** The shared query's context,
+the balance pages and the observation routes pin the identity mode and
+release and re-read the current revisions (a dated reported-state
+`contextId`, whose rows name no revision, pins each row's mapped account and
+instrument instead); an
+`explain` context with extra pins would no longer equal the
+`kogane.context.open` context for the same inputs, which is what a caller
+hands from one answer to the next. It would also need the revisions before
+the context is opened, a read of a row that has not been authorized yet.
+b. **Pin nothing more, and let the graph name what it read (chosen).** Each
+mapping ref carries the revision it was built from, so two graphs under one
+`contextId` that differ say how. `explain` issues no cursor and no
+`resultRef`, so nothing resumes or is handed off on a revision it did not
+read.
+
+### Decision
+
+Option 3 with b. `ExplainReader` gains `getOrganization(ref, mode)`.
+`organizedExplainReader(reader, sql)` serves it with
+`observationOrganizations(sql, [ref], mode)`, and `explain` calls it after
+`grantAllowsRow` with the opened context's identity mode, which is always
+`latest` on the served paths (`identityRead` stays refused). The Worker's
+`kogane.explain` passes `organizedExplainReader(evidenceReader, d1Executor)`
+on `/api/agent/v1/explain` and `/mcp` alike. The grant, scope and budget
+checks are unchanged, and so is the graph's schema
+(`explanation-graph-v1`) and its node kinds. The organization contributes
+ids and revisions only: a mapping's label and reason, the account entity or
+instrument it maps to (which another source's account may share) and an
+identifier's namespace, scope and value stay out of the graph.
+
+### Consequences
+
+- A served graph of a mapped observation has its `adopted-claim` and
+  `identity-decision` nodes. Its shape changes for every existing ref that
+  is organized; the owner approves the changed answer before this merges.
+- Under `latest`, a mapping corrected between two calls in the same second
+  changes the graph's refs and not its `contextId`, as it changes a `latest`
+  query's rows and not that query's `contextId`
+  ([agent API](../agent-api.md#explain-and-the-identity-read)).
+- The levels are shown under `summary.read`, like the parse run beside them;
+  no level checks `records.read`. Every served caller holds the whole-store
+  grant (ADR 0084), so this changes nothing served today; a narrower grant
+  would see its own row's mapping ids.
+- A row outside the grant is refused before its organization is read, so its
+  refusal and cost are an absent ref's.
+- An `explain` call runs the organization read's statements for one row
+  (the organization, the preferred instrument names, the account connection
+  and the entity labels), of which it keeps only ids and revisions: the
+  statements the detail route runs to organize the same row. That is one
+  statement for a row no sealed run organizes and five for a mapped row with
+  an instrument (the organization, the preferred names, the connection
+  reviews, the entity's references and the connection reviews again), six
+  when the entity holds a Vpass reference; each is keyed by the one row or
+  its entity, and the connection reviews are capped at 64. They run at
+  `depth: 1` too, where no organization node fits.
+
+### Verification
+
+- `services/app/test/explain-organization.test.ts`, over the served Worker on
+  a synthetic store: agent HTTP and MCP answer the same graph for a mapped
+  observation, its levels sit at depths 2 and 3, and its mapping refs equal
+  the detail route's `organization` for the same row; `depth: 2` keeps the
+  claims and cuts the decision; a correction moves the account ref to
+  `@2` and `manual` while the `contextId` stays; no label, reason, entity or
+  identifier value appears; a grant scoped to one source account sees that
+  account's mapping, nothing of a second source account mapped onto the same
+  entity, and that account's row answers exactly as an absent ref. With a
+  second, hand-corrected source account on the shared entity, the scoped
+  graph has the kinds, depths and organization refs of a graph whose entity
+  has one account, and runs the same organization statements; the
+  out-of-scope row runs none of them at depths 1, 2 and the default, like an
+  absent ref. With the served reader's organization removed, the three
+  served-shape tests fail.
+- `packages/application/test/explain-propose.test.ts`: the levels' refs and
+  depths, the mode they are read under, that labels, reasons, entities and
+  identifier values stay out, and that a row outside the grant is refused
+  before any organization read.

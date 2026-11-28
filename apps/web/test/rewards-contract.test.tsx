@@ -44,7 +44,7 @@ const page: RewardReadExpiryPage = {
         unitRef: "points:synthetic",
         value: {
           status: "exact",
-          value: { coefficient: "12345", scale: 2 },
+          value: { coefficient: "123456789", scale: 2 },
           normalizationVersion: "decimal-v1",
         },
       },
@@ -79,7 +79,7 @@ test("READ expiry keeps undated buckets, native quantities, snapshot time and pa
   for (const text of [
     "期限未確認",
     "未確定",
-    "123.45",
+    "1,234,567.89",
     "points:synthetic",
     "2026-12-31",
     "取得元の表示",
@@ -88,6 +88,24 @@ test("READ expiry keeps undated buckets, native quantities, snapshot time and pa
     "取得できた履歴が途中から",
   ])
     expect(html).toContain(text);
+});
+
+test("a code that names a built-in object member is shown as the code, never as the member", () => {
+  const codes = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"];
+  const row = {
+    ...page.rows[0]!,
+    bucketKind: "constructor",
+    state: "toString",
+    basis: "valueOf",
+    reasonCodes: [...codes, "synthetic_unknown_code"],
+  } as unknown as (typeof page.rows)[number];
+  const html = renderToStaticMarkup(<RewardExpiryResults data={{ ...page, rows: [row] }} />);
+  for (const code of [...codes, "synthetic_unknown_code"]) expect(html).toContain(code);
+  expect(html).not.toContain("native code");
+  expect(html).not.toContain("[object Object]");
+  // A known code keeps its label.
+  const known = renderToStaticMarkup(<RewardExpiryResults data={page} />);
+  expect(known).toContain("取得できた履歴が途中から");
 });
 
 test("reward transport rejects malformed values and dates rather than rendering them", () => {
@@ -292,7 +310,7 @@ test("READ expiry displays unclassified dated and undated quantities with the co
   const html = renderToStaticMarkup(<RewardExpiryResults data={data} />);
   for (const text of [
     "種類未確認",
-    "123.45",
+    "1,234,567.89",
     "points:synthetic",
     "2026-12-31",
     "期限未確認",
@@ -316,7 +334,7 @@ test("provider subset sections render separately, including not-displayed and un
     holdingRef: "holding:conn",
     parentBucketRef: "total",
     unitRef: "points:j-point",
-    observedAt: { kind: "unknown" as const, reasonCode: "synthetic_time" },
+    observedAt: { kind: "unknown" as const, reasonCode: "observed_at_unparsed" },
     sourceFactRefs: ["balance:1"],
     coverage: "observed" as const,
     reasonCode: null,
@@ -403,7 +421,11 @@ test("each holding and expiry table region has its own accessible name", () => {
     buckets: [],
     qualificationMeasures: [],
     membership: [],
-    valueModel: { netAssetEligible: false, cashLikeRedemptionEstimate: null, reasonCode: "none" },
+    valueModel: {
+      netAssetEligible: false,
+      cashLikeRedemptionEstimate: null,
+      reasonCode: "no_offer_named",
+    },
   });
   const expiry = (id: string): RewardExpiryRow => ({
     holdingRef: `holding:${id}`,

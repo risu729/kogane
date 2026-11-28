@@ -162,14 +162,52 @@ A build writes rows while `building`, and:
 - each chunk and its checkpoint are one D1 batch, so a statement error rolls
   both back (G2-08), and a re-sent chunk is a no-op only when its content is
   identical — different content for a row that exists raises `projection chunk
-  conflict` in a trigger (G2-07);
+  conflict` in a trigger (G2-07). The reward writer skips only a row whose
+  primary key is written (`ON CONFLICT … DO NOTHING`), so a reward row that
+  fails a CHECK or NOT NULL raises as well
+  ([rewards.md](rewards.md#read-tables-migration-0002_reward_readsql-current-expiry-rows-use-0004_reward_unclassified_bucketssql)),
+  and so does the balance writer (below);
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
-  longer write, seal or publish (G2-09);
+  longer write, seal or publish (G2-09). Every row, relation and checkpoint a
+  chunk writes restates that the build is still `building` under the chunk's
+  lease, in both writers (the reward provider sections also restate the
+  fence), so a displaced writer's chunk writes no row and reports
+  `lease_lost`. That condition is one search of the build by its key per
+  statement (`packages/storage-d1/test/statement-plans.test.ts`, without
+  table statistics);
+- the balance writer (`packages/storage-d1/src/read/writer.ts`) skips only a
+  row or input ref whose primary key is already written:
+  `ON CONFLICT(snapshot_id,scope_key) DO NOTHING` for
+  `current_balance_projection` and
+  `ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING` for
+  `snapshot_input_refs`. A row that fails a CHECK or NOT NULL, or a new scope
+  at a `row_seq` already written, raises its constraint: the chunk and its
+  checkpoint roll back, the tick logs `balance_projection_failed` with the
+  error's class as its code, and the build stays `building` and unpublished at
+  the chunk after its checkpoint; the code names neither the row nor the
+  constraint. An input ref that fails a constraint fails the batch that starts
+  the build, so no build starts. Two starts that read the same next attempt
+  name one snapshot id; the second one's refs hit the primary key and are
+  skipped, and the writer lease decides which start builds it
+  (`test/read-writer.test.ts`, "only a re-sent key is skipped").
+  `snapshot_input_refs` has no digest-conflict trigger: a `(kind, id)` a plan
+  listed twice would keep its first row, and the balance plan lists each once
+  (`services/processor/src/read-projection.ts` keys decisions by id);
 - the seal and the pointer switch are one batch. The pointer moves only to a
   snapshot at least as current as the published one under the same epoch, so a
   build that finishes late is complete but not published (G2-10);
 - the App reads only through the pointer. There is no "newest complete build"
-  fallback, so an unfinished or unpublished build is never served.
+  fallback, so an unfinished or unpublished build is never served;
+- retiring a build and deleting its rows are one batch, for both the balance
+  and the reward writer, and the retirement states its own condition: an old
+  build only while the pointer does not name it, an abandoned one only while
+  it is `building`. A failed batch leaves the build as it was, so the next pass
+  retires it; a build the pointer was switched to after the selection, or one
+  another writer sealed, keeps its rows. Each delete names only a retired
+  build; that condition is one search of the build by its key, run once per
+  statement, and every statement of the batch reaches its rows by key
+  (`packages/storage-d1/test/statement-plans.test.ts`, without table
+  statistics).
 
 The pointer's `source_revision` and `visibility_revision` are the watermark
 "the published content was verified against these". A capture that digests to
@@ -186,7 +224,7 @@ is different from the CORE path:
 | --------------------------------------------- | ----------------------------------------------------- |
 | No published snapshot                         | `503 read_model_unavailable` — never an empty success |
 | Cursor from another read instance or snapshot | `410 context_expired`                                 |
-| Cursor for another query                      | `400 cursor_mismatch`                                 |
+| Cursor for another route, filter or read mode | `400 cursor_mismatch` with `mustMatch` (ADR 0123)     |
 | CORE restored under a new epoch               | `503 read_model_context_changed`                      |
 | A use restriction changed                     | `503 read_model_restriction_changed`                  |
 
@@ -206,7 +244,12 @@ reason and blocking warning instead of summing a refused snapshot
 The cursor is `{ snapshotId, readInstanceId, filterDigest, position }`
 (`packages/storage-d1/src/read/cursor.ts`), base64url of the same JSON shape the
 CORE path uses. Nothing in it is trusted: every field is compared with what the
-server resolved for this request, and it is never an authorisation.
+server resolved for this request, and it is never an authorisation. Its
+`filterDigest` covers the page size its page was read at, but the page size is
+not part of the query: the balance and reward routes also compare it with the
+same query's digest at each size they offer, so a cursor continues at another
+offered `limit` from where its page ended
+([ADR 0119](adr/0119-cursor-page-size.md)).
 
 `/api/meta` advertises `balancesV2ReadModel`: `none`, `core-d1` or `read-d1`. A
 client is told which store answered rather than inferring it from a cursor that
@@ -286,17 +329,17 @@ separation exists for, and it is tested in
 
 ## Verified locally (synthetic data only)
 
-| Acceptance                                                                                                                     | Where                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| The schema: STRICT, no CORE foreign key, the instance guard                                                                    | `packages/storage-d1/test/read-schema.test.ts`           |
-| Identity, the retired-content rebuild, the racing start, G2-07, G2-08, G2-09 (late seal after a successor), G2-10              | `packages/storage-d1/test/read-writer.test.ts`           |
-| The cursor codec and the pointer-only reader (G3-01, G3-03)                                                                    | `packages/storage-d1/test/read-cursor.test.ts`           |
-| The lane end to end on real D1: G2-05, G2-07, G2-11, G2-12, the attempt rebuild, and the total loss (G0-09, G3-12)             | `services/processor/test/read-projection.test.ts`        |
-| The routes: G3-01, G3-02, G3-03, G3-04, another baseline refused, and a saved report with every READ table dropped (G0-11)     | `services/app/test/balances-v2-read.test.ts`             |
-| The READ schema ledger is the generator's output and is built from its own directory                                           | `scripts/core-schema-ledger.test.ts`                     |
-| U16 — the reward schema and writer: the fixed instant, the replay, the chunk, the displaced writer, the pointer (G2-19, G2-20) | `packages/storage-d1/test/reward-read-writer.test.ts`    |
-| U16 — the reward lane end to end on real D1, and its total loss (G2-19, G2-20, G0-09)                                          | `services/processor/test/reward-read-projection.test.ts` |
-| U16 — the reward routes: the published instant, the replay states, the cursor rules                                            | `services/app/test/rewards-v2-read.test.ts`              |
+| Acceptance                                                                                                                                              | Where                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| The schema: STRICT, no CORE foreign key, the instance guard                                                                                             | `packages/storage-d1/test/read-schema.test.ts`           |
+| Identity, the retired-content rebuild, the racing start, G2-07, G2-08, G2-09 (late seal after a successor), G2-10, retirement in one batch              | `packages/storage-d1/test/read-writer.test.ts`           |
+| The cursor codec and the pointer-only reader (G3-01, G3-03)                                                                                             | `packages/storage-d1/test/read-cursor.test.ts`           |
+| The lane end to end on real D1: G2-05, G2-07, G2-11, G2-12, the attempt rebuild, and the total loss (G0-09, G3-12)                                      | `services/processor/test/read-projection.test.ts`        |
+| The routes: G3-01, G3-02, G3-03, G3-04, another baseline refused, and a saved report with every READ table dropped (G0-11)                              | `services/app/test/balances-v2-read.test.ts`             |
+| The READ schema ledger is the generator's output and is built from its own directory                                                                    | `scripts/core-schema-ledger.test.ts`                     |
+| U16 — the reward schema and writer: the fixed instant, the replay, the chunk, the displaced writer, the pointer, retirement in one batch (G2-19, G2-20) | `packages/storage-d1/test/reward-read-writer.test.ts`    |
+| U16 — the reward lane end to end on real D1, and its total loss (G2-19, G2-20, G0-09)                                                                   | `services/processor/test/reward-read-projection.test.ts` |
+| U16 — the reward routes: the published instant, the replay states, the cursor rules                                                                     | `services/app/test/rewards-v2-read.test.ts`              |
 
 Not verified: production volumes, a real second Worker racing the lease (the
 displaced writer is simulated), R2 failure injection, and the retention of

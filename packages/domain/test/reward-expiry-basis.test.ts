@@ -8,6 +8,7 @@ import {
   estimateExpiry,
   EXPIRY_DERIVATION_RELEASE,
   validBucketExpiryBasis,
+  validExpiryRule,
   type ActivityHistory,
   type BucketKind,
   type ComputedExpiryReason,
@@ -428,6 +429,11 @@ describe("every unavailable computed expiry carries exactly one closed reason", 
       rule: { ...inactivity, qualifyingActivity: null },
       state: "needs-rule-verification",
     },
+    {
+      reason: "deadline_calendar_unreadable",
+      rule: { ...inactivity, deadlineCalendar: null },
+      state: "needs-rule-verification",
+    },
     { reason: "membership_out_of_scope", rule: tiered, state: "partial" },
     {
       reason: "membership_not_retroactive",
@@ -493,6 +499,50 @@ describe("every unavailable computed expiry carries exactly one closed reason", 
       expect(estimate.state).toBe(entry.state);
       expect(validBucketExpiryBasis(row.expiryBasis)).toBe(true);
     });
+});
+
+describe("a rule whose deadline calendar could not be read", () => {
+  // The read model leaves the calendar null for a malformed stored reference;
+  // no family's answer is then the rule's own (ADR 0004, INV05).
+  for (const rule of [inactivity, fixedLot, noExpiry])
+    test(`${rule.family}: unavailable, never a date or "no expiry", and no assumed zone`, () => {
+      const unreadable: ExpiryRule = { ...rule, deadlineCalendar: null };
+      const { estimate, row } = only(unreadable, bucket("bucket:subject", "regular"));
+      expect(estimate.state).toBe("needs-rule-verification");
+      expect(estimate.uncertaintyCodes).toContain("rule_family_unsupported");
+      expect(estimate.uncertaintyCodes).not.toContain("deadline_zone_assumed");
+      expect(row.expiryBasis.computed).toMatchObject({
+        status: "unavailable",
+        value: null,
+        reasonCode: "deadline_calendar_unreadable",
+        activity: null,
+        membership: null,
+        uncertaintyCodes: [],
+      });
+      expect(row.expiryBasis.computed.rule.deadlineCalendar).toBeNull();
+      expect(row.reasonCodes).toContain("deadline_calendar_unreadable");
+      expect(row.reasonCodes).not.toContain("no_expiry_under_verified_terms");
+      expect(validBucketExpiryBasis(row.expiryBasis)).toBe(true);
+    });
+
+  test("a provider display stays an observation beside the refusal", () => {
+    const shown = bucket("bucket:shown", "regular", { observedExpiry: day("2027-03-31") });
+    const { row } = only({ ...inactivity, deadlineCalendar: null }, shown);
+    expect(row.deadline).toEqual(day("2027-03-31"));
+    expect(row.basis).toBe("provider-observed");
+    expect(row.reasonCodes).toEqual(["deadline_calendar_unreadable", "provider_expiry_only"]);
+    expect(row.expiryBasis.agreement).toBe("not-comparable");
+  });
+
+  test("the rule validator admits the unreadable calendar only as null", () => {
+    expect(validExpiryRule({ ...inactivity, deadlineCalendar: null })).toBe(true);
+    expect(
+      validExpiryRule({
+        ...inactivity,
+        deadlineCalendar: { zone: "", dayBoundary: "end-of-day", zoneBasis: "assumed" },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("rule versions across an applicable-period boundary", () => {
@@ -569,6 +619,141 @@ describe("rule versions across an applicable-period boundary", () => {
       },
     };
     expect(computed(unreadable, "2026-03-01", "2026-09-09").reasonCode).toBe("rule_out_of_force");
+  });
+});
+
+describe("an instant counts on the rule's deadline calendar, not by the date its offset was written in", () => {
+  // Synthetic instants around one Tokyo midnight (ADR 0056: the civil date of
+  // an instant comes from a named zone's time-zone data). 2026-09-30T20:00:00Z
+  // is already 2026-10-01 in Asia/Tokyo, the inactivity rule's calendar.
+  const instant = (value: string, zone: string): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  const postedAt = (postedDate: TemporalValue): ActivityHistory => ({
+    ...history,
+    activities: [{ activityRef: "act:earn-edge", kind: "earn", postedDate, usedDate: null }],
+  });
+  const anchoredOn = (postedDate: TemporalValue, rule: ExpiryRule = inactivity) => {
+    const { computed } = only(rule, bucket("bucket:regular", "regular"), {
+      activity: postedAt(postedDate),
+      clock: day("2026-10-09"),
+    }).row.expiryBasis;
+    return {
+      status: computed.status,
+      reasonCode: computed.reasonCode,
+      anchor: computed.activity?.anchorDate ?? null,
+      deadline: computed.value,
+    };
+  };
+  const tokyoDay: ReturnType<typeof anchoredOn> = {
+    status: "date",
+    reasonCode: null,
+    anchor: derived("2026-10-01"),
+    deadline: derived("2027-10-01"),
+  };
+
+  test("a Z instant just after Tokyo midnight anchors on the Tokyo day", () => {
+    expect(anchoredOn(instant("2026-09-30T20:00:00Z", TOKYO))).toEqual(tokyoDay);
+  });
+
+  test("the same moment written at +09:00, and a plain date, anchor on the same day", () => {
+    expect(anchoredOn(instant("2026-10-01T05:00:00+09:00", TOKYO))).toEqual(tokyoDay);
+    expect(anchoredOn(day("2026-10-01"))).toEqual(tokyoDay);
+    // One second before Tokyo midnight is still the previous Tokyo day.
+    expect(anchoredOn(instant("2026-09-30T14:59:59Z", TOKYO))).toEqual({
+      ...tokyoDay,
+      anchor: derived("2026-09-30"),
+      deadline: derived("2027-09-30"),
+    });
+  });
+
+  test("an instant stamped with another zone still counts on the rule's calendar", () => {
+    expect(anchoredOn(instant("2026-09-30T20:00:00Z", "UTC"))).toEqual(tokyoDay);
+  });
+
+  test("a calendar zone the runtime does not know dates no instant, while a plain date still anchors", () => {
+    const unknownZone: ExpiryRule = {
+      ...inactivity,
+      deadlineCalendar: { ...inactivity.deadlineCalendar!, zone: "Synthetic/Nowhere" },
+    };
+    expect(anchoredOn(instant("2026-09-30T20:00:00Z", TOKYO), unknownZone)).toEqual({
+      status: "unavailable",
+      reasonCode: "activity_date_unknown",
+      anchor: null,
+      deadline: null,
+    });
+    expect(anchoredOn(day("2026-10-01"), unknownZone).deadline).toEqual({
+      ...derived("2027-10-01"),
+      zone: "Synthetic/Nowhere",
+    });
+  });
+
+  test("an instant clock is evaluated on the rule calendar's day", () => {
+    const v1: ExpiryRule = {
+      ...inactivity,
+      applicability: {
+        ...inactivity.applicability,
+        validPeriod: period("2025-01-01", "2026-12-31"),
+      },
+    };
+    const v2: ExpiryRule = {
+      ...v1,
+      version: "v2",
+      applicability: { ...v1.applicability, validPeriod: period("2027-01-01", "2030-12-31") },
+    };
+    // 2026-12-31T15:00:00Z is 2027-01-01 00:00 in Tokyo: v2's first day.
+    const reason = (rule: ExpiryRule, at: string) =>
+      only(rule, bucket("bucket:regular", "regular"), { clock: instant(at, TOKYO) }).row.expiryBasis
+        .computed.reasonCode;
+    expect(reason(v1, "2026-12-31T15:00:00Z")).toBe("rule_out_of_force");
+    expect(reason(v2, "2026-12-31T15:00:00Z")).not.toBe("rule_out_of_force");
+    expect(reason(v1, "2026-12-31T14:59:59Z")).not.toBe("rule_out_of_force");
+    expect(reason(v2, "2026-12-31T14:59:59Z")).toBe("rule_out_of_force");
+  });
+
+  test("without a readable calendar an instant clock is read in its own zone, and no date is computed", () => {
+    const unreadable: ExpiryRule = {
+      ...inactivity,
+      deadlineCalendar: null,
+      applicability: {
+        ...inactivity.applicability,
+        validPeriod: period("2025-01-01", "2026-12-31"),
+      },
+    };
+    const shown = bucket("bucket:shown", "regular", { observedExpiry: day("2026-12-31") });
+    const at = (value: string, zone: string) => {
+      const { row } = only(unreadable, shown, { clock: instant(value, zone) });
+      return {
+        status: row.expiryBasis.computed.status,
+        value: row.expiryBasis.computed.value,
+        reasonCode: row.expiryBasis.computed.reasonCode,
+        passed: row.reasonCodes.includes("deadline_passed"),
+      };
+    };
+    // 2026-12-31T15:00:00Z is 2027-01-01 in Tokyo and still 2026-12-31 in UTC.
+    expect(at("2026-12-31T15:00:00Z", TOKYO)).toEqual({
+      status: "unavailable",
+      value: null,
+      reasonCode: "rule_out_of_force",
+      passed: true,
+    });
+    expect(at("2026-12-31T15:00:00Z", "UTC")).toEqual({
+      status: "unavailable",
+      value: null,
+      reasonCode: "deadline_calendar_unreadable",
+      passed: false,
+    });
+    // A clock zone the runtime does not know establishes no evaluation day:
+    // nothing is passed, and a bounded version is not shown in force.
+    expect(at("2026-12-31T15:00:00Z", "Synthetic/Nowhere")).toEqual({
+      status: "unavailable",
+      value: null,
+      reasonCode: "rule_out_of_force",
+      passed: false,
+    });
   });
 });
 

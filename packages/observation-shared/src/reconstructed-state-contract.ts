@@ -36,7 +36,9 @@ import {
 import { validInstantText, validLocalDateText } from "../../domain/src/time.ts";
 import { isZeroDecimal, type Quantity, validQuantity } from "../../domain/src/values.ts";
 
-export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v1";
+export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v3";
+/** `RECONSTRUCTION_ACCOUNTS_MAX` of the query: the most accounts one scope names (ADR 0116). */
+export const RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX = 20;
 /** `RECONSTRUCTED_STATE_STATUSES` of the query, in precedence order. */
 export const RECONSTRUCTED_STATE_WIRE_STATUSES = [
   "unavailable",
@@ -431,6 +433,40 @@ function validDisposition(value: unknown): boolean {
   );
 }
 
+/** The scope: one to 20 account ids, sorted, each once. */
+function scope(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX &&
+    value.every(text) &&
+    value.every((entry, index) => index === 0 || (value[index - 1] as string) < entry)
+  );
+}
+
+/**
+ * The scope accounts' mapped sources: `[accountId, sourceId]` pairs, sorted by
+ * account then source, each once.
+ */
+function accountSources(value: unknown): value is [string, string][] {
+  return (
+    list(
+      value,
+      (pair) => Array.isArray(pair) && pair.length === 2 && text(pair[0]) && text(pair[1]),
+    ) &&
+    (value as [string, string][]).every((pair, index, all) => {
+      if (index === 0) return true;
+      const before = all[index - 1]!;
+      return before[0] < pair[0] || (before[0] === pair[0] && before[1] < pair[1]);
+    })
+  );
+}
+
+/** Two scopes name the same accounts in the same order. */
+function sameScope(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
 function validReconstruction(value: unknown): boolean {
   return (
     record(value) &&
@@ -495,7 +531,7 @@ function validManifest(value: unknown): boolean {
       "adapterRelease",
       "engineRelease",
       "foldPolicy",
-      "account",
+      "accounts",
       "range",
       "basis",
       "cut",
@@ -505,6 +541,7 @@ function validManifest(value: unknown): boolean {
       "aliasRuleVersions",
       "coverageProducer",
       "snapshots",
+      "accountSources",
       "innerManifestDigest",
     ]) &&
     value.schemaVersion === RECONSTRUCTED_STATE_QUERY_SCHEMA &&
@@ -512,7 +549,7 @@ function validManifest(value: unknown): boolean {
     text(value.adapterRelease) &&
     text(value.engineRelease) &&
     text(value.foldPolicy) &&
-    text(value.account) &&
+    scope(value.accounts) &&
     record(value.range) &&
     exactKeys(value.range, ["from", "to"]) &&
     value.basis === "cash" &&
@@ -537,6 +574,7 @@ function validManifest(value: unknown): boolean {
     exactKeys(value.snapshots, ["startContextId", "endContextId"]) &&
     digest(value.snapshots.startContextId) &&
     digest(value.snapshots.endContextId) &&
+    accountSources(value.accountSources) &&
     digest(value.innerManifestDigest)
   );
 }
@@ -551,7 +589,7 @@ export function validReconstructedState(value: unknown): boolean {
         "schemaVersion",
         "status",
         "reasons",
-        "account",
+        "accounts",
         "range",
         "basis",
         "cut",
@@ -568,7 +606,7 @@ export function validReconstructedState(value: unknown): boolean {
       value.schemaVersion === RECONSTRUCTED_STATE_QUERY_SCHEMA &&
       member(RECONSTRUCTED_STATE_WIRE_STATUSES)(value.status) &&
       list(value.reasons, member(RECONSTRUCTED_STATE_WIRE_REASONS)) &&
-      text(value.account) &&
+      scope(value.accounts) &&
       record(value.range) &&
       exactKeys(value.range, ["from", "to"]) &&
       date(value.range.from) &&
@@ -614,6 +652,39 @@ export function validReconstructedState(value: unknown): boolean {
       member(RECONSTRUCTED_STATE_LATE_UNAVAILABLE)(value.lateUnavailable)) &&
     (value.late === null) !== (value.lateUnavailable === null) &&
     validManifest(value.manifest) &&
-    digest(value.contextId)
+    digest(value.contextId) &&
+    // The fold, the manifest and the answer name the same scope, every account listed.
+    sameScope(
+      (value.reconstruction as { accounts: { accountId: string }[] }).accounts.map(
+        (entry) => entry.accountId,
+      ),
+      value.accounts,
+    ) &&
+    sameScope((value.manifest as { accounts: string[] }).accounts, value.accounts) &&
+    // Every mapped source is a scope account's, and an account mapped to no
+    // source is listed by no reported container.
+    mappedWithinScope(
+      (value.manifest as { accountSources: [string, string][] }).accountSources,
+      value.accounts,
+      (
+        value.reconstruction as {
+          accounts: { accountId: string; startContainer: boolean; endContainer: boolean }[];
+        }
+      ).accounts,
+    )
+  );
+}
+
+function mappedWithinScope(
+  pairs: readonly [string, string][],
+  scopeAccounts: readonly string[],
+  folded: readonly { accountId: string; startContainer: boolean; endContainer: boolean }[],
+): boolean {
+  const mapped = new Set(pairs.map((pair) => pair[0]));
+  return (
+    [...mapped].every((account) => scopeAccounts.includes(account)) &&
+    folded.every(
+      (entry) => mapped.has(entry.accountId) || (!entry.startContainer && !entry.endContainer),
+    )
   );
 }

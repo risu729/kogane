@@ -1,7 +1,9 @@
+import { ownEntry } from "./labels.ts";
 import { SchedulesPage } from "./pages/Schedules";
 import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 import { AuditPage } from "./pages/Audit.tsx";
 import { OperationPage } from "./pages/Operation.tsx";
+import { OperationsPage } from "./pages/Operations.tsx";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
@@ -78,6 +80,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
   { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
   { to: "/collection-quality", label: "収集品質", icon: NAV_ICONS.evidence },
+  { to: "/operations", label: "依頼の一覧", icon: NAV_ICONS.evidence },
   { to: "/audit", label: "監査ログ", icon: NAV_ICONS.audit },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
@@ -106,6 +109,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <CollectionQualityPage />;
     case "audit":
       return <AuditPage />;
+    case "operations":
+      return <OperationsPage />;
     case "operation":
       return <OperationPage key={route.operationId} operationId={route.operationId} />;
     case "overview":
@@ -189,7 +194,7 @@ export function App(): ReactNode {
     : synthetic
       ? "表示対象の記録がありません"
       : connected
-        ? (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
+        ? (ownEntry(SOURCE_KIND_LABELS, metadata.data?.source.kind ?? "") ?? "保存された記録に接続")
         : "接続を確認できません";
 
   const evidenceRoute = features.evidenceHistory && isEvidencePath(path);
@@ -197,8 +202,10 @@ export function App(): ReactNode {
   // caption; one trailing slash names it too, as in matchRoute.
   const schedulesRoute = trimTrailingSlash(path) === "/schedules";
   const auditRoute = trimTrailingSlash(path) === "/audit";
-  // One operation's trail is the operator's too: like the audit log it reads
-  // no observation capability, so it is drawn outside the metadata boundary.
+  // The operations list and one operation's trail are the operator's too: like
+  // the audit log they read no observation capability, so they are drawn
+  // outside the metadata boundary.
+  const operationsRoute = route.name === "operations";
   const operationRoute = route.name === "operation";
   const navItems: NavItem[] = NAV.filter((item) => !item.feature || features[item.feature]).map(
     (item) => ({
@@ -221,9 +228,11 @@ export function App(): ReactNode {
           ? "収集スケジュール"
           : auditRoute
             ? "監査ログ"
-            : operationRoute
-              ? "依頼の経過"
-              : "保存された記録"
+            : operationsRoute
+              ? "依頼の一覧"
+              : operationRoute
+                ? "依頼の経過"
+                : "保存された記録"
       }
       modeLabel={schedulesRoute ? "管理者による設定変更" : "閲覧専用"}
       connection={{
@@ -243,7 +252,7 @@ export function App(): ReactNode {
               ) : (
                 <>
                   <strong>
-                    {SOURCE_KIND_NOTICES[metadata.data.source.kind] ?? "保存された記録"}
+                    {ownEntry(SOURCE_KIND_NOTICES, metadata.data.source.kind) ?? "保存された記録"}
                   </strong>
                   <span className="notice-divider">·</span>
                   実データかどうか未確認
@@ -252,7 +261,7 @@ export function App(): ReactNode {
             ) : (
               "データの種類は未確認です"
             )}
-            {metadata.isError && metadata.data ? "（前回の接続情報）" : ""}
+            {metadata.isError && metadata.data ? "（前回読み込んだ接続情報を表示しています）" : ""}
           </>
         ),
       }}
@@ -278,6 +287,8 @@ export function App(): ReactNode {
       ) : auditRoute ? (
         // The operator's own record: it reads no observation capability.
         <AuditPage />
+      ) : route.name === "operations" ? (
+        <OperationsPage />
       ) : route.name === "operation" ? (
         <OperationPage key={route.operationId} operationId={route.operationId} />
       ) : (

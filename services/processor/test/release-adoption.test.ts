@@ -7,7 +7,7 @@
 //
 // Every fixture is synthetic. The smbc-direct parsers are used because their
 // inputs are small JSON documents; no provider data is involved.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { parseJob } from "../src/worker.ts";
 import { candidateBatch } from "../src/release-adoption.ts";
@@ -21,14 +21,15 @@ import {
   smbcDirectBalance,
   smbcDirectTransactions,
 } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline(layerBMigrations(), {
-    RELEASE_CANDIDATES_ENABLED: "true",
-  }));
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline(layerBMigrations(), {
+  RELEASE_CANDIDATES_ENABLED: "true",
+}));
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -259,9 +260,10 @@ test("a candidate write whose lease expired records nothing at all", async () =>
     .bind(Date.now() + 60_000)
     .run();
   const live = await env.DB.batch(candidateBatch(env.DB, { ...input, now: Date.now() }));
-  // The parse run plus the CORE revision bump of migration 0038's trigger:
-  // D1 counts rows written by triggers too.
-  expect(live[0]?.meta.changes).toBe(2);
+  // The parse run plus the CORE revision bump of migration 0038's trigger and
+  // the snapshot-input revision bump of migration 0108's: D1 counts rows
+  // written by triggers too.
+  expect(live[0]?.meta.changes).toBe(3);
   expect(await candidateRow(pending!.id)).toMatchObject({ state: "candidate" });
   expect(await published(201)).toMatchObject({ parse_run_id: adopted });
 }, 30000);
@@ -474,6 +476,24 @@ test("comparison, adoption and rollback keep the visible result set exactly repr
     });
     expect(activated.status).toBe(200);
     expect(activated.json).toMatchObject({ kind: "activate", changed: true, pointersMoved: 2 });
+    // Compared again once active, the release is its own base: each artifact's
+    // published run is its candidate run, and both sides are the same rows.
+    const active = await local.post("/release/compare", {
+      ...target,
+      releaseId: candidateRelease.releaseId,
+    });
+    expect(active.status).toBe(200);
+    expect(active.json.baseReleaseId).toBe(candidateRelease.releaseId);
+    expect(active.json.countsByKind).toEqual([{ kind: "balance", base: 2, candidate: 2 }]);
+    expect(active.json.locators).toEqual({
+      matched: 2,
+      baseOnly: 0,
+      candidateOnly: 0,
+      ambiguous: 0,
+    });
+    expect(active.json.values).toEqual({ compared: 2, differing: 0, missingOnOneSide: 0 });
+    expect(active.json.coverage).toEqual({ baseClaims: 2, candidateClaims: 2, differing: 0 });
+    expect(active.json.sample).toEqual([]);
     const after = await local.visible();
     expect(after).not.toEqual(before);
     expect(after.map((row) => row.parse_run_id)).toEqual([

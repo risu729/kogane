@@ -69,7 +69,9 @@ const days = (date: string, offset: number): string =>
 /**
  * `D1Database` over the given rows: the statement page and the bank window
  * (`debit_date` within three days, up to the bound limit) as the two reads
- * define them, a stable CORE revision, and every candidate insert recorded.
+ * define them, a stable CORE revision, no pass gate row (so every call is a
+ * pass from the first statement that marks nothing, src/sweep-pass.ts), and
+ * every candidate insert recorded.
  */
 function store(statements: Row[], debits: Row[]) {
   const inserts: unknown[][] = [];

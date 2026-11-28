@@ -10,7 +10,7 @@
 //   * Authentication is not a capability. The target's `get` carries its own
 //     credentials; nothing here weakens or replaces that gate.
 import type { ApiCapabilities, ApiMetadata } from "../src/api-contract.ts";
-import { validApiResponse } from "../src/api-validation.ts";
+import { requestedDetail, validApiResponse } from "../src/api-validation.ts";
 import { validEvidenceResponse } from "../src/evidence-validation.ts";
 import {
   allowedQueryParameters,
@@ -45,7 +45,11 @@ async function ok(target: ConformanceTarget, path: string): Promise<unknown> {
   assert(response.status === 200, `${path}: expected 200, got ${response.status}`);
   assert(response.headers.get("cache-control") === "no-store", `${path}: not no-store`);
   const body: unknown = await response.json();
-  assert(validApiResponse(path.split("?", 1)[0]!, body), `${path}: fails the shared validator`);
+  const [pathname, search = ""] = path.split("?", 2) as [string, string?];
+  assert(
+    validApiResponse(pathname, body, requestedDetail(search)),
+    `${path}: fails the shared validator`,
+  );
   return body;
 }
 async function refused(target: ConformanceTarget, path: string, status = 400): Promise<void> {
@@ -72,6 +76,7 @@ const SAMPLE: Record<string, string> = {
   view: "balances",
   kind: "transactions",
   identityRead: "latest",
+  detail: "full",
 };
 /** Parameters a path needs before any other parameter is meaningful. */
 const BASE: Partial<Record<ListPath, Record<string, string>>> = {
@@ -211,6 +216,27 @@ export const CONFORMANCE_CHECKS: ConformanceCheck[] = [
     },
   },
   {
+    name: "the balance list answers its summary by default exactly where it offers detail",
+    async run(target) {
+      const { capabilities } = await metadata(target);
+      const body = (await ok(target, "/api/balances")) as Record<string, unknown>;
+      if (allowedQueryParameters("/api/balances", capabilities).includes("detail")) {
+        assert(body["detail"] === "summary", "/api/balances: the default is the summary");
+        assert(
+          validApiResponse("/api/balances", body, "summary") &&
+            !validApiResponse("/api/balances", body, "full"),
+          "/api/balances: the summary passes as a summary only",
+        );
+        const full = await ok(target, "/api/balances?detail=full");
+        assert(
+          !Object.hasOwn(full as object, "detail"),
+          "/api/balances: a full list has no detail",
+        );
+        await refused(target, "/api/balances?detail=compact");
+      } else assert(!Object.hasOwn(body, "detail"), "/api/balances: a summary without detail");
+    },
+  },
+  {
     name: "measure views outside the advertised set are refused",
     async run(target) {
       const { capabilities } = await metadata(target);
@@ -313,7 +339,11 @@ export const CONFORMANCE_CHECKS: ConformanceCheck[] = [
       const { capabilities } = await metadata(target);
       let rows = 0;
       for (const path of COLLECTIONS) {
-        for (const row of rowsOf(await ok(target, path), path)) {
+        // Where the balance list has a summary (ADR 0123), its rows are in `full`.
+        const request = allowedQueryParameters(path, capabilities).includes("detail")
+          ? `${path}?detail=full`
+          : path;
+        for (const row of rowsOf(await ok(target, request), path)) {
           rows += 1;
           assert(
             Object.hasOwn(row, "organization") === capabilities.organizedDisplay,

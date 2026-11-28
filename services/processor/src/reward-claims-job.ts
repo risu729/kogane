@@ -11,8 +11,11 @@
 //     `qualification` bucket so it stays visible and stays out of every
 //     consumable subtotal (docs/balance-presentation.md, addendum 08 §2).
 //   * The job is idempotent: `claim_digest` is a digest of the source fact
-//     reference and the promotion release, and the insert ignores a conflict.
-//     Re-running it, or running it while another sweep runs, adds nothing new.
+//     reference and the promotion release, and the insert skips a conflict on
+//     that column only (`ON CONFLICT(claim_digest) DO NOTHING`). Re-running it,
+//     or running it while another sweep runs, adds nothing new. Any other
+//     refusal of the schema raises instead of being skipped, and `promoted`
+//     counts the rows the inserts actually wrote.
 import { unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
 import {
   JPOINT_PUBLISHED_COHORT_CTES,
@@ -21,6 +24,7 @@ import {
 import type { D1Like as RewardReadD1 } from "../../../packages/storage-d1/src/d1.ts";
 import type { BucketKind } from "../../../packages/domain/src/rewards.ts";
 import { validTemporalValue, type TemporalValue } from "../../../packages/domain/src/time.ts";
+import { finishSweepPass, ONE_PAGE_CURSOR_SQL, openSweepTick, shortDigest } from "./sweep-pass.ts";
 
 /** Bump to re-promote every published row under new mapping rules. */
 export const REWARD_PROMOTION_RELEASE = "reward-promotion-v2";
@@ -183,8 +187,19 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
     clauses.push(`b.instrument=${parameter("J_POINT")}`);
     // GLOB, not LIKE: LIKE ignores ASCII case, and a row this read selects but
     // `matches` skips is never claimed, so it would head every page for good.
+    // For the same reason both filters check all that `matches` checks. The
+    // length allows a connection of 1 to 64 characters between the fixed
+    // prefix (6) and suffix (28 with the date, 14 for the total), so the
+    // middle `substr` is exactly the connection. SQLite's `length`, `substr`
+    // and GLOB stop at a NUL character while `matches` reads the whole text,
+    // so the byte length must equal the character length (which also holds
+    // only for ASCII). The date's digits are a pattern of their own: D1
+    // refuses a GLOB pattern longer than 50 bytes.
     if (rule.parserName === "myjcb-jpoint-history") {
       clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:acquired:????-??-??")}`);
+      clauses.push(
+        `length(b.source_account) BETWEEN 35 AND 98 AND length(CAST(b.source_account AS BLOB))=length(b.source_account) AND substr(b.source_account,7,length(b.source_account)-34) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]' AND substr(b.source_account,-10) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`,
+      );
       clauses.push(`EXISTS (SELECT 1 FROM parse_coverage_claims hc WHERE hc.parse_run_id=p.id
         AND hc.completeness='complete' AND hc.membership_complete=1 AND hc.failure_cause IS NULL)`);
       clauses.push(`EXISTS (SELECT 1 FROM jpoint_histories h JOIN jpoint_totals t ON ${JPOINT_COHORT_MATCH}
@@ -192,7 +207,7 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
     } else {
       clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:total")}`);
       clauses.push(
-        `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
+        `length(b.source_account) BETWEEN 21 AND 84 AND length(CAST(b.source_account AS BLOB))=length(b.source_account) AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
       );
     }
   }
@@ -229,11 +244,29 @@ export function rewardCandidateQuery(
 const CURSOR_SQL = `SELECT COALESCE(MAX(source_fact_id),0) AS cursor FROM reward_bucket_claims_v2
  WHERE source_fact_kind='balance' AND promotion_release=?1`;
 
-const INSERT_SQL = `INSERT OR IGNORE INTO reward_bucket_claims_v2
+/**
+ * One claim. The conflict target is `claim_digest`, the only key a retry or a
+ * concurrent sweep can hit (`id` is never supplied, and the table has no other
+ * unique key). Unlike `OR IGNORE`, which SQLite also applies to CHECK and NOT
+ * NULL failures, a claim the schema refuses for any other reason raises; it is
+ * never skipped with `changes=0`.
+ */
+export const REWARD_CLAIM_INSERT_SQL = `INSERT INTO reward_bucket_claims_v2
  (claim_digest,parse_run_id,source_fact_kind,source_fact_id,program_id,holding_ref,bucket_ref,
   bucket_kind,restriction_refs_json,unit_ref,quantity_coefficient,quantity_scale,quantity_status,
   observed_expiry_json,observed_at,promotion_release,recorded_at)
- VALUES(?1,?2,'balance',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)`;
+ VALUES(?1,?2,'balance',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+ ON CONFLICT(claim_digest) DO NOTHING`;
+
+/**
+ * A claim batch the schema refused (a CHECK, NOT NULL, foreign key or trigger
+ * failure). The scheduler records this class, matched by identity, as the
+ * lane's failure code `RewardClaimWriteRefused` (`LANE_ERROR_CLASSES`, worker.ts);
+ * the SQLite text is dropped, never kept or logged.
+ */
+export class RewardClaimWriteRefused extends Error {}
+
+const CONSTRAINT_FAILURE = /constraint failed|SQLITE_CONSTRAINT/u;
 
 function matches(rule: PromotionRule, row: CandidateRow): boolean {
   if (rule.sourceId !== row.source_id || rule.metric !== row.metric) return false;
@@ -320,9 +353,20 @@ export async function rewardPromotionPending(db: Pick<RewardReadD1, "prepare">):
 
 export interface RewardPromotionResult {
   enabled: true;
+  /** Candidates the bounded read returned. */
   scanned: number;
+  /** Claims this sweep wrote: the inserts' own `changes`, not the attempts. */
   promoted: number;
+  /** Claims already present under the same `claim_digest` (a concurrent sweep wrote them). */
+  known: number;
+  /** Candidates no promotion rule maps, or whose instrument disagrees with the rule's unit. */
   skipped: number;
+  /**
+   * Candidates whose decimal row says `exact` without a coefficient and scale,
+   * which the claim table's quantity CHECK refuses. Nothing is written for
+   * them, so they stay candidates and are counted again on every sweep.
+   */
+  quantity_incomplete: number;
   cursor: number;
   release: string;
 }
@@ -350,8 +394,8 @@ export async function promoteRewardClaims(
     .all<CandidateRow>();
   const statements: D1PreparedStatement[] = [];
   let cursor = from;
-  let promoted = 0;
   let skipped = 0;
+  let quantityIncomplete = 0;
   for (const row of rows.results) {
     cursor = Math.max(cursor, row.id);
     const rule = PROMOTION_RULES.find((candidate) => matches(candidate, row));
@@ -376,11 +420,19 @@ export async function promoteRewardClaims(
           : null;
     const bucketKind: BucketKind = rule.bucketKind;
     const status = row.decimal_status ?? "unparsed";
+    // The claim's quantity CHECK, decided before the write: a candidate the
+    // schema would refuse is counted by name and passed, so it can neither
+    // abort the batch of every other candidate nor vanish uncounted. CORE's
+    // decimal CHECK forbids such a row, so a migrated store never yields one.
+    if (status === "exact" && (row.coefficient === null || row.scale === null)) {
+      quantityIncomplete += 1;
+      continue;
+    }
     const claimDigest = await digest(
       `balance:${row.id}:${rule.programId}:${row.source_account}:${release}`,
     );
     statements.push(
-      db.prepare(INSERT_SQL).bind(
+      db.prepare(REWARD_CLAIM_INSERT_SQL).bind(
         claimDigest,
         row.parse_run_id,
         row.id,
@@ -405,17 +457,31 @@ export async function promoteRewardClaims(
         now,
       ),
     );
-    promoted += 1;
   }
-  // D1 batches are bounded by the scan limit above; a conflict is ignored, so
-  // a retry after a partial failure re-inserts nothing.
-  for (let index = 0; index < statements.length; index += 50)
-    await db.batch(statements.slice(index, index + 50));
+  // D1 batches are bounded by the scan limit above; a `claim_digest` conflict
+  // is skipped, so a retry after a partial failure re-inserts nothing. Each
+  // statement writes one row or none, so a statement counts once whatever
+  // `changes` a trigger adds. A refused batch rolls back as a whole and fails
+  // the tick under a closed code; the batches before it stay written.
+  let promoted = 0;
+  for (let index = 0; index < statements.length; index += 50) {
+    let results: D1Result[];
+    try {
+      results = await db.batch(statements.slice(index, index + 50));
+    } catch (error) {
+      if (error instanceof Error && CONSTRAINT_FAILURE.test(error.message))
+        throw new RewardClaimWriteRefused("reward_claim_write_refused");
+      throw error;
+    }
+    promoted += results.filter((result) => result.meta.changes > 0).length;
+  }
   return {
     enabled: true,
     scanned: rows.results.length,
     promoted,
+    known: statements.length - promoted,
     skipped,
+    quantity_incomplete: quantityIncomplete,
     cursor,
     release,
   };
@@ -426,7 +492,60 @@ export function rewardClaimsEnabled(value: string | undefined): boolean {
   return value === "1" || value === "true";
 }
 
-/** The scheduled lane. `runScheduled` skips it entirely while the flag is off. */
-export async function rewardClaimsStage(env: Env): Promise<object> {
-  return await promoteRewardClaims(env.DB);
+/**
+ * The definitions of the views the promotion's code can read, as a digest
+ * that `test/sweep-pass.test.ts` checks against the migrated schema: a
+ * migration that redefines one moves no revision, so it changes this value,
+ * and with it the gate's policy, to read again.
+ */
+export const REWARD_CLAIMS_VIEWS = "ba736c878b995006";
+
+/**
+ * The gate policy of the scheduled promotion (src/sweep-pass.ts): the release,
+ * a digest of the candidate statement and its bound values (which carry the
+ * promotion rules), and the views it reads.
+ */
+export async function rewardClaimsPolicy(): Promise<string> {
+  const query = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, REWARD_PROMOTION_BATCH);
+  const text = `${query.sql}\n${JSON.stringify(query.bindings)}`;
+  return `reward-claims-v1+${REWARD_PROMOTION_RELEASE}+sql:${await shortDigest(text)}+views:${REWARD_CLAIMS_VIEWS}`;
+}
+
+/**
+ * The scheduled lane. `runScheduled` skips it entirely while the flag is off.
+ *
+ * The candidate read is one statement over every published balance row, so
+ * with nothing to promote it still read about 187k rows a tick in production
+ * (2026-11-27). It is a one-page pass of `src/sweep-pass.ts` (migration 0110):
+ * a tick whose read returned no candidate marks the CORE revision it started
+ * at clean, and later ticks read only the gate row while the revision and the
+ * policy stay the same. Everything the read depends on is on the CORE ledger
+ * (balance rows, their decimals, parse runs and their publication, coverage
+ * claims, fetch run seals, and the claims it writes itself), written before a
+ * run is sealed (reports, units, artifacts), or code carried in the policy;
+ * it has no clock. Only an empty read closes the gate, so a candidate the
+ * rules skip keeps it open, as before. A gated tick reads no cursor and
+ * reports 0.
+ */
+export async function rewardClaimsStage(env: Env): Promise<RewardPromotionResult> {
+  const tick = await openSweepTick(
+    env.DB,
+    "reward_claims",
+    await rewardClaimsPolicy(),
+    ONE_PAGE_CURSOR_SQL,
+  );
+  if (tick.skip)
+    return {
+      enabled: true,
+      scanned: 0,
+      promoted: 0,
+      known: 0,
+      skipped: 0,
+      quantity_incomplete: 0,
+      cursor: 0,
+      release: REWARD_PROMOTION_RELEASE,
+    };
+  const result = await promoteRewardClaims(env.DB);
+  if (result.scanned === 0) await finishSweepPass(env.DB, "reward_claims", tick.token);
+  return result;
 }

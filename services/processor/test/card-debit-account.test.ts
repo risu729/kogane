@@ -5,13 +5,15 @@ import { CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL } from "../src/card-settlement-sh
 // the observed one (vertical th/td rows after an h3.hdg-H3 heading), and every
 // bank, branch, digit and name string is made up.
 import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import {
   cardDebitAccountSweep,
   parseCardInformation,
   knownBankAccounts,
+  SMBC_DEBIT_CONTEXT_PARSER_VERSIONS,
+  SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL,
 } from "../src/card-debit-account-job.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../packages/domain/src/myjcb-card-information.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
@@ -20,12 +22,13 @@ import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/sm
 import { cardSettlementEligible } from "../../../packages/domain/src/card-settlement.ts";
 import { bankSourceIdForDisplayedName } from "../../../packages/domain/src/card-debit-account.ts";
 import { CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS } from "../../../packages/domain/src/card-settlement-review.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -564,7 +567,20 @@ test("SMBC supports only the debit whose own published parse records its selecte
   ).toBe(0);
 }, 60000);
 
-test("the shared-helper SMBC release keeps account matching and readiness diagnostics", async () => {
+test("the deployed SMBC transactions release is one whose account context is read", () => {
+  // A parser bump that is not added here would leave every debit it parses
+  // uncomparable and out of the readiness count, with nothing failing.
+  expect<readonly string[]>(SMBC_DEBIT_CONTEXT_PARSER_VERSIONS).toContain(
+    smbcDirectTransactions.version,
+  );
+  for (const version of SMBC_DEBIT_CONTEXT_PARSER_VERSIONS)
+    expect(version).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/u);
+  expect(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL).toContain(
+    `p.parser_version IN (${SMBC_DEBIT_CONTEXT_PARSER_VERSIONS_SQL})`,
+  );
+});
+
+test("the deployed SMBC release keeps account matching and readiness diagnostics", async () => {
   const before = await db
     .prepare(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL)
     .first<Record<string, number>>();
@@ -584,7 +600,7 @@ test("the shared-helper SMBC release keeps account matching and readiness diagno
       branchCode: "123",
       accountNumber: "1234000",
     },
-    "1.1.1",
+    smbcDirectTransactions.version,
   );
   const id = (await db
     .prepare("SELECT id FROM transaction_observations WHERE parse_run_id=910")

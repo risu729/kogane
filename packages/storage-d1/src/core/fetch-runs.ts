@@ -125,7 +125,7 @@ export async function readFetchRunByKey(
     .first<Row>();
 }
 
-/** Column list of `fetch_run_reports`, in the order the INSERT below binds. */
+/** The report columns `insertRunReportIfAbsent` writes; each is bound by name. */
 export interface RunReportFields {
   producer_version: string | null;
   producer_revision: string | null;
@@ -149,7 +149,27 @@ export async function insertRunReportIfAbsent(
   fields: RunReportFields,
   now: number,
 ): Promise<void> {
-  const values = [runId, reportKey, reportKind, clientId, ...Object.values(fields), now];
+  // Bound by name: the column order of the INSERT never depends on the order
+  // in which a caller built `fields`, and a key the type does not declare is
+  // never bound.
+  const values = [
+    runId,
+    reportKey,
+    reportKind,
+    clientId,
+    fields.producer_version,
+    fields.producer_revision,
+    fields.manifest_schema_version,
+    fields.producer_status,
+    fields.normalized_outcome,
+    fields.started_at_ms,
+    fields.started_at_basis,
+    fields.completed_at_ms,
+    fields.completed_at_basis,
+    fields.declared_artifact_count,
+    fields.artifact_count_scope,
+    now,
+  ];
   await db
     .prepare(
       `

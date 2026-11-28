@@ -31,13 +31,10 @@ import {
 } from "../../../domain/src/card-debit-account.ts";
 import {
   answerCardDebitAccount,
-  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
   CARD_DEBIT_ACCOUNT_ANSWER_RULE,
   CARD_DEBIT_ACCOUNT_BASES,
-  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
   compareDebitBankAccounts,
   compareMatchedDebitAccounts,
-  STATED_ABSENT_REASONS,
   statedDebitAccount,
   type CardDebitAccountAnswer,
   type DebitBankAccount,
@@ -45,40 +42,31 @@ import {
   type StatedDebitAccount,
   type StatedReading,
 } from "../../../domain/src/card-debit-account-answer.ts";
+import {
+  settlementDebitDate,
+  statementDueDate,
+  type StatementDueDateReason,
+} from "../../../domain/src/card-settlement.ts";
 import type { SourceFactRef } from "../../../domain/src/events.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-information.ts";
 import type { FinancialError } from "../../../domain/src/result.ts";
-import { parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
+import type { TemporalValue } from "../../../domain/src/time.ts";
 import type { Quantity } from "../../../domain/src/values.ts";
-import {
-  sweepRowAmount,
-  type CardSettlementSweepRow,
-} from "../../../read-model/src/card-settlement-bank-debits.ts";
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type Grant, grantAllows } from "../grants.ts";
+import { type Grant, wholeStoreReadRefusal } from "../grants.ts";
+import { statementTotal, type StatementTotalRow } from "./card-statement-total.ts";
 import { pageBeyondBudget } from "./page-budget.ts";
 
 const REQUEST_ID = "card-settlements.debit-accounts";
 /** The most cards one answer lists. */
 export const CARD_DEBIT_ACCOUNTS_CARDS_MAX = 100;
-/** A request carries no key: any key is refused, never ignored. */
-export const CARD_DEBIT_ACCOUNTS_KEYS = [] as const;
 
-export {
-  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
-  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
-  STATED_ABSENT_REASONS,
-  type CardDebitAccountAnswer,
-  type DebitBankAccount,
-  type MatchedDebitAccount,
-  type StatedDebitAccount,
-  type StatedReading,
-};
+export { type DebitBankAccount, type MatchedDebitAccount, type StatedReading };
 
 /** The card sources whose statements the settlement review reads. */
-export type CardDebitAccountSource = "vpass" | "myjcb";
+type CardDebitAccountSource = "vpass" | "myjcb";
 /** Sources with a reader of a provider-stated debit account (ADR 0032). */
 const STATED_READER_SOURCES: readonly CardDebitAccountSource[] = ["myjcb"];
 
@@ -94,15 +82,27 @@ export interface CardDebitAccountCard {
     period: string | null;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
-    /** The provider's total; null when it is not exact (INV05). */
-    amount: Quantity | null;
+    /**
+     * Why `paymentDate` is null, present exactly then (INV05):
+     * `payment_date_absent` or `payment_date_invalid`
+     * (`STATEMENT_DUE_DATE_REASONS`).
+     */
+    paymentDateReason?: StatementDueDateReason;
+    /**
+     * The provider's total. One that is not exact keeps its status and a
+     * closed reason (`stored:<status>`, or `decimal_not_projected` when no
+     * decimal-v1 value was recorded), never zero and never dropped (INV05).
+     */
+    amount: Quantity;
   } | null;
   stated: StatedDebitAccount;
   /** Accepted settlements per bank account, newest debit first. */
   settled: MatchedDebitAccount[];
   /**
    * Undecided candidates per bank account, of statements no accepted
-   * settlement covers, newest debit first. A proposal only: never an answer.
+   * settlement covers by statement key or card month (the acceptance
+   * guard's reservation), newest debit first. A proposal only: never an
+   * answer.
    */
   proposed: MatchedDebitAccount[];
   answer: CardDebitAccountAnswer;
@@ -129,7 +129,11 @@ export type CardDebitAccountsOutcome =
   | { ok: true; review: CardDebitAccountsReview }
   | { ok: false; error: FinancialError };
 
-type CardRow = CardSettlementSweepRow & { payment_date: string | null; period: string | null };
+/** A statement row (./card-statement-total.ts) with its due date and period. */
+type CardRow = StatementTotalRow & {
+  payment_date: string | null;
+  period: string | null;
+};
 
 /**
  * Each card's newest current statement total (`?1` the card bound plus one),
@@ -214,36 +218,40 @@ interface CandidateRow {
  * as `<debit date>\n<id>` with its period. SQLite takes a bare column from the
  * row of the one `max()` aggregate. Every candidate is read once, its latest
  * decision by key.
+ *
+ * A statement is covered as the acceptance guard reserves it
+ * (`card_settlement_readiness.allocation_available`, migration 0044): an
+ * accepted candidate with the same `statement_key`, or with the same
+ * `$.statement.sourceId`, `$.statement.accountId` and `$.statement.period`,
+ * compared with `=` as the guard compares them, so a fact that is null on
+ * either side reserves nothing beyond its key. One card month read through
+ * two producers, namespaces or card ordinals has two statement keys; once
+ * one of them is accepted, a candidate on the other can never be accepted,
+ * and is not listed as `proposed`. The covered months are read once
+ * (`settled_month`) and probed per proposed candidate.
  */
 export const CARD_DEBIT_ACCOUNT_CANDIDATES_SQL = `WITH live AS MATERIALIZED (
  SELECT r.id,r.status,r.statement_key,
   json_extract(r.facts_json,'$.statement.sourceId') AS card_source_id,
   json_extract(r.facts_json,'$.statement.sourceAccount') AS card_source_account,
+  json_extract(r.facts_json,'$.statement.accountId') AS card_account_id,
   json_extract(r.facts_json,'$.statement.period') AS period,
   json_extract(r.facts_json,'$.bankDebit.sourceId') AS bank_source_id,
   json_extract(r.facts_json,'$.bankDebit.sourceAccount') AS bank_source_account,
   CASE WHEN json_extract(r.facts_json,'$.bankDebit.occurred.kind')='local-date'
    THEN json_extract(r.facts_json,'$.bankDebit.occurred.value') END AS debit_date
  FROM card_settlement_reviews r WHERE r.status IN ('accepted','proposed')
-), settled AS (SELECT DISTINCT statement_key FROM live WHERE status='accepted')
+), settled AS (SELECT DISTINCT statement_key FROM live WHERE status='accepted'),
+settled_month AS MATERIALIZED (SELECT DISTINCT card_source_id,card_account_id,period FROM live
+ WHERE status='accepted' AND card_source_id IS NOT NULL AND card_account_id IS NOT NULL AND period IS NOT NULL)
 SELECT status,card_source_id,card_source_account,bank_source_id,bank_source_account,
  count(DISTINCT statement_key) AS statements,
  max(coalesce(debit_date,'')||char(10)||id) AS latest_key,period AS latest_period
-FROM live WHERE status='accepted' OR statement_key NOT IN (SELECT statement_key FROM settled)
+FROM live WHERE status='accepted' OR (statement_key NOT IN (SELECT statement_key FROM settled)
+ AND NOT EXISTS(SELECT 1 FROM settled_month m WHERE m.card_source_id=live.card_source_id
+  AND m.card_account_id=live.card_account_id AND m.period=live.period))
 GROUP BY status,card_source_id,card_source_account,bank_source_id,bank_source_account
 ORDER BY card_source_id,card_source_account,status,bank_source_id,bank_source_account`;
-
-/** Parse an untrusted request body: no key at all. */
-export function parseCardDebitAccountsRequest(
-  body: unknown,
-): { ok: true; value: Record<string, never> } | { ok: false; refs: string[] } {
-  if (body === null || typeof body !== "object" || Array.isArray(body))
-    return { ok: false, refs: ["body"] };
-  const keys = Object.keys(body);
-  return keys.length === 0
-    ? { ok: true, value: {} }
-    : { ok: false, refs: keys.map((key) => "key:" + key) };
-}
 
 const invalid = () => new Error("card_debit_accounts_row_invalid");
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
@@ -252,8 +260,16 @@ const cardSource = (value: unknown): value is CardDebitAccountSource =>
 const reasonCode = (value: unknown): value is CardDebitAccountReason =>
   (CARD_DEBIT_ACCOUNT_REASONS as readonly unknown[]).includes(value);
 const cardKey = (sourceId: string, sourceAccount: string) => sourceId + "\n" + sourceAccount;
-const localDate = (value: string | null): string | null =>
-  value !== null && parseLocalDate(value) !== null ? value : null;
+
+/**
+ * The statement's total (./card-statement-total.ts). A row CORE 0024's CHECK
+ * refuses to store fails the read.
+ */
+function totalOf(row: CardRow): Quantity {
+  const total = statementTotal(row);
+  if (total === null) throw invalid();
+  return total;
+}
 
 /** The account a `supports` or `names_other_account` row's proposal names. */
 function namedAccount(json: string | null): { account: DebitBankAccount; digits: number } {
@@ -338,13 +354,16 @@ function matchedOf(row: CandidateRow): MatchedDebitAccount {
   const split = row.latest_key.indexOf("\n");
   const proposalId = row.latest_key.slice(split + 1);
   if (split < 0 || !text(proposalId)) throw invalid();
+  // The read's `debit_date` is null unless `bankDebit.occurred` is a
+  // `local-date`, and `max()` joins null as empty text: either way the stored
+  // date is not a civil local date (`debit_date_invalid`).
   return {
     bankSourceId: row.bank_source_id,
     bankSourceAccount: row.bank_source_account,
     statements: row.statements,
     latest: {
       proposalId,
-      debitDate: localDate(row.latest_key.slice(0, split) || null),
+      ...settlementDebitDate(row.latest_key.slice(0, split) || null),
       period: typeof row.latest_period === "string" ? row.latest_period : null,
     },
   };
@@ -368,17 +387,8 @@ export async function reviewCardDebitAccounts(input: {
   sql: SqlExecutor;
 }): Promise<CardDebitAccountsOutcome> {
   const { grant, sql } = input;
-  if (!grantAllows(grant, "records.read"))
-    return {
-      ok: false,
-      error: financialError("unauthorized", REQUEST_ID, ["capability:records.read"]),
-    };
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0)
-    return { ok: false, error: financialError("evidence_restricted", REQUEST_ID, narrowed) };
+  const refused = wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (pageBeyondBudget(0, CARD_DEBIT_ACCOUNTS_CARDS_MAX, grant))
     return {
       ok: false,
@@ -440,7 +450,7 @@ export async function reviewCardDebitAccounts(input: {
       readingsOf(card.readings),
     );
     const row = card.statement;
-    const paymentDate = row === null ? null : localDate(row.payment_date);
+    const due = row === null ? null : statementDueDate(row.payment_date);
     return {
       card: {
         sourceId: card.sourceId,
@@ -448,7 +458,7 @@ export async function reviewCardDebitAccounts(input: {
         accountId: row?.account_id ?? null,
       },
       latestStatement:
-        row === null
+        row === null || due === null
           ? null
           : {
               ref: {
@@ -457,16 +467,17 @@ export async function reviewCardDebitAccounts(input: {
                 revision: "parse_run:" + row.parse_run_id,
               },
               period: row.period ?? null,
-              paymentDate:
-                paymentDate === null
-                  ? null
-                  : {
+              ...(due.paymentDate === null
+                ? { paymentDate: null, paymentDateReason: due.paymentDateReason }
+                : {
+                    paymentDate: {
                       kind: "local-date" as const,
-                      value: paymentDate,
+                      value: due.paymentDate,
                       zone: "Asia/Tokyo",
                       basis: "provider" as const,
                     },
-              amount: sweepRowAmount(row),
+                  }),
+              amount: totalOf(row),
             },
       stated,
       settled,

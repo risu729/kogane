@@ -234,3 +234,79 @@ test("an answer its evidence does not carry, or an unknown code, is refused", ()
   ).toBe(false);
   expect(validCardDebitAccountsReview(page(Array.from({ length: 101 }, () => card())))).toBe(false);
 });
+
+test("a statement total that is not exact carries its status and reason; a bare null is refused (INV05)", () => {
+  const statement = card().latestStatement;
+  const withTotal = (amount: unknown) => card({ latestStatement: { ...statement, amount } });
+  for (const value of [
+    { status: "unparsed", reasonCode: "stored:unparsed" },
+    { status: "missing", reasonCode: "decimal_not_projected" },
+  ])
+    expect(validCardDebitAccountsReview(page([withTotal({ unitRef: "JPY", value })]))).toBe(true);
+  for (const amount of [
+    null,
+    undefined,
+    // An exact status carries a value, never a reason.
+    { unitRef: "JPY", value: { status: "exact", reasonCode: "stored:exact" } },
+  ])
+    expect(validCardDebitAccountsReview(page([withTotal(amount)]))).toBe(false);
+});
+
+test("a null due or debit date carries its closed reason, and a date never has one (INV05)", () => {
+  const statement = card().latestStatement;
+  const undated = (debitDateReason: unknown) => ({
+    ...SHINSEI,
+    statements: 1,
+    latest: { proposalId: "p-2", debitDate: null, debitDateReason, period: "2098-01" },
+  });
+  const settledOn = (latest: Record<string, unknown>, answer: Record<string, unknown>) =>
+    card({
+      card: { sourceId: "vpass", sourceAccount: "vpass:card-001", accountId: null },
+      stated: {
+        status: "absent",
+        reason: "source_has_no_debit_account_statement",
+        latest: null,
+        lastNamed: null,
+      },
+      settled: [latest],
+      answer: {
+        basis: "accepted-settlement",
+        account: SHINSEI,
+        proposalId: "p-2",
+        codes: [],
+        ...answer,
+      },
+    });
+  const valid = [
+    ...["payment_date_absent", "payment_date_invalid"].map((paymentDateReason) =>
+      card({ latestStatement: { ...statement, paymentDate: null, paymentDateReason } }),
+    ),
+    card({ proposed: [undated("debit_date_invalid")] }),
+    settledOn(undated("debit_date_invalid"), {
+      debitDate: null,
+      debitDateReason: "debit_date_invalid",
+    }),
+  ];
+  for (const item of valid) expect(validCardDebitAccountsReview(page([item]))).toBe(true);
+  const invalid = [
+    // A bare null, or a reason outside the closed list.
+    card({ latestStatement: { ...statement, paymentDate: null } }),
+    card({ latestStatement: { ...statement, paymentDate: null, paymentDateReason: "guessed" } }),
+    card({ proposed: [undated(undefined)] }),
+    card({ proposed: [undated("payment_date_absent")] }),
+    // A date beside a reason.
+    card({ latestStatement: { ...statement, paymentDateReason: "payment_date_absent" } }),
+    card({
+      proposed: [
+        {
+          ...matched(SMBC, "p-3"),
+          latest: { ...matched(SMBC, "p-3").latest, debitDateReason: "debit_date_invalid" },
+        },
+      ],
+    }),
+    // The answer drops or changes the reason its settlement carries.
+    settledOn(undated("debit_date_invalid"), { debitDate: null }),
+    settledOn(undated("debit_date_invalid"), { debitDate: null, debitDateReason: "guessed" }),
+  ];
+  for (const item of invalid) expect(validCardDebitAccountsReview(page([item]))).toBe(false);
+});

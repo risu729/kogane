@@ -69,12 +69,6 @@ export function isOpsToolName(value: string): value is OpsToolName {
   return (OPS_TOOL_NAMES as readonly string[]).includes(value);
 }
 
-/** The published JSON Schema of one request schema, without the meta key. */
-function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = mcpInputSchema(schema);
-  return generated;
-}
-
 /**
  * A request tool accepts work; it is not read-only, it destroys nothing, and
  * re-sending the same request under the same key is the same operation rather
@@ -96,7 +90,7 @@ export const OPS_MCP_TOOLS = [
     title: "Request collection of a declared source",
     description:
       "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later. Before requesting, read the source's past history: its collection quality (kogane.collection-quality.read with the source), its schedule, next alarm, recent occurrences and held execution leases (kogane.schedules.read), its maintenance windows (kogane.schedules.maintenance.read), and earlier requests (kogane.ops.operation.list with kind collection, whose summaries name the source and status, then kogane.ops.operation.get for one; both read every principal's requests). Do not request while the source's alarm is due, its maintenance window is on, a lease is held or an earlier request has not finished, and when its latest runs failed, find the cause before requesting again.",
-    inputSchema: inputSchema(collectionSchema),
+    inputSchema: mcpInputSchema(collectionSchema),
     annotations: REQUEST_HINTS,
   },
   {
@@ -104,7 +98,7 @@ export const OPS_MCP_TOOLS = [
     title: "Request re-registration of a persisted run",
     description:
       "Record a request to re-register an already persisted run of a declared source. Names a run identifier, never a storage key; it re-reads what is stored and never re-collects from the provider.",
-    inputSchema: inputSchema(importSchema),
+    inputSchema: mcpInputSchema(importSchema),
     annotations: REQUEST_HINTS,
   },
   {
@@ -112,7 +106,7 @@ export const OPS_MCP_TOOLS = [
     title: "Request a replay at a fixed parser release",
     description:
       "Record a replay plan for a scope at one registered parser release. The evidence in range is fixed when the plan is stored, so evidence collected afterwards is not pulled into this replay.",
-    inputSchema: inputSchema(replaySchema),
+    inputSchema: mcpInputSchema(replaySchema),
     annotations: REQUEST_HINTS,
   },
   {
@@ -120,7 +114,7 @@ export const OPS_MCP_TOOLS = [
     title: "Request a read-model rebuild",
     description:
       "Record a request to rebuild the read model from valid inputs. A rebuild creates a new snapshot; it never deletes a database, a bucket or stored evidence.",
-    inputSchema: inputSchema(projectionSchema),
+    inputSchema: mcpInputSchema(projectionSchema),
     annotations: REQUEST_HINTS,
   },
   {
@@ -128,7 +122,7 @@ export const OPS_MCP_TOOLS = [
     title: "Request a session refresh for one source",
     description:
       "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential. When the source policy needs a person the operation is stored as waiting_for_human. For an unattended source whose connection is enabled for dispatch, the collector renews the session itself and may log in once: SBI VC runs its keepalive and, if that fails, one passkey login, at most one forced login per hour whoever asks. Otherwise the request waits as collector_dispatch_disabled.",
-    inputSchema: inputSchema(sessionRefreshSchema),
+    inputSchema: mcpInputSchema(sessionRefreshSchema),
     annotations: REQUEST_HINTS,
   },
   {
@@ -136,15 +130,15 @@ export const OPS_MCP_TOOLS = [
     title: "Read the progress of one accepted operation",
     description:
       "Report the stored stage progress and failure code of one accepted operation, whichever principal requested it (the operator in the browser or any MCP client). Stages nobody has reported are pending: enqueued work is never reported as done.",
-    inputSchema: inputSchema(operationIdSchema),
+    inputSchema: mcpInputSchema(operationIdSchema),
     annotations: READ_HINTS,
   },
   {
     name: "kogane.ops.operation.list",
     title: "List accepted operations",
     description:
-      "List one page of every accepted operation, whichever principal requested it (the operator in the browser or any MCP client), newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. status is the stored status: the READ projection is not checked here, so a request kogane.ops.operation.get reads as completed may be listed, and filtered, as running. Follow one with kogane.ops.operation.get.",
-    inputSchema: inputSchema(operationListSchema),
+      "List one page of every accepted operation, whichever principal requested it (the operator in the browser or any MCP client), newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; merge `next.arguments` into the same call for the next page until `next` is null (ADR 0128; `paging` says how the page ended, `nextCursor` is deprecated, a cursor naming no operation is 400 invalid_cursor). Each summary's status is the one kogane.ops.operation.get answers (a running collection, import or replay whose projected stage the READ projection covers reads completed); storedStatus is the stored status, and the status filter matches storedStatus, as each page's statusFilterMatches says, so a status=running page can hold rows whose status is completed. Follow one with kogane.ops.operation.get.",
+    inputSchema: mcpInputSchema(operationListSchema),
     annotations: READ_HINTS,
   },
 ] as const;
@@ -252,7 +246,7 @@ export function delegatedOpsTools(resolution: DelegationResolution) {
         tool.name === "kogane.ops.collection.request"
           ? {
               ...tool,
-              inputSchema: inputSchema(delegatedCollectionSchema),
+              inputSchema: mcpInputSchema(delegatedCollectionSchema),
               description:
                 tool.description +
                 " Requires prepare then exact confirmation; external collection cannot be undone.",
@@ -260,7 +254,7 @@ export function delegatedOpsTools(resolution: DelegationResolution) {
           : tool.name === "kogane.ops.session.refresh"
             ? {
                 ...tool,
-                inputSchema: inputSchema(delegatedSessionSchema),
+                inputSchema: mcpInputSchema(delegatedSessionSchema),
                 description:
                   tool.description +
                   " Requires prepare then exact confirmation; human session policy and MFA boundary remain unchanged.",

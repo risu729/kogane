@@ -10,11 +10,14 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | ------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Vpass        | `vpass:card-NNN`                                   | One verified trusted card binding (importer or collector, v1 or v2 token; ADR 0023, ADR 0029) gives provider-local card identity; absent/ambiguous evidence stays run-scoped |
 | GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                                                                          |
+| PRESTIA      | `prestia-bank:account:{no}:{CCY}[:deposit:{no}]`   | Provider account number and native currency, plus a term deposit's number: `deposit`, provider-local; each currency and each deposit is its own account                      |
+| PRESTIA      | `prestia-bank:group:{group}`                       | Provider group total (the parser's seven groups, below), not a holding: `valuation-aggregate`, `aggregate`; any other group stays unresolved                                 |
+| PRESTIA      | `prestia-bank:relationship`                        | Monthly average relationship balance, a qualification measure: `qualification-aggregate`, `aggregate`                                                                        |
 | MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                                                                      |
 | MyJCB        | `myjcb:{connection}:j-point:total`                 | Displayed J-POINT total of the connection's login: `reward-account`, provider-local, label `MyJCB J-POINT` (policy 2)                                                        |
 | MyJCB        | `myjcb:{connection}:j-point:acquired:{YYYY-MM-DD}` | J-POINT history acquisition bucket (ADR 0107): keyed as the connection's `j-point:total`, so it is that source account (`provider-jpoint-acquisition-bucket`)                |
 | SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                                                                 |
-| SMBC         | `smbc-bank:ordinary-foreign-aud`                   | AUD ordinary deposit (`smbc-foreign-ordinary-balance`): no rule yet, so `unresolved` / `unrecognized-source-account`; labelled as the yen deposit (source fallback)          |
+| SMBC         | `smbc-bank:ordinary-foreign-aud`                   | AUD balance of the login's one foreign ordinary account: `deposit`, provider-local, own label (policy 2, ADR 0118)                                                           |
 | Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                                                                  |
 | Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                                                                              |
 | Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                                                                        |
@@ -44,6 +47,12 @@ This groups source observations without merging rows or adding balances.
 MoneyForward HMAC identity is stable across ordinal changes; changing an alias
 secret does not authorize a merge. Coarse single-account source scopes remain
 provider-local, not globally identified accounts.
+
+PRESTIA's groups are exactly the parser's seven: `yen-deposits`,
+`foreign-deposits`, `premium-deposit`, `mutual-funds`, `money-trust`,
+`borrowing` and `yen-current`. An account reference's currency must be three
+upper-case letters; the account and deposit numbers are any provider value
+without a colon.
 
 SBI Shinsei's `{accountNo}` is any non-empty provider account id (its layout is
 not observed, so the rule does not narrow it); the two exact parser constants

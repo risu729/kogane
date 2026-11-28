@@ -1,8 +1,9 @@
 // 基準日の保有状況: every account as its provider last reported it in a
 // complete capture before the end of a chosen date (Asia/Tokyo), with the card
-// statements due around it (docs/reported-state.md). The page lists provider
-// figures as they were reported and never adds, converts or compares them: a
-// container without a capture is named in the coverage, not shown as zero.
+// statements due around it and the payments the card company's skip-payment
+// page scheduled (docs/reported-state.md). The page lists provider figures as
+// they were reported and never adds, converts or compares them: a container
+// without a capture is named in the coverage, not shown as zero.
 import { useState, type ReactNode } from "react";
 import { ApiError, useFeatures } from "../api.ts";
 import { SettlementQuantity, SETTLEMENT_STATUS } from "../reconciliation-display.tsx";
@@ -11,6 +12,7 @@ import {
   useReportedState,
   type ReportedAccount,
   type ReportedPayable,
+  type ReportedScheduledPaymentCapture,
   type ReportedSnapshot,
   type ReportedState,
 } from "../reported-state-api.ts";
@@ -44,6 +46,13 @@ const PAYABLE: Record<ReportedPayable["status"], { label: string; tone: Tone }> 
   due_unsettled: { label: "引落予定日を過ぎ、引落は未確認", tone: "warn" },
   payment_date_unknown: { label: "引落予定日が不明", tone: "warn" },
 };
+const SCHEDULED_DUE: Record<
+  ReportedScheduledPaymentCapture["payments"][number]["dueStatus"],
+  { label: string; tone: Tone }
+> = {
+  due_after_date: { label: "基準日より後に支払予定", tone: "neutral" },
+  due_on_or_before_date: { label: "支払予定日が基準日以前（支払は未確認）", tone: "warn" },
+};
 const IDENTITY: Record<ReportedAccount["identityStatus"], string> = {
   identified: "口座を特定済み",
   "provider-local": "取得元の中だけで識別",
@@ -70,6 +79,10 @@ const LIABILITY_GAPS: Record<string, string> = {
   statements_before_window:
     "引落予定日が基準日の31日より前の請求と、引落予定日が不明で45日より前に取得した請求",
 };
+const WINDOW_REASONS: Record<string, string> = {
+  due_before_window: "引落予定日が基準日の31日より前",
+  undated_captured_before_window: "引落予定日が不明で、基準日の45日より前に取得",
+};
 
 const label = (labels: Record<string, string>, code: string): string =>
   Object.hasOwn(labels, code) ? labels[code]! : code;
@@ -79,10 +92,18 @@ function UnavailableNotice(): ReactNode {
   return <EmptyState>この接続先は基準日の保有状況を提供していません。</EmptyState>;
 }
 
-function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
+function SnapshotLine({
+  snapshot,
+  withSource = false,
+}: {
+  snapshot: ReportedSnapshot;
+  /** Name the source first, for a capture shown outside its account's card. */
+  withSource?: boolean;
+}): ReactNode {
   const freshness = FRESHNESS[snapshot.freshness];
   return (
     <li>
+      {withSource ? <>{snapshot.sourceId}: </> : null}
       取得日時 <time dateTime={snapshot.capturedAt}>{snapshot.capturedAt}</time>{" "}
       <span className="dim">（日本時間 {snapshot.captureDate}）</span>{" "}
       <Badge tone={freshness.tone} title={`基準日の${snapshot.ageDays}日前`}>
@@ -259,7 +280,10 @@ function PayableTable({ payables }: { payables: ReportedPayable[] }): ReactNode 
                   <Nullable value={payable.period} />
                 </td>
                 <td>
-                  <Nullable value={payable.paymentDate} placeholder="不明" />
+                  {/* Null only when no `_kogane.paymentDate` is recorded: a value
+                      that is not a civil date is shown as stored, and the
+                      status says the due date is unknown either way. */}
+                  <Nullable value={payable.paymentDate} placeholder="引落予定日未記録" />
                 </td>
                 <td className="num">
                   <Link to={`/observations/balance/${idOf(payable.ref)}`}>
@@ -287,6 +311,110 @@ function PayableTable({ payables }: { payables: ReportedPayable[] }): ReactNode 
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ScheduledCapture({ capture }: { capture: ReportedScheduledPaymentCapture }): ReactNode {
+  const freshness = FRESHNESS[capture.freshness];
+  // A page that listed none names no provider account; its source names it.
+  const account = capture.payments[0]?.sourceAccount ?? null;
+  const name = account ?? capture.sourceId;
+  return (
+    <div className="panel-body">
+      {account === null ? (
+        <p>{capture.sourceId}</p>
+      ) : (
+        <SourceAccount source={capture.sourceId} account={account} />
+      )}
+      <p>
+        取得日時 <time dateTime={capture.capturedAt}>{capture.capturedAt}</time>{" "}
+        <span className="dim">（日本時間 {capture.captureDate}）</span>{" "}
+        <Badge tone={freshness.tone} title={`基準日の${capture.ageDays}日前`}>
+          {freshness.label}
+        </Badge>{" "}
+        <span className="dim">
+          <Link to={`/artifacts/${idOf(capture.ref)}`}>原本</Link>
+        </span>
+      </p>
+      {capture.payments.length === 0 ? (
+        <p>この取得では、スキップ払いの予定は表示されていませんでした。</p>
+      ) : (
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label={`${name}のスキップ払いの予定（${capture.captureDate} 取得）`}
+          tabIndex={0}
+        >
+          <table className="reported-state-table">
+            <caption>
+              カード会社の明細に表示された「今後のお支払い金額」です。請求額とは照合せず、合算していません。
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">ご利用日</th>
+                <th scope="col">ご利用先</th>
+                <th scope="col">お支払日</th>
+                <th scope="col" className="num">
+                  今後のお支払い金額
+                </th>
+                <th scope="col">基準日の状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {capture.payments.map((payment) => {
+                const status = SCHEDULED_DUE[payment.dueStatus];
+                return (
+                  <tr key={payment.ref}>
+                    <td>{payment.usageDate}</td>
+                    <td>{payment.counterparty}</td>
+                    <td>{payment.dueDate}</td>
+                    <td className="num">
+                      <SettlementQuantity value={payment.amount} />
+                    </td>
+                    <td>
+                      <Badge tone={status.tone}>{status.label}</Badge>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScheduledPayments({ state }: { state: ReportedState }): ReactNode {
+  const count = state.scheduledPayments.reduce(
+    (total, capture) => total + capture.payments.length,
+    0,
+  );
+  return (
+    <Panel
+      id="reported-state-scheduled-payments"
+      title="スキップ払いの予定"
+      count={`${count}件`}
+      note="基準日までの最新の取得で、カード会社が今後の支払として表示していたものです。1回分か残り全額かは確認されていないため、負債には数えていません。"
+    >
+      {state.coverage.scheduledPayments === "not_listed_account_filter" ? (
+        <div className="panel-body">
+          <p>
+            口座で絞り込んだため表示していません（スキップ払いの予定は口座に対応付けていません）。
+          </p>
+        </div>
+      ) : state.scheduledPayments.length === 0 ? (
+        <div className="panel-body">
+          <p>
+            基準日までにスキップ払いの明細は取得されていません。予定がないという意味ではありません。
+          </p>
+        </div>
+      ) : (
+        state.scheduledPayments.map((capture) => (
+          <ScheduledCapture key={capture.ref} capture={capture} />
+        ))
+      )}
+    </Panel>
   );
 }
 
@@ -323,6 +451,22 @@ function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
         負債は一部だけです。次のものは含まれていません:{" "}
         {coverage.liabilitiesMissing.map((code) => label(LIABILITY_GAPS, code)).join("、")}。
       </p>
+      {coverage.statementsBeforeWindow.length === 0 ? null : (
+        <>
+          <p>
+            次の請求は期間外のため一覧にありません。引落済みかどうかはここでは確認していません。
+          </p>
+          <ul className="warning-list" aria-label="一覧にない期間外の請求">
+            {coverage.statementsBeforeWindow.map((entry) => (
+              <li key={`${entry.sourceId}/${entry.reasonCode}`}>
+                {entry.sourceId}{" "}
+                <span className="dim">· {label(WINDOW_REASONS, entry.reasonCode)}</span>:{" "}
+                {entry.count} 件
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <details className="inline-disclosure">
         <summary>対象外にしているもの</summary>
         <ul className="warning-list">
@@ -337,6 +481,56 @@ function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
         ))}
       </details>
     </Notice>
+  );
+}
+
+/**
+ * The chosen captures no listed account came from. Each is complete, yet
+ * nothing in it is a position or a balance this page lists per account: the
+ * provider listed nothing, or only rows the coverage counts as excluded, or
+ * only rows the answer never lists per account (the perimeter's exchange-rate,
+ * income and realised-gains containers hold valuations only). The page cannot
+ * tell these apart, so it names each capture and says all three. Without an
+ * account filter every chosen capture is a capture of the whole answer, so one
+ * no account names is shown here rather than left out. Two parsers can read
+ * one artifact, so a capture is its ref and parser.
+ */
+function unlistedSnapshots(state: ReportedState): ReportedSnapshot[] {
+  if (state.filters.account !== null) return [];
+  const listed = new Set(
+    state.accounts.flatMap((account) =>
+      account.snapshots.map((snapshot) => JSON.stringify([snapshot.ref, snapshot.parserName])),
+    ),
+  );
+  return state.snapshots.filter(
+    (snapshot) => !listed.has(JSON.stringify([snapshot.ref, snapshot.parserName])),
+  );
+}
+
+function UnlistedCaptures({ state }: { state: ReportedState }): ReactNode {
+  const snapshots = unlistedSnapshots(state);
+  if (snapshots.length === 0) return null;
+  return (
+    <Panel
+      id="reported-state-unlisted-captures"
+      title="表示する記載のない取得結果"
+      count={`${snapshots.length}件`}
+    >
+      <div className="panel-body">
+        <p>
+          完全な取得結果ですが、口座ごとに表示する保有や残高の記載はありません。取得元が何も記載していないか、記載がこの一覧に載せないものだけです（取引ごとの残高やポイント、または為替レート・受取額・実現損益のように保有や残高ではないもの）。
+        </p>
+        <ul className="plain-list" aria-label="表示する記載のない取得結果">
+          {snapshots.map((snapshot) => (
+            <SnapshotLine
+              key={`${snapshot.ref}/${snapshot.parserName}`}
+              snapshot={snapshot}
+              withSource
+            />
+          ))}
+        </ul>
+      </div>
+    </Panel>
   );
 }
 
@@ -419,8 +613,16 @@ export function ReportedStatePage(): ReactNode {
                   <CoverageNotes state={state} />
                   {state.accounts.length === 0 ? (
                     <EmptyState>
-                      <p>この基準日までに完全な取得結果のある口座はありません。</p>
-                      <p>保有がないという意味ではありません。</p>
+                      {unlistedSnapshots(state).length === 0 ? (
+                        <>
+                          <p>この基準日までに完全な取得結果のある口座はありません。</p>
+                          <p>保有がないという意味ではありません。</p>
+                        </>
+                      ) : (
+                        <p>
+                          この基準日までの完全な取得結果に、口座ごとに表示する記載はありません。取得結果は下に挙げます。
+                        </p>
+                      )}
                     </EmptyState>
                   ) : (
                     state.accounts.map((account, index) => (
@@ -442,6 +644,7 @@ export function ReportedStatePage(): ReactNode {
                       />
                     ))
                   )}
+                  <UnlistedCaptures state={state} />
                   <Panel
                     id="reported-state-payables"
                     title="カードの請求"
@@ -456,6 +659,7 @@ export function ReportedStatePage(): ReactNode {
                       <PayableTable payables={state.payables} />
                     )}
                   </Panel>
+                  <ScheduledPayments state={state} />
                 </>
               )}
             </QueryBoundary>

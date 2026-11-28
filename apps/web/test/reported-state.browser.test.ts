@@ -1,6 +1,6 @@
 // 基準日の保有状況 in the production client against a server whose answers
 // the query itself produces (packages/application/test/reported-state-world.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -10,7 +10,9 @@ import {
   reportedStateWorld,
 } from "../../../packages/application/test/reported-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { DatedStore } from "../../../packages/read-model/test/dated-state-fixture.ts";
 import { tokyoToday } from "../src/reported-state-api.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -18,17 +20,55 @@ const runnable = existsSync(join(client, "index.html")) && existsSync(executable
 if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] === "true"))
   process.exitCode = 1;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("reported state on a date", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
   let tooMany = false;
   const requests: URL[] = [];
   const world = reportedStateWorld();
+  // A world whose first capture is complete and lists nothing: the provider
+  // reported no holding on 2026-09-08, then a bank capture lists a balance.
+  // Beside it, a complete income capture holds only a valuation, which the
+  // answer never lists per account: it is named too, never read as empty.
+  const emptyWorld = new DatedStore();
+  emptyWorld.capture({
+    source: "sbi-securities",
+    dataset: "domestic-cash-positions",
+    parser: "sbi-domestic-cash-positions",
+    fetchedAt: "2026-09-08T01:00:00Z",
+  });
+  const income = emptyWorld.capture({
+    source: "sbi-securities",
+    dataset: "income-payments",
+    parser: "sbi-income-payments",
+    version: "0.1.3",
+    fetchedAt: "2026-09-08T03:00:00Z",
+    claim: "complete",
+  });
+  emptyWorld.db.run(
+    `INSERT INTO valuation_observations(parse_run_id,source_account,subject,metric,amount_minor,amount_text,amount_scale,currency,as_of,observed_at,raw_locator,extra_json)
+     VALUES(?,'sbi-a','1001','income_amount',100,'100',0,'JPY',NULL,NULL,'$.payments[0]','{}')`,
+    [income.parse],
+  );
+  emptyWorld.capture({
+    source: "smbc-bank",
+    dataset: "balance-normalized",
+    parser: "smbc-direct-balance",
+    fetchedAt: "2026-09-09T02:00:00Z",
+    balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 50_000 }],
+  });
+  let served = world;
   beforeEach(() => {
     advertised = true;
     tooMany = false;
+    served = world;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -46,7 +86,7 @@ describe.if(runnable)("reported state on a date", () => {
         if (url.pathname === "/api/v2/reported-state") {
           requests.push(url);
           if (tooMany) return Response.json({ error: "result_limit_exceeded" }, { status: 413 });
-          return Response.json(await reportedStateBody(world, url.searchParams.get("date")!));
+          return Response.json(await reportedStateBody(served, url.searchParams.get("date")!));
         }
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -57,7 +97,6 @@ describe.if(runnable)("reported state on a date", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -107,14 +146,17 @@ describe.if(runnable)("reported state on a date", () => {
     expect(main).toContain("4日以上前の取得");
     expect(main).toContain("3日以内に取得");
     // Provider valuations in the provider's currency, side by side.
-    expect(main).toContain("12000 JPY");
+    expect(main).toContain("12,000 JPY");
     expect(main).toContain("150.25 USD");
-    expect(main).toContain("50000 JPY");
+    expect(main).toContain("50,000 JPY");
     // An unreadable balance stays unknown, never zero.
     expect(main).toContain("不明（stored:unparsed） · JPY");
-    // Nothing is added: no sum of the JPY figures appears anywhere.
-    for (const combined of ["62000", "80000", "92000", "112000"])
+    // Nothing is added: no sum of the JPY figures appears anywhere, grouped
+    // as the shared formatter writes it or not.
+    for (const combined of ["62000", "80000", "92000", "112000"]) {
       expect(main).not.toContain(combined);
+      expect(main).not.toContain(`${combined.slice(0, -3)},${combined.slice(-3)}`);
+    }
     expect(main).toContain("この一覧は資産や負債の合計ではありません。");
     await page.close();
   }, 30_000);
@@ -148,9 +190,39 @@ describe.if(runnable)("reported state on a date", () => {
     expect(text).toContain("基準日より後に引落予定");
     expect(text).toContain("引落予定日を過ぎ、引落は未確認");
     expect(text).toContain("引落予定日が不明");
+    // A statement with no due date recorded says so in words, never a bare 不明 (INV05).
+    expect(text).toContain("引落予定日未記録");
+    expect(text).not.toMatch(/(^|[\t\n])不明($|[\t\n])/u);
     expect(text).toContain("採用済み");
     await choose(page, "2026-09-26");
     expect(await payables.innerText()).toContain("基準日までに引落を確認");
+    await page.close();
+  }, 30_000);
+
+  test("scheduled skip payments are listed per capture with their due status, never added", async () => {
+    const page = await open();
+    await choose(page, "2026-09-10");
+    const panel = page.getByRole("region", { name: "スキップ払いの予定", exact: true });
+    const listed = await page
+      .getByRole("region", {
+        name: "myjcb:conn-1:rootのスキップ払いの予定（2026-09-07 取得）",
+        exact: true,
+      })
+      .innerText();
+    expect(listed).toContain("4,500 JPY");
+    expect(listed).toContain("-300 JPY");
+    expect(listed).toContain("基準日より後に支払予定");
+    expect(listed).toContain("支払予定日が基準日以前（支払は未確認）");
+    const text = await panel.innerText();
+    // The other connection's page listed none, and says so.
+    expect(text).toContain("この取得では、スキップ払いの予定は表示されていませんでした。");
+    expect(text).toContain("負債には数えていません");
+    // Two rows, never their sum.
+    expect(text).toContain("2件");
+    expect(text).not.toContain("4200");
+    // Before any capture of the page, nothing is listed and that is not "none scheduled".
+    await choose(page, "2026-09-01");
+    expect(await panel.innerText()).toContain("予定がないという意味ではありません。");
     await page.close();
   }, 30_000);
 
@@ -164,8 +236,46 @@ describe.if(runnable)("reported state on a date", () => {
     const main = await page.locator("main").innerText();
     expect(main).toContain("負債は一部だけです。");
     expect(main).toContain("まだ請求に載っていないカード利用");
+    // The statements the window leaves out are counted, never listed.
+    const older = await page.getByRole("list", { name: "一覧にない期間外の請求" }).innerText();
+    expect(older).toContain("vpass · 引落予定日が基準日の31日より前: 1 件");
+    expect(older).toContain("vpass · 引落予定日が不明で、基準日の45日より前に取得: 1 件");
     await page.close();
   }, 30_000);
+
+  test("a complete capture that lists nothing is named with its capture, never left out", async () => {
+    served = emptyWorld;
+    const page = await open();
+    // Only the empty capture by the end of 2026-09-08: no account, but the
+    // capture is complete, so the page names it instead of saying nothing is known.
+    await choose(page, "2026-09-08");
+    const empty = page.getByRole("list", { name: "表示する記載のない取得結果" });
+    const listed = await empty.innerText();
+    expect(listed).toContain("sbi-securities");
+    expect(listed).toContain("sbi-domestic-cash-positions");
+    expect(listed).toContain("取得日時 2026-09-08T01:00:00.000Z");
+    expect(listed).toContain("当日取得");
+    // The income capture holds a valuation, so the page never says it listed nothing.
+    expect(listed).toContain("sbi-income-payments");
+    const main = await page.locator("main").innerText();
+    expect(main).toContain("取得元が何も記載していないか、記載がこの一覧に載せないものだけです");
+    expect(main).toContain("為替レート・受取額・実現損益");
+    expect(main).not.toContain("保有がないという意味ではありません。");
+    expect(main).not.toContain("0 JPY");
+    // With a bank capture beside it, the empty one is still named apart.
+    await choose(page, "2026-09-10");
+    expect(await empty.innerText()).toContain("sbi-domestic-cash-positions");
+    expect(await empty.innerText()).not.toContain("smbc-bank");
+    await page.getByRole("region", { name: "smbc-bank · smbc-aの残高", exact: true }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    // Before every capture nothing is known, and the page says so.
+    await choose(page, "2026-09-01");
+    expect(await empty.count()).toBe(0);
+    expect(await page.locator("main").innerText()).toContain(
+      "保有がないという意味ではありません。",
+    );
+    await page.close();
+  }, 60_000);
 
   test("a date with too many records says so instead of a partial answer", async () => {
     tooMany = true;

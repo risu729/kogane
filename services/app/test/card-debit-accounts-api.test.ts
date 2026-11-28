@@ -2,14 +2,16 @@
 // migrations: `GET /api/v2/reconciliation/card-debit-accounts` for the
 // operator's カード照合 page and `kogane.card-settlements.debit-accounts` for
 // an agent answer one read (docs/card-settlements.md, Debit account per card;
-// ADR 0114). The store holds one MyJCB statement total, no reading and no
-// candidate. The answers are exercised on the complete schema in
+// ADR 0114). The store holds two MyJCB statement totals, one exact and one
+// the decimal-v1 projection could not read, no reading and no candidate. The
+// answers are exercised on the complete schema in
 // services/processor/test/card-debit-accounts.test.ts. Every value is
 // invented.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validCardDebitAccountsReview } from "../../../packages/observation-shared/src/card-debit-accounts-contract";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import worker from "../src/worker";
 import { callTool, toolContext } from "../src/agent-service";
 import { readMcpTools } from "../src/read-tools";
@@ -41,31 +43,50 @@ beforeAll(async () => {
       "INSERT INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES('evidence-test','evidence-test','myjcb')",
     ),
   ]);
+  // The second card's total is not a number: decimal-v1 records it `unparsed`.
+  await seedStatements([
+    ["myjcb:synthetic:root", 4000, "4000", "2099-01-10"],
+    ["myjcb:synthetic:unreadable", null, "unreadable", "2099-01-10"],
+  ]);
+  keys = await generateKeyPair("RS256", { extractable: true });
+  jwks = {
+    keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
+  };
+});
+/**
+ * One published MyJCB statement-total parse with a total per card: its
+ * source account, minor units, text and `_kogane.paymentDate` (none when
+ * undefined).
+ */
+async function seedStatements(
+  cards: readonly (readonly [string, number | null, string, string | undefined])[],
+) {
   const run = await seedRun({ source: "myjcb", count: 1 });
   const parse =
     await env.DB.prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
     VALUES(?,'myjcb-credit-statement-total','1','2099-01-12T00:00:00Z','ok','[]') RETURNING id`)
       .bind(run.artifacts[0]!.id)
       .first<{ id: number }>();
-  await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
-    VALUES(?,'myjcb:synthetic:root','credit_statement_payment_amount',4000,'4000',0,'JPY','2099-01-01','synthetic-total',?)`)
-    .bind(
-      parse!.id,
-      JSON.stringify({
-        _kogane: {
-          period: "2099-01",
-          paymentDate: "2099-01-10",
-          snapshotSemantics: "provider-reported-monthly-payment-amount",
-        },
-      }),
-    )
-    .run();
+  for (const [card, minor, text, paymentDate] of cards)
+    await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+    VALUES(?,?,'credit_statement_payment_amount',?,?,0,'JPY','2099-01-01','synthetic-total',?)`)
+      .bind(
+        parse!.id,
+        card,
+        minor,
+        text,
+        JSON.stringify({
+          _kogane: {
+            period: "2099-01",
+            ...(paymentDate === undefined ? {} : { paymentDate }),
+            snapshotSemantics: "provider-reported-monthly-payment-amount",
+          },
+        }),
+      )
+      .run();
   await publishParse(parse!.id);
-  keys = await generateKeyPair("RS256", { extractable: true });
-  jwks = {
-    keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
-  };
-});
+}
+
 beforeEach(() => {
   issuer = `https://card-debit-accounts-${++sequence}.cloudflareaccess.com`;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -188,6 +209,18 @@ describe("GET /api/v2/reconciliation/card-debit-accounts", () => {
           proposed: [],
           answer: { basis: "unknown", reason: "no_debit_account_evidence" },
         },
+        {
+          card: { sourceId: "myjcb", sourceAccount: "myjcb:synthetic:unreadable" },
+          // Not exact: its status and reason, never null or zero (INV05).
+          latestStatement: {
+            period: "2099-01",
+            amount: {
+              unitRef: "JPY",
+              value: { status: "unparsed", reasonCode: "stored:unparsed" },
+            },
+          },
+          answer: { basis: "unknown", reason: "no_debit_account_evidence" },
+        },
       ],
     });
     expect(await tables()).toEqual(before);
@@ -296,8 +329,158 @@ describe("kogane.card-settlements.debit-accounts", () => {
         path: "agent-http",
         risk_class: "R0",
         result: "read",
-        diff_json: JSON.stringify({ kind: "read", rows: 1, truncated: false }),
+        diff_json: JSON.stringify({ kind: "read", rows: 2, truncated: false }),
       },
     ]);
+  });
+});
+
+// The 次回の引落 view (ADR 0114's 2026-11-19 amendment): the same route with
+// `?view=upcoming` and the same tool with `view: "upcoming"`, one service
+// (`reviewUpcomingCardBills`). On this store both cards' statements are due
+// after the fixed date and neither has a debit account, so both are bills on
+// the unknown-account line; the unreadable total keeps its reason.
+describe("the upcoming view (次回の引落)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2098-12-01T03:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("answers the route and the tool alike, in the page's wire shape, and writes nothing", async () => {
+    const before = await tables();
+    const response = await call(`${PATH}?view=upcoming`);
+    expect(response.status).toBe(200);
+    const overRoute = (await response.json()) as Record<string, any>;
+    expect(validApiResponse(PATH, overRoute)).toBe(true);
+    expect(overRoute).toMatchObject({
+      apiVersion: 2,
+      schemaVersion: "kogane-card-upcoming-bills-v1",
+      view: "upcoming",
+      date: "2098-12-01",
+      cardsTruncated: false,
+      bills: [
+        {
+          card: { source: "myjcb", sourceAccount: "myjcb:synthetic:root" },
+          statementPeriod: "2099-01",
+          debitDate: "2099-01-10",
+          amount: { value: "4000", unit: "JPY", status: "exact" },
+          debitAccount: { answer: "unknown", account: null, codes: ["no_debit_account_evidence"] },
+        },
+        {
+          card: { source: "myjcb", sourceAccount: "myjcb:synthetic:unreadable" },
+          amount: { unit: "JPY", status: "unparsed", reason: "stored:unparsed" },
+        },
+      ],
+      byDebitAccount: [
+        {
+          account: null,
+          debitDate: "2099-01-10",
+          bills: 2,
+          cardBills: { unit: "JPY", status: "missing", reason: "bill_not_exact" },
+          balance: null,
+          covers: "unknown",
+          reasons: ["debit_account_unknown", "bill_not_exact"],
+          notes: ["other_debits_not_modelled"],
+        },
+      ],
+      notListed: [],
+    });
+    const overMcp = await mcp({
+      method: "tools/call",
+      params: { name: TOOL, arguments: { view: "upcoming" } },
+    });
+    expect(overMcp["result"].isError).toBe(false);
+    expect(overMcp["result"].structuredContent).toEqual(overRoute);
+    const overAgent = await call(AGENT_PATH, {
+      subject: "synthetic-agent",
+      body: { view: "upcoming" },
+    });
+    expect(await overAgent.json()).toEqual(overRoute);
+    // A compact answer: well under the 8 KB a client shows.
+    expect(JSON.stringify(overRoute).length).toBeLessThan(8 * 1024);
+    expect(await tables()).toEqual(before);
+  });
+
+  it("refuses any other view or parameter on both transports, and is graded like the default", async () => {
+    for (const query of [
+      "?view=other",
+      "?view=",
+      "?view=upcoming&view=upcoming",
+      "?view=upcoming&offset=0",
+    ]) {
+      const response = await call(`${PATH}${query}`);
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_query" });
+    }
+    for (const body of [{ view: "other" }, { view: "upcoming", source: "x" }])
+      expect((await call(AGENT_PATH, { subject: "synthetic-agent", body })).status).toBe(400);
+    const narrowed = await direct(
+      { view: "upcoming" },
+      { scopes: { sources: ["myjcb"], accounts: "*" } },
+    );
+    expect(narrowed.status).toBe(403);
+    expect(narrowed.body).toMatchObject({ code: "evidence_restricted", refs: ["scope:source"] });
+    const summary = await direct({ view: "upcoming" }, { capabilities: ["summary.read"] });
+    expect(summary.status).toBe(403);
+    schemaAhead = true;
+    expect((await call(`${PATH}?view=upcoming`)).status).toBe(404);
+  });
+
+  it("records each served agent call as one read of the bills and the cards not listed", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const response = await call(AGENT_PATH, {
+      subject: "synthetic-agent",
+      body: { view: "upcoming" },
+    });
+    expect(response.status).toBe(200);
+    const records = (
+      await env.DB.prepare(
+        "SELECT result,diff_json FROM audit_records WHERE operation='card-settlements.debit-accounts' AND rowid>? ORDER BY rowid",
+      )
+        .bind(last)
+        .all()
+    ).results;
+    expect(records).toEqual([
+      { result: "read", diff_json: JSON.stringify({ kind: "read", rows: 2, truncated: false }) },
+    ]);
+  });
+});
+
+// Last, so the cards it adds change no answer above.
+describe("a card whose due date is not answered", () => {
+  beforeAll(async () => {
+    await seedStatements([
+      ["myjcb:synthetic:undated", 4000, "4000", undefined],
+      ["myjcb:synthetic:misdated", 4000, "4000", "2099-02-30"],
+    ]);
+  });
+
+  it("says why on the route and through the tool alike, never a bare null (INV05)", async () => {
+    const overRoute = (await (await call(PATH)).json()) as Record<string, any>;
+    expect(validCardDebitAccountsReview(overRoute)).toBe(true);
+    const statements = Object.fromEntries(
+      overRoute["items"].map((item: Record<string, any>) => [
+        item["card"].sourceAccount,
+        item["latestStatement"],
+      ]),
+    );
+    expect(statements["myjcb:synthetic:misdated"]).toMatchObject({
+      paymentDate: null,
+      paymentDateReason: "payment_date_invalid",
+    });
+    expect(statements["myjcb:synthetic:undated"]).toMatchObject({
+      paymentDate: null,
+      paymentDateReason: "payment_date_absent",
+    });
+    // A dated statement carries no reason.
+    expect(statements["myjcb:synthetic:root"]).not.toHaveProperty("paymentDateReason");
+    const overMcp = await mcp({ method: "tools/call", params: { name: TOOL, arguments: {} } });
+    expect(overMcp["result"].isError).toBe(false);
+    expect(overMcp["result"].structuredContent).toEqual(overRoute);
   });
 });

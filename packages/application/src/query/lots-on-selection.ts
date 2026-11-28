@@ -80,7 +80,7 @@ export const LOT_INSTRUMENT_MAPPINGS_SQL = `SELECT w.value AS identifier_id,m.re
  * (`instrument_identifier_remapped`) instead of silently missing them.
  * No index orders `instrument_mappings` by instrument (CORE 0018 keys it by
  * identifier and revision, and an index would be a migration), so this reads
- * the mapping table once, as `ACCOUNT_SOURCES_SQL` reads the account
+ * the mapping table once, as `ACCOUNTS_SOURCES_SQL` reads the account
  * mappings; each row's currency is checked by the `(identifier_id, revision)`
  * key. The table holds one row per identifier revision, curated by identity
  * runs and decisions, not one per observation. One row past the bound is read

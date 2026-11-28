@@ -10,6 +10,10 @@ import {
   CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
   STATED_ABSENT_REASONS,
 } from "../../domain/src/card-debit-account-answer.ts";
+import {
+  SETTLEMENT_DEBIT_DATE_REASONS,
+  STATEMENT_DUE_DATE_REASONS,
+} from "../../domain/src/card-settlement.ts";
 import { validSourceFactRef } from "../../domain/src/events.ts";
 import { validTemporalValue } from "../../domain/src/time.ts";
 import { validQuantity } from "../../domain/src/values.ts";
@@ -28,6 +32,17 @@ const oneOf = (values: readonly string[], value: unknown): boolean =>
   typeof value === "string" && values.includes(value);
 const codes = (values: readonly string[], value: unknown): boolean =>
   Array.isArray(value) && value.every((code) => oneOf(values, code));
+/**
+ * A date and its closed reason: the reason is there exactly when the date is
+ * null, so a null date is never shown without why (INV05).
+ */
+const dateReason = (
+  owner: Record<string, any>,
+  date: string,
+  reason: string,
+  reasons: readonly string[],
+): boolean =>
+  owner[date] === null ? oneOf(reasons, owner[reason]) : !Object.hasOwn(owner, reason);
 const sameAccount = (a: Record<string, any>, b: Record<string, any>): boolean =>
   a.bankSourceId === b.bankSourceId && a.bankSourceAccount === b.bankSourceAccount;
 
@@ -79,6 +94,7 @@ const validMatched = (value: unknown): boolean =>
   record(value.latest) &&
   text(value.latest.proposalId) &&
   nullableText(value.latest.debitDate) &&
+  dateReason(value.latest, "debitDate", "debitDateReason", SETTLEMENT_DEBIT_DATE_REASONS) &&
   nullableText(value.latest.period);
 
 /** Exactly the notes whose condition holds, in the closed list's order. */
@@ -127,6 +143,9 @@ function validAnswer(value: unknown, item: Record<string, any>): boolean {
     sameAccount(value.account, newestSettled) &&
     value.proposalId === newestSettled.latest.proposalId &&
     value.debitDate === newestSettled.latest.debitDate &&
+    value.debitDateReason === newestSettled.latest.debitDateReason &&
+    Object.hasOwn(value, "debitDateReason") ===
+      Object.hasOwn(newestSettled.latest, "debitDateReason") &&
     exactCodes(value.codes, {
       settled_accounts_differ: item.settled.length > 1,
       stated_reading_conflicting: stated.status === "conflicting",
@@ -159,7 +178,9 @@ export function validCardDebitAccountsReview(value: unknown): boolean {
           validSourceFactRef(statement.ref) &&
           nullableText(statement.period) &&
           (statement.paymentDate === null || validTemporalValue(statement.paymentDate)) &&
-          (statement.amount === null || validQuantity(statement.amount)))) &&
+          dateReason(statement, "paymentDate", "paymentDateReason", STATEMENT_DUE_DATE_REASONS) &&
+          // A total that is not exact carries its status and reason (INV05).
+          validQuantity(statement.amount))) &&
       validStated(item.stated) &&
       Array.isArray(item.settled) &&
       item.settled.every(validMatched) &&

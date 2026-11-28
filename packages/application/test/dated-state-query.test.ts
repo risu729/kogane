@@ -5,8 +5,22 @@
 // is not shown. Every account, code and amount is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import { canonicalDigest } from "../../domain/src/context.ts";
+import { METRIC_REGISTRY_RELEASE } from "../../domain/src/metrics.ts";
+import {
+  payableStatus,
+  REPORTED_STATE_EXCLUSIONS,
+  scheduledPaymentDueStatus,
+  snapshotFreshness,
+} from "../../domain/src/reported-state.ts";
+import { validReportedState } from "../../observation-shared/src/reported-state-contract.ts";
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
+import {
+  DATED_SCHEDULED_PAYMENTS_SQL,
+  DATED_STATE_EXCLUDED_SOURCES,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+  DATED_STATEMENTS_SQL,
+} from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
 import { DatedStateLimitError, queryDatedState } from "../src/query/dated-state.ts";
@@ -169,6 +183,13 @@ describe("accounts and their snapshots", () => {
 });
 
 describe("coverage", () => {
+  test("the sources the perimeter leaves out are the source: scopes, by id", () => {
+    const sources = REPORTED_STATE_EXCLUSIONS.flatMap(({ scope }) =>
+      scope.startsWith("source:") ? [scope.slice("source:".length)] : [],
+    );
+    expect(sources).toEqual([...DATED_STATE_EXCLUDED_SOURCES]);
+  });
+
   test("containers without a snapshot, stale snapshots, the perimeter and liabilities", async () => {
     const state = await queryDatedState(executor(holdings()), { date: "2026-09-10" });
     const missing = state.coverage.containersWithoutSnapshot.map((c) => c.parserName);
@@ -186,10 +207,48 @@ describe("coverage", () => {
         ageDays: 4,
       },
     ]);
-    expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward");
+    expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward-me");
     expect(state.coverage.liabilitiesCoverage).toBe("partial");
     expect(state.coverage.liabilitiesMissing).toContain("unbilled_card_usage");
     expect(state.coverage.payablesFromPaymentDate).toBe("2026-08-10");
+  });
+
+  test("MoneyForward is excluded as the coverage says: no account, no missing container", async () => {
+    // Before and after its first capture alike: the aggregator restates the
+    // direct sources' accounts, so it is never listed nor expected.
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.capture({
+      source: "moneyforward-me",
+      dataset: "account-detail",
+      parser: "moneyforward-detail-balances",
+      version: "1.0.1",
+      unitKey: "synthetic-connection",
+      claim: "complete",
+      fetchedAt: "2026-09-10T01:00:00Z",
+      balances: [
+        {
+          account: "moneyforward-me:synthetic-connection",
+          metric: "reported_account_value_jpy",
+          instrument: "JPY",
+          minor: 57_000,
+        },
+      ],
+    });
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    for (const state of [before, after]) {
+      expect(state.coverage.excluded.map((e) => e.scope)).toContain("source:moneyforward-me");
+      expect(state.accounts.map((a) => a.sourceId)).not.toContain("moneyforward-me");
+      expect(state.snapshots.map((s) => s.sourceId)).not.toContain("moneyforward-me");
+      expect(state.coverage.containersWithoutSnapshot.map((c) => c.sourceId)).not.toContain(
+        "moneyforward-me",
+      );
+      expect(validReportedState(JSON.parse(JSON.stringify({ apiVersion: 2, ...state })))).toBe(
+        true,
+      );
+    }
+    // Nothing the answer reads changed, so neither did its context.
+    expect(after.contextId).toBe(before.contextId);
   });
 
   test("a date before every capture lists no account and names every container", async () => {
@@ -277,6 +336,159 @@ describe("coverage", () => {
     }
   });
 
+  test("an accounts scope lists each account as its one-account read does (ADR 0116)", async () => {
+    const store = holdings();
+    // The same provider account in a second SBI container, mapped to another account.
+    const foreign = store.capture({
+      source: SBI.source,
+      dataset: "foreign-cash-positions",
+      parser: "sbi-foreign-cash-positions",
+      // The reader release migration 0084 requires.
+      version: "0.3.1",
+      fetchedAt: "2026-09-07T01:00:00Z",
+      positions: [{ account: "sbi-a", code: "3003", quantity: "4" }],
+    });
+    store.identify(foreign, SBI.source, "acct-sbi-usd", "identified");
+    const executorFor = executor(store);
+    const date = "2026-09-10";
+    const scoped = await queryDatedState(executorFor, {
+      date,
+      accounts: ["acct-sbi-usd", "acct-sbi"],
+    });
+    const one = await Promise.all(
+      ["acct-sbi", "acct-sbi-usd"].map((account) =>
+        queryDatedState(executorFor, { date, account }),
+      ),
+    );
+    // Two entries for one provider account: neither account's rows are listed under the other.
+    expect(scoped.accounts.map((a) => [a.sourceAccount, a.accountId]).sort()).toEqual([
+      ["sbi-a", "acct-sbi"],
+      ["sbi-a", "acct-sbi-usd"],
+    ]);
+    for (const state of one)
+      expect(scoped.accounts.filter((a) => a.accountId === state.filters.account)).toEqual(
+        state.accounts,
+      );
+    // The manifest has no filter: a one-account scope is the one-account read.
+    const single = await queryDatedState(executorFor, { date, accounts: ["acct-sbi"] });
+    expect({ ...single, filters: null }).toEqual({ ...one[0]!, filters: null });
+    // Unscoped too, the provider account is one entry per account its rows map to (ADR 0019).
+    const all = await queryDatedState(executorFor, { date });
+    expect(all.accounts.filter((a) => a.sourceAccount === "sbi-a")).toHaveLength(2);
+    await expect(
+      queryDatedState(executorFor, { date, account: "acct-sbi", accounts: ["acct-sbi"] }),
+    ).rejects.toThrow("invalid_query");
+  });
+
+  test("on random stores, a one-account list is the `account` read and a scope lists each account's rows as its own read does", async () => {
+    const FOREIGN = {
+      source: SBI.source,
+      dataset: "foreign-cash-positions",
+      parser: "sbi-foreign-cash-positions",
+      version: "0.3.1",
+    };
+    const ACCOUNTS = ["acct-a", "acct-b", "acct-c", "acct-d"];
+    for (let seed = 1; seed <= 100; seed += 1) {
+      let state = seed;
+      const next = () => {
+        state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return state / 2_147_483_648;
+      };
+      const pick = <T>(values: readonly T[]): T => values[Math.floor(next() * values.length)]!;
+      const store = new DatedStore();
+      const captures = 3 + Math.floor(next() * 8);
+      for (let index = 0; index < captures; index += 1) {
+        const fetchedAt = `2026-09-${String(1 + Math.floor(next() * 12)).padStart(2, "0")}T0${String(Math.floor(next() * 10))}:00:00Z`;
+        const provider = pick(["p-1", "p-2"]);
+        const kind = pick(["domestic", "foreign", "smbc", "shinsei", "statement"] as const);
+        const account = pick(ACCOUNTS);
+        if (kind === "statement") {
+          const statement = store.statement({
+            card: `card-${provider}`,
+            period: "2026-09",
+            paymentDate: pick(["2026-09-26", "2026-10-26", null]),
+            minor: Math.floor(next() * 50_000),
+            fetchedAt,
+          });
+          if (next() < 0.8) store.identify(statement, "vpass", account, "identified");
+          continue;
+        }
+        const capture =
+          kind === "domestic" || kind === "foreign"
+            ? store.capture({
+                ...(kind === "domestic" ? SBI : FOREIGN),
+                fetchedAt,
+                positions: [
+                  { account: provider, code: pick(["1001", "2002"]), quantity: "3", value: 900 },
+                ],
+              })
+            : store.capture({
+                ...(kind === "smbc" ? SMBC : SHINSEI),
+                fetchedAt,
+                balances: [
+                  {
+                    account: provider,
+                    metric: pick(["account_balance", "activity_current_balance"]),
+                    instrument: "JPY",
+                    minor: next() < 0.2 ? null : Math.floor(next() * 90_000),
+                  },
+                ],
+              });
+        // Now and then a capture no identity run maps to an account.
+        const source = kind === "smbc" ? SMBC : kind === "shinsei" ? SHINSEI : SBI;
+        if (next() < 0.85)
+          store.identify(capture, source.source, account, pick(["identified", "provider-local"]));
+      }
+      const sql = executor(store);
+      const date = `2026-09-${String(5 + Math.floor(next() * 8)).padStart(2, "0")}`;
+      const one = new Map(
+        await Promise.all(
+          [...ACCOUNTS, "acct-none"].map(
+            async (account) => [account, await queryDatedState(sql, { date, account })] as const,
+          ),
+        ),
+      );
+      for (const [account, state] of one)
+        expect([
+          seed,
+          account,
+          { ...(await queryDatedState(sql, { date, accounts: [account] })), filters: null },
+        ]).toEqual([seed, account, { ...state, filters: null }]);
+      const scope = ACCOUNTS.filter(() => next() < 0.6);
+      if (scope.length === 0) continue;
+      const scoped = await queryDatedState(sql, { date, accounts: scope });
+      expect(scoped.accounts.every((entry) => scope.includes(entry.accountId!))).toBe(true);
+      for (const account of scope) {
+        const alone = one.get(account)!;
+        expect([
+          seed,
+          account,
+          scoped.accounts.filter((entry) => entry.accountId === account),
+        ]).toEqual([seed, account, alone.accounts]);
+        expect([
+          seed,
+          account,
+          scoped.payables.filter((entry) => entry.accountId === account),
+        ]).toEqual([seed, account, alone.payables]);
+      }
+      expect(scoped.payables.length).toBe(
+        scope.reduce((sum, account) => sum + one.get(account)!.payables.length, 0),
+      );
+      expect(scoped.snapshots).toEqual(one.get(scope[0]!)!.snapshots);
+      expect(scoped.coverage.containersWithoutSnapshot).toEqual(
+        one.get(scope[0]!)!.coverage.containersWithoutSnapshot,
+      );
+      expect(scoped.coverage.excludedRows.reduce((sum, row) => sum + row.count, 0)).toBe(
+        scope.reduce(
+          (sum, account) =>
+            sum +
+            one.get(account)!.coverage.excludedRows.reduce((total, row) => total + row.count, 0),
+          0,
+        ),
+      );
+    }
+  }, 60_000);
+
   test("the context id is a digest of the manifest", async () => {
     const executorFor = executor(holdings());
     const first = await queryDatedState(executorFor, { date: "2026-09-10" });
@@ -290,6 +502,146 @@ describe("coverage", () => {
       "dated-state-perimeter-v1",
     ]);
     expect(first.manifest.snapshotRefs).toHaveLength(3);
+    expect(first.contextId).toBe(await canonicalDigest(first.manifest));
+    expect(first.manifest.filters).toEqual({ source: null, account: null });
+    // The code release that decides each balance's metric and exclusion, and
+    // each coverage container without a snapshot.
+    expect(first.manifest.metricRegistryRelease).toBe(METRIC_REGISTRY_RELEASE);
+    expect(first.manifest.containersWithoutSnapshot.length).toBeGreaterThan(0);
+    expect(first.manifest.containersWithoutSnapshot).toEqual(
+      first.coverage.containersWithoutSnapshot
+        .map((entry) => `${entry.sourceId}/${entry.parserName}/${entry.dataset}`)
+        .sort(),
+    );
+    // Every listed or counted row, with the identity the answer shows for it.
+    expect(first.manifest.rows).toHaveLength(6);
+    expect(first.manifest.rows).toContainEqual([
+      first.accounts[0]!.positions[0]!.ref,
+      "acct-sbi",
+      "identified",
+      "inst-1001",
+      "identified",
+    ]);
+  });
+});
+
+// INV09: every input that can change the answer is pinned by the manifest, so
+// a change of any of them is a new context id. Each case changes one input
+// the answer reads, and each failed on the manifest of snapshot, statement
+// and settlement ids alone, which left the context id equal.
+describe("the context id moves with every input the answer reads", () => {
+  const SBI_ACCOUNT_REF = `sa-acct-sbi-${SBI.source}`;
+
+  test("the account filter", async () => {
+    const executorFor = executor(holdings());
+    const one = await queryDatedState(executorFor, { date: "2026-09-10", account: "acct-sbi" });
+    const other = await queryDatedState(executorFor, {
+      date: "2026-09-10",
+      account: "acct-elsewhere",
+    });
+    expect(one.accounts.map((a) => a.accountId)).toEqual(["acct-sbi"]);
+    expect(other.accounts).toEqual([]);
+    expect(other.contextId).not.toBe(one.contextId);
+    expect(one.manifest.filters).toEqual({ source: null, account: "acct-sbi" });
+  });
+
+  test("a later account mapping revision", async () => {
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.db.run(
+      "INSERT INTO accounts VALUES('acct-sbi-corrected','Synthetic','synthetic','identified')",
+    );
+    store.db.run(
+      "INSERT INTO account_mappings VALUES(?,?,2,'acct-sbi-corrected','manual','synthetic',1,'2098-01-02','Synthetic','identified')",
+      [`${SBI_ACCOUNT_REF}-r2`, SBI_ACCOUNT_REF],
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(after.accounts[0]!.accountId).toBe("acct-sbi-corrected");
+    expect(before.accounts[0]!.accountId).toBe("acct-sbi");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("a later instrument mapping revision", async () => {
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.db.run(
+      "INSERT INTO instruments VALUES('inst-1001-corrected','security','Synthetic','identified')",
+    );
+    store.db.run(
+      "INSERT INTO instrument_mappings VALUES('im-inst-1001-r2','ii-inst-1001',2,'inst-1001-corrected','manual','synthetic',1,'2098-01-02','Synthetic','identified')",
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(after.accounts[0]!.positions[0]!.instrument.instrumentId).toBe("inst-1001-corrected");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("another parse run of the same artifact activated in place of the first", async () => {
+    const store = new DatedStore();
+    const capture = store.capture({
+      ...SMBC,
+      fetchedAt: "2026-09-10T02:00:00Z",
+      balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 100 }],
+    });
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const reparse = 9_001;
+    store.db.run(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,'1.0.1','2026-09-11','ok','[]')",
+      [reparse, capture.artifact, SMBC.parser],
+    );
+    store.db.run(
+      `INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,observed_at,raw_locator,extra_json)
+       VALUES(?,'smbc-a','account_balance',200,'200',0,'JPY',NULL,NULL,'$.balances[0]','{}')`,
+      [reparse],
+    );
+    store.db.run(
+      "UPDATE published_parse_runs SET parse_run_id=?,parser_version='1.0.1',publication_kind='activation' WHERE fetch_artifact_id=?",
+      [reparse, capture.artifact],
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(after.snapshots.map((s) => s.ref)).toEqual(before.snapshots.map((s) => s.ref));
+    expect(after.accounts[0]!.balances[0]!.providerText).toBe("200");
+    expect(before.accounts[0]!.balances[0]!.providerText).toBe("100");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("a decision on a listed settlement review", async () => {
+    const store = new DatedStore();
+    const statement = store.statement({
+      card: "card-a",
+      period: "2026-09",
+      paymentDate: "2026-09-26",
+      minor: 30_000,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    store.identify(statement, "vpass", "acct-card", "identified");
+    const proposal = store.settle(statement, {
+      account: "acct-card",
+      period: "2026-09",
+      debitDate: "2026-09-26",
+    });
+    const before = await queryDatedState(executor(store), { date: "2026-09-27" });
+    store.db.run(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES('dr-late','relation',?,1,'accept','manual','synthetic-operator',NULL,'synthetic review','[]',NULL,NULL,'2026-09-28T00:00:00Z')`,
+      [`card-settlement:${proposal}`],
+    );
+    store.db.run(
+      `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+       VALUES(?,1,'accepted','dr-late',?,NULL,?,'2026-09-28T00:00:00Z')`,
+      [proposal, `event-${proposal}`, `allocation-${proposal}`],
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-27" });
+    expect(before.payables[0]!.status).toBe("due_unsettled");
+    expect(after.payables[0]!.status).toBe("settled_on_or_before_date");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("an unchanged store keeps its context id", async () => {
+    const store = holdings();
+    const first = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const again = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(again.contextId).toBe(first.contextId);
+    expect(again.manifest).toEqual(first.manifest);
   });
 });
 
@@ -389,6 +741,287 @@ describe("card payables on the date", () => {
     });
   });
 
+  test("statements the window leaves out are counted per source and reason, under the filters", async () => {
+    const { store } = cards();
+    // Two due before the window (one resolved to card-a's account), and one
+    // undated and captured before the undated bound, unresolved.
+    const june = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    store.identify(june, "vpass", "acct-card", "identified");
+    store.statement({
+      card: "card-a",
+      period: "2026-07",
+      paymentDate: "2026-07-26",
+      minor: 26_000,
+      fetchedAt: "2026-07-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-c",
+      period: "2026-05",
+      paymentDate: null,
+      minor: 900,
+      fetchedAt: "2026-05-03T01:00:00Z",
+    });
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(state.payables.map((p) => p.period)).toEqual(["2026-09", "2026-09", "2026-09"]);
+    expect(state.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 2 },
+      { sourceId: "vpass", reasonCode: "undated_captured_before_window", count: 1 },
+    ]);
+    expect(state.coverage.liabilitiesMissing).toContain("statements_before_window");
+    // The listed statements are in the manifest by ref, and the ones left out
+    // by count per source, resolved account and reason.
+    expect(state.manifest.statementRefs).toHaveLength(3);
+    expect(state.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: null, reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        accountId: null,
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    // The account filter counts only the statements resolved to that account.
+    const byAccount = await queryDatedState(executor(store), {
+      date: "2026-09-10",
+      account: "acct-card",
+    });
+    expect(byAccount.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(byAccount.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    const other = await queryDatedState(executor(store), {
+      date: "2026-09-10",
+      account: "acct-card-b",
+    });
+    expect(other.coverage.statementsBeforeWindow).toEqual([]);
+    expect(other.coverage.liabilitiesMissing).not.toContain("statements_before_window");
+    const bySource = await queryDatedState(executor(store), {
+      date: "2026-09-10",
+      source: "myjcb",
+    });
+    expect(bySource.coverage.statementsBeforeWindow).toEqual([]);
+    // A date whose window still reaches July lists it and counts only June.
+    const august = await queryDatedState(executor(store), { date: "2026-08-20" });
+    expect(august.payables.map((p) => p.period)).toContain("2026-07");
+    expect(august.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+      { sourceId: "vpass", reasonCode: "undated_captured_before_window", count: 1 },
+    ]);
+  });
+
+  test("an answer that leaves no statement out does not name the gap", async () => {
+    const { store } = cards();
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(state.coverage.statementsBeforeWindow).toEqual([]);
+    expect(state.coverage.liabilitiesMissing).toEqual([
+      "unbilled_card_usage",
+      "installment_remaining",
+      "loan_balances",
+    ]);
+    expect(state.manifest.statementsBeforeWindow).toEqual([]);
+  });
+
+  test("a changed count gives a new context id while the listed statements stay the same (INV09)", async () => {
+    const { store } = cards();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    // An older capture's parse published after the first answer: nothing
+    // listed changes, only the count of what the window leaves out.
+    const june = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    const published = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(published.manifest.statementRefs).toEqual(before.manifest.statementRefs);
+    expect(published.manifest.snapshotRefs).toEqual(before.manifest.snapshotRefs);
+    expect(published.manifest.settlementRefs).toEqual(before.manifest.settlementRefs);
+    expect(published.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(published.contextId).not.toBe(before.contextId);
+    // Resolving its account moves the count to another account: the coverage
+    // is unchanged, the manifest and the context id are not.
+    store.identify(june, "vpass", "acct-card", "identified");
+    const resolved = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(resolved.coverage).toEqual(published.coverage);
+    expect(resolved.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(resolved.contextId).not.toBe(published.contextId);
+    expect(resolved.contextId).toBe(await canonicalDigest(resolved.manifest));
+  });
+
+  test("a state read without the count skips its read and records no count", async () => {
+    const { store } = cards();
+    store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    const statements: string[] = [];
+    const inner = executor(store);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.first<T>(sql, args);
+      },
+    };
+    const uncounted = await queryDatedState(recording, {
+      date: "2026-09-10",
+      includeStatementsBeforeWindow: false,
+    });
+    expect(statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    expect(statements).toContain(DATED_STATEMENTS_SQL);
+    expect("statementsBeforeWindow" in uncounted.coverage).toBe(false);
+    expect("statementsBeforeWindow" in uncounted.manifest).toBe(false);
+    // It cannot tell whether a statement was left out, so it names the gap.
+    expect(uncounted.coverage.liabilitiesMissing).toContain("statements_before_window");
+    expect(uncounted.contextId).toBe(await canonicalDigest(uncounted.manifest));
+    // Everything else is the counted answer's.
+    const counted = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const {
+      statementsBeforeWindow: _manifestCounts,
+      scheduledPaymentCaptures: _captures,
+      scheduledPaymentRefs: _refs,
+      ...countedManifest
+    } = counted.manifest;
+    expect(uncounted.manifest).toEqual(countedManifest);
+    expect("scheduledPayments" in uncounted).toBe(false);
+    expect("scheduledPayments" in uncounted.coverage).toBe(false);
+    expect(uncounted.payables).toEqual(counted.payables);
+    expect(uncounted.accounts).toEqual(counted.accounts);
+    expect(uncounted.contextId).not.toBe(counted.contextId);
+  });
+
+  test("on random stores, every answer meets the wire contract and the counts agree", async () => {
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x0c0de;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    const seen = { answers: 0, counted: 0, split: 0, refused: 0, scheduled: 0 };
+    for (let round = 0; round < 8; round += 1) {
+      const store = new DatedStore();
+      store.capture({
+        ...SMBC,
+        fetchedAt: `2026-0${1 + random(9)}-10T02:00:00Z`,
+        balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 1 }],
+      });
+      // Skip-payment pages of two connections, some empty, some unpublished.
+      for (let index = 0; index < 6; index += 1) {
+        const month = String(1 + random(11)).padStart(2, "0");
+        store.scheduledPage({
+          fetchedAt: `2026-${month}-0${1 + random(9)}T0${random(10)}:00:00Z`,
+          connection: `conn-${random(2)}`,
+          published: random(4) !== 0,
+          payments: Array.from({ length: random(3) }, () => ({
+            usageDate: `2026-${month}-01`,
+            dueDate: `2026-${String(1 + random(12)).padStart(2, "0")}-10`,
+            amount: String(random(2) === 0 ? -1 - random(99) : 1 + random(9_000)),
+            asOf: `2026-${month}-01`,
+          })),
+        });
+      }
+      for (let index = 0; index < 24; index += 1) {
+        const month = String(1 + random(11)).padStart(2, "0");
+        const card = `card-${random(4)}`;
+        const due = random(4);
+        const capture = store.statement({
+          card,
+          period: `2026-${month}`,
+          paymentDate: due === 0 ? null : due === 1 ? "unknown" : `2026-${month}-26`,
+          minor: 1 + random(9_000),
+          fetchedAt: `2026-${month}-0${1 + random(9)}T0${random(10)}:00:00Z`,
+        });
+        if (random(3) === 0) continue;
+        // Two cards share an account, so one account can hold several cards' counts.
+        const account = `acct-${card === "card-3" ? "card-0" : card}`;
+        store.identify(capture, "vpass", account, "identified");
+        if (random(3) === 0)
+          store.settle(capture, {
+            account,
+            period: `2026-${month}`,
+            debitDate: `2026-${month}-26`,
+            ...(random(2) === 0 ? { decision: "accepted" as const } : {}),
+          });
+      }
+      const filters = [
+        {},
+        { source: "vpass" },
+        { source: SMBC.source },
+        { account: "acct-card-0" },
+        { account: "acct-card-1" },
+        { source: "vpass", account: "acct-card-2" },
+        { account: "acct-none" },
+      ];
+      for (const date of ["2026-03-31", "2026-07-15", "2026-11-30"])
+        for (const filter of filters) {
+          const state = await queryDatedState(executor(store), { date, ...filter });
+          // What both adapters send (services/app), as JSON text read back.
+          const wire = JSON.parse(JSON.stringify({ apiVersion: 2, ...state })) as Record<
+            string,
+            any
+          >;
+          expect(validReportedState(wire)).toBe(true);
+          expect(state.contextId).toBe(await canonicalDigest(state.manifest));
+          seen.answers += 1;
+          if (state.scheduledPayments.some((capture) => capture.payments.length > 0))
+            seen.scheduled += 1;
+          const recorded = state.manifest.statementsBeforeWindow;
+          if (recorded.length > 0) seen.counted += 1;
+          if (new Set(recorded.map((entry) => entry.accountId)).size > 1) seen.split += 1;
+          // Any one count changed in the manifest alone is refused.
+          if (recorded.length > 0) {
+            const copy = structuredClone(wire);
+            copy["manifest"]["statementsBeforeWindow"][random(recorded.length)]["count"] += 1;
+            expect(validReportedState(copy)).toBe(false);
+            seen.refused += 1;
+          }
+          // The uncounted state is the counted one without the count.
+          const uncounted = await queryDatedState(executor(store), {
+            date,
+            ...filter,
+            includeStatementsBeforeWindow: false,
+          });
+          const {
+            statementsBeforeWindow: _counts,
+            scheduledPaymentCaptures: _captures,
+            scheduledPaymentRefs: _refs,
+            ...rest
+          } = state.manifest;
+          expect(uncounted.manifest).toEqual(rest);
+          expect(uncounted.payables).toEqual(state.payables);
+          expect(uncounted.contextId).toBe(await canonicalDigest(rest));
+        }
+    }
+    // The random worlds reach answers with counts, and counts split across accounts.
+    expect(seen.answers).toBe(8 * 3 * 7);
+    expect(seen.counted).toBeGreaterThan(20);
+    expect(seen.split).toBeGreaterThan(5);
+    expect(seen.refused).toBe(seen.counted);
+    expect(seen.scheduled).toBeGreaterThan(10);
+  }, 60_000);
+
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {
     const accepted = {
       proposalId: "p",
@@ -409,6 +1042,147 @@ describe("card payables on the date", () => {
     expect(payableStatus("2026-09-27", null, null)).toBe("payment_date_unknown");
     expect(payableStatus("2026-09-27", "not-a-date", null)).toBe("payment_date_unknown");
     expect(payableStatus("2026-09-27", null, accepted)).toBe("settled_on_or_before_date");
+  });
+});
+
+describe("scheduled payments on the date", () => {
+  const row = { usageDate: "2026-08-03", asOf: "2026-09-05" };
+
+  test("each capture's payments as stored, with the due status of the date, never added", async () => {
+    const store = new DatedStore();
+    const page = store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [
+        { ...row, dueDate: "2026-09-10", amount: "4500" },
+        { ...row, dueDate: "2026-10-10", amount: "-30" },
+      ],
+    });
+    const empty = store.scheduledPage({ fetchedAt: "2026-09-09T12:00:00Z", connection: "conn-2" });
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(state.coverage.scheduledPayments).toBe("listed");
+    expect(state.scheduledPayments).toEqual([
+      {
+        ref: `artifact:${page.artifact}`,
+        sourceId: "myjcb",
+        parserName: "myjcb-skip-payment-schedule",
+        capturedAt: "2026-09-05T12:00:00.000Z",
+        captureDate: "2026-09-05",
+        ageDays: 5,
+        freshness: "stale",
+        payments: [
+          {
+            ref: `scheduled-payment:${page.payments[0]}`,
+            sourceAccount: "myjcb:conn-1:root",
+            scheduleKind: "card-skip-payment",
+            usageDate: "2026-08-03",
+            dueDate: "2026-09-10",
+            amount: {
+              unitRef: "JPY",
+              value: {
+                status: "exact",
+                value: { coefficient: "4500", scale: 0 },
+                normalizationVersion: "exact-arith-v1",
+              },
+            },
+            providerText: "4500",
+            counterparty: "Synthetic merchant 0",
+            asOf: "2026-09-05",
+            dueStatus: "due_on_or_before_date",
+          },
+          expect.objectContaining({
+            ref: `scheduled-payment:${page.payments[1]}`,
+            dueDate: "2026-10-10",
+            dueStatus: "due_after_date",
+            amount: expect.objectContaining({
+              value: expect.objectContaining({ value: { coefficient: "-30", scale: 0 } }),
+            }),
+          }),
+        ],
+      },
+      // A page that listed none is shown as such, not dropped.
+      expect.objectContaining({ ref: `artifact:${empty.artifact}`, payments: [] }),
+    ]);
+    // Nothing about them is a payable, a total or a liability figure.
+    expect(state.payables).toEqual([]);
+    expect(state.coverage.netAssets).toBe("not-computed");
+    expect(state.coverage.liabilitiesMissing).toContain("unbilled_card_usage");
+    expect(state.manifest.scheduledPaymentCaptures).toEqual([
+      [`artifact:${page.artifact}`, `parse_run:${page.parse}`],
+      [`artifact:${empty.artifact}`, `parse_run:${empty.parse}`],
+    ]);
+    expect(state.manifest.scheduledPaymentRefs).toEqual(
+      page.payments.map((id) => `scheduled-payment:${id}`).sort(),
+    );
+    expect(validReportedState({ apiVersion: 2, ...state })).toBe(true);
+    // A newer capture is a new input: a new context id.
+    store.scheduledPage({ fetchedAt: "2026-09-10T01:00:00Z", payments: [] });
+    const later = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(later.scheduledPayments.map((capture) => capture.payments.length)).toEqual([0, 0]);
+    expect(later.contextId).not.toBe(state.contextId);
+    expect(later.contextId).toBe(await canonicalDigest(later.manifest));
+  });
+
+  test("a source filter keeps its own; an account filter lists none and says so, without the read", async () => {
+    const store = new DatedStore();
+    store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [{ ...row, dueDate: "2026-10-10", amount: "100" }],
+    });
+    const vpass = await queryDatedState(executor(store), { date: "2026-09-10", source: "vpass" });
+    expect(vpass.scheduledPayments).toEqual([]);
+    expect(vpass.manifest.scheduledPaymentCaptures).toEqual([]);
+    expect(vpass.coverage.scheduledPayments).toBe("listed");
+    const myjcb = await queryDatedState(executor(store), { date: "2026-09-10", source: "myjcb" });
+    expect(myjcb.scheduledPayments.map((capture) => capture.payments.length)).toEqual([1]);
+    const statements: string[] = [];
+    const inner = executor(store);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: inner.first,
+    };
+    const filtered = await queryDatedState(recording, { date: "2026-09-10", account: "acct-card" });
+    expect(statements).not.toContain(DATED_SCHEDULED_PAYMENTS_SQL);
+    expect(filtered.scheduledPayments).toEqual([]);
+    expect(filtered.coverage.scheduledPayments).toBe("not_listed_account_filter");
+    expect(filtered.manifest.scheduledPaymentRefs).toEqual([]);
+    expect(validReportedState({ apiVersion: 2, ...filtered })).toBe(true);
+    // A state the other reads build on never reads them.
+    statements.length = 0;
+    const uncounted = await queryDatedState(recording, {
+      date: "2026-09-10",
+      includeStatementsBeforeWindow: false,
+    });
+    expect(statements).not.toContain(DATED_SCHEDULED_PAYMENTS_SQL);
+    expect("scheduledPayments" in uncounted).toBe(false);
+  });
+
+  test("the pure rule: due after the date, or due on or before it", () => {
+    expect(scheduledPaymentDueStatus("2026-09-10", "2026-09-11")).toBe("due_after_date");
+    expect(scheduledPaymentDueStatus("2026-09-10", "2026-09-10")).toBe("due_on_or_before_date");
+    expect(scheduledPaymentDueStatus("2026-09-10", "2026-08-31")).toBe("due_on_or_before_date");
+  });
+
+  test("the wire contract refuses a scheduled payment the manifest does not pin, and a total", async () => {
+    const store = new DatedStore();
+    store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [{ ...row, dueDate: "2026-10-10", amount: "100" }],
+    });
+    const state = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const wire = JSON.parse(JSON.stringify({ apiVersion: 2, ...state })) as Record<string, any>;
+    expect(validReportedState(wire)).toBe(true);
+    const unpinned = structuredClone(wire);
+    unpinned["manifest"]["scheduledPaymentRefs"] = [];
+    expect(validReportedState(unpinned)).toBe(false);
+    const totalled = structuredClone(wire);
+    totalled["scheduledPayments"][0]["total"] = "100";
+    expect(validReportedState(totalled)).toBe(false);
+    const listedUnderFilter = structuredClone(wire);
+    listedUnderFilter["coverage"]["scheduledPayments"] = "not_listed_account_filter";
+    expect(validReportedState(listedUnderFilter)).toBe(false);
   });
 });
 

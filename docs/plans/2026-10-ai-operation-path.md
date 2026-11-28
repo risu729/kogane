@@ -762,8 +762,8 @@ the same correlation id; the `applied` record is authoritative.
 
 **What "in the writer's batch" requires.** A D1 batch rolls back only when a
 statement raises; a guard that matches no row (`UPDATE … WHERE revision = ?`,
-`INSERT OR IGNORE … SELECT … WHERE …`, as `updateSchedule` and the maintenance
-writers use) leaves a committed batch with no effect. So the `applied` /
+`INSERT … SELECT … WHERE …`, as `updateSchedule` and the maintenance writers
+use) leaves a committed batch with no effect. So the `applied` /
 `accepted` statement is a plain `INSERT … SELECT … WHERE` joined to the
 writer's own guard or to the row the effect wrote (the commit batch's
 reservation, the new revision row at `revision + 1`, the released lease), never
@@ -1118,7 +1118,7 @@ acceptance and concrete client delegation remain separate owner decisions.
   `delegationRef`; the schedules and confirm pages show it as a read-only
   notice. The route and shape are recorded in
   [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06);
-  [agent API](../agent-api.md#the-operators-mcp-principal-adr-0084-2026-11-07)
+  [agent API](../agent-api.md#the-mcp-clients-operation-authority-adr-0084-2026-11-07)
   (removed by ADR 0084).
   Service, contract and desktop/mobile browser tests cover it. The audit page
   is a separate pull request.

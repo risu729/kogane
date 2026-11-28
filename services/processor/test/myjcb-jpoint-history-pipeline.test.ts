@@ -1,5 +1,5 @@
 // Synthetic collector -> shared R2 -> registration -> publication -> promotion -> reader.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -35,19 +35,23 @@ import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { captureRewardInput } from "../src/reward-read-projection.ts";
 import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const DB = await mf.getD1Database("DB");
   const READ = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
@@ -183,6 +187,9 @@ test("real registration selects same-capture history once, falls back on a faile
   expect(input.ok).toBe(true);
   if (!input.ok) throw new Error("synthetic_reward_input_unavailable");
   expect(input.captured.input.content.buckets).toHaveLength(3);
+  // The selected lots are not totals: none of them is a provider display
+  // section, and the total they replace is not selected (ADR 0068, ADR 0107).
+  expect(input.captured.input.content.providerSections).toEqual([]);
   await capture(2, "200");
   const newer = (await reader.holdings({ programId: "program:j-point", offset: 0 })).rows[0]!;
   expect(newer.holding.buckets).toHaveLength(1);
@@ -196,6 +203,13 @@ test("real registration selects same-capture history once, falls back on a faile
     observedAt: completeAt,
     reasonCode: "history_not_current",
   });
+  // With the newer history failed the reader selects the total again, and the
+  // total keeps its provider display section.
+  const fallback = await captureRewardInput(env.DB, { now: () => "2026-10-03T00:00:00.000Z" });
+  if (!fallback.ok) throw new Error("synthetic_reward_input_unavailable");
+  expect(
+    fallback.captured.input.content.providerSections?.map((section) => section.parentBucketRef),
+  ).toEqual([newer.holding.buckets[0]!.bucketRef]);
   const smaller = syntheticJPointHistory();
   smaller.rows = [smaller.rows[1]!];
   smaller.reportedTotal = "40";

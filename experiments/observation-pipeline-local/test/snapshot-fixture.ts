@@ -42,7 +42,7 @@ import { openTestStore } from "./test-store.ts";
  */
 export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
   ["myjcb-jpoint-history", "1.0.1"],
-  ["vpass-credit-snapshot", "1.0.2"],
+  ["vpass-credit-snapshot", "1.1.0"],
   ["moneyforward-detail-balances", "1.0.1"],
   ["st-george-balances", "1.0.1"],
   ["prestia-bank-balances", "1.0.1"],
@@ -73,7 +73,7 @@ export function database(): Store {
 }
 
 /** Overrides applied to the default complete container claim of a snapshot. */
-export type CoverageOverrides = Partial<CoverageClaim>;
+type CoverageOverrides = Partial<CoverageClaim>;
 
 export interface Snapshot {
   parser: string;

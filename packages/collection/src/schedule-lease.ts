@@ -23,6 +23,8 @@
 // clear fails does the lease stay held (logged) until the tick frees it. Both
 // clear only this call's own reference, so neither can free a lease another
 // execution holds.
+import { loggedErrorName } from "./error-name";
+
 export interface ScheduleLeaseDatabase {
   prepare(sql: string): {
     bind(...values: unknown[]): {
@@ -62,7 +64,7 @@ export class CollectionLeaseAbort extends Error {
 }
 
 /** The lease timestamp format, `YYYY-MM-DDTHH:MM:SS.sssZ`, taken on D1's clock. */
-export const D1_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+const D1_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 const RELEASE_OWN =
   "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND lease_ref=?";
@@ -176,9 +178,13 @@ export async function withCollectionLease<T>(
   const timing = options.timing ?? LEASE_TIMING;
   const ref = crypto.randomUUID(),
     now = new Date().toISOString();
+  // The source's lease row, written once: a source that has one keeps it
+  // (`ON CONFLICT(source) DO NOTHING`, the table's only key). A row the schema
+  // refuses raises instead of being skipped, which `OR IGNORE` did, leaving
+  // the claim below nothing to claim and answering a busy lease.
   await db
     .prepare(
-      "INSERT OR IGNORE INTO collection_execution_leases(source, lease_ref, started_at) VALUES(?,NULL,NULL)",
+      "INSERT INTO collection_execution_leases(source, lease_ref, started_at) VALUES(?,NULL,NULL) ON CONFLICT(source) DO NOTHING",
     )
     .bind(source)
     .run();
@@ -201,7 +207,7 @@ export async function withCollectionLease<T>(
         JSON.stringify({
           event: "collection_lease_claim_failed",
           source,
-          errorName: error instanceof Error ? error.name : typeof error,
+          errorName: loggedErrorName(error),
         }),
       );
     } catch {

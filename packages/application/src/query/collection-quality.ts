@@ -133,8 +133,14 @@ export function safeCode(value: string | null): string | null {
  * `human_required`, and SBI VC's `manual_agreement_required` (the provider's
  * terms wait for the owner's agreement; owner, 2026-11-07 06:28 UTC).
  */
-const userActionRequired = (code: string | null): boolean =>
+export const userActionRequired = (code: string | null): boolean =>
   code !== null && (code.startsWith("human_required") || code === "manual_agreement_required");
+
+/** V Point's receipt codes that, while unrecovered, are a current session-refresh action. */
+export const VPOINT_SESSION_CODES: readonly string[] = [
+  "reauthentication_pending",
+  "human_required_session_refresh",
+];
 
 /** V Point's email login may finish in a separate run after its failed scheduled receipt. */
 function currentSessionFailure(
@@ -143,10 +149,7 @@ function currentSessionFailure(
   failedAt: string | null,
   latestFetchRun: CollectionQualityFetchRun | null,
 ): string | null {
-  if (
-    sourceId !== "v-point" ||
-    !["reauthentication_pending", "human_required_session_refresh"].includes(failureCode ?? "")
-  )
+  if (sourceId !== "v-point" || !VPOINT_SESSION_CODES.includes(failureCode ?? ""))
     return failureCode;
   const failureTime = Date.parse(failedAt ?? "");
   const successTime = Date.parse(latestFetchRun?.completedAt ?? "");
@@ -162,7 +165,7 @@ function currentSessionFailure(
 }
 
 /** The kinds of job that collect a source's data (a keepalive or the Processor tick does not). */
-const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "email"];
+export const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "email"];
 
 /**
  * What a source waits on, from its jobs' stored settings and newest receipts
@@ -173,7 +176,7 @@ const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "email"];
  * nothing about whether collection was switched off: V Point Pay's app job is
  * unsupported while its e-mail path, which has no job, still delivers.
  */
-export function sourceWait(
+function sourceWait(
   jobs: readonly {
     kind: string;
     enabled: boolean;

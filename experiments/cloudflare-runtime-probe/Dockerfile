@@ -1,11 +1,11 @@
-# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# syntax=docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 
 # The build context is the repository root (`image_build_context` in
 # wrangler.jsonc). There is one `bun.lock` at the root since the workspace
 # migration, so a frozen install needs the root manifests plus this workspace's
 # own manifest at the path the lockfile records it under. Bun installs the
 # workspaces it can see and says which ones it skipped.
-FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4
+FROM oven/bun:1.4.5-slim@sha256:b780593f3e10918cbdaec3d5a08d52224b9198069a65eb47812085c2ec007643
 
 WORKDIR /app
 

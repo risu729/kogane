@@ -5,10 +5,15 @@
 //  * a stale plan cannot be approved or committed from the screen,
 //  * the server-computed diff is what is shown (the client never recomputes),
 //  * `accepted` and `published` are shown as different states,
+//  * after a commit the plan, which the server would report stale because the
+//    commit moved its pins, is not simulated again and reads as committed,
+//    never as a refused approval,
+//  * a commit the server refused reads the plan again; one whose answer was
+//    lost keeps the plan as read so the same confirmation can be sent again,
 //  * a pending-to-posted card usage review compares every pinned revision
 //    with the candidate the server shows now, names its invalidation and its
 //    effect, and cannot be approved while any of them disagrees.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -33,6 +38,7 @@ import {
   POSTED_EVENT,
   serverPlanPins,
 } from "./card-purchase-link-fixture.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -62,13 +68,35 @@ const simulation = {
   outboxTargets: ["identity-projection", "balance-projection"],
 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("change confirmation screen", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let commands = true;
   let stale = false;
   let published = false;
+  // Set once a commit is answered: as the server does, a later simulate of
+  // the plan reports the pinned subject at the revision the commit wrote, so
+  // the plan reads as stale.
+  let committed = false;
+  /** Holds the commit's answer until it resolves; the decision is written on arrival. */
+  let commitHeld: Promise<void> | null = null;
+  /** A receipt status other than the accepted/published pair the outbox drives. */
+  let receiptStatus: "failed" | null = null;
+  /**
+   * The next commit's answer when it is not a receipt: an HTTP status and
+   * closed code, and whether the decision was written before the answer was
+   * lost. Used once; a resend is answered as the server does.
+   */
+  let commitFailure: { status: number; error: string; written: boolean } | null = null;
+  // The server reports no current revision for the subject (it reads one only
+  // for a pinned subject, 0 when none exists) and the plan reaches no source.
+  let vanished = false;
   const posted: string[] = [];
   /**
    * A pending-to-posted review plan: its kind, its pins, the proposal status
@@ -87,6 +115,11 @@ describe.if(runnable)("change confirmation screen", () => {
   let purchaseAdvertised = true;
   const purchaseReads: string[] = [];
   beforeEach(() => {
+    committed = false;
+    commitHeld = null;
+    receiptStatus = null;
+    commitFailure = null;
+    vanished = false;
     link = null;
     purchaseAdvertised = true;
     purchaseReads.length = 0;
@@ -161,11 +194,11 @@ describe.if(runnable)("change confirmation screen", () => {
               report: {
                 planId: PLAN_ID,
                 planDigest: PLAN_ID,
-                simulation,
+                simulation: vanished ? { ...simulation, affectedScopes: [] } : simulation,
                 expectedRevisions: { [SUBJECT]: 7 },
-                currentRevisions: { [SUBJECT]: stale ? 8 : 7 },
-                stale,
-                resimulatedPlanId: stale ? "b".repeat(64) : PLAN_ID,
+                currentRevisions: vanished ? {} : { [SUBJECT]: stale || committed ? 8 : 7 },
+                stale: stale || committed,
+                resimulatedPlanId: stale || committed ? "b".repeat(64) : PLAN_ID,
               },
             });
           if (operation === "approve")
@@ -179,11 +212,21 @@ describe.if(runnable)("change confirmation screen", () => {
                 usesRemaining: 1,
               },
             });
+          if (operation === "commit" && commitFailure !== null) {
+            const failure = commitFailure;
+            commitFailure = null;
+            committed = failure.written;
+            return Response.json({ error: failure.error }, { status: failure.status });
+          }
+          if (operation === "commit") {
+            committed = true;
+            if (commitHeld) await commitHeld;
+          }
           const receipt = {
             operationId: "op-synthetic",
             operationKind: "identity.assign",
             planId: PLAN_ID,
-            status: published ? "published" : "accepted",
+            status: receiptStatus ?? (published ? "published" : "accepted"),
             acceptedAt: "2098-01-01T00:00:00.000Z",
             publishedAt: published ? "2098-01-01T00:05:00.000Z" : null,
             decisionRevisionId: `dr_${"d".repeat(64)}`,
@@ -200,7 +243,6 @@ describe.if(runnable)("change confirmation screen", () => {
       },
     });
     origin = `http://127.0.0.1:${String(server.port)}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -228,6 +270,25 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(await page.getByRole("button", { name: "承認する" }).isDisabled()).toBe(true);
     expect(await page.getByRole("button", { name: "確定する" }).isDisabled()).toBe(true);
     expect(main).toContain("この接続先では確認操作が有効ではないため、承認・確定は行えません。");
+    await page.close();
+  }, 30_000);
+
+  test("names an absent current revision and an empty source list in words, never a dash (INV05)", async () => {
+    commands = false;
+    stale = false;
+    vanished = true;
+    const page = await open();
+    const targets = page
+      .getByRole("region", { name: "変更の対象", exact: true })
+      .locator("tbody tr");
+    expect(await targets.count()).toBe(1);
+    expect(await targets.first().locator("td").nth(1).innerText()).toBe("現在の版の報告なし");
+    const diff = await page
+      .getByRole("region", { name: "サーバーが計算した差分", exact: true })
+      .innerText();
+    expect(diff).toMatch(/影響する取得元\s+なし/u);
+    expect(diff).not.toContain("—");
+    expect(await targets.first().innerText()).not.toContain("—");
     await page.close();
   }, 30_000);
 
@@ -260,6 +321,20 @@ describe.if(runnable)("change confirmation screen", () => {
       "判断は保存されました。読み取りモデルへの反映はまだ完了していません。",
     );
     expect(accepted).not.toContain("2098-01-01T00:05:00.000Z");
+    // The plan is not simulated again: the commit moved the revision it
+    // pinned, so the server would report it stale. The screen says the plan is
+    // committed and that what it shows was read before the commit, never that
+    // its approval does not apply.
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    expect(
+      await page.getByRole("status").filter({ hasText: "この計画は確定しました" }).count(),
+    ).toBe(1);
+    const committedText = await page.locator("main").innerText();
+    expect(committedText).toContain("版は計画時と、確定前に読んだサーバーの値です。");
+    expect(committedText).not.toContain("古い承認は適用されません");
+    expect(committedText).not.toContain("対象が変更されています");
+    expect(committedText).not.toContain("再試算後の計画ID");
+    expect(await page.getByRole("alert").count()).toBe(0);
     // Accepted is not published: the screen offers a re-check, not a claim.
     published = true;
     await page.getByRole("button", { name: "反映状況を再確認" }).click();
@@ -268,15 +343,108 @@ describe.if(runnable)("change confirmation screen", () => {
       .getByText("反映済み", { exact: true })
       .waitFor();
     expect(await page.locator("main").innerText()).toContain("2098-01-01T00:05:00.000Z");
-    // The commit re-reads the plan from the server rather than mutating a
-    // local copy of it.
+    // The commit neither simulates the committed plan again nor mutates a
+    // local copy of it; the receipt is re-read on request only.
     expect(posted).toEqual([
       "/api/command/v1/simulate",
       "/api/command/v1/approve",
       "/api/command/v1/commit",
-      "/api/command/v1/simulate",
       "/api/command/v1/operation",
     ]);
+    await page.close();
+  }, 30_000);
+
+  test("a window refocused while the commit is in flight does not read the plan again", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    posted.length = 0;
+    let release = (): void => {};
+    commitHeld = new Promise((resolve) => {
+      release = resolve;
+    });
+    const page = await open();
+    await page.getByRole("button", { name: "承認する" }).click();
+    await page.getByRole("button", { name: "承認済み" }).waitFor();
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page.getByRole("button", { name: "確定中…" }).waitFor();
+    // The server has written the decision; a re-read now would be answered stale.
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForTimeout(300);
+    release();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((path) => path.endsWith("/simulate"))).toHaveLength(1);
+    await page.close();
+  }, 30_000);
+
+  test("a receipt that is neither accepted nor published is not shown as committed", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    receiptStatus = "failed";
+    const page = await open();
+    await page.getByRole("button", { name: "承認する" }).click();
+    await page.getByRole("button", { name: "承認済み" }).waitFor();
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page
+      .getByRole("region", { name: "操作の記録" })
+      .getByText("失敗", { exact: true })
+      .waitFor();
+    const main = await page.locator("main").innerText();
+    expect(main).not.toContain("確定済み");
+    expect(main).not.toContain("この計画は確定しました");
+    expect(main).toContain("この計画の判断は保存されましたが、操作は失敗として記録されています");
+    expect(main).toContain("操作の記録を確認してください");
+    await page.close();
+  }, 30_000);
+
+  test("a commit whose answer is lost keeps the plan as read, and the same confirmation sent again shows its receipt", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    posted.length = 0;
+    // The decision is written, then the Processor's answer is lost on the way
+    // back (the App answers 500 internal_error): a re-read now would be
+    // answered stale and block the resend.
+    commitFailure = { status: 500, error: "internal_error", written: true };
+    const page = await open();
+    await page.getByRole("button", { name: "承認する" }).click();
+    await page.getByRole("button", { name: "承認済み" }).waitFor();
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page.getByRole("alert").filter({ hasText: "時間をおいて再試行" }).waitFor();
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await page.waitForTimeout(300);
+    expect(await page.locator("main").innerText()).not.toContain("古い承認は適用されません");
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page.getByText("確定済み", { exact: true }).waitFor();
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(posted.filter((path) => path.endsWith("/simulate"))).toHaveLength(1);
+    expect(posted.filter((path) => path.endsWith("/commit"))).toHaveLength(2);
+    await page.close();
+  }, 30_000);
+
+  test("a commit refused for a stale plan reads the plan again and offers the re-simulated plan id", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    posted.length = 0;
+    commitFailure = { status: 409, error: "stale_context", written: false };
+    const page = await open();
+    await page.getByRole("button", { name: "承認する" }).click();
+    await page.getByRole("button", { name: "承認済み" }).waitFor();
+    // The targets move after approval; the commit is refused and writes nothing.
+    stale = true;
+    await page.getByRole("button", { name: "確定する" }).click();
+    await page.getByText("b".repeat(64)).waitFor();
+    const main = await page.locator("main").innerText();
+    expect(main).toContain("古い承認は適用されません");
+    expect(main).toContain("対象が変更されました。再試算した新しい計画で確認し直してください。");
+    expect(await page.getByRole("button", { name: "確定する" }).isDisabled()).toBe(true);
+    expect(posted.filter((path) => path.endsWith("/simulate"))).toHaveLength(2);
     await page.close();
   }, 30_000);
 

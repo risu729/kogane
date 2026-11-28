@@ -305,6 +305,32 @@ describe("reward reads", () => {
     expect(body.coverage).toEqual({ limit: 200, truncated: false, nextOffset: null });
   });
 
+  it("gives no total for a holding whose buckets the page cuts, only the reason", async () => {
+    // The offset walks bucket rows: from row 1 the page holds the restricted
+    // bucket and the qualification measure, not the regular 5,000. Their 3,000
+    // is a part of the holding, never its consumable quantity (INV05).
+    const body = (await (
+      await get("/api/v2/rewards/holdings?program=program:v-point&offset=1")
+    ).json()) as {
+      rows: {
+        consumable: unknown;
+        byKind: { kind: string; quantity: unknown }[];
+        buckets: { kind: string }[];
+      }[];
+    };
+    expect(body.rows).toHaveLength(1);
+    const holding = body.rows[0]!;
+    expect(holding.buckets.map((bucket) => bucket.kind)).toEqual(["restricted"]);
+    const cut = {
+      unitRef: "points:v-point",
+      value: { status: "missing", reasonCode: "holding_cut_by_page" },
+    };
+    expect(holding.consumable).toEqual(cut);
+    expect(holding.byKind).toEqual([
+      { kind: "restricted", quantity: cut, bucketRefs: [expect.any(String)] },
+    ]);
+  });
+
   it("requires a published READ snapshot for expiry even when CORE has holdings", async () => {
     const response = await get("/api/v2/rewards/expiry?program=program:v-point");
     expect(response.status).toBe(503);
@@ -709,5 +735,38 @@ describe("reward reads", () => {
     };
     expect(named.offerCoverage).toEqual({ limit: 200, truncated: false });
     expect(named.simulation.receive.value.value.coefficient).toBe("1000");
+  });
+});
+
+describe("holding membership", () => {
+  it("lists only its own programme's membership claims, whatever the holding reference", async () => {
+    // A claim of another programme that happens to name the same holding
+    // reference. Membership is keyed by programme and holding
+    // (`MEMBERSHIP_SQL`, `estimateExpiry`), so it is not this holding's.
+    await env.DB.prepare(
+      `INSERT INTO membership_state_claims(claim_digest,parse_run_id,program_id,holding_ref,tier,
+       valid_json,source,evidence_refs_json,recorded_at)
+       VALUES('membership-other-programme',NULL,'program:v-point-pay','program:v-point:member',
+       'other-programme-tier',?1,'self-reported','["evidence:self-report"]',
+       '2026-09-09T00:00:00.000Z')`,
+    )
+      .bind(
+        JSON.stringify({
+          kind: "period",
+          start: "2026-04-01",
+          end: "2027-03-31",
+          endExclusive: false,
+          zone: "Asia/Tokyo",
+          granularity: "day",
+        }),
+      )
+      .run();
+    const body = (await (await get("/api/v2/rewards/holdings")).json()) as {
+      rows: { programId: string; holdingRef: string; membership: { tier: string }[] }[];
+    };
+    const holding = body.rows.find(
+      (row) => row.programId === "program:v-point" && row.holdingRef === "program:v-point:member",
+    )!;
+    expect(holding.membership.map((state) => state.tier)).toEqual(["synthetic-tier"]);
   });
 });

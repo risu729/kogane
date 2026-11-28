@@ -5,8 +5,13 @@ import {
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
 import { atStage, emitDiagnostic, failure } from "./diagnostics";
-import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
-import { collectSonyBank, parseCredential, type Supplement } from "./sony-bank";
+import {
+  persistRefusalCode,
+  persistSharedRun,
+  sharedBucket,
+  sharedRunDiagnostic,
+} from "./shared-collection";
+import { collectSonyBank, coreProgress, parseCredential, type Supplement } from "./sony-bank";
 import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types";
 export default {
   async fetch(request, env): Promise<Response> {
@@ -40,7 +45,8 @@ interface SharedResult {
     from: string | null;
     to: string;
   };
-  readonly transactionCount: number;
+  /** Null when the canonical history was not collected (INV05), never a default 0. */
+  readonly transactionCount: number | null;
   readonly artifactCount: number;
   readonly failureCount: number;
   readonly persistence: string;
@@ -71,8 +77,9 @@ export async function runSharedCollection(
     const runId = crypto.randomUUID();
     const failures: CollectionFailure[] = [];
     let artifacts: readonly RawArtifact[] = [];
-    let transactionCount = 0;
+    let transactionCount: number | null = null;
     let supplements: Supplement[] = [];
+    const progress = coreProgress();
     try {
       const credential = await atStage("credential", async () =>
         parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
@@ -84,12 +91,18 @@ export async function runSharedCollection(
         runId,
         includeRetainedHistory: true,
         includeSupplementaryData: true,
+        progress,
       });
       transactionCount = collection.transactionCount;
       artifacts = collection.artifacts;
       supplements = collection.supplements;
     } catch (error) {
-      failures.push(failure("collect", error));
+      // A core step threw: the steps that finished before it keep their
+      // validated artifacts, and the run is `partial` when any exist
+      // (ADR 0099, amendment 2026-11-18). The failing step keeps nothing.
+      failures.push(failure(progress.stopped?.failed ?? "collect", error));
+      artifacts = progress.artifacts;
+      transactionCount = progress.transactionCount;
     }
     for (const entry of failures) {
       emitDiagnostic("error", {
@@ -113,8 +126,22 @@ export async function runSharedCollection(
       artifacts,
       failures,
       acquisitionSessionRef: runId,
+      ...(progress.stopped === undefined ? {} : { coreSteps: progress.stopped }),
     } as const;
-    const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
+    const outcome = await persistSharedRun(sharedBucket(env.DATA), input).catch(
+      (error: unknown) => {
+        // A refused plan (central safety, or a stopped core run's scope) writes
+        // no terminal and the alarm reports only `collection_failed`; the
+        // closed code is logged here, then the run fails as before.
+        emitDiagnostic("error", {
+          event: "sony-bank-shared-persistence-refused",
+          runId,
+          status,
+          reason: persistRefusalCode(error),
+        });
+        throw error;
+      },
+    );
     emitDiagnostic(
       outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
         ? "log"
@@ -128,9 +155,13 @@ export async function runSharedCollection(
         : [];
     let supplementalPersistenceFailed = false;
     for (const supplement of supplements) {
+      // A supplement is its own run written by the same attempt: like the
+      // core run, it names the session as its acquisition session (ADR 0100)
+      // and as the attempt that wrote it (collection contract).
       const supplementalInput = {
         ...input,
         runId: crypto.randomUUID(),
+        attemptId: runId,
         acquisitionSessionRef: runId,
         status:
           supplement.failures.length === 0

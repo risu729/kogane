@@ -22,12 +22,13 @@ import {
   ERROR_STATUS,
   executeQuery,
   type HoldingsProjection,
+  answerPurchasesExplain,
   explain,
-  explainCardPurchases,
   financialError,
   type Grant,
   grantAllowsSource,
   openContext,
+  organizedExplainReader,
   parseExplainRequest,
   parseProposalRequest,
   parsePurchasesExplainRequest,
@@ -37,11 +38,13 @@ import {
   readReconstructedState,
   RECONSTRUCTED_STATE_REFUSALS,
   reconstructedStateError,
+  unknownKeyRefs,
 } from "../../../packages/application/src/index";
 import {
   parseInstrumentCandidatesRequest,
   reviewInstrumentCandidates,
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
+import { financialQueryPaging } from "../../../packages/application/src/query/query-paging.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
@@ -56,6 +59,7 @@ import type { OperationCall } from "../../../packages/application/src/audit/call
 
 import { callReadTool, isReadToolName, type ReadToolName } from "./read-tools";
 import { callPageReadTool, isPageReadToolName, type PageReadToolName } from "./page-read-tools";
+import { catalogueTool } from "./read";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -127,14 +131,19 @@ function failure(
 /**
  * Everything the context pins, read from the shared read model once per call,
  * **inside the grant's source scope** (SC18). `visibleSources` is the granted
- * sources the store holds; `publicationHighWater` is the highest visible
- * parse run of those sources — what "current" means for this answer; and
- * `parserBuildDigest` covers the builds of the newest visible parse runs of
- * those sources, bounded by the read model's page limit. For a grant over
- * every source (`"*"`, which is also the browser reader's) the window is the
- * overview's own; for a listed grant it is read for the listed sources only,
- * so a source outside the grant can neither be named in a context nor move
- * its publication or parser digests.
+ * sources the store holds; `publicationHighWater` is what "current" means for
+ * this answer: the highest visible parse run of those sources, the newest
+ * publication event, the number of runs excluded from financial views and a
+ * digest of the dataset snapshot and eligibility policies
+ * (`publicationMarks`). The last three move with an activation, a rollback,
+ * an exclusion or a policy update, which change the rows a page reads without
+ * recording a newer parse run (INV09, ADR 0091 amendment). `parserBuildDigest` covers the
+ * builds of the newest visible parse runs of those sources, bounded by the
+ * read model's page limit. For a grant over every source (`"*"`, which is
+ * also the browser reader's) the window and the marks are the whole store's;
+ * for a listed grant they are read for the listed sources only, so a source
+ * outside the grant can neither be named in a context nor move its
+ * publication or parser digests.
  */
 async function contextInputs(context: ToolContext, overview: Overview): Promise<ContextInputs> {
   const grant = context.grant;
@@ -146,12 +155,15 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
     grant.scopes.sources === "*"
       ? overview.parseRuns
       : await context.reader.sourceParseRuns(visibleSources);
+  const marks = await context.reader.publicationMarks(
+    grant.scopes.sources === "*" ? null : visibleSources,
+  );
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
   return {
     now: context.now,
-    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}`,
+    publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}+publication-events@${String(marks.publicationEvent)}+exclusions@${String(marks.exclusions)}+snapshot-policies@${await canonicalDigest(marks.snapshotPolicies)}`,
     parserBuildDigest: await canonicalDigest(builds),
     visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),
@@ -163,6 +175,12 @@ async function resultRef(value: unknown): Promise<string> {
   return `result:${await canonicalDigest(value)}`;
 }
 
+/** The tools of this file that only read: each runs as its route does, in `catalogue`. */
+type AgentReadToolName = Exclude<
+  AgentToolName,
+  ReadToolName | PageReadToolName | "kogane.reconcile.propose"
+>;
+
 export async function callTool(
   name: AgentToolName,
   body: unknown,
@@ -170,6 +188,35 @@ export async function callTool(
 ): Promise<ToolResult> {
   if (isReadToolName(name)) return callReadTool(name, body, context.env, context.grant);
   if (isPageReadToolName(name)) return callPageReadTool(name, body, context.env, context.grant);
+  // A proposal writes: a store failure there is not a read's, and stays the
+  // Worker's `500 internal_error`.
+  if (name === "kogane.reconcile.propose") return proposeTool(body, context);
+  // Every other tool here reads, and a store failure inside its read is its
+  // route's `503 catalogue_read_failed`, answered as the tool's result.
+  return catalogueTool(() => agentRead(name, body, context));
+}
+
+async function proposeTool(body: unknown, context: ToolContext): Promise<ToolResult> {
+  const parsed = parseProposalRequest(body, context.grant.budget.maxProposalTargets);
+  if (!parsed.ok) return failure(parsed.code, "reconcile.propose", parsed.refs);
+  const overview = await context.reader.overview();
+  const opened = await openContext(context.grant, await contextInputs(context, overview));
+  const outcome = await proposeReconciliation({
+    grant: context.grant,
+    opened,
+    store: commandProposalStore(d1CommandStore(context.db), context.audit),
+    request: parsed.value,
+    now: context.now,
+  });
+  if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+  return { status: 200, body: outcome.receipt };
+}
+
+async function agentRead(
+  name: AgentReadToolName,
+  body: unknown,
+  context: ToolContext,
+): Promise<ToolResult> {
   switch (name) {
     case "kogane.capabilities": {
       if (body !== undefined && body !== null && Object.keys(body as object).length > 0)
@@ -218,29 +265,17 @@ export async function callTool(
       if (!parsed.ok) return failure(parsed.code, "explain", parsed.refs);
       const overview = await context.reader.overview();
       const opened = await openContext(context.grant, await contextInputs(context, overview));
+      // The organization is the observation detail route's read, under the
+      // context's identity mode (always `latest` here), so a served graph has
+      // the adopted-claim and identity-decision levels.
       const outcome = await explain({
         grant: context.grant,
         opened,
-        reader: context.reader,
+        reader: organizedExplainReader(context.reader, d1Executor(context.db)),
         request: parsed.value,
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.graph };
-    }
-    case "kogane.reconcile.propose": {
-      const parsed = parseProposalRequest(body, context.grant.budget.maxProposalTargets);
-      if (!parsed.ok) return failure(parsed.code, "reconcile.propose", parsed.refs);
-      const overview = await context.reader.overview();
-      const opened = await openContext(context.grant, await contextInputs(context, overview));
-      const outcome = await proposeReconciliation({
-        grant: context.grant,
-        opened,
-        store: commandProposalStore(d1CommandStore(context.db), context.audit),
-        request: parsed.value,
-        now: context.now,
-      });
-      if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
-      return { status: 200, body: outcome.receipt };
     }
     case "kogane.instruments.candidates": {
       // The candidate review of the identity page, under this caller's grant:
@@ -260,11 +295,11 @@ export async function callTool(
     case "kogane.purchases.explain": {
       // Whether the deployment serves it is the transport's question (it
       // needs the store's schema); everything else — the capability, the
-      // perimeter, the bounds and what a candidate may carry — is the
-      // application service's.
+      // perimeter, the bounds, the view and what a candidate may carry — is
+      // the application service's.
       const parsed = parsePurchasesExplainRequest(body);
       if (!parsed.ok) return failure(parsed.code, "purchases.explain", parsed.refs);
-      const outcome = await explainCardPurchases({
+      const outcome = await answerPurchasesExplain({
         grant: context.grant,
         sql: d1Executor(context.db),
         request: parsed.value,
@@ -330,6 +365,9 @@ export async function queryResponse(
       }),
       unresolvedInputs: opened.unresolvedInputs,
       result: outcome.result,
+      // `next` and `paging` (ADR 0128) of a row page, beside `result` and
+      // saying what its `nextCursor` says; `coverage` and `holdings` do not page.
+      ...financialQueryPaging(outcome.result),
     },
   };
 }
@@ -363,7 +401,7 @@ function parseOpenBody(value: unknown):
     (key) => !(OPEN_KEYS as readonly string[]).includes(key),
   );
   if (unknown.length > 0)
-    return { ok: false, code: "unsupported_semantics", refs: unknown.slice(0, 10) };
+    return { ok: false, code: "unsupported_semantics", refs: unknownKeyRefs(unknown) };
   const resolved: {
     query?: QueryRequest;
     knowledgeCutoff?: string;

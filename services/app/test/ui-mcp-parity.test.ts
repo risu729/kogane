@@ -30,6 +30,10 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
+import { CONTINUATION_INPUTS, PAGING_WAITING, PAGING_WALKED } from "./paging-registry";
+import { HOLDING_CHANGE_STATUSES } from "../../../packages/domain/src/holdings-change.ts";
+import { HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES } from "../../../packages/domain/src/holdings-change-summary.ts";
+import { VALUE_STATUSES } from "../../../packages/domain/src/values.ts";
 import {
   OPERATION_CATALOGUE,
   type OperationName,
@@ -45,7 +49,11 @@ import {
   processorCall,
   resolveDelegation,
   REVIEW_PLANNERS,
+  REWARD_EXPIRY_SUMMARY_BUCKET_LINES,
+  REWARD_EXPIRY_SUMMARY_DISPLAY_LINES,
+  REWARD_EXPIRY_WINDOW_ROW_BOUND,
 } from "../../../packages/application/src/index";
+import { REWARD_EXPIRY_LEFT_OUT_REASONS } from "../../../packages/observation-shared/src/reward-contract.ts";
 import {
   delegatedDecisionAllowed,
   delegatedPlanAllowed,
@@ -57,6 +65,21 @@ import {
 } from "../src/delegated-decision-tools";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
+import { READ_MCP_TOOLS } from "../src/read-tools";
+import {
+  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
+  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
+  STATED_ABSENT_REASONS,
+} from "../../../packages/domain/src/card-debit-account-answer";
+import {
+  SETTLEMENT_DEBIT_DATE_REASONS,
+  STATEMENT_DUE_DATE_REASONS,
+} from "../../../packages/domain/src/card-settlement";
+import {
+  COVERS_UNKNOWN_REASONS,
+  NOT_LISTED_REASONS,
+  UPCOMING_BILL_NOTES,
+} from "../../../packages/domain/src/card-upcoming-bills";
 
 // ── 1. catalogue operations on `ui` ──────────────────────────────────────
 
@@ -86,14 +109,19 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reported-state": ["kogane.reported-state.read"],
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
   "/api/v2/audit": ["kogane.audit.search"],
+  // The ホーム page's 最近の変化 panel: what was recorded since an instant,
+  // per source, from `readChangesSince` (ADR 0127 and its 2026-11-20 amendment).
+  "/api/v2/changes": ["kogane.changes.since"],
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
   "/api/v2/reconciliation/card-debit-accounts": ["kogane.card-settlements.debit-accounts"],
+  "/api/v2/decisions/pending": ["kogane.decisions.pending"],
   "/api/v2/reconciliation/card-settlements": ["kogane.card-settlements.read"],
   "/api/v2/reconciliation/card-settlements/ownership": ["kogane.card-settlements.ownership"],
   "/api/v2/reconciliation/card-settlements/statements": ["kogane.card-settlements.statements"],
   // UI read pages (src/page-read-tools.ts): each the route's own reader.
   "/api/identity/connections": ["kogane.identity.read"],
   "/api/identity/accounts": ["kogane.identity.read"],
+  "/api/identity/account-list": ["kogane.identity.read"],
   "/api/identity/instruments": ["kogane.identity.read"],
   "/api/identity/coverage": ["kogane.identity.read"],
   "/api/meta": ["kogane.store.read"],
@@ -128,6 +156,9 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   ],
   "/api/raw/:sha256": ["kogane.evidence.raw.read"],
   "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": ["kogane.evidence.raw.read"],
+  // The 依頼の一覧 page: one page of every principal's requests, from
+  // `listOperations` (ADR 0086 and its 2026-11-18 amendment).
+  "/api/ops/v1/operations": ["kogane.ops.operation.list"],
   // The 依頼の経過 page: one operation's receipt, `execution` block included,
   // from `readOperation`, whichever principal requested it (ADR 0086).
   "/api/ops/v1/operations/:id": ["kogane.ops.operation.get"],
@@ -294,6 +325,38 @@ describe("catalogue operations on ui are published on mcp (ADR 0081, point 4)", 
 });
 
 describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
+  it("serves the カード照合 page's 次回の引落 view as the debit-accounts tool's one view", async () => {
+    // The page reads `?view=upcoming` of the mapped route (ADR 0114's
+    // 2026-11-19 amendment); the tool takes the same view, and nothing else.
+    const route = "/api/v2/reconciliation/card-debit-accounts";
+    const tool = "kogane.card-settlements.debit-accounts";
+    expect(READ_ROUTE_TOOLS[route]).toEqual([tool]);
+    expect([...uiApiPatterns().keys()].some((pattern) => routeServes(route, pattern))).toBe(true);
+    const schema = READ_MCP_TOOLS.find((entry) => entry.name === tool)!.inputSchema as {
+      properties: Record<string, unknown>;
+    };
+    expect(Object.keys(schema.properties)).toEqual(["view"]);
+    expect(JSON.stringify(schema.properties["view"])).toContain('"upcoming"');
+    const published = (await publishedDefinitions()).find((entry) => entry.name === tool)!;
+    for (const term of ["次回の引落", "?view=upcoming", "covers", "other_debits_not_modelled"])
+      expect(published.description).toContain(term);
+    // The condensed description still names every closed code of both views.
+    for (const code of [
+      ...STATED_ABSENT_REASONS,
+      ...CARD_DEBIT_ACCOUNT_ANSWER_CODES,
+      ...CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
+      ...COVERS_UNKNOWN_REASONS,
+      ...NOT_LISTED_REASONS,
+      ...UPCOMING_BILL_NOTES,
+      // A null date's reason, and the field that carries it (INV05).
+      ...STATEMENT_DUE_DATE_REASONS,
+      ...SETTLEMENT_DEBIT_DATE_REASONS,
+      "paymentDateReason",
+      "debitDateReason",
+    ])
+      expect(published.description, code).toContain(code);
+  });
+
   it("publishes the self-contained account catalogue and named-capture freshness contract", async () => {
     expect(READ_ROUTE_TOOLS["/api/collection-quality/:source/accounts"]).toEqual([
       "kogane.collection-quality.read",
@@ -308,6 +371,77 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       "dataTypesVersion",
       "providerTypes",
       "provider-data-types-v1",
+    ])
+      expect(tool.description).toContain(term);
+  });
+  it("names the overview summary's byte budget, what it trims, and its refusal", async () => {
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.store.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "8,192 bytes",
+      "`sourcesOmitted`",
+      "`moreFailureCodes`",
+      "`budget.trimmed`",
+      "every status keeps every code",
+      "413 result_limit_exceeded",
+      "`retryWith",
+    ])
+      expect(tool.description).toContain(term);
+  });
+
+  it("publishes the holdings change's details, closed statuses and cursor codes (ADR 0075, 2026-11-19)", async () => {
+    expect(READ_ROUTE_TOOLS["/api/v2/reported-holdings-change"]).toEqual([
+      "kogane.reported-holdings-change.read",
+    ]);
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.reported-holdings-change.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "`detail`",
+      "`summary` (default)",
+      "`full`",
+      ...HOLDING_CHANGE_STATUSES.map((status) => `\`${status}\``),
+      "`unchanged`",
+      "`quantityStatus`",
+      ...VALUE_STATUSES.filter((status) => status !== "exact").map((status) => `\`${status}\``),
+      "`reasonCounts`",
+      "`containers`",
+      "`nextCursor`",
+      "`cursor_mismatch`",
+      "`context_expired`",
+      "`invalid_cursor`",
+      "`contextId`",
+      "kogane.observations.get",
+      ...HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES.map(String),
+      "not-computed",
+    ])
+      expect(tool.description, term).toContain(term);
+  });
+
+  it("names the reward expiry window, its summary and every closed code they answer", async () => {
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.rewards.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "`from`",
+      "`before`",
+      "Asia/Tokyo",
+      "`detail: summary`",
+      // Without `from` or `before` nothing is windowed: `from` is not today then.
+      "with neither there is no window",
+      `earliest ${String(REWARD_EXPIRY_SUMMARY_BUCKET_LINES)} bucket lines`,
+      `up to ${String(REWARD_EXPIRY_SUMMARY_DISPLAY_LINES)} provider-displayed portions`,
+      `${REWARD_EXPIRY_WINDOW_ROW_BOUND.toLocaleString("en-US")} rows`,
+      "cursor_mismatch",
+      "invalid_date",
+      "invalid_date_range",
+      "result_limit_exceeded",
+      "not-exact",
+      ...REWARD_EXPIRY_LEFT_OUT_REASONS,
     ])
       expect(tool.description).toContain(term);
   });
@@ -354,6 +488,42 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       names.filter((name) => !tools.has(name)).map((name) => `${route} -> ${name}`),
     );
     expect(unpublished).toEqual([]);
+  });
+});
+
+describe("one paging contract across the published tools (ADR 0128)", () => {
+  it("keeps every published description within what a client shows, 2,048 characters", async () => {
+    const long = (await publishedDefinitions())
+      .filter((tool) => tool.description.length > 2048)
+      .map((tool) => `${tool.name}: ${tool.description.length}`);
+    expect(long).toEqual([]);
+  });
+
+  it("classes every tool that takes a continuation argument as walked or waiting for its slice", async () => {
+    const tools = (await publishedDefinitions()) as unknown as {
+      name: string;
+      description: string;
+      inputSchema: { properties?: Record<string, unknown> };
+    }[];
+    const paged = tools
+      .filter((tool) =>
+        CONTINUATION_INPUTS.some((name) => Object.hasOwn(tool.inputSchema.properties ?? {}, name)),
+      )
+      .map((tool) => tool.name)
+      .sort();
+    const walked = Object.keys(PAGING_WALKED);
+    const waiting = Object.keys(PAGING_WAITING);
+    expect(walked.filter((name) => waiting.includes(name))).toEqual([]);
+    expect(paged).toEqual([...walked, ...waiting].sort());
+  });
+
+  it("tells each converted tool's caller to continue by next.arguments", async () => {
+    const tools = await publishedDefinitions();
+    for (const name of Object.keys(PAGING_WALKED)) {
+      const tool = tools.find((entry) => entry.name === name)!;
+      expect(tool.description, name).toContain("`next.arguments`");
+      expect(tool.description, name).toContain("`paging`");
+    }
   });
 });
 

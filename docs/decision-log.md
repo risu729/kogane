@@ -87,7 +87,15 @@ interface IdentityCommand {
   citation bound or the revision bound alone stops it, and both are kept as
   defense in depth.
   It does not delete or replace the manual mapping row: the manual mapping
-  stays current until automatic policy appends the next rule revision. It also
+  stays current until automatic policy appends the next rule revision, which
+  happens only when a parse whose plan names the same reference is next
+  identified (the sweep re-identifies no sealed parse): a later capture, a
+  reparse of an artifact that carries the reference, or a re-identification
+  at a raised required policy version. A run-scoped reference (a key with
+  `fetch-run`) is planned by no later capture, so after a release its manual
+  mapping stays current until a reparse or re-identification of that fetch
+  run's artifact plans the same key again
+  ([identity operations](identity-operations.md#corrections)). It also
   releases a manual row no decision describes (one written by an older build):
   the decision then supersedes nothing and records `previous_revision` null.
 - All writes of one command are one `D1Database.batch` (one transaction). The
@@ -162,7 +170,8 @@ the subject is not in `protected_mapping_subjects` and the current mapping is
 not already a rule decision of an equal or newer policy version. Protection
 therefore follows the latest effective decision: a manual `assign` protects
 until a `release-override`, after which the rule applies again and appends a
-new revision. `identity-decisions.test.ts` compares this guard with the former
+new revision when a parse that plans the reference is next identified.
+`identity-decisions.test.ts` compares this guard with the former
 one (`method='manual' OR policy_version>=?`) over synthetic histories: they
 agree everywhere except after a release, which is the intended change. A rule
 revision written after a release has an id qualified by its revision
@@ -207,11 +216,21 @@ every SBI Shinsei parse, no evidence, so parses sealed while policy 1 mapped
 the exchange-rate board and the stage category as deposits are re-identified
 ([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md),
 [identity-operations.md](identity-operations.md#policy-2-sbi-shinsei-non-account-references)).
+The `myjcb` module selects `identity-default-v2` for J-POINT captures only
+([ADR 0089](adr/0089-myjcb-jpoint-identity.md)), and the `sbi-securities`
+module selects `identity-default-v3` for foreign trade, positions and cash
+balances captures only
+([ADR 0113](adr/0113-sbi-scopeless-security-identity.md),
+[ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md)).
 Sources without a module get `identity-default`. The standard request
-(`IDENTITY_POLICY_VERSION`) runs the default family at the base version, as
+(`IDENTITY_POLICY_VERSION`, the build's highest version, 3) runs each source
+module at its own version and the default family at the base version, as
 before; an explicit other version is stored as requested, so the numeric
-ordering tests are unchanged. `requiredIdentityPolicySql` is composed from the
-modules and produces the same expression audits used before.
+ordering tests are unchanged. The sweep's row path and empty fast path both
+make the standard request. `requiredIdentityPolicySql` is composed from the
+modules and produces the same expression audits used before;
+`identityPolicyCeilingSql` gives each source's highest version, which the
+sweep compares a sealed run with before reading any evidence.
 
 The store saves the selection: `identity_run_policies` records the family,
 release, dependency digest and set for every new run (row path and the empty

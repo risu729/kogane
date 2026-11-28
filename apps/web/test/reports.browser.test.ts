@@ -1,7 +1,7 @@
 // 評価レポート in the production client against a server that answers the
 // fixed report routes with synthetic bodies in the shapes the App Worker
 // writes (apps/web/test/report-fixture.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -19,8 +19,11 @@ import {
   PARTIAL_ID,
   partialDetail,
   RESTRICTED_ID,
+  TRUNCATED_ID,
+  truncatedCompleteDetail,
   UNEXPLAINED_ID,
 } from "./report-fixture.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -30,8 +33,13 @@ if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] =
 
 const STORED = 60;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("fixed report artifacts", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
@@ -52,6 +60,7 @@ describe.if(runnable)("fixed report artifacts", () => {
       return Response.json(detail);
     }
     if (id === COMPLETE_ID) return Response.json(completeDetail());
+    if (id === TRUNCATED_ID) return Response.json(truncatedCompleteDetail());
     if (id === RESTRICTED_ID) return Response.json(partialDetail(RESTRICTED_ID, "restricted"));
     if (id === UNEXPLAINED_ID) return Response.json(partialDetail(UNEXPLAINED_ID));
     if (id === COLON_ID) return Response.json(partialDetail(COLON_ID));
@@ -99,7 +108,6 @@ describe.if(runnable)("fixed report artifacts", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -160,13 +168,13 @@ describe.if(runnable)("fixed report artifacts", () => {
     await page.waitForFunction(() => document.title === "評価レポートの内容 | kogane");
     expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
     const rows = await page.getByRole("region", { name: "保有資産ごとの評価" }).innerText();
-    // Formatted by the shared formatter; a place JPY cannot hold is shown as stored.
+    // Formatted by the shared formatter; a place JPY cannot hold is kept, never rounded.
     expect(rows).toContain("1,200,000 JPY");
-    expect(rows).toContain("34567.5 JPY");
+    expect(rows).toContain("34,567.5 JPY");
     expect(rows).toContain("未評価 同じ取得結果の価格がない");
     expect(rows).not.toMatch(/(^|\s)0 JPY/u);
     const main = await page.locator("main").innerText();
-    expect(main).toContain("1234567.5 JPY");
+    expect(main).toContain("1,234,567.5 JPY");
     expect(main).toContain("評価できた保有資産だけの小計");
     expect(main).toContain("確認できた範囲のみ評価");
     expect(main).toContain("資産全体の合計でも、その下限でもありません");
@@ -191,14 +199,30 @@ describe.if(runnable)("fixed report artifacts", () => {
     await page.close();
   }, 30_000);
 
-  test("a complete report names its whole figure and a truncated catalogue", async () => {
+  test("a complete report names its whole figure", async () => {
     const page = await open(`/reports/${COMPLETE_ID}`, "評価レポートの内容");
     await page.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
     const main = await page.locator("main").innerText();
     expect(main).toContain("評価額の合計");
     expect(main).toContain("すべて評価済み");
     expect(main).toContain("保存内容のみ（入力からは再計算できない）");
+    expect(main).not.toContain("保有資産が上限で打ち切られています。");
+    await page.close();
+  }, 30_000);
+
+  test("a body stored complete but cut at the row bound is shown as a partial subtotal", async () => {
+    // Every row it holds is valued, but positions past the bound were never
+    // read: its figure is not the whole (INV05).
+    const page = await open(`/reports/${TRUNCATED_ID}`, "評価レポートの内容");
+    await page.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
+    const main = await page.locator("main").innerText();
+    expect(main).toContain("評価できた保有資産だけの小計");
+    expect(main).toContain("確認できた範囲のみ評価");
+    expect(main).toContain("上限を超えた保有資産を含みません。");
     expect(main).toContain("保有資産が上限で打ち切られています。");
+    expect(main).not.toContain("評価額の合計");
+    expect(main).not.toContain("すべて評価済み");
+    expect(main).not.toContain("すべての保有資産を評価できたレポートです。");
     await page.close();
   }, 30_000);
 

@@ -128,7 +128,7 @@ describe("production observation API", () => {
         9007199254740993,'2026-09-07',CAST(x AS TEXT),'{}' FROM n`)
       .bind(parse!.id)
       .run();
-    const base = "/api/balances?source=other-test&account=large-balance-account";
+    const base = "/api/balances?source=other-test&account=large-balance-account&detail=full";
     const first = (await (await call(base)).json()) as {
       latest: { id: number }[];
       history: { id: number }[];
@@ -263,6 +263,8 @@ describe("production observation API", () => {
         reportedStateOnDate: true,
         reconstructedStateOnDate: true,
         reportArtifacts: true,
+        pendingDecisions: true,
+        changesSince: true,
         eventsV2: true,
         rewardsV2: true,
         cardPurchaseRecognition: true,
@@ -395,7 +397,7 @@ describe("production observation API", () => {
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(validApiResponse(path, await response.json()), path).toBe(true);
     }
-    const balances = (await (await call("/api/balances")).json()) as {
+    const balances = (await (await call("/api/balances?detail=full")).json()) as {
       latest: { amount_minor: string }[];
     };
     expect(balances.latest.some((row) => row.amount_minor === "9007199254740993")).toBe(true);
@@ -483,6 +485,17 @@ async function call(
       ACCESS_AUDIENCE: "fixture-audience",
       ...options.environment,
     } as Env,
+  );
+}
+/** The HSTS policy of every answer (ADR 0131): one year, this host only, not preloaded. */
+const HSTS = "max-age=31536000";
+/** `call` with extra request headers, for a conditional request. */
+async function rawCall(path: string, headers: Record<string, string>) {
+  return worker.fetch(
+    new Request(`https://fixture.test${path}`, {
+      headers: { "cf-access-jwt-assertion": await token(), ...headers },
+    }),
+    { ...env, ACCESS_ISSUER: issuer, ACCESS_AUDIENCE: "fixture-audience" } as Env,
   );
 }
 async function catalogueSnapshot() {
@@ -585,6 +598,30 @@ describe("authenticated read-only evidence", () => {
       expect(response.headers.get("cross-origin-resource-policy"), path).toBe("same-origin");
       expect(response.headers.get("cross-origin-opener-policy"), path).toBe("same-origin");
       await response.arrayBuffer();
+    }
+  });
+  // The browser keeps to HTTPS for this host once it has seen one answer, so
+  // a later `http://` link or a typed hostname cannot be served in clear text
+  // by whoever sits on the network path (ADR 0131). Every kind of answer
+  // carries it: the shell, its revalidation, a HEAD, a read and each refusal.
+  it("tells the browser to use only HTTPS on every kind of answer", async () => {
+    const shell = await call("/evidence/sources/sony-bank");
+    const etag = shell.headers.get("etag");
+    await shell.arrayBuffer();
+    expect(etag).not.toBeNull();
+    const answers: [string, Response, number][] = [
+      ["shell", shell, 200],
+      ["revalidated shell", await rawCall("/", { "if-none-match": etag! }), 304],
+      ["HEAD shell", await call("/", { method: "HEAD" }), 200],
+      ["read", await call(`${prefix}/meta`), 200],
+      ["unrouted API path", await call(`${prefix}/missing`), 404],
+      ["no Access assertion", await call(`${prefix}/meta`, { jwt: null }), 401],
+      ["write to a read", await call(`${prefix}/meta`, { method: "POST" }), 405],
+    ];
+    for (const [label, response, status] of answers) {
+      expect(response.status, label).toBe(status);
+      expect(response.headers.get("strict-transport-security"), label).toBe(HSTS);
+      if (!response.bodyUsed) await response.arrayBuffer();
     }
   });
   it("classifies malformed identity keys as a provider outage rather than invalid credentials", async () => {
@@ -695,6 +732,7 @@ describe("authenticated read-only evidence", () => {
       `attachment; filename="synthetic-0.json"; filename*=UTF-8''synthetic-0.json`,
     );
     expect(response.headers.get("content-security-policy")).toContain("sandbox");
+    expect(response.headers.get("strict-transport-security")).toBe(HSTS);
     const head = await call(path, { method: "HEAD", environment });
     expect(head.status).toBe(200);
     expect(head.headers.get("content-disposition")).toBe(

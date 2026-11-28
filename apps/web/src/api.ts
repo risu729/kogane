@@ -1,6 +1,9 @@
 // Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import {
+  requestedDetail,
+  validApiResponse,
+} from "../../../packages/observation-shared/src/api-validation.ts";
 import {
   listRequestSearch,
   type ListPath,
@@ -179,7 +182,9 @@ async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
       "受信したデータを読み取れませんでした。再読み込みしてください。",
     );
   }
-  if (!validApiResponse(path.split("?", 1)[0]!, value)) {
+  // A page that asked for a detail (ADR 0123) accepts that shape only.
+  const [pathname, search = ""] = path.split("?", 2) as [string, string?];
+  if (!validApiResponse(pathname, value, requestedDetail(search))) {
     throw new ApiError(
       response.status,
       "受信したデータの形式が対応していません。接続先を確認してください。",
@@ -214,9 +219,14 @@ export function useFeatures(): ClientFeatures & { known: boolean } {
 }
 
 export function useOverview(): UseQueryResult<Overview, Error> {
+  // The page shows every run; the route's default is the summary (ADR 0123).
+  // A store without the summary (the local store) is sent no `detail` and
+  // answers in full.
+  const request = useListRequest("/api/overview", { detail: "full" });
   return useQuery({
-    queryKey: ["overview"],
-    queryFn: ({ signal }) => getJson<Overview>("/api/overview", signal),
+    queryKey: ["overview", request.suffix],
+    enabled: request.enabled,
+    queryFn: ({ signal }) => getJson<Overview>(`/api/overview${request.suffix}`, signal),
   });
 }
 
@@ -253,7 +263,10 @@ export function useBalances(
 ): UseQueryResult<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }, Error> {
   // The view parameter is sent only when the server advertises that view;
   // the schema builder drops it otherwise, and the page filters client-side.
-  const request = useListRequest("/api/balances", view ? { view } : {});
+  // The page shows every row; the route's default is the summary (ADR 0123,
+  // amendment 2026-11-20). A store without the summary (the local store) is
+  // sent no `detail` and answers in full.
+  const request = useListRequest("/api/balances", { ...(view ? { view } : {}), detail: "full" });
   return useQuery({
     queryKey: ["balances", request.suffix],
     enabled: request.enabled,
@@ -279,6 +292,8 @@ export function useLatestBalances(
   const request = useListRequest("/api/v2/balances/latest", {
     ...(view ? { view } : {}),
     ...(cursor ? { cursor } : {}),
+    // The page shows each row's provenance; the route's default is the summary (ADR 0123).
+    detail: "full",
   });
   const enabled = request.enabled && features.balanceReadModel;
   return useQuery({
@@ -302,6 +317,8 @@ export function useBalanceHistory(
   const request = useListRequest("/api/v2/balances/history", {
     ...(view ? { view } : {}),
     ...(cursor ? { cursor } : {}),
+    // The page shows each row's provenance; the route's default is the summary (ADR 0123).
+    detail: "full",
   });
   const enabled = request.enabled && features.balanceReadModel;
   return useQuery({

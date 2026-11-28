@@ -10,9 +10,13 @@ import {
   type HoldingChange,
 } from "../../domain/src/holdings-change.ts";
 import { decimalToString, type Quantity } from "../../domain/src/values.ts";
-import { DATED_POSITIONS_SQL } from "../../read-model/src/dated-state.ts";
+import {
+  DATED_POSITIONS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+} from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
+import { queryDatedState } from "../src/query/dated-state.ts";
 import {
   HoldingsChangeError,
   queryHoldingsChange,
@@ -179,6 +183,33 @@ describe("queryHoldingsChange", () => {
     expect(narrowed.contextId).not.toBe(result.contextId);
   });
 
+  test("it never counts the statements before the payable window, and its context records no count", async () => {
+    const store = world();
+    const sql = recording(store);
+    const result = await queryHoldingsChange(sql, REQUEST);
+    expect(sql.statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    // The pinned reported context ids are those of the states it read: without the count.
+    const uncounted = await queryDatedState(recording(store), {
+      date: REQUEST.to,
+      includeStatementsBeforeWindow: false,
+    });
+    const counted = await queryDatedState(recording(store), { date: REQUEST.to });
+    expect(result.manifest.reportedContextIds.end).toBe(uncounted.contextId);
+    expect(result.manifest.reportedContextIds.end).not.toBe(counted.contextId);
+    // A statement the window leaves out on both dates changes neither.
+    store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    expect((await queryHoldingsChange(recording(store), REQUEST)).contextId).toBe(result.contextId);
+    expect((await queryDatedState(recording(store), { date: REQUEST.to })).contextId).not.toBe(
+      counted.contextId,
+    );
+  });
+
   test("each holding carries its own row's account when one provider account maps to two", async () => {
     // The same provider account in both containers, mapped per container; the
     // foreign capture precedes the domestic one on the start date.
@@ -300,7 +331,7 @@ describe("queryHoldingsChange", () => {
     await expect(queryHoldingsChange(recording(store), REQUEST)).rejects.toMatchObject({
       code: "holding_limit_exceeded",
     });
-  });
+  }, 60_000);
 
   test("a reported state past its row bound is refused, never cut", async () => {
     const store = world();

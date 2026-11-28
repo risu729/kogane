@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { startPipeline } from "./harness";
+import { settledTest } from "./support/settle.ts";
 interface Storage {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
@@ -19,10 +20,12 @@ interface Alarm {
 let mf: Miniflare, env: Env, AlarmClass: new (state: State, env: Env) => Alarm;
 let errorKind: (error: unknown) => string;
 let bundleFixture: { dispose(): Promise<void> } | undefined;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = started.env;
+const test = settledTest();
 beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = started.env;
   // Every CI date is valid: the synthetic alarm test is independent of the
   // seed's real recurring maintenance, disabled here by a new revision.
   await env.DB.prepare(
@@ -205,6 +208,29 @@ test("D1 outage persists a new bookkeeping wakeup instead of exhausting native r
   expect(calls).toBe(0);
   expect((await ctx.storage.getAlarm())!).toBeGreaterThanOrEqual(before + 60000);
   expect((await ctx.storage.getAlarm())!).toBeLessThanOrEqual(Date.now() + 60000);
+});
+test("a thrown error's own name is logged only as a closed code", async () => {
+  // An identifier-shaped name its thrower chose is still not a closed code.
+  const thrown = Object.assign(new Error("synthetic_outage"), { name: "SyntheticProviderToken42" });
+  const fake = {
+    ...env,
+    DB: {
+      prepare() {
+        throw thrown;
+      },
+    },
+  } as unknown as Env;
+  const log = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await new AlarmClass(state(), fake).alarm();
+    const lines = log.mock.calls.map(([line]) => String(line));
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ event: "schedule_bookkeeping_retry", errorName: "other" }),
+    ]);
+    expect(lines.join("\n")).not.toContain("SyntheticProviderToken42");
+  } finally {
+    log.mockRestore();
+  }
 });
 test("lost receipt bookkeeping after provider return cannot cause another provider call", async () => {
   // Use a distinct occurrence even when the previous test ran within one minute.

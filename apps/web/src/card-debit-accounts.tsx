@@ -18,14 +18,14 @@ import type {
 import { CARD_DEBIT_ACCOUNTS_PATH } from "../../../packages/observation-shared/src/card-debit-accounts-contract.ts";
 import {
   bankSourceLabel,
-  DateValue,
   debitAccountReason,
+  NullableDate,
   SettlementQuantity,
 } from "./reconciliation-display.tsx";
 import { Link } from "./router.tsx";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
-export function useCardDebitAccounts() {
+function useCardDebitAccounts() {
   const features = useFeatures();
   return useQuery({
     queryKey: ["card-settlements", "debit-accounts"],
@@ -58,6 +58,8 @@ const STATED_STATUS: Record<string, string> = {
 };
 const label = (labels: Record<string, string>, code: string): string =>
   Object.hasOwn(labels, code) ? labels[code]! : code;
+/** Why a card's debit account is unknown, in words; shared with 次回の引落. */
+export const debitAccountUnknownReason = (code: string): string => label(UNKNOWN_REASONS, code);
 
 function Account({ account }: { account: DebitBankAccount }): ReactNode {
   return (
@@ -72,7 +74,7 @@ function Answer({ item }: { item: CardDebitAccountCard }): ReactNode {
   if (answer.basis === "unknown")
     return (
       <p>
-        <Badge tone="neutral">引落口座は不明</Badge> {label(UNKNOWN_REASONS, answer.reason)}
+        <Badge tone="neutral">引落口座は不明</Badge> {debitAccountUnknownReason(answer.reason)}
       </p>
     );
   return (
@@ -91,8 +93,12 @@ function Answer({ item }: { item: CardDebitAccountCard }): ReactNode {
         ) : (
           <span className="dim">
             {" "}
-            · 引落日 <Nullable value={answer.debitDate} placeholder="不明" /> ·{" "}
-            <Link to={`/reconciliation/${answer.proposalId}`}>照合を見る</Link>
+            · 引落日{" "}
+            <NullableDate
+              value={answer.debitDate}
+              reason={answer.debitDate === null ? answer.debitDateReason : undefined}
+            />{" "}
+            · <Link to={`/reconciliation/${answer.proposalId}`}>照合を見る</Link>
           </span>
         )}
       </p>
@@ -144,8 +150,11 @@ function Matched({ entries, empty }: { entries: MatchedDebitAccount[]; empty: st
       {entries.map((entry) => (
         <li key={entry.bankSourceId + "\n" + entry.bankSourceAccount}>
           <Account account={entry} /> · 請求 {entry.statements}件 · 最新の引落日{" "}
-          <Nullable value={entry.latest.debitDate} placeholder="不明" /> ·{" "}
-          <Link to={`/reconciliation/${entry.latest.proposalId}`}>照合候補</Link>
+          <NullableDate
+            value={entry.latest.debitDate}
+            reason={entry.latest.debitDate === null ? entry.latest.debitDateReason : undefined}
+          />{" "}
+          · <Link to={`/reconciliation/${entry.latest.proposalId}`}>照合候補</Link>
         </li>
       ))}
     </ul>
@@ -165,17 +174,8 @@ function CardRow({ item }: { item: CardDebitAccountCard }): ReactNode {
           <span className="dim">
             {" "}
             · 最新の請求 <Nullable value={statement.period} /> · 請求総額{" "}
-            {statement.amount === null ? (
-              <Nullable value={null} placeholder="不明" />
-            ) : (
-              <SettlementQuantity value={statement.amount} />
-            )}{" "}
-            · 引落予定日{" "}
-            {statement.paymentDate === null ? (
-              <Nullable value={null} placeholder="不明" />
-            ) : (
-              <DateValue value={statement.paymentDate} />
-            )}
+            <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
+            <NullableDate value={statement.paymentDate} reason={statement.paymentDateReason} />
           </span>
         )}
       </p>

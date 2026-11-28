@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -7,6 +7,7 @@ import type {
   TransactionRow,
 } from "../../../packages/observation-shared/src/api-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 // Synthetic rows only: invented sources, accounts, amounts and dates.
 const client = join(import.meta.dir, "../dist-production");
@@ -62,8 +63,13 @@ function window<T>(offset: string | null, make: (id: number) => T) {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("in-memory pages follow the server window", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   beforeAll(async () => {
@@ -89,6 +95,13 @@ describe.if(runnable)("in-memory pages follow the server window", () => {
           const { rows, coverage } = window(offset, position);
           return Response.json({ positions: rows, coverage });
         }
+        // A first history window that has more: the page names which list the link continues.
+        if (url.pathname === "/api/balances")
+          return Response.json({
+            latest: [],
+            history: [],
+            coverage: { limit: 500, truncated: true, nextOffset: 500, latestNextOffset: null },
+          });
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
         return new Response(
@@ -101,7 +114,6 @@ describe.if(runnable)("in-memory pages follow the server window", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -142,6 +154,26 @@ describe.if(runnable)("in-memory pages follow the server window", () => {
         await page.waitForURL(/\/observations\//u);
         await page.goBack();
         await status(page, "120件中 51–100件");
+      } finally {
+        await page.close();
+      }
+    }, 30_000);
+
+  // One trailing slash names the same page (matchRoute), so it names the same link too.
+  for (const [path, label] of [
+    ["/balances", "履歴の次の500件"],
+    ["/balances/", "履歴の次の500件"],
+    ["/summaries", "次の500件"],
+    ["/summaries/", "次の500件"],
+  ] as const)
+    test(`${path}: the next history window is offered as ${label}`, async () => {
+      const page = await browser.newPage();
+      try {
+        await page.goto(`${origin}${path}`);
+        const next = page.getByRole("link", { name: label, exact: true });
+        await next.waitFor({ timeout: 10_000 });
+        expect(await next.getAttribute("href")).toBe(`${path}?offset=500`);
+        expect(await page.getByRole("link", { name: /次の500件/u }).count()).toBe(1);
       } finally {
         await page.close();
       }

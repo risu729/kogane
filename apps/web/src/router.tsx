@@ -100,11 +100,11 @@ export function Link({
 
 // ── route table ──────────────────────────────────────────────────────
 
-export const OBSERVATION_KINDS = ["transaction", "balance", "position", "valuation"] as const;
+const OBSERVATION_KINDS = ["transaction", "balance", "position", "valuation"] as const;
 
 export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
 
-export function isObservationKind(value: string): value is ObservationKind {
+function isObservationKind(value: string): value is ObservationKind {
   return (OBSERVATION_KINDS as readonly string[]).includes(value);
 }
 
@@ -114,6 +114,8 @@ export type Route =
   | { name: "collectionQuality" }
   /** The operator's read-only audit log (ADR 0064). Filters are query parameters. */
   | { name: "audit" }
+  /** Every accepted operations request, newest first (ADR 0086). Filters are query parameters. */
+  | { name: "operations" }
   /** One accepted operations request and its trail, by its `op_` id (docs/ops-api.md). */
   | { name: "operation"; operationId: string }
   | { name: "transactions" }
@@ -192,6 +194,7 @@ export function matchRoute(path: string): Route {
     if (first === "schedules") return { name: "schedules" };
     if (first === "collection-quality") return { name: "collectionQuality" };
     if (first === "audit") return { name: "audit" };
+    if (first === "operations") return { name: "operations" };
     if (first === "transactions") return { name: "transactions" };
     if (first === "balances") return { name: "balances" };
     if (first === "summaries") return { name: "summaries" };

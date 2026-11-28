@@ -24,7 +24,7 @@ import type { IdentityPolicyModule } from "./index.ts";
 
 export const MYJCB_POLICY_VERSION = 2;
 /** The dataset the J-POINT parser reads (`myjcb-jpoint-balance`). */
-export const MYJCB_JPOINT_DATASET = "jpoint-balance";
+const MYJCB_JPOINT_DATASET = "jpoint-balance";
 
 export const myJcbPolicy: IdentityPolicyModule = {
   family: DEFAULT_POLICY_FAMILY,

@@ -3,7 +3,9 @@
 // exactly as it was fixed: the page never recomputes a value, never adds the
 // rows itself, and offers no recompute or share button, because those are
 // commands no route serves.
+import { displayLabel } from "../labels.ts";
 import type { ReactNode } from "react";
+import type { ResultPartition } from "../../../../packages/domain/src/calculation.ts";
 import { ApiError, useFeatures } from "../api.ts";
 import { Pagination } from "../pagination.tsx";
 import {
@@ -172,12 +174,21 @@ export function ReportsPage(): ReactNode {
   );
 }
 
-/** The figure a body states, with what it covers. A partial subtotal is named as one. */
-function ReportFigures({ body }: { body: ReportBody }): ReactNode {
+/**
+ * The figure a body states, with what it covers. A partial subtotal is named as
+ * one; `partition` is the one the server states for the body, never read from
+ * the body alone (a truncated body is not complete).
+ */
+function ReportFigures({
+  body,
+  partition,
+}: {
+  body: ReportBody;
+  partition: ResultPartition;
+}): ReactNode {
   const valued = body.rows.filter((row) => row.valued).length;
   const unvalued = body.rows.length - valued;
-  const subtotalLabel =
-    body.partition === "complete" ? "評価額の合計" : "評価できた保有資産だけの小計";
+  const subtotalLabel = partition === "complete" ? "評価額の合計" : "評価できた保有資産だけの小計";
   return (
     <div className="tiles report-figures">
       <div className="tile tile-wide">
@@ -310,7 +321,7 @@ function ReportFacts({
         ) : (
           <>
             <code className="wrap-any">{run.runId}</code> ·{" "}
-            {RUN_STATUS_LABELS[run.status] ?? run.status} · 開始 {run.startedAt}
+            {displayLabel(RUN_STATUS_LABELS, run.status)} · 開始 {run.startedAt}
             {run.completedAt === null ? null : <> · 完了 {run.completedAt}</>}
           </>
         )}
@@ -477,14 +488,16 @@ function ReportContent({ detail }: { detail: ReportDetail }): ReactNode {
         <Panel
           id="report-body"
           title={`${PURPOSE_LABELS[detail.body.purpose]}（${detail.body.unitRef}）`}
-          count={<PartitionBadge partition={detail.body.partition} />}
+          count={<PartitionBadge partition={detail.partition} />}
           note={
-            detail.body.partition === "complete"
+            detail.partition === "complete"
               ? "すべての保有資産を評価できたレポートです。対象は取得済みの保有資産だけで、資産全体の合計ではありません。"
-              : "評価できなかった保有資産があります。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
+              : detail.body.coverage.truncated
+                ? "上限を超えた保有資産を含みません。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
+                : "評価できなかった保有資産があります。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
           }
         >
-          <ReportFigures body={detail.body} />
+          <ReportFigures body={detail.body} partition={detail.partition} />
           {detail.body.coverage.truncated ? (
             <div className="panel-body">
               <Notice tone="warn" inline role="note">

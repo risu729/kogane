@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
-    "wrangler": "4.163.0"
+    "wrangler": "4.168.0"
   }
 }

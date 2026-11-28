@@ -30,7 +30,7 @@ export const COLLECTION_FRESHNESS_STATES = [
   "disabled",
   "no-capture",
 ] as const;
-export type CollectionFreshnessState = (typeof COLLECTION_FRESHNESS_STATES)[number];
+type CollectionFreshnessState = (typeof COLLECTION_FRESHNESS_STATES)[number];
 
 /** What a source waits on, from its stored settings and receipts; null when nothing. */
 export type CollectionWait = "human-required" | "disabled" | null;
@@ -44,13 +44,16 @@ export interface CollectionFreshness {
 /** Asia/Tokyo is UTC+9 with no daylight saving time. */
 const TOKYO_OFFSET_SECONDS = 9 * 3600;
 
-/** The Asia/Tokyo civil date of an instant (any offset), or null when it is not one. */
+/**
+ * The Asia/Tokyo civil date of an instant (any offset), or null when it is not
+ * one or its Tokyo date is outside 0000-01-01..9999-12-31, which `YYYY-MM-DD`
+ * cannot write.
+ */
 export function tokyoDate(instant: string): string | null {
   const parsed = parseInstant(instant);
   if (parsed === null) return null;
-  return formatLocalDate(
-    civilFromDays(Math.floor((parsed.epochSeconds + TOKYO_OFFSET_SECONDS) / 86400)),
-  );
+  const date = civilFromDays(Math.floor((parsed.epochSeconds + TOKYO_OFFSET_SECONDS) / 86400));
+  return date.year < 0 || date.year > 9999 ? null : formatLocalDate(date);
 }
 
 function ageState(ageDays: number): "same-day" | "recent" | "stale" {

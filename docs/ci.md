@@ -153,6 +153,60 @@ Success, rejection, synchronous outcomes, detached calls, mutable arrays and
 cleanup are also checked independently. No operation is retried and existing
 test deadlines are unchanged.
 
+When a case times out, Bun's test runner sends SIGTERM to every child process
+a hook or a case of the file spawned (it prints `killed 1 dangling process`)
+and leaves the ones spawned while the module loaded;
+`services/processor/test/bun-timeout-kill.test.ts` pins both on a fixture. A
+Miniflare started in `beforeAll` is such a process, so one timeout kills its
+workerd: the timed-out case's request fails with `ECONNRESET` and every later
+case of the file with `ECONNREFUSED`. The timed-out case's body also keeps
+running against the shared store while later cases read it.
+Every processor test file that shares one Miniflare across its cases, but
+the one named below, therefore starts it while the module loads (a top-level
+`await`; `startPipeline` also bundles the Worker and applies the schema
+there), keeps its seeding and any schema setup of its own in `beforeAll`,
+disposes it in `afterAll`, and declares its cases with `settledTest()` from
+`services/processor/test/support/settle.ts`. That `test`
+keeps each case's body, and its `afterEach` waits for the body to settle before
+the next case begins, so a timeout fails that case alone; Bun still reports a
+late rejection as an error between tests. The wait is bounded by `afterEach`'s
+default 5 s deadline: a body that has not settled by then fails its case at
+the hook and goes on running while the next case reads the store.
+`settledTest()` refuses `test.concurrent`, since it keeps one body at a time;
+`services/processor/test/settled-test.test.ts` pins its behaviour on a fixture.
+Bun loads, runs and finishes one test file before it loads the next, so a
+runtime started at load is disposed before the next file starts its own. Files that
+start a runtime per case, in `beforeEach` or in the case itself
+(`unit-scope.test.ts`, `sbi-supplemental-snapshot-compatibility.test.ts`, the
+card purchase worlds), lose only that case's runtime at a timeout.
+`miniflare-d1-lifetime.test.ts` still starts its two runtimes in `beforeAll`;
+only its last case reads them.
+
+A Chromium launched in `beforeAll` is such a process too: one timeout killed
+it, and every later case of the file failed to open a page (`Target page,
+context or browser has been closed`). The browser tests of `apps/web` and
+`experiments/observation-pipeline-local`, and
+`experiments/st-george-automation/test/probe.test.ts`, therefore launch their
+one Chromium while the module loads (a top-level `await`). Where `describe.if`
+guards the suite, the launch runs only when the suite will: a suite skipped for
+a missing build or Chromium launches nothing. The probe has no such guard and
+always launches; it keeps a failed launch and rethrows it in its browser
+suite's `beforeAll`, so a missing Chromium fails that suite alone, as it did
+before, and the probe's route cases still run. Their local server and seeding
+stay in `beforeAll`, the browser is closed in `afterAll`, and their cases are
+declared with `settledTest()` from `apps/web/test/settle.ts`. That `test`
+keeps each case's body, and its `afterEach` waits for the body to settle before
+the next case begins, so a timeout fails that case alone; Bun still reports a
+late rejection as an error between tests. The wait is bounded by `afterEach`'s
+default 5 s deadline: a body that has not settled by then fails its case at the
+hook and goes on driving the browser while the next case runs.
+`activity-semantics.browser.test.ts` and `synthetic-display.browser.test.ts`
+launch Chromium inside their only case, which a timeout fails alone.
+`bun test` loads and runs one file at a time, and each file closes its browser
+before the next one loads, so a workspace's test run holds at most one
+Chromium; with the three browser workspaces' `ci` tasks run in parallel, as
+CI's `MISE_JOBS` allows, at most three are alive at once.
+
 hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
 deployment ledger and existing operational instructions working. Workspace
@@ -203,6 +257,17 @@ tasks, deployment dry-run coverage, tracked Wrangler configurations, untracked
 Wrangler types output and the ban on package scripts. A workspace is not
 silently omitted because someone forgot to add another Actions matrix row or
 root task-file include.
+
+The guard also checks that a test task which lists its files or a shell glob
+(`bun test test/a.test.ts …`, `bun test ./test/*.test.ts`, `node --test …`)
+leaves no test file in the directory they name, or below it, that no `bun test`
+or `node --test` command of the local `checks` graph runs. A test file is a
+name Bun runs by default (`*.test.ts`, `*_spec.mjs` and the like) or a Node
+runner file (`*.node.mjs`, `*.node-test.mjs`); helpers and fixtures with other
+names are not checked. Vitest `include` patterns are not read, so a file that
+only Vitest runs is reported if a list or glob names its directory; today the
+Vitest suites live in directories no list names (`worker-test/`, and
+`services/app/test/` through Vitest's default include).
 
 ## Checks and coverage
 

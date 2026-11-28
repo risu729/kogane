@@ -39,8 +39,9 @@ On 2026-08-30, the following were verified with the owner's real account using a
 - `manifest.json`: R2 key, SHA-256, bytes and success/failure per artifact.
 
 The same session then reads two supplements, each persisted as its own terminal
-run with the core run's ID as `acquisitionSessionRef` (`collectSonyBank` and
-`runSharedCollection`, `src/sony-bank.ts` and `src/worker.ts`):
+run with the core run's ID as `acquisitionSessionRef` and `attemptId`
+(`collectSonyBank` and `runSharedCollection`, `src/sony-bank.ts` and
+`src/worker.ts`):
 
 - Realised gains: `realised-gains-response.json` (the raw current/previous-year
   summary), `realised-gains.csv` (the official 15-column detail CSV, kept only
@@ -117,10 +118,12 @@ When retiring the PoC, delete only the Worker. Keep shared DATA because other co
 Collection failures emit a structured `*-collection-failure` event before teardown
 or the DATA write. Join on `runId`; use `phase` to distinguish collection from
 teardown, relay and shared-persist events. Sony emits that event only for a
-core collection failure. A core failure always makes the core run `failed`,
-and a `failed` run stores no artifact, not even `manifest.json`, so its
-terminal's closed `safeErrorCode` and the Worker logs are the only diagnosis
-(see the open limit at the end of this page). A supplementary run's failure
+core collection failure. A core stop after `gross-balance` makes the core run
+`partial`, and its `manifest.json` keeps the three failure fields plus
+`coreSteps`. A stop at the credential, `login` or `gross-balance` makes the run
+`failed` with no artifact, not even `manifest.json`, so its terminal's closed
+`safeErrorCode` and the Worker logs are the only diagnosis (see "A core failure
+keeps the finished steps" below). A supplementary run's failure
 emits no `*-collection-failure` event; when that run kept an artifact
 (`partial`), its collector manifest in DATA retains the three failure fields
 (`operation`, `errorType`, `message`), and its terminal carries the closed
@@ -141,7 +144,8 @@ subsequent `NotAttempted` reads. No retries or collection requests are added.
 JPY now follows the same zero-transaction CSV rule as foreign currencies: after
 validating every official history JSON page, request CSV only when the total is
 positive. Keep the original zero-row JSON, balance and WALLET evidence; do not
-fabricate an empty CSV. A positive-history CSV error still fails collection.
+fabricate an empty CSV. A positive-history CSV error still stops the core run
+(see the last section).
 No importer re-checks this any more: the collector itself omits JPY CSV only after
 validating zero-row history, and the manifest and collection-summary field shapes
 remain unchanged.
@@ -162,19 +166,34 @@ counts are logged before requesting CSV, even if a later step fails. No URLs,
 credentials, financial bodies or free-text provider errors enter these records.
 Log emission is best effort and cannot replace a collection result or failure.
 
-Core artifacts are persisted only after the whole core collection (login,
-balance, both history ranges and WALLET) returns. Open limit: a failure at any
-core step discards every core artifact fetched before it, so the core run is
-never `partial`: it is stored as `failed` with no artifact (`src/worker.ts`,
-`runSharedCollection`; `sonyBankRunPlan` in `src/shared-collection.ts` keeps
-none for a failed run). Such a run leaves no manifest, and the
-`transactionCount` of 0 in its returned result is a default, not evidence that
-JPY history was empty; use the validated progress count instead. The two
-supplementary runs are read only after the core steps succeed, so a core
-failure leaves neither of them. They differ from the core run: each keeps the
+### A core failure keeps the finished steps
+
+The core run's steps are, in order, `login`, `gross-balance`,
+`monthly-history`, `retained-history` and `wallet` (`CORE_STEPS`,
+`src/sony-bank.ts`); each one is all-or-nothing across the eleven currencies.
+When a step throws, `runSharedCollection` (`src/worker.ts`) keeps the
+artifacts of the steps that finished before it and nothing of the failing step.
+With at least one kept artifact the core run is `partial`; a stop at `login`
+or `gross-balance` keeps nothing and stays `failed` with no artifact. The
+month window keeps its `monthly-*` names, so canonical history files (the
+parser input) appear only when the retained step finished. A stopped run
+writes no `collection-summary.json` and no WALLET page. Its `manifest.json`
+names the stopped step as the failure's `operation` and lists
+`coreSteps.completed`, `coreSteps.failed` and `coreSteps.notAttempted`; its
+terminal carries the allowlisted history reason or else
+`core_monthly_history_failed`, `core_retained_history_failed` or
+`core_wallet_failed`. `transactionCount` (manifest and returned result) is
+null, not 0, unless the retained step finished; use the validated progress
+count for an earlier stop. The kept artifacts are evidence only: every Sony
+core dataset has run-scoped parse eligibility, so a `partial` core run is
+never parsed. The two supplementary runs still start only after a complete
+core
+([ADR 0099, amendment 2026-11-18](../../docs/adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)).
+
+The two supplementary runs differ from the core run: each keeps the
 artifacts it fetched before its own failure (`partial`, or `failed` when it
 fetched none), and neither changes the core run's terminal. Because the
 documents run always records a failure, `runSharedCollection` reports
-`partial` whenever the core run succeeded (and `failed` when it did not); the
-alarm records a persisted `partial` result as completed (`scheduledResult`,
+`partial` whenever the core run succeeded; the alarm records a persisted
+`partial` result as completed (`scheduledResult`,
 `packages/collection/src/schedule-result.ts`).

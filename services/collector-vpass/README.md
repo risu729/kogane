@@ -158,9 +158,13 @@ output/<timestamp>/
   It adds no provider or storage request and exposes no card, run or month
   identifier. It distinguishes response families and row-shape/count
   relations without changing coverage. `unavailable` means no diagnostic
-  evidence, not zero rows. Even a matching recognized-detail count does not
-  prove provider count semantics or make a partial card complete; see the
+  evidence, not zero rows. The diagnostic itself never makes a partial card
+  complete; see the
   [ADR 0023 amendment](../../docs/adr/0023-vpass-collector-card-binding.md#counts-only-shape-diagnostic-amendment-2026-10-10).
+  Its row classifier (`src/statement-rows.ts`) is shared with the month check,
+  which leaves a finalized page's `45` and `4C` header rows out of the count it
+  compares with `allCnt`
+  ([2026-11-19 amendment](../../docs/adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted)).
 
 - The Android API authentication, all-card selection, available-month discovery,
   finalized statements, and unsettled statements were live validated with a

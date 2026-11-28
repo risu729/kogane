@@ -59,9 +59,9 @@ export const CARD_PURCHASE_ACTOR = `rule:${CARD_PURCHASE_POLICY}`;
  */
 export const CARD_PURCHASE_WRITER_RELEASE = `${CARD_PURCHASE_POLICY}:economic-guard-v1`;
 /** The provider usage date is a Japanese civil date, as for card statements. */
-export const CARD_PURCHASE_ZONE = "Asia/Tokyo";
+const CARD_PURCHASE_ZONE = "Asia/Tokyo";
 /** The one basis these events carry; a card purchase moves no cash by itself. */
-export const CARD_PURCHASE_BASIS: RecognitionBasis = "purchase-recognition";
+const CARD_PURCHASE_BASIS: RecognitionBasis = "purchase-recognition";
 /**
  * What a single payment looks like, per source, in the column the read model
  * reads (`payment_type`, packages/read-model/src/card-usage.ts), as production
@@ -99,8 +99,8 @@ const PROVIDER_STATES: Record<CardPurchaseSourceId, Record<string, "captured" | 
   vpass: { posted: "captured", unconfirmed: "authorized" },
   myjcb: { confirmed: "captured", unconfirmed: "authorized" },
 };
-export const CARD_PURCHASE_PROVIDER_STATUSES = ["posted", "confirmed", "unconfirmed"] as const;
-export type CardPurchaseProviderStatus = (typeof CARD_PURCHASE_PROVIDER_STATUSES)[number];
+const CARD_PURCHASE_PROVIDER_STATUSES = ["posted", "confirmed", "unconfirmed"] as const;
+type CardPurchaseProviderStatus = (typeof CARD_PURCHASE_PROVIDER_STATUSES)[number];
 
 /** Why a row is not recognised. Closed: a new reason is a reviewed contract change. */
 export const CARD_USAGE_EXCLUSIONS = [
@@ -230,7 +230,7 @@ export interface CardPurchaseFacts {
   amountCheck: "provider-amount" | "usage-equals-payment";
   providerSaleCode: "5" | "6" | null;
 }
-export const CARD_PURCHASE_FACT_KEYS = [
+const CARD_PURCHASE_FACT_KEYS = [
   "providerStatus",
   "amount",
   "usageDate",
@@ -362,6 +362,20 @@ function isCardSource(value: string): value is CardPurchaseSourceId {
 }
 
 /**
+ * The event state a source's status maps to, or null. Only the table's own
+ * keys count: a status such as `constructor` or `__proto__` names a property
+ * every object inherits, not a status the source was observed to use.
+ */
+function providerState(
+  sourceId: string,
+  providerStatus: string | null,
+): "captured" | "authorized" | null {
+  if (!isCardSource(sourceId) || providerStatus === null) return null;
+  const states = PROVIDER_STATES[sourceId];
+  return Object.hasOwn(states, providerStatus) ? states[providerStatus]! : null;
+}
+
+/**
  * The per-source single-payment rule: the Vpass web family's code
  * (`VPASS_WEB_SINGLE_PAYMENT_CODE`), the Vpass customized family's
  * `bunkatsuYaku` (`VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE`), and MyJCB's
@@ -396,10 +410,8 @@ export function classifyCardUsage(fact: CardUsageFact): CardUsageClassification 
     reasonCode,
   });
   if (!fact.newestRepresentation) return fail("superseded_representation");
-  const state = isCardSource(fact.sourceId)
-    ? PROVIDER_STATES[fact.sourceId][fact.providerStatus ?? ""]
-    : undefined;
-  if (state === undefined) return fail("status_unsupported");
+  const state = providerState(fact.sourceId, fact.providerStatus);
+  if (state === null) return fail("status_unsupported");
   if (fact.accountId === null || fact.accountId.length === 0) return fail("account_not_resolved");
   if (
     fact.externalId === null ||
@@ -443,9 +455,7 @@ export function classifyCardUsage(fact: CardUsageFact): CardUsageClassification 
 }
 
 /** The immutable Layer B reference of a row: never a bare string (SourceFactRef). */
-export function cardUsageRef(
-  fact: Pick<CardUsageFact, "observationId" | "parseRunId">,
-): SourceFactRef {
+function cardUsageRef(fact: Pick<CardUsageFact, "observationId" | "parseRunId">): SourceFactRef {
   return {
     kind: "transaction",
     id: `transaction:${fact.observationId}`,

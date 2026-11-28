@@ -352,7 +352,11 @@ metadata — so the boundary has its own tests:
     exception text in neither the answer nor the log, and an exchange logs
     only the request line (since 2026-11-08 a failing availability check,
     which is every store read the tool list makes, is its route's
-    `503 catalogue_read_failed` instead, through the same rethrow);
+    `503 catalogue_read_failed` instead, through the same rethrow; since
+    2026-11-18 a store failure inside a read tool's own read is its route's
+    `503 catalogue_read_failed` as the tool's `isError` result, and the
+    exception case is a proposal's,
+    [ADR 0081 amendment](0081-ui-parity-through-mcp.md#amendment-a-read-tools-store-failure-is-its-routes-answer-2026-11-18));
   - the connection in both eras, `Origin`, the SDK's refusals, tool
     definitions against the SEP-986 names and Claude Code's load-time checks,
     `tools/list` and `tools/call` under each single capability, and the UI's
@@ -492,7 +496,7 @@ about 16:40 UTC.
 
 ## Amendment: reconcile the App domain in normal delivery
 
-- Status: accepted by the owner, implementation pending merge
+- Status: accepted by the owner; merged with its implementation 2026-11-12 in [#1305](https://github.com/risu729/kogane/pull/1305)
 - Date: 2026-11-11 13:40 UTC
 
 The owner selected normal `deploy-triggers: true` delivery for all four maintained

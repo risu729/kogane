@@ -79,8 +79,42 @@ page passes when:
   settlement candidate is named by its billing month and creation time). A pager is
   `Pagination`: a named group whose status speaks its label before the count,
   and a page with two pagers gives each its own label. Retry buttons inside
-  alerts are distinct by name.
+  alerts are distinct by name: each shows 再試行 and is named for the read it
+  repeats (`取引を再試行`).
 - Loading and error states carry `role="status"` or `role="alert"`.
+- A button whose request is in flight keeps focus: it is `aria-disabled` and
+  ignores activation instead of becoming `disabled`, because a focused button
+  that becomes `disabled` drops focus to the document body, and a keyboard
+  user would meet the answer, a refusal included, back at the top of the
+  page. One component, `BusyButton` (`apps/web/src/busy-button.tsx`), does
+  this for the review pages' plan buttons (口座の対応候補, 銘柄の同一性の候補,
+  請求と引落の照合候補, 口座の保有者を確認 and カード利用の説明), every
+  `Pagination` button (the cursor pagers on 監査ログ, 依頼の一覧, the latest
+  balances and the evidence browser's lists, their read-again buttons, and
+  the offset pagers built on it), and a failed read's 再試行 (`ErrorState` and
+  `QueryBoundary`'s 前回読み込んだ warning). A button
+  with nowhere to go or nothing to act on (no earlier page, missing input) is
+  `disabled`. The shell's 表示を更新 follows the same rule with its own
+  markup. The review pages' browser tests check that focus stays after a
+  refusal, and the retry and latest-balances pager tests that it stays
+  through a read. `BusyButton` also holds the confirmation screen's 承認する,
+  確定する and 反映状況を再確認, the operation page's 最新の状態を読み直す,
+  the ホーム 最近の変化 panel's 続きを読み込む, and the schedules page's
+  依頼を送信, 採用, 却下 and 停止した実行を解除; 設定を保存 and
+  停止時間を保存, submit buttons, carry the same `aria-disabled` and their
+  save ignores a submission while one is in flight. Their browser tests
+  check that focus stays on the pressed button while it is in flight and
+  after a refusal (続きを読み込む: while in flight), and that a second press
+  sends nothing (採用: nor asks again). A button that cannot act is
+  `disabled`: 承認する once approved, 確定する once a receipt is shown or
+  the plan reads stale, and the schedules page's やめる while its request is
+  sent. Open limit: focus drops to the document body when the pressed button
+  becomes `disabled` that way, or leaves the page with its answer, since
+  nothing moves focus to what replaces it: a refused 続きを読み込む (its
+  alert and 再試行 take its place), 続きを読み込む once the last page is
+  read, 反映状況を再確認 once the receipt reads 反映済み, 依頼を送信 once
+  the request is accepted, 設定を保存 once the saved schedule is read again,
+  and a decided proposal's or released run's button.
 - Every visible table has a caption (visually hidden when the panel title
   already says it) and every header cell a `scope`; every `.table-scroll` is
   a named `role="region"` with `tabIndex={0}` at every width. Anything else
@@ -91,6 +125,10 @@ page passes when:
   control, `summary`, `.button` link and navigation link is at least 24px
   or has no other target within its 24px circle (WCAG 2.5.8). Text links in a
   sentence, cell or breadcrumb are the inline exception.
+- A plan refused because the reviewed item changed reads the item again
+  without moving focus while the focused control is still on the page; when
+  the read again removes or hides it, focus moves to the refusal, in the item
+  or at the top of the page (docs/frontend.md, "Plan refusals").
 
 ## Review gate
 

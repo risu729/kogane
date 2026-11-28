@@ -16,11 +16,22 @@ import {
   day,
   storeExecutor,
 } from "../../read-model/test/economic-history-fixture.ts";
+import { queryDatedState } from "../src/query/dated-state.ts";
 import {
   queryReconstructedState,
   ReconstructedStateInputError,
   type ReconstructedStateInput,
 } from "../src/query/reconstructed-state.ts";
+import type { ReconstructedCell } from "../../domain/src/reconstruction.ts";
+import {
+  DATED_BALANCES_SQL,
+  DATED_POSITIONS_SQL,
+  DATED_SNAPSHOTS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+  DATED_STATEMENTS_SQL,
+} from "../../read-model/src/dated-state.ts";
+import { ACCOUNTS_SOURCES_SQL } from "../../read-model/src/economic-selector.ts";
+import type { SqlExecutor } from "../../read-model/src/reader.ts";
 
 const BANK = "acct-bank";
 const CARD = "acct-card";
@@ -58,7 +69,7 @@ function world(endMinor = 9_000): EconomicHistory {
 }
 
 const input = (fields: Partial<ReconstructedStateInput> = {}): ReconstructedStateInput => ({
-  account: BANK,
+  accounts: [BANK],
   from: "2026-03-01",
   to: "2026-03-31",
   basis: "cash",
@@ -200,7 +211,7 @@ describe("what it answers today", () => {
       times: [["usage", day("2026-03-10")]],
       writerRelease: CARD_PURCHASE_WRITER_RELEASE,
     });
-    const result = await queryReconstructedState(storeExecutor(h.db), input({ account: CARD }));
+    const result = await queryReconstructedState(storeExecutor(h.db), input({ accounts: [CARD] }));
     expect(result.status).toBe("unavailable");
     expect(result.reasons).toEqual(["no_reported_container", "nothing_to_reconstruct"]);
     expect(result.reconstruction!.dispositions.map((row) => [row.ref, row.disposition])).toEqual([
@@ -265,6 +276,93 @@ describe("acceptance", () => {
       coverageProducer: "coverage-producer-none-v1",
       foldPolicy: "reconstruction-fold-v1",
     });
+  });
+
+  test("a mapping no capture lists moves the context id when it changes which account a container lists (INV09)", async () => {
+    const h = world();
+    const before = await queryReconstructedState(storeExecutor(h.db), input({ accounts: [CARD] }));
+    expect(before.status).toBe("unavailable");
+    expect(before.reasons).toContain("no_reported_container");
+    expect(before.reconstruction!.accounts[0]).toMatchObject({ startContainer: false });
+    expect(before.manifest!.accountSources).toEqual([[CARD, "vpass"]]);
+    // A source account of the bank, mapped to the card account. No capture
+    // lists it, so neither dated state changes: only the container check reads it.
+    h.db.run(
+      "INSERT INTO source_accounts SELECT 'sa-card-at-bank',source_id,producer_id,'[\"sa-card-at-bank\"]' FROM source_accounts WHERE source_id=? LIMIT 1",
+      [SMBC.source],
+    );
+    h.db.run(
+      "INSERT INTO account_mappings VALUES('sa-card-at-bank-r1','sa-card-at-bank',1,?,'manual','synthetic',1,'2098-01-01','Synthetic','identified')",
+      [CARD],
+    );
+    const after = await queryReconstructedState(storeExecutor(h.db), input({ accounts: [CARD] }));
+    expect(after.reported).toEqual(before.reported);
+    expect(after.reasons).not.toContain("no_reported_container");
+    expect(after.reconstruction!.accounts[0]).toMatchObject({ startContainer: true });
+    expect(after.manifest!.accountSources).toEqual([
+      [CARD, SMBC.source],
+      [CARD, "vpass"],
+    ]);
+    expect(after.contextId).not.toBe(before.contextId);
+    expect(after.contextId).toBe(await canonicalDigest(after.manifest!));
+  });
+
+  test("it never counts the statements before the payable window, and its context records no count", async () => {
+    const h = world();
+    settle(h, "ev-settle", "2026-03-15");
+    // The account is already mapped to the card source before the first read,
+    // so the statement added below changes nothing but the count.
+    const earlier = h.store.statement({
+      card: "card-b",
+      period: "2025-11",
+      paymentDate: "2025-11-26",
+      minor: 1,
+      fetchedAt: "2025-11-05T01:00:00Z",
+    });
+    h.store.identify(earlier, "vpass", BANK, "identified");
+    const statements: string[] = [];
+    const inner = storeExecutor(h.db);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.first<T>(sql, args);
+      },
+    };
+    const first = await queryReconstructedState(recording, input());
+    expect(statements).toContain(DATED_STATEMENTS_SQL);
+    expect(statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    // The pinned snapshot contexts are those of the states it read: without the count.
+    const uncounted = await queryDatedState(storeExecutor(h.db), {
+      date: "2026-03-31",
+      account: BANK,
+      includeStatementsBeforeWindow: false,
+    });
+    const counted = await queryDatedState(storeExecutor(h.db), {
+      date: "2026-03-31",
+      account: BANK,
+    });
+    expect(first.manifest!.snapshots.endContextId).toBe(uncounted.contextId);
+    expect(first.manifest!.snapshots.endContextId).not.toBe(counted.contextId);
+    // A statement of the account that the window leaves out on both dates
+    // changes the reported state's context, not this one.
+    const older = h.store.statement({
+      card: "card-a",
+      period: "2025-12",
+      paymentDate: "2025-12-26",
+      minor: 1,
+      fetchedAt: "2025-12-05T01:00:00Z",
+    });
+    h.store.identify(older, "vpass", BANK, "identified");
+    expect((await queryReconstructedState(storeExecutor(h.db), input())).contextId).toBe(
+      first.contextId,
+    );
+    expect(
+      (await queryDatedState(storeExecutor(h.db), { date: "2026-03-31", account: BANK })).contextId,
+    ).not.toBe(counted.contextId);
   });
 });
 
@@ -359,4 +457,316 @@ describe("refusals", () => {
       ),
     ).rejects.toThrow("cut_epoch_not_current");
   });
+});
+
+describe("a scope of several accounts (ADR 0116)", () => {
+  const SAVINGS = "acct-savings";
+  const SHINSEI = {
+    source: "sbi-shinsei-bank",
+    dataset: "top-accounts-balance-and-activity",
+    parser: "sbi-shinsei-top-balances-and-activity",
+  };
+
+  /** The bank world beside a savings account at another provider, reported at both ends. */
+  function scoped(endCapture = "2026-03-31T03:00:00Z"): EconomicHistory {
+    const h = world(9_000);
+    for (const [fetchedAt, minor] of [
+      ["2026-03-01T03:00:00Z", 50_000],
+      [endCapture, 49_900],
+    ] as const) {
+      const capture = h.store.capture({
+        ...SHINSEI,
+        fetchedAt,
+        balances: [{ account: "shinsei-a", metric: "account_balance", instrument: "JPY", minor }],
+      });
+      h.store.identify(capture, SHINSEI.source, SAVINGS, "identified");
+    }
+    settle(h, "ev-settle", "2026-03-15");
+    h.adopt({
+      eventId: "ev-savings",
+      revision: 1,
+      legs: [
+        { subject: SAVINGS, amount: "100", role: "decrease", basis: "cash-movement" },
+        { subject: CARD, amount: null, role: "unresolved", basis: "obligation-change" },
+      ],
+      times: [["posting", day("2026-03-20")]],
+      knownAt: "2026-04-01T00:00:00.000Z",
+      writerRelease: SETTLEMENT_RELEASE,
+    });
+    return h;
+  }
+
+  /** What one cell says (the scope's own knowledge, such as its set version, differs by scope). */
+  const figures = (cell: ReconstructedCell) => ({
+    accountId: cell.accountId,
+    unitRef: cell.unitRef,
+    start: cell.start,
+    reconstructed: cell.reconstructed,
+    applied: cell.applied,
+    gaps: cell.gaps,
+    explanation: cell.explanation,
+  });
+
+  test("each account's cells are what its one-account read answers; nothing is added across them", async () => {
+    const sql = storeExecutor(scoped().db);
+    const both = await queryReconstructedState(sql, input({ accounts: [SAVINGS, BANK] }));
+    expect(both.accounts).toEqual([BANK, SAVINGS]);
+    expect(both.manifest!.accounts).toEqual([BANK, SAVINGS]);
+    expect(both.reconstruction!.accounts.map((account) => account.accountId)).toEqual([
+      BANK,
+      SAVINGS,
+    ]);
+    expect(both.reconstruction!.netWorth).toBe("not-computed");
+    for (const account of [BANK, SAVINGS]) {
+      const one = await queryReconstructedState(sql, input({ accounts: [account] }));
+      expect(one.accounts).toEqual([account]);
+      expect(
+        both.reconstruction!.cells.filter((cell) => cell.accountId === account).map(figures),
+      ).toEqual(one.reconstruction!.cells.map(figures));
+    }
+    const savings = both.reconstruction!.cells.find((cell) => cell.accountId === SAVINGS)!;
+    expect(savings.unitRef).toBe("JPY");
+    expect(savings.reconstructed.value).toMatchObject({
+      status: "exact",
+      value: { coefficient: "49900", scale: 0 },
+    });
+    expect(savings.applied.refs).toEqual(["ev-savings@1#0"]);
+    // Both end captures share one instant, so the late part is the scope's.
+    expect(both.lateUnavailable).toBeNull();
+    expect(both.late!.entered).toEqual(["ev-savings@1", "ev-settle@1"]);
+  });
+
+  test("the order asked in changes nothing", async () => {
+    const sql = storeExecutor(scoped().db);
+    const one = await queryReconstructedState(sql, input({ accounts: [SAVINGS, BANK] }));
+    const two = await queryReconstructedState(sql, input({ accounts: [BANK, SAVINGS] }));
+    expect(two.contextId).toBe(one.contextId);
+    expect(two).toEqual(one);
+  });
+
+  test("an account without a reported container makes the scope unavailable; the others are still folded", async () => {
+    const sql = storeExecutor(scoped().db);
+    const result = await queryReconstructedState(sql, input({ accounts: [BANK, CARD] }));
+    expect(result.status).toBe("unavailable");
+    expect(result.reasons[0]).toBe("no_reported_container");
+    expect(result.reasons).toContain("nothing_to_reconstruct");
+    expect(
+      result.reconstruction!.accounts.map((account) => [
+        account.accountId,
+        account.startContainer,
+        account.cells,
+      ]),
+    ).toEqual([
+      [BANK, true, 1],
+      [CARD, false, 0],
+    ]);
+    expect(result.reconstruction!.cells.map((cell) => cell.accountId)).toEqual([BANK]);
+  });
+
+  test("end captures at different instants leave the late part to each account's own read", async () => {
+    const result = await queryReconstructedState(
+      storeExecutor(scoped("2026-03-31T05:00:00Z").db),
+      input({ accounts: [BANK, SAVINGS] }),
+    );
+    expect(result.late).toBeNull();
+    expect(result.lateUnavailable).toBe("end_captures_differ");
+  });
+
+  test("one read of each reported date and one selector load, however many accounts", async () => {
+    const h = scoped();
+    const counted = (counts: Map<string, number>): SqlExecutor => {
+      const inner = storeExecutor(h.db);
+      const count = (sql: string) => counts.set(sql, (counts.get(sql) ?? 0) + 1);
+      return {
+        all: <T>(sql: string, args: readonly unknown[]) => {
+          count(sql);
+          return inner.all<T>(sql, args);
+        },
+        first: <T>(sql: string, args: readonly unknown[]) => {
+          count(sql);
+          return inner.first<T>(sql, args);
+        },
+      };
+    };
+    const one = new Map<string, number>();
+    await queryReconstructedState(counted(one), input({ accounts: [BANK] }));
+    const three = new Map<string, number>();
+    await queryReconstructedState(counted(three), input({ accounts: [BANK, SAVINGS, CARD] }));
+    // Each reported date is read once, the accounts' sources once.
+    for (const sql of [
+      DATED_BALANCES_SQL,
+      DATED_POSITIONS_SQL,
+      DATED_SNAPSHOTS_SQL,
+      DATED_STATEMENTS_SQL,
+    ])
+      expect([one.get(sql), three.get(sql)]).toEqual([2, 2]);
+    expect([one.get(ACCOUNTS_SOURCES_SQL), three.get(ACCOUNTS_SOURCES_SQL)]).toEqual([1, 1]);
+    // Every other statement runs as often as for one account; the card's
+    // statement adds one settlement-review read per date, bound as one list.
+    for (const [sql, runs] of three)
+      expect([sql.slice(0, 40), runs]).toEqual([
+        sql.slice(0, 40),
+        one.get(sql) ?? Math.min(runs, 2),
+      ]);
+  });
+
+  test("an empty, repeated or too long scope is refused, never narrowed", async () => {
+    const sql = storeExecutor(scoped().db);
+    for (const accounts of [
+      [],
+      [BANK, BANK],
+      Array.from({ length: 21 }, (_, index) => `acct-${String(index)}`),
+    ])
+      await expect(queryReconstructedState(sql, input({ accounts }))).rejects.toThrow(
+        "invalid_query",
+      );
+  });
+
+  test("on random stores, each account's cells in a scope are its own answer's, except a late part the scope does not have", async () => {
+    const BANKS = [SMBC, SHINSEI];
+    const STATUS_ORDER = ["unavailable", "indeterminate", "needs_review", "incomplete", "complete"];
+    let lateOnlyCells = 0;
+    let checkedCells = 0;
+    for (let seed = 1; seed <= 60; seed += 1) {
+      let state = seed;
+      const next = () => {
+        state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return state / 2_147_483_648;
+      };
+      const pick = <T>(values: readonly T[]): T => values[Math.floor(next() * values.length)]!;
+      const someDay = () =>
+        new Date(Date.UTC(2026, 1, 26) + Math.floor(next() * 37) * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+      const store = new DatedStore();
+      const accounts = Array.from(
+        { length: 1 + Math.floor(next() * 4) },
+        (_, index) => `acct-r${String(index)}`,
+      );
+      for (const [index, account] of accounts.entries()) {
+        // Now and then an account no reported container lists.
+        if (next() < 0.2) continue;
+        const bank = pick(BANKS);
+        for (let capture = Math.floor(next() * 4); capture > 0; capture -= 1) {
+          const date = next() < 0.5 ? pick(["2026-02-28", "2026-03-01", "2026-03-31"]) : someDay();
+          const captured = store.capture({
+            ...bank,
+            fetchedAt: `${date}T${pick(["03:00:00Z", "12:00:00Z", "14:59:59Z", "15:00:00Z"])}`,
+            balances: [
+              {
+                account: `p-${String(index)}`,
+                metric: "account_balance",
+                instrument: "JPY",
+                minor: next() < 0.1 ? null : Math.floor(next() * 100_000),
+              },
+            ],
+          });
+          store.identify(captured, bank.source, account, pick(["identified", "provider-local"]));
+        }
+      }
+      const h = new EconomicHistory(store);
+      for (const account of [...accounts, CARD])
+        if (h.db.query("SELECT 1 FROM accounts WHERE id=?").get(account) === null)
+          h.account(account);
+      let clock = Date.parse("2026-03-02T00:00:00.000Z");
+      for (let event = Math.floor(next() * 7); event > 0; event -= 1) {
+        const account = pick(accounts);
+        const other = pick([...accounts, CARD]);
+        const revisions = next() < 0.25 ? 2 : 1;
+        const logged = next() < 0.85;
+        for (let revision = 1; revision <= revisions; revision += 1) {
+          clock += Math.floor(next() * 5 * 86_400_000);
+          const time = next();
+          h.adopt({
+            eventId: `ev-${String(event)}`,
+            revision,
+            legs:
+              next() < 0.3 && other !== account
+                ? [
+                    {
+                      subject: account,
+                      amount: String(Math.floor(next() * 5_000)),
+                      role: "decrease",
+                      basis: "cash-movement",
+                    },
+                    {
+                      subject: other,
+                      amount: next() < 0.5 ? null : String(Math.floor(next() * 5_000)),
+                      role: "increase",
+                      basis: "cash-movement",
+                    },
+                  ]
+                : [
+                    {
+                      subject: account,
+                      amount: next() < 0.1 ? null : String(Math.floor(next() * 5_000)),
+                      role: pick(["decrease", "increase"] as const),
+                      basis: "cash-movement",
+                    },
+                    { subject: CARD, amount: null, role: "unresolved", basis: "obligation-change" },
+                  ],
+            times:
+              time < 0.1
+                ? []
+                : [["posting", day(time < 0.3 ? pick(["2026-03-01", "2026-03-31"]) : someDay())]],
+            knownAt: new Date(clock).toISOString(),
+            writerRelease: SETTLEMENT_RELEASE,
+            logged: revision === revisions ? logged : true,
+          });
+        }
+      }
+      const sql = storeExecutor(h.db);
+      const scope = [...accounts, CARD];
+      const all = await queryReconstructedState(sql, input({ accounts: scope }));
+      // Never a total: the fold's net worth stays not computed.
+      expect(all.reconstruction?.netWorth ?? "not-computed").toBe("not-computed");
+      for (const account of scope) {
+        const alone = await queryReconstructedState(sql, input({ accounts: [account] }));
+        // The scope's reasons hold every account's, and its status is at least as grave.
+        for (const reason of alone.reasons)
+          expect([seed, account, reason, all.reasons.includes(reason)]).toEqual([
+            seed,
+            account,
+            reason,
+            true,
+          ]);
+        expect(STATUS_ORDER.indexOf(all.status)).toBeLessThanOrEqual(
+          STATUS_ORDER.indexOf(alone.status),
+        );
+        const mine = (cells: readonly ReconstructedCell[] | undefined) =>
+          (cells ?? []).filter((cell) => cell.accountId === account);
+        const scoped = mine(all.reconstruction?.cells);
+        const own = mine(alone.reconstruction?.cells);
+        expect([seed, account, scoped.length]).toEqual([seed, account, own.length]);
+        for (const [index, cell] of scoped.entries()) {
+          checkedCells += 1;
+          const ownCell = own[index]!;
+          // The late part is the scope's: with end captures at different
+          // instants it is not computed for the scope (ADR 0116, decision 5).
+          if (all.lateUnavailable !== null && alone.lateUnavailable === null) {
+            if (
+              JSON.stringify(cell.explanation.lateRecorded) !==
+              JSON.stringify(ownCell.explanation.lateRecorded)
+            )
+              lateOnlyCells += 1;
+            expect(cell.explanation.lateRecorded).toBeNull();
+            expect([
+              seed,
+              account,
+              { ...cell, explanation: { ...cell.explanation, lateRecorded: null } },
+            ]).toEqual([
+              seed,
+              account,
+              { ...ownCell, explanation: { ...ownCell.explanation, lateRecorded: null } },
+            ]);
+          } else expect([seed, account, cell]).toEqual([seed, account, ownCell]);
+        }
+        expect(all.reconstruction?.accounts.find((entry) => entry.accountId === account)).toEqual(
+          alone.reconstruction?.accounts[0],
+        );
+      }
+    }
+    expect(checkedCells).toBeGreaterThan(40);
+    expect(lateOnlyCells).toBeGreaterThan(0);
+  }, 120_000);
 });

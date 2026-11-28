@@ -113,7 +113,9 @@ policy it applies; none has a default.
   validators reject unknown keys, empty or duplicated lists, bad day counts,
   zones the runtime does not know or spells differently, a bound that is not
   exactly the end of its date in the policy zone, and a known-at instant finer
-  than a millisecond (`validKnownAtInstant`). A policy's digest is its
+  than a millisecond, with an offset outside -12:00 to +14:00, or after
+  9999-12-31T23:59:59.999Z (`validKnownAtInstant`,
+  `validZoneOffsetInstantText`). A policy's digest is its
   `canonicalDigest`.
 - `selectPrice(key, candidates, bound, policy, calendar)` runs six checks in
   order and returns one selected price (with its age and corroborating ids)
@@ -176,7 +178,11 @@ policy it applies; none has a default.
   1. candidates of another metric or unit are excluded;
   2. non-exact values and partial or unknown coverage are unresolved;
   3. `same` evidence is bundled when it agrees; disagreements stay
-     `conflicting_evidence` unless `conflictRule: "prefer-lowest-rank"`;
+     `conflicting_evidence` unless `conflictRule: "prefer-lowest-rank"`.
+     `same` is read as an equivalence: a bundle is a connected component of
+     `same` claims, so `a ≡ c` and `b ≡ c` make one bundle of a, b and c
+     even with no claim between a and b
+     ([ADR 0001, amendment 2026-11-18](adr/0001-domain-axes.md#amendment-2026-11-18-same-is-an-equivalence-in-adoption));
   4. a total and its complete, pairwise-disjoint breakdown are alternatives
      (`preferBreakdown`, default true); a mismatch leaves both unresolved with
      a warning;
@@ -208,7 +214,10 @@ policy it applies; none has a default.
 
 ## `context.ts` — fixing the inputs of a result
 
-- `FinancialContext` (schema `financial-context-v1`): query semantics
+- `FinancialContext` (schema `financial-context-v2`; v2's publication marker
+  also moves with an activation, a rollback, a run exclusion or a dataset
+  policy update,
+  [ADR 0091 amendment](adr/0091-query-cursor-paging-basis.md#amendment-2026-11-21-a-publication-marker-that-moves-with-every-publication-change)): query semantics
   version, perimeter, effective time, knowledge cutoff, publication and the
   manifest references for source selection, parser build, metadata build,
   identity decisions, event decisions, reference data, calculation policy and

@@ -34,6 +34,7 @@ import {
   laneTickRecord,
   type LaneWrites,
 } from "../../../packages/application/src/index.ts";
+import { safeFailureCode } from "./collection/failure-code.ts";
 import type { LaneTickResult } from "./lane-ticks.ts";
 
 /** The actor of the reconciliation sweep's automatic acceptances (`reconciliation-job.ts`). */
@@ -231,7 +232,7 @@ export async function recordLaneAudit(
   correlationId: string,
   log: (line: string) => void,
 ): Promise<void> {
-  const spec = LANE_AUDIT[lane];
+  const spec = Object.hasOwn(LANE_AUDIT, lane) ? LANE_AUDIT[lane] : undefined;
   if (!spec || mark === null || tick.outcome === "skipped-by-flag") return;
   try {
     const writes = await laneWrites(db, spec, mark);
@@ -263,25 +264,30 @@ export async function markLaneAudit(
   }
 }
 
-/** A closed code of this module or the audit builder (`audit_record_invalid`, …). */
-const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
+/** The closed codes the audit builder throws (`AuditRecordError`, `AuditDiffError`). */
+const AUDIT_FAILURE_CODES: readonly unknown[] = ["audit_record_invalid", "audit_diff_invalid"];
+
+/**
+ * An audit builder's closed code, else the error's built-in class
+ * (`safeFailureCode`): never a driver's own `code`, class name or message,
+ * and never a throw of its own, whatever the value.
+ */
+function laneAuditFailureCode(error: unknown): string {
+  try {
+    if (error instanceof Error && "code" in error) {
+      // Read once: a getter may answer differently on a second read.
+      const code: unknown = error.code;
+      if (AUDIT_FAILURE_CODES.includes(code)) return code as string;
+    }
+  } catch {
+    // A throwing `code` getter or a hostile proxy names no code.
+  }
+  return safeFailureCode(error);
+}
 
 function logFailure(log: (line: string) => void, lane: string, error: unknown): void {
-  // Only a lower-case code is kept from an error's `code`; any other value
-  // (a driver's own text) falls back to the error's class name.
-  const code =
-    error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : null;
   log(
-    JSON.stringify({
-      event: "lane_audit_record_failed",
-      lane,
-      code:
-        code !== null && SAFE_CODE.test(code)
-          ? code
-          : error instanceof Error
-            ? error.constructor.name
-            : "unknown",
-    }),
+    JSON.stringify({ event: "lane_audit_record_failed", lane, code: laneAuditFailureCode(error) }),
   );
 }
 
@@ -301,7 +307,7 @@ export async function resolveLaneRef(
   lane: string,
   ref: string,
 ): Promise<string[] | null> {
-  const spec = LANE_AUDIT[lane];
+  const spec = Object.hasOwn(LANE_AUDIT, lane) ? LANE_AUDIT[lane] : undefined;
   const match = REF.exec(ref)?.groups;
   if (!spec || !match) return null;
   if (match.d !== undefined) {

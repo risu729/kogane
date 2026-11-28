@@ -41,17 +41,28 @@ import { createCoreProjectionSource, d1Executor } from "../../../packages/read-m
 import {
   validRewardExpiryBasis,
   type RewardExpiryBasis,
+  type RewardExpiryWindow,
 } from "../../../packages/observation-shared/src/reward-contract.ts";
+import {
+  parseRewardExpiryWindow,
+  REWARD_EXPIRY_DETAILS,
+  REWARD_EXPIRY_WINDOW_ROW_BOUND,
+  type RewardExpiryDetail,
+  type RewardExpiryWindowRow,
+  rewardExpirySummary,
+  rowsInRewardExpiryWindow,
+} from "../../../packages/application/src/index";
+import type { Quantity } from "../../../packages/domain/src/values.ts";
 import { HttpError } from "./http";
 import { REWARD_PROJECTION_RELEASE } from "../../../packages/read-model/src/reward-projection";
 import { REWARD_READ_RELEASE } from "../../../packages/read-model/src/rewards";
 
 /** Rows per page; the same shape of limit the v2 balance routes accept. */
 export const REWARD_READ_PAGE_LIMITS = [25, 50, 100, 200] as const;
-export const DEFAULT_REWARD_READ_PAGE_LIMIT = 50;
+const DEFAULT_REWARD_READ_PAGE_LIMIT = 50;
 
 /** The READ binding, when this deployment has one. */
-export function rewardReadBinding(env: Env): D1Like | null {
+function rewardReadBinding(env: Env): D1Like | null {
   return (env as unknown as { READ?: D1Like }).READ ?? null;
 }
 
@@ -136,12 +147,26 @@ function pageLimit(url: Pick<URL, "searchParams">): number {
   return limit;
 }
 
-/** What a cursor is bound to: the route, the scope and the page size. */
+/**
+ * What a cursor carries: the digest of the route, the scope and the page size.
+ * Another route or scope is another query; another offered page size is not
+ * (ADR 0119), so `continuation` also takes the scope's digest at each size.
+ */
 async function filterDigest(
   route: string,
   scope: Record<string, string | number | null>,
 ): Promise<string> {
   return await canonicalDigest({ route, ...scope });
+}
+
+/** One route and scope's digests at every offered page size (`continuation`). */
+function pageSizeDigests(
+  route: string,
+  scope: Record<string, string | number | null>,
+): Promise<string[]> {
+  return Promise.all(
+    REWARD_READ_PAGE_LIMITS.map((limit) => filterDigest(route, { ...scope, limit })),
+  );
 }
 
 interface Continuation {
@@ -154,12 +179,17 @@ interface Continuation {
  * one the cursor names with it — so membership stays fixed while a reader
  * pages. A cursor for another query is `cursor_mismatch` (400); one whose
  * context is gone is `context_expired` (410). Neither ever falls back to the
- * newest snapshot.
+ * newest snapshot. A cursor read at another offered page size continues at
+ * the size asked now (ADR 0119); `pageSizes` is computed only for a cursor.
+ * `mustMatch` names, by `kogane.rewards.read`'s argument names (the route's
+ * path is `collection`), the inputs a `cursor_mismatch` says must repeat.
  */
 async function continuation(
   context: RewardReadContext,
   url: Pick<URL, "searchParams">,
   digest: string,
+  pageSizes: () => Promise<readonly string[]>,
+  mustMatch: readonly string[],
 ): Promise<Continuation> {
   const text = url.searchParams.get("cursor");
   if (text === null) return { snapshot: context.snapshot, afterRowSeq: -1 };
@@ -168,10 +198,13 @@ async function continuation(
   const named = await rewardSnapshot(context.read, cursor.snapshotId);
   const rejection = checkReadCursor(cursor, {
     filterDigest: digest,
+    pageSizeDigests: await pageSizes(),
     readInstanceId: context.readInstanceId,
     snapshotReadable: named !== null,
   });
-  if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
+  // The answer names the inputs a continuation must repeat (ADR 0123).
+  if (rejection === "cursor_mismatch")
+    throw new HttpError(400, "cursor_mismatch", [], { mustMatch });
   if (
     rejection !== null ||
     named === null ||
@@ -227,6 +260,36 @@ function expiryBasis(value: string | null): RewardExpiryBasis | null {
   }
 }
 
+/**
+ * The row's amount at risk. READ 0002 and 0004 CHECK that the status is one
+ * of the four and that a row is `exact` exactly when both decimal-v1 columns
+ * are set. A pairing that CHECK refuses (`exact` without both columns, a
+ * status that is not exact with both, or another status) is a READ store the
+ * schema never admits: it fails the read (`reward_estimate_amount_invalid`)
+ * rather than being shown as a value nobody stored or a reason nobody
+ * recorded. A status that is not exact with one stray column is one the CHECK
+ * admits (the writer never stores it); it keeps its reason, and the stray
+ * column is never shown as a value.
+ */
+function estimateQuantity(row: RewardEstimateRow): Quantity {
+  const coefficient = row.amount_coefficient;
+  const scale = row.amount_scale;
+  const columns = coefficient !== null && scale !== null;
+  const status = row.amount_status;
+  if (status === "exact" && coefficient !== null && scale !== null)
+    return {
+      unitRef: row.unit_ref,
+      value: {
+        status: "exact",
+        value: { coefficient, scale },
+        normalizationVersion: "decimal-v1",
+      },
+    };
+  if ((status === "missing" || status === "unparsed" || status === "conflict") && !columns)
+    return { unitRef: row.unit_ref, value: { status, reasonCode: `decimal-v1:${status}` } };
+  throw new Error("reward_estimate_amount_invalid");
+}
+
 function estimateDto(row: RewardEstimateRow) {
   return {
     holdingRef: row.holding_ref,
@@ -239,17 +302,7 @@ function estimateDto(row: RewardEstimateRow) {
     // A date, in the rule's own calendar; null keeps the row in a
     // deadline-ordered list rather than dropping it (addendum 08 §8).
     expiresOn: row.expires_on,
-    quantity: {
-      unitRef: row.unit_ref,
-      value:
-        row.amount_status === "exact" && row.amount_coefficient !== null
-          ? {
-              status: "exact",
-              value: { coefficient: row.amount_coefficient, scale: row.amount_scale },
-              normalizationVersion: "decimal-v1",
-            }
-          : { status: row.amount_status, reasonCode: `decimal-v1:${row.amount_status}` },
-    },
+    quantity: estimateQuantity(row),
     providerObserved: temporal(row.provider_observed_json),
     policyEstimated: temporal(row.policy_estimated_json),
     reasonCodes: refs(row.reason_codes_json),
@@ -293,18 +346,97 @@ function snapshotEnvelope(snapshot: RewardSnapshotRow) {
   };
 }
 
+/** `detail`: absent or `full` is the page, `summary` the compact answer. */
+function detailOf(url: Pick<URL, "searchParams">): RewardExpiryDetail {
+  const text = url.searchParams.get("detail");
+  if (text === null) return "full";
+  if (!(REWARD_EXPIRY_DETAILS as readonly string[]).includes(text))
+    throw new HttpError(400, "invalid_query");
+  return text as RewardExpiryDetail;
+}
+
+/** The request's `from`/`before` window on today's Asia/Tokyo date, or null without either. */
+function windowOf(url: Pick<URL, "searchParams">): RewardExpiryWindow | null {
+  const parsed = parseRewardExpiryWindow(
+    url.searchParams.get("from"),
+    url.searchParams.get("before"),
+    Date.now(),
+  );
+  if (!parsed.ok) throw new HttpError(400, parsed.refusal);
+  return parsed.window;
+}
+
+/**
+ * Every estimate row of one snapshot (narrowed to a programme), in snapshot
+ * order, through the shipped page query with a bound one past
+ * `REWARD_EXPIRY_WINDOW_ROW_BOUND`: a larger snapshot is refused, never cut.
+ */
+async function snapshotRows(
+  context: RewardReadContext,
+  snapshotId: string,
+  program: string | undefined,
+): Promise<RewardEstimateRow[]> {
+  const rows = await rewardEstimatePage(context.read, snapshotId, {
+    programId: program,
+    afterRowSeq: -1,
+    limit: REWARD_EXPIRY_WINDOW_ROW_BOUND + 1,
+  });
+  if (rows.length > REWARD_EXPIRY_WINDOW_ROW_BOUND)
+    throw new HttpError(413, "result_limit_exceeded");
+  return rows;
+}
+
 /** `GET /api/v2/rewards/expiry` from the published reward snapshot. */
 export async function rewardExpiryFromRead(
   context: RewardReadContext,
   url: Pick<URL, "searchParams">,
   program: string | undefined,
 ): Promise<Record<string, unknown>> {
+  const detail = detailOf(url);
+  const window = windowOf(url);
+  if (detail === "summary") {
+    // One answer over the whole window: it is not paged.
+    if (url.searchParams.has("cursor") || url.searchParams.has("limit"))
+      throw new HttpError(400, "invalid_query");
+    const rows = await snapshotRows(context, context.snapshot.snapshot_id, program);
+    return rewardExpirySummary(
+      rows.map((row) => ({
+        rowSeq: row.row_seq,
+        programId: row.program_id,
+        holdingRef: row.holding_ref,
+        bucketRef: row.bucket_ref,
+        bucketKind: row.bucket_kind,
+        basis: row.deadline_basis as RewardExpiryWindowRow["basis"],
+        expiresOn: row.expires_on,
+        quantity: estimateQuantity(row),
+      })),
+      await rewardProviderSections(context.read, context.snapshot.snapshot_id, program),
+      window,
+      snapshotEnvelope(context.snapshot),
+    ) as unknown as Record<string, unknown>;
+  }
   const limit = pageLimit(url);
-  const digest = await filterDigest("/api/v2/rewards/expiry", {
-    program: program ?? null,
-    limit,
-  });
-  const resolved = await continuation(context, url, digest);
+  // The window is part of the query a cursor is bound to. A read without one
+  // keeps the scope it always had, so its cursors stay valid.
+  const scope: Record<string, string | null> =
+    window === null
+      ? { program: program ?? null }
+      : { program: program ?? null, from: window.from, before: window.before };
+  const digest = await filterDigest("/api/v2/rewards/expiry", { ...scope, limit });
+  // A continuation repeats every input bound to the cursor, absent included:
+  // the window too, so a cursor read without one is continued without one.
+  const resolved = await continuation(
+    context,
+    url,
+    digest,
+    () => pageSizeDigests("/api/v2/rewards/expiry", scope),
+    ["collection", "program", "from", "before"],
+  );
+  if (window !== null)
+    return await windowedExpiryPage(context, resolved, program, window, {
+      limit,
+      digest,
+    });
   const rows = await rewardEstimatePage(context.read, resolved.snapshot.snapshot_id, {
     programId: program,
     afterRowSeq: resolved.afterRowSeq,
@@ -338,6 +470,53 @@ export async function rewardExpiryFromRead(
   };
 }
 
+/**
+ * A full page of the rows inside the window, in snapshot order. The rows are
+ * read whole (bounded) and filtered here, so the shipped page query is not
+ * rewritten; the cursor's position is a row of that order, as on an
+ * unwindowed page. `window.rows` counts every row of the read: inside,
+ * before, after, and those with no date, left out as `deadline_unknown`.
+ * The provider display sections stay the snapshot's complete companion set.
+ */
+async function windowedExpiryPage(
+  context: RewardReadContext,
+  resolved: Continuation,
+  program: string | undefined,
+  window: RewardExpiryWindow,
+  paging: { limit: number; digest: string },
+): Promise<Record<string, unknown>> {
+  const all = await snapshotRows(context, resolved.snapshot.snapshot_id, program);
+  const inside = rowsInRewardExpiryWindow(all, window, (row) => row.expires_on);
+  const after = inside.rows.filter((row) => row.row_seq > resolved.afterRowSeq);
+  const hasMore = after.length > paging.limit;
+  const page = after.slice(0, paging.limit);
+  const last = page[page.length - 1];
+  return {
+    providerDisplaySections: await rewardProviderSections(
+      context.read,
+      resolved.snapshot.snapshot_id,
+      program,
+    ),
+    rows: page.map(estimateDto),
+    page: {
+      limit: paging.limit,
+      hasMore,
+      nextCursor:
+        hasMore && last
+          ? encodeReadCursor({
+              snapshotId: resolved.snapshot.snapshot_id,
+              readInstanceId: context.readInstanceId,
+              filterDigest: paging.digest,
+              sortKey: last.expires_on ?? "",
+              position: last.row_seq,
+            })
+          : null,
+    },
+    window: { ...window, rows: inside.counts },
+    snapshot: snapshotEnvelope(resolved.snapshot),
+  };
+}
+
 /** `GET /api/v2/rewards/simulations`: the saved simulations of the snapshot. */
 export async function rewardSimulationsFromRead(
   context: RewardReadContext,
@@ -345,7 +524,13 @@ export async function rewardSimulationsFromRead(
 ): Promise<Record<string, unknown>> {
   const limit = pageLimit(url);
   const digest = await filterDigest("/api/v2/rewards/simulations", { limit });
-  const resolved = await continuation(context, url, digest);
+  const resolved = await continuation(
+    context,
+    url,
+    digest,
+    () => pageSizeDigests("/api/v2/rewards/simulations", {}),
+    ["collection"],
+  );
   const rows = await rewardSimulationPage(context.read, resolved.snapshot.snapshot_id, {
     afterRowSeq: resolved.afterRowSeq,
     limit: limit + 1,

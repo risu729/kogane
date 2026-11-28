@@ -171,8 +171,10 @@ export {
   pendingDispatches,
   type ProjectionRequest,
   readOperation,
+  RECORD_STATUSES_MAX_ROWS,
   recordDispatch,
   recordOperationStage,
+  recordStatuses,
   type ReplayRequest,
   requestCollection,
   previewProviderOperation,
@@ -184,6 +186,7 @@ export {
   type SessionRefreshMode,
   sessionRefreshPolicy,
   type SessionRefreshRequest,
+  SELECT_STAGES_OF_PAGE,
   STAGE_STATES,
   STAGES_BY_KIND,
   type StageReport,
@@ -198,6 +201,7 @@ export {
   type OperationListPage,
   type OperationListQuery,
   type OperationSummary,
+  STATUS_FILTER_MATCHES,
 } from "./operations/list.ts";
 
 // ── collector execution of operations (issue #544, ADR 0048) ─────────
@@ -260,11 +264,13 @@ export {
   grantAllowsSource,
   grantedSources,
   fullGrant,
+  narrowedScopeRefs,
   perimeterRefFor,
   type ScopeSet,
   validGrant,
+  wholeStoreReadRefusal,
 } from "./grants.ts";
-export { ERROR_REMEDIES, ERROR_STATUS, financialError } from "./errors.ts";
+export { ERROR_REMEDIES, ERROR_STATUS, financialError, unknownKeyRefs } from "./errors.ts";
 export {
   type AgentCapabilitiesReport,
   capabilitiesFor,
@@ -307,14 +313,21 @@ export {
   type ReportedStateRow,
 } from "./query/execute.ts";
 export {
+  answerPurchasesExplain,
+  explainCardPurchaseCards,
+  explainCardPurchaseLines,
   explainCardPurchases,
   parsePurchasesExplainRequest,
   PURCHASES_EXPLAIN_CAPABILITY,
   PURCHASES_EXPLAIN_KEYS,
   PURCHASES_EXPLAIN_MAX_OFFSET,
+  PURCHASES_EXPLAIN_VIEWS,
   PURCHASES_NEXT_PAGE,
+  type PurchasesCardsAnswer,
   type PurchasesExplainOutcome,
+  type PurchasesExplainRequest,
   type PurchasesExplanation,
+  type PurchasesLinesAnswer,
   type PurchasesNextPage,
   withoutReviewAffordances,
 } from "./query/purchases-explain.ts";
@@ -338,6 +351,7 @@ export {
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
 } from "./query/reconstructed-state-read.ts";
+export { RECONSTRUCTION_ACCOUNTS_MAX } from "./query/reconstructed-state.ts";
 export {
   parseReportedStateRequest,
   readReportedStateRequest,
@@ -351,6 +365,21 @@ export {
   reportedStateBodyFromQuery,
 } from "./query/reported-state-read.ts";
 export {
+  parseRewardExpiryWindow,
+  REWARD_EXPIRY_DETAILS,
+  REWARD_EXPIRY_SUMMARY_BUCKET_LINES,
+  REWARD_EXPIRY_SUMMARY_DISPLAY_LINES,
+  REWARD_EXPIRY_WINDOW_ROW_BOUND,
+  type RewardExpiryDetail,
+  type RewardExpiryWindowRefusal,
+  type RewardExpiryWindowRow,
+  rewardExpirySummary,
+  rowsInRewardExpiryWindow,
+  tokyoToday,
+  type WindowPlace,
+  windowPlace,
+} from "./query/reward-expiry-window.ts";
+export {
   DEFAULT_EXPLAIN_DEPTH,
   explain,
   type ExplainReader,
@@ -359,6 +388,7 @@ export {
   type ExplanationNode,
   EXPLANATION_NODE_KINDS,
   MAX_NODE_DEPTH,
+  organizedExplainReader,
   parseExplainRequest,
 } from "./explain.ts";
 export {

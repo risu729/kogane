@@ -68,6 +68,54 @@ describe("the read cursor", () => {
     ).toBe("context_expired");
   });
 
+  test("the same query at another offered page size continues (ADR 0119)", () => {
+    // The request asks at another size (`digest-100`); the cursor carries the
+    // digest of the size its page was read at, which the route lists.
+    const sizes = ["digest-50", "digest-1", "digest-200"];
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: sizes,
+        readInstanceId: "instance-1",
+        snapshotReadable: true,
+      }),
+    ).toBeNull();
+    // Without the list, or with a list that does not name the cursor's
+    // digest, it is still another query.
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        readInstanceId: "instance-1",
+        snapshotReadable: true,
+      }),
+    ).toBe("cursor_mismatch");
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: ["digest-50", "digest-200"],
+        readInstanceId: "instance-1",
+        snapshotReadable: true,
+      }),
+    ).toBe("cursor_mismatch");
+    // A size match never outweighs an expired context.
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: sizes,
+        readInstanceId: "instance-2",
+        snapshotReadable: true,
+      }),
+    ).toBe("context_expired");
+    expect(
+      checkReadCursor(cursor, {
+        filterDigest: "digest-50",
+        pageSizeDigests: sizes,
+        readInstanceId: "instance-1",
+        snapshotReadable: false,
+      }),
+    ).toBe("context_expired");
+  });
+
   test("a retired or deleted snapshot is context_expired; another query is a mismatch", () => {
     expect(
       checkReadCursor(cursor, {
@@ -158,5 +206,31 @@ describe("the read reader", () => {
     });
     const page = await reader.latestPage(snapshotId, {}, 10, -1);
     expect(page.map((entry) => entry.row_seq)).toEqual([0]);
+  });
+});
+
+// The cash read's measure read (ADR 0123, amendment of 2026-11-20) answers
+// a scope of at most 5,000 latest rows; one more is no answer, never a part.
+describe("the measure read's bound", () => {
+  const reading = (count: number) => {
+    const asked: string[] = [];
+    const read = {
+      async all<T>(sql: string): Promise<T[]> {
+        asked.push(sql);
+        return Array.from({ length: count }, (_, index) => ({ row_seq: index }) as T);
+      },
+      async first<T>(): Promise<T | null> {
+        return null;
+      },
+    };
+    return { reader: createReadProjectionReader(read, read), asked };
+  };
+
+  test("answers 5,000 rows and refuses 5,001", async () => {
+    const full = reading(5_000);
+    expect(await full.reader.measureRows("a".repeat(64), {})).toHaveLength(5_000);
+    // The statement asks for one row over the bound, so it can tell the two apart.
+    expect(full.asked[0]).toContain("LIMIT 5001");
+    expect(await reading(5_001).reader.measureRows("a".repeat(64), {})).toBeNull();
   });
 });

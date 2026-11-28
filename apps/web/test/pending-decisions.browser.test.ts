@@ -1,0 +1,491 @@
+// The ホーム page's 判断待ち panel (ADR 0126) against a synthetic server: one
+// line per kind with its count, a link to the page that decides the first
+// item, the reason of a line that cannot be counted, no total from an earlier
+// answer once a later read fails, a wait announced as a status and a failure
+// as an alert with a retry named for it, a refresh that starts on its own
+// after a failure waiting as a status, and no panel for a caller the route
+// refuses or on a store that does not advertise the route.
+// Every id is synthetic.
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { chromium, type Browser } from "playwright";
+import type { Overview } from "../../../packages/observation-shared/src/api-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import {
+  PENDING_DECISION_HANDLERS,
+  PENDING_DECISION_KINDS,
+  PENDING_DECISIONS_COUNT_BOUND,
+  PENDING_DECISIONS_ID_BYTES,
+  PENDING_DECISIONS_IDS_SHOWN,
+  PENDING_DECISIONS_MAX_BYTES,
+  PENDING_DECISIONS_NOT_COVERED,
+  type PendingDecisionLine,
+} from "../../../packages/domain/src/pending-decisions.ts";
+import {
+  PENDING_DECISIONS_PATH,
+  validPendingDecisions,
+} from "../../../packages/observation-shared/src/pending-decisions-contract.ts";
+import { auditPage } from "./a11y-audit.ts";
+
+const client = join(import.meta.dir, "../dist-production");
+const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
+const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
+if (!runnable && process.env["CI"] === "true") process.exitCode = 1;
+
+const overview: Overview = { counts: [], sources: [], fetchRuns: [], parseRuns: [] };
+
+const lines: PendingDecisionLine[] = PENDING_DECISION_KINDS.map((kind) => {
+  const base = {
+    kind,
+    handler: PENDING_DECISION_HANDLERS[kind],
+    timeBasis: kind.includes("candidate") ? ("not_recorded" as const) : ("created" as const),
+  };
+  if (kind === "maintenance-survey.proposal")
+    return {
+      ...base,
+      state: "unavailable",
+      reason: "unauthorized",
+      count: null,
+      complete: false,
+      ids: [],
+      oldestAt: null,
+    };
+  if (kind === "card-settlement.statement")
+    return {
+      ...base,
+      state: "counted",
+      reason: null,
+      count: 3,
+      complete: true,
+      ids: ["cs_synthetic_1", "cs_synthetic_2"],
+      oldestAt: "2099-01-05T00:00:00Z",
+    };
+  if (kind === "pending-posted.link")
+    return {
+      ...base,
+      state: "counted",
+      reason: null,
+      count: PENDING_DECISIONS_COUNT_BOUND,
+      complete: false,
+      ids: ["rp_synthetic"],
+      oldestAt: "2099-01-01T00:00:00Z",
+    };
+  return {
+    ...base,
+    state: "counted",
+    reason: null,
+    count: 0,
+    complete: true,
+    ids: [],
+    oldestAt: null,
+  };
+});
+const answer = {
+  apiVersion: 2,
+  schemaVersion: "kogane-pending-decisions-v1",
+  asOf: "2099-01-10T00:00:00.000Z",
+  bounds: {
+    idsShown: PENDING_DECISIONS_IDS_SHOWN,
+    idBytes: PENDING_DECISIONS_ID_BYTES,
+    countBound: PENDING_DECISIONS_COUNT_BOUND,
+    maxBytes: PENDING_DECISIONS_MAX_BYTES,
+  },
+  kinds: lines,
+  notCovered: PENDING_DECISIONS_NOT_COVERED,
+  decisions: "elsewhere",
+};
+
+describe("the wire contract", () => {
+  test("accepts the fixture and refuses what the summary cannot produce", () => {
+    expect(validPendingDecisions(answer)).toBe(true);
+    const mutate = (change: (copy: any) => void): boolean => {
+      const copy = structuredClone(answer) as any;
+      change(copy);
+      return validPendingDecisions(copy);
+    };
+    // A kind out of order, a handler the summary does not name, a cut count
+    // that is not the bound, more ids than the count, a time on a zero line,
+    // a count on an unavailable line, six ids.
+    expect(mutate((copy) => copy.kinds.reverse())).toBe(false);
+    expect(mutate((copy) => (copy.kinds[0].handler.page = "/elsewhere"))).toBe(false);
+    expect(mutate((copy) => (copy.kinds[6].count = 5))).toBe(false);
+    expect(mutate((copy) => (copy.kinds[0].count = 1))).toBe(false);
+    expect(mutate((copy) => (copy.kinds[2].oldestAt = "2099-01-01T00:00:00Z"))).toBe(false);
+    expect(mutate((copy) => (copy.kinds[7].count = 0))).toBe(false);
+    expect(
+      mutate((copy) => {
+        copy.kinds[0].count = 9;
+        copy.kinds[0].ids = ["a", "b", "c", "d", "e", "f"];
+      }),
+    ).toBe(false);
+    expect(mutate((copy) => (copy.decisions = "here"))).toBe(false);
+  });
+});
+
+describe.if(runnable)("the 判断待ち panel on ホーム", () => {
+  let browser: Browser;
+  let server: ReturnType<typeof Bun.serve>;
+  let origin: string;
+  let refuse = false;
+  let unavailable = false;
+  let advertised = true;
+  let requested = 0;
+  let current: unknown = answer;
+  // While set, a read of the route waits for it before it answers.
+  let held: Promise<void> | null = null;
+  beforeAll(async () => {
+    server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === "/api/meta")
+          return Response.json({
+            apiVersion: 1,
+            source: { kind: "central-store", classification: "financial" },
+            capabilities: { ...CENTRAL_STORE_CAPABILITIES, pendingDecisions: advertised },
+          });
+        if (url.pathname === "/api/overview") return Response.json(overview);
+        if (url.pathname === PENDING_DECISIONS_PATH) requested += 1;
+        if (url.pathname === PENDING_DECISIONS_PATH && held !== null) await held;
+        if (url.pathname === PENDING_DECISIONS_PATH)
+          return refuse
+            ? Response.json({ error: "operator_required" }, { status: 403 })
+            : unavailable
+              ? // As the App answers a read whose store read failed: the
+                // route runs in `catalogue`, which answers any failure that
+                // is not already an HTTP refusal as 503 catalogue_read_failed.
+                Response.json(
+                  { error: "catalogue_read_failed", requestId: "req_synthetic" },
+                  { status: 503 },
+                )
+              : Response.json(current);
+        if (url.pathname.startsWith("/api/"))
+          return Response.json({ error: "not_found" }, { status: 404 });
+        return new Response(
+          Bun.file(
+            url.pathname.startsWith("/assets/")
+              ? join(client, url.pathname)
+              : join(client, "index.html"),
+          ),
+        );
+      },
+    });
+    origin = `http://127.0.0.1:${server.port}`;
+    browser = await chromium.launch({ executablePath });
+  }, 60_000);
+  afterAll(async () => {
+    await browser?.close();
+    server?.stop(true);
+  });
+
+  test("each kind is one line, linked to the page that decides it", async () => {
+    refuse = false;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/`);
+      const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+      await panel.getByRole("heading", { name: "判断待ち" }).waitFor();
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(await panel.locator("li").count()).toBe(PENDING_DECISION_KINDS.length);
+      expect(await panel.getByText("3件", { exact: true }).count()).toBe(1);
+      expect(await panel.getByText(`${PENDING_DECISIONS_COUNT_BOUND}件以上`).count()).toBe(1);
+      expect(await panel.getByText("この権限では数えられません").count()).toBe(1);
+      // A cut line and an uncounted one leave the total a lower bound.
+      expect(await panel.locator(".panel-head .count").textContent()).toBe(
+        `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
+      );
+      const links = panel.getByRole("link", { name: "確認する →" });
+      expect(await links.count()).toBe(2);
+      expect(await links.nth(0).getAttribute("href")).toBe("/reconciliation/cs_synthetic_1");
+      expect(await links.nth(1).getAttribute("href")).toBe("/purchases");
+      expect(await auditPage(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("the oldest proposal's date is its date in Asia/Tokyo, not in UTC", async () => {
+    refuse = false;
+    // 20:00 UTC on 30 September is 05:00 on 1 October in Tokyo. The time is
+    // written as the job stores it (`new Date().toISOString()`).
+    current = {
+      ...answer,
+      kinds: lines.map((line) =>
+        line.kind === "card-settlement.statement"
+          ? { ...line, oldestAt: "2026-09-30T20:00:00.000Z" }
+          : line,
+      ),
+    };
+    expect(validPendingDecisions(current)).toBe(true);
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/`);
+      const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+      const line = panel.locator("li").filter({ hasText: "カード請求と引落の照合" });
+      await line.waitFor();
+      expect(await line.locator(".dim").textContent()).toBe(" 最も古い提案 2026-10-01");
+    } finally {
+      current = answer;
+      await page.close();
+    }
+  }, 30_000);
+
+  test("the total says 以上 exactly when some line is cut or could not be counted", async () => {
+    refuse = false;
+    // Every line counted and complete but for the change lifecycle, which
+    // this deployment does not serve: the total is exact. Each other way a
+    // line can fall short, on its own, makes it a lower bound (INV05).
+    const unavailable = { state: "unavailable", count: null, complete: false, ids: [] };
+    const cases: [Partial<Record<string, object>>, string][] = [
+      [{}, "8件"],
+      [{ "account-candidate.open": { ...unavailable, reason: "budget_exceeded" } }, "8件以上"],
+      [{ "card-ownership.account": { ...unavailable, reason: "unauthorized" } }, "8件以上"],
+      [
+        { "pending-posted.link": { count: PENDING_DECISIONS_COUNT_BOUND, complete: false } },
+        `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
+      ],
+    ];
+    try {
+      for (const [changes, total] of cases) {
+        const kinds = lines.map((line) => ({
+          ...line,
+          ...(line.kind === "maintenance-survey.proposal"
+            ? { state: "counted", reason: null, count: 0, complete: true }
+            : {}),
+          ...(line.kind === "pending-posted.link" ? { count: 5, complete: true } : {}),
+          ...(line.kind === "change-plan.open"
+            ? { ...unavailable, reason: "not_served", oldestAt: null }
+            : {}),
+          ...changes[line.kind],
+        }));
+        current = { ...answer, kinds };
+        expect(validPendingDecisions(current), total).toBe(true);
+        const page = await browser.newPage();
+        try {
+          await page.goto(`${origin}/`);
+          const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+          await panel.getByText("カード請求と引落の照合").waitFor();
+          expect(await panel.locator(".panel-head .count").textContent()).toBe(total);
+        } finally {
+          await page.close();
+        }
+      }
+    } finally {
+      current = answer;
+    }
+  }, 60_000);
+
+  test("a read that fails after an answer shows no total from the earlier answer", async () => {
+    refuse = false;
+    // The answer once the read recovers: one more statement waits.
+    const recovered = {
+      ...answer,
+      kinds: lines.map((line) =>
+        line.kind === "card-settlement.statement" ? { ...line, count: 4 } : line,
+      ),
+    };
+    expect(validPendingDecisions(recovered)).toBe(true);
+    let release = (): void => {};
+    const page = await browser.newPage();
+    const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+    const total = panel.locator(".panel-head .count");
+    const failed = panel.getByRole("alert").getByText("判断待ちの件数を読み込めませんでした");
+    try {
+      await page.goto(`${origin}/`);
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(await total.textContent()).toBe(`${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
+      // The next read fails (the panel does not retry it): the body says the
+      // count could not be read, so the heading must not keep the earlier
+      // answer's total beside it as if it were current (INV05).
+      unavailable = true;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await failed.waitFor();
+      expect(await total.count()).toBe(0);
+      // A read after the failure, still in flight: the failure stands, and
+      // there is still no total.
+      unavailable = false;
+      current = recovered;
+      held = new Promise((resolve) => (release = resolve));
+      const before = requested;
+      const asked = (): boolean => requested > before;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      while (!asked()) await Bun.sleep(10);
+      expect(await failed.count()).toBe(1);
+      expect(await total.count()).toBe(0);
+      // The read succeeds: the heading shows its total, not the earlier one.
+      release();
+      held = null;
+      await failed.waitFor({ state: "detached" });
+      expect(await total.textContent()).toBe(`${String(4 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
+    } finally {
+      release();
+      held = null;
+      unavailable = false;
+      current = answer;
+      await page.close();
+    }
+  }, 30_000);
+
+  test("loading is a status, and a failed read an alert whose retry is named for it", async () => {
+    refuse = false;
+    unavailable = true;
+    let release = (): void => {};
+    const page = await browser.newPage();
+    const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+    try {
+      // The first read waits: the panel says so as a status, and no total.
+      held = new Promise((resolve) => (release = resolve));
+      await page.goto(`${origin}/`);
+      await panel
+        .getByRole("status")
+        .getByText("判断待ちの件数を読み込んでいます…")
+        .waitFor({ timeout: 5_000 });
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      // It fails: an alert, announced, with a retry that says what it repeats.
+      release();
+      held = null;
+      const alert = panel.getByRole("alert");
+      await alert.getByText("判断待ちの件数を読み込めませんでした").waitFor({ timeout: 5_000 });
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      expect(await auditPage(page)).toEqual([]);
+      // The retry reads again. While that read is in flight the alert
+      // stands, its button waiting, rather than turning back into the
+      // loading status, and there is still no total.
+      unavailable = false;
+      held = new Promise((resolve) => (release = resolve));
+      const before = requested;
+      await alert.getByRole("button", { name: "判断待ちの件数を再試行", exact: true }).click();
+      const asked = (): boolean => requested > before;
+      while (!asked()) await Bun.sleep(10);
+      await alert
+        .getByRole("button", { name: "判断待ちの件数を再試行中…", exact: true })
+        .waitFor({ timeout: 2_000 });
+      expect(await panel.getByRole("status").count()).toBe(0);
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      // The answer replaces the alert.
+      release();
+      held = null;
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(requested).toBe(before + 1);
+      expect(await alert.count()).toBe(0);
+      expect(await panel.locator(".panel-head .count").textContent()).toBe(
+        `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
+      );
+    } finally {
+      release();
+      held = null;
+      unavailable = false;
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a refresh that starts on its own after a failed first read waits as a status, never as the earlier alert", async () => {
+    refuse = false;
+    unavailable = true;
+    let release = (): void => {};
+    const page = await browser.newPage();
+    const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+    const total = panel.locator(".panel-head .count");
+    const loading = panel.getByRole("status").getByText("判断待ちの件数を読み込んでいます…");
+    const failed = panel.getByRole("alert").getByText("判断待ちの件数を読み込めませんでした");
+    // Waits until the panel has asked for one more read than `before`.
+    const askedAfter = async (before: number): Promise<void> => {
+      const asked = (): boolean => requested > before;
+      while (!asked()) await Bun.sleep(10);
+    };
+    try {
+      await page.goto(`${origin}/`);
+      await failed.waitFor({ timeout: 5_000 });
+      // The page comes back into view: the refresh it starts is no retry the
+      // owner pressed, so the panel waits as a status, with no total.
+      held = new Promise((resolve) => (release = resolve));
+      let before = requested;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await askedAfter(before);
+      await loading.waitFor({ timeout: 2_000 });
+      expect(await panel.getByRole("alert").count()).toBe(0);
+      expect(await total.count()).toBe(0);
+      release();
+      held = null;
+      await failed.waitFor({ timeout: 5_000 });
+      // A pressed retry that fails again leaves its alert; a refresh that
+      // starts on its own after that second failure waits as a status, not
+      // as the alert of the failure the retry repeated.
+      held = new Promise((resolve) => (release = resolve));
+      before = requested;
+      await panel
+        .getByRole("alert")
+        .getByRole("button", { name: "判断待ちの件数を再試行", exact: true })
+        .click();
+      await askedAfter(before);
+      await panel
+        .getByRole("alert")
+        .getByRole("button", { name: "判断待ちの件数を再試行中…", exact: true })
+        .waitFor({ timeout: 2_000 });
+      release();
+      held = null;
+      await panel
+        .getByRole("alert")
+        .getByRole("button", { name: "判断待ちの件数を再試行", exact: true })
+        .waitFor({ timeout: 5_000 });
+      unavailable = false;
+      held = new Promise((resolve) => (release = resolve));
+      before = requested;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await askedAfter(before);
+      await loading.waitFor({ timeout: 2_000 });
+      expect(await panel.getByRole("alert").count()).toBe(0);
+      expect(await total.count()).toBe(0);
+      // The answer replaces the status, and no alert comes back after it.
+      release();
+      held = null;
+      await panel.getByText("カード請求と引落の照合").waitFor();
+      expect(await panel.getByRole("alert").count()).toBe(0);
+      expect(await total.textContent()).toBe(`${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`);
+    } finally {
+      release();
+      held = null;
+      unavailable = false;
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a caller the route refuses sees no panel", async () => {
+    refuse = true;
+    const page = await browser.newPage();
+    try {
+      // Listen before navigating: the refusal can arrive before the heading
+      // renders, and a listener added after it would wait forever.
+      const refused = page.waitForResponse((response) =>
+        response.url().endsWith(PENDING_DECISIONS_PATH),
+      );
+      await page.goto(`${origin}/`);
+      await page.getByRole("heading", { name: "ホーム", exact: true }).waitFor();
+      await refused;
+      await page.waitForTimeout(200);
+      expect(await page.locator('section[aria-labelledby="pending-decisions"]').count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a store that does not advertise the route is never asked and shows no panel", async () => {
+    refuse = false;
+    advertised = false;
+    requested = 0;
+    const page = await browser.newPage();
+    try {
+      // The local evidence browser serves no such route: probing it would be
+      // a failed request in the console on every visit to ホーム.
+      await page.goto(`${origin}/`, { waitUntil: "networkidle" });
+      await page.getByRole("heading", { name: "ホーム", exact: true }).waitFor();
+      expect(await page.locator('section[aria-labelledby="pending-decisions"]').count()).toBe(0);
+      expect(requested).toBe(0);
+    } finally {
+      advertised = true;
+      await page.close();
+    }
+  }, 30_000);
+});

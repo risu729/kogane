@@ -15,7 +15,7 @@
 //   G2-12  a lost response converges without rebuilding or re-consuming.
 //   G2-13  building, a flag that is off and a missing processor never complete.
 //   G2-14  a guard that matches no row leaves nothing half-written.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   balanceProjectionOutboxProcessor,
@@ -25,6 +25,7 @@ import {
 import { dispatchDecisionOutbox, type OutboxRow } from "../src/decision-outbox.ts";
 import { inputObjectKey, readInputRecord } from "../src/projection-input.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -46,9 +47,9 @@ const extraPipeline = async (): Promise<Env> => {
   return extra.env;
 };
 
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
   await extra?.mf.dispose();
@@ -138,9 +139,11 @@ test("D1 counts the revision bump in meta.changes: one ledger row is two changes
   // migration 0038 every write to a dependency-ledger table also writes the
   // revision row. A guard that expects exactly one change on a ledger table
   // would therefore never match again, and a business count derived from
-  // `meta.changes` on one would be doubled. Nothing in services/** or
-  // packages/** does either (the three counting sites use RETURNING), and
-  // this test is what a reader should find when wondering why.
+  // `meta.changes` on one would be doubled (a table that is also on the
+  // snapshot-input ledger of migration 0108 counts a third row, for its own
+  // revision). Nothing in services/** or packages/** does either (the three
+  // counting sites use RETURNING), and this test is what a reader should find
+  // when wondering why.
   const before = await currentCoreRevision(env.DB);
   const ledger = await env.DB.prepare(
     `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,

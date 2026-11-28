@@ -5,15 +5,26 @@
 // the matcher stores one (card-purchase-world.ts). Synthetic values only.
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
+import { CARD_PURCHASE_LINES_MAX } from "../../domain/src/card-purchase-view.ts";
 import type { SourceFactRef } from "../../domain/src/events.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import {
   validAgentCardPurchasePage,
   validCardPurchasePage,
 } from "../../observation-shared/src/card-purchase-contract.ts";
+import { validPagedFields } from "../../observation-shared/src/paging-contract.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
-import { queryCardPurchases } from "../src/query/card-purchases.ts";
 import {
+  decodeLinesCursor,
+  encodeLinesCursor,
+  queryCardPurchaseCards,
+  queryCardPurchaseLines,
+  queryCardPurchases,
+} from "../src/query/card-purchases.ts";
+import {
+  answerPurchasesExplain,
+  explainCardPurchaseCards,
+  explainCardPurchaseLines,
   explainCardPurchases,
   parsePurchasesExplainRequest,
   type PurchasesExplainOutcome,
@@ -146,6 +157,18 @@ async function world() {
   return { w, pendingEvent, postedEvent, proposalId };
 }
 
+/** A seeded uniform draw in [0, 1) (mulberry32), so a failing store replays. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function explained(outcome: PurchasesExplainOutcome) {
   if (!outcome.ok) throw new Error(`refused: ${outcome.error.code}`);
   return outcome.explanation;
@@ -169,6 +192,8 @@ describe("the agent reads the operator's page", () => {
         decisions: "operator-only",
         // Two events: no page follows the first, so none is offered.
         nextPage: "none",
+        next: null,
+        paging: { limit: 50, returned: page.items.length, hasMore: false, stoppedBy: null },
         data: withoutReviewAffordances(page),
       });
       // Nothing but the candidates' affordances differs from the page.
@@ -410,6 +435,357 @@ describe("the request is closed", () => {
     ] as const)
       expect(parsePurchasesExplainRequest(body)).toEqual({ ok: false, code, refs: [...refs] });
   });
+
+  test("a view: events is the page's request, cards takes a period or a usage month (ADR 0125)", () => {
+    const event = `purchase_${"a".repeat(64)}`;
+    expect(parsePurchasesExplainRequest({ view: "events", period: "2026-09" })).toEqual({
+      ok: true,
+      value: { period: "2026-09" },
+    });
+    for (const [body, value] of [
+      [
+        { view: "cards", period: "2026-09" },
+        { view: "cards", period: "2026-09" },
+      ],
+      [
+        { view: "cards", usageMonth: "2026-08" },
+        { view: "cards", usageMonth: "2026-08" },
+      ],
+    ] as const)
+      expect(parsePurchasesExplainRequest(body)).toEqual({ ok: true, value });
+    for (const [body, refs] of [
+      [{ view: "summary" }, ["view"]],
+      [{ view: null }, ["view"]],
+      [{ usageMonth: "2026-08" }, ["usageMonth"]],
+      [{ view: "events", usageMonth: "2026-08" }, ["usageMonth"]],
+      [{ view: "cards", usageMonth: "202608" }, ["usageMonth"]],
+      [{ view: "cards", usageMonth: 202608 }, ["usageMonth"]],
+      [{ view: "cards", period: "2026-09", usageMonth: "2026-08" }, ["period", "usageMonth"]],
+      [{ view: "cards" }, ["period", "usageMonth"]],
+      [{ view: "cards", period: "2026-09", offset: 0 }, ["offset"]],
+      [{ view: "cards", usageMonth: "2026-08", eventId: event }, ["eventId"]],
+    ] as const)
+      expect(parsePurchasesExplainRequest(body)).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: [...refs],
+      });
+  });
+});
+
+describe("the per-card view (ADR 0125)", () => {
+  test("is graded like the page, refused past the budget, and answers the page's per-card reader", async () => {
+    const { w } = await world();
+    const before = tables(w.db);
+    const ok = await explainCardPurchaseCards({
+      grant: grant(),
+      sql: w.sql,
+      request: { period: "2026-09" },
+    });
+    expect(ok).toEqual({
+      ok: true,
+      explanation: {
+        schemaVersion: "kogane-card-purchases-cards-v1",
+        query: { view: "cards", period: "2026-09", usageMonth: null },
+        decisions: "operator-only",
+        data: await queryCardPurchaseCards(w.sql, { period: "2026-09" }),
+      },
+    });
+    // The dispatcher picks the view.
+    expect(
+      await answerPurchasesExplain({
+        grant: grant(),
+        sql: w.sql,
+        request: { view: "cards", period: "2026-09" },
+      }),
+    ).toEqual(ok);
+    for (const [refused, code, refs] of [
+      [grant({ capabilities: ["summary.read"] }), "unauthorized", ["capability:records.read"]],
+      [
+        grant({ scopes: { sources: ["vpass"], accounts: "*" } }),
+        "evidence_restricted",
+        ["scope:source"],
+      ],
+      [
+        grant({ budget: { maxRows: 99, maxProposalTargets: 1, maxExplainDepth: 1 } }),
+        "budget_exceeded",
+        ["budget:maxRows=99"],
+      ],
+    ] as const) {
+      const outcome = await explainCardPurchaseCards({
+        grant: refused,
+        sql: w.sql,
+        request: { usageMonth: "2026-08" },
+      });
+      expect(outcome).toMatchObject({ ok: false, error: { code, refs: [...refs] } });
+    }
+    expect(tables(w.db)).toEqual(before);
+  });
+});
+
+describe("the line view (ADR 0125 amendment)", () => {
+  test("takes one month, an account, a sort and its own cursor, and nothing else", async () => {
+    const { w } = await world();
+    for (let row = 0; row < 30; row += 1)
+      await w.recognise(
+        w.usage({
+          externalId: `vpass:card-001:202609:web:row-${row}:0`,
+          amount: -(100 + row),
+          usageDate: "2026-08-10",
+        }),
+      );
+    const cursor = (await queryCardPurchaseLines(w.sql, { period: "2026-09", sort: "amount" }))
+      .nextCursor!;
+    for (const [body, value] of [
+      [
+        { view: "lines", period: "2026-09" },
+        { view: "lines", period: "2026-09" },
+      ],
+      [
+        { view: "lines", usageMonth: "2026-08", account: "acct-card", sort: "date" },
+        { view: "lines", usageMonth: "2026-08", account: "acct-card", sort: "date" },
+      ],
+      [
+        { view: "lines", period: "2026-09", sort: "amount", cursor },
+        { view: "lines", period: "2026-09", sort: "amount", cursor },
+      ],
+    ] as const)
+      expect(parsePurchasesExplainRequest(body)).toEqual({ ok: true, value });
+    const event = `purchase_${"a".repeat(64)}`;
+    for (const [body, refs] of [
+      [{ view: "lines" }, ["period", "usageMonth"]],
+      [{ view: "lines", period: "2026-09", usageMonth: "2026-08" }, ["period", "usageMonth"]],
+      [{ view: "lines", period: "2026-09", offset: 0 }, ["offset"]],
+      [{ view: "lines", period: "2026-09", eventId: event }, ["eventId"]],
+      [{ view: "lines", period: "2026-09", account: "" }, ["account"]],
+      [{ view: "lines", period: "2026-09", account: "a b" }, ["account"]],
+      [{ view: "lines", period: "2026-09", account: 7 }, ["account"]],
+      [{ view: "lines", period: "2026-09", sort: "merchant" }, ["sort"]],
+      [{ view: "lines", period: "2026-09", cursor: "garbage" }, ["cursor"]],
+      [{ view: "lines", period: "2026-09", cursor: 1 }, ["cursor"]],
+      [{ view: "lines", period: "2026-09", cursor: "a".repeat(2049) }, ["cursor"]],
+      // Another request's cursor: its sort, account or month differs.
+      [{ view: "lines", period: "2026-09", cursor }, ["cursor"]],
+      [
+        { view: "lines", period: "2026-09", sort: "amount", account: "acct-card", cursor },
+        ["cursor"],
+      ],
+      [{ view: "lines", usageMonth: "2026-09", sort: "amount", cursor }, ["cursor"]],
+      // The line view's keys beside another view.
+      [{ period: "2026-09", sort: "amount" }, ["sort"]],
+      [{ view: "events", account: "acct-card" }, ["account"]],
+      [{ view: "cards", period: "2026-09", account: "acct-card", cursor }, ["account", "cursor"]],
+    ] as const)
+      expect(parsePurchasesExplainRequest(body), JSON.stringify(body)).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: [...refs],
+      });
+  });
+
+  test("is graded like the page, bounded by maxRows across pages, and answers the route's reader", async () => {
+    const { w } = await world();
+    for (let row = 0; row < 30; row += 1)
+      await w.recognise(
+        w.usage({
+          externalId: `vpass:card-001:202609:web:row-${row}:0`,
+          amount: -(100 + row),
+          usageDate: "2026-08-10",
+        }),
+      );
+    const before = tables(w.db);
+    const request = { period: "2026-09", sort: "amount" } as const;
+    const data = await queryCardPurchaseLines(w.sql, request);
+    expect(data.nextCursor).not.toBeNull();
+    const ok = await explainCardPurchaseLines({ grant: grant(), sql: w.sql, request });
+    expect(ok).toEqual({
+      ok: true,
+      explanation: {
+        schemaVersion: "kogane-card-purchases-lines-v1",
+        query: {
+          view: "lines",
+          account: null,
+          period: "2026-09",
+          usageMonth: null,
+          sort: "amount",
+        },
+        decisions: "operator-only",
+        nextPage: "offered",
+        next: { arguments: { cursor: data.nextCursor! } },
+        paging: {
+          limit: 25,
+          returned: data.lines.length,
+          hasMore: true,
+          stoppedBy: data.lines.length < 25 ? "bytes" : "limit",
+        },
+        data,
+      },
+    });
+    // The dispatcher picks the view.
+    expect(
+      await answerPurchasesExplain({
+        grant: grant(),
+        sql: w.sql,
+        request: { view: "lines", ...request },
+      }),
+    ).toEqual(ok);
+    // The last page offers nothing more.
+    const last = await explainCardPurchaseLines({
+      grant: grant(),
+      sql: w.sql,
+      request: { ...request, cursor: data.nextCursor! },
+    });
+    expect(last).toMatchObject({
+      ok: true,
+      explanation: { nextPage: "none", data: { nextCursor: null } },
+    });
+    // A grant that may read one page but not two: the next page is withheld and said.
+    const narrow = grant({ budget: { maxRows: 30, maxProposalTargets: 1, maxExplainDepth: 1 } });
+    if (!ok.ok) throw new Error("refused");
+    expect(await explainCardPurchaseLines({ grant: narrow, sql: w.sql, request })).toEqual({
+      ok: true,
+      explanation: {
+        ...ok.explanation,
+        nextPage: "budget_exceeded",
+        // Withheld (ADR 0128): lines follow, no continuation is offered.
+        next: null,
+        paging: { ...ok.explanation.paging, stoppedBy: "budget" },
+        data: { ...data, nextCursor: null },
+      },
+    });
+    // And a cursor past it is refused before anything is read.
+    const probe = recorded(w.sql);
+    expect(
+      await explainCardPurchaseLines({
+        grant: narrow,
+        sql: probe.sql,
+        request: { ...request, cursor: data.nextCursor! },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "budget_exceeded", refs: ["budget:maxRows=30"] } });
+    expect(probe.queries).toEqual([]);
+    // The cursor is not signed: one rewritten to claim fewer listed lines is
+    // still charged the depth its key has in the month, so it reads no deeper.
+    const issued = decodeLinesCursor(data.nextCursor!)!;
+    expect(issued.listed).toBe(data.lines.length);
+    const rewritten = encodeLinesCursor({ ...issued, listed: 1 });
+    expect(
+      await explainCardPurchaseLines({
+        grant: narrow,
+        sql: w.sql,
+        request: { ...request, cursor: rewritten },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "budget_exceeded", refs: ["budget:maxRows=30"] } });
+    // Under a grant deep enough, the same rewritten cursor reads the page its key names.
+    const healed = await queryCardPurchaseLines(w.sql, { ...request, cursor: rewritten });
+    expect(healed.lines).toEqual(last.ok ? last.explanation.data.lines : []);
+    for (const [refused, code, refs] of [
+      [grant({ capabilities: ["summary.read"] }), "unauthorized", ["capability:records.read"]],
+      [
+        grant({ scopes: { sources: "*", accounts: ["acct-card"] } }),
+        "evidence_restricted",
+        ["scope:account"],
+      ],
+      [
+        grant({ budget: { maxRows: 24, maxProposalTargets: 1, maxExplainDepth: 1 } }),
+        "budget_exceeded",
+        ["budget:maxRows=24"],
+      ],
+    ] as const) {
+      const probe = recorded(w.sql);
+      const outcome = await explainCardPurchaseLines({
+        grant: refused,
+        sql: probe.sql,
+        request: { usageMonth: "2026-08", account: "acct-card" },
+      });
+      expect(outcome).toMatchObject({ ok: false, error: { code, refs: [...refs] } });
+      expect(probe.queries).toEqual([]);
+    }
+    // The summary bound refuses the month, never a part of it.
+    expect(
+      await explainCardPurchaseLines({
+        grant: grant(),
+        sql: recorded(w.sql, { overfull: true }).sql,
+        request,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "budget_exceeded", refs: ["budget:cardPurchaseEvents=10000"] },
+    });
+    expect(tables(w.db)).toEqual(before);
+  });
+});
+
+describe("the bytes stop (ADR 0128 §2)", () => {
+  test("random stores: a page the byte bound ends is short, and a full page says limit", async () => {
+    // Seeded stores of 0 to 80 lines whose counterparties run from empty to
+    // past the line's cut, in plain, JSON-escaped and astral text, with and
+    // without an account id on each line, walked in both sorts to the end.
+    const escaped = "\u0001";
+    const astral = "🛒";
+    let shortPages = 0;
+    let fullPages = 0;
+    for (let seed = 1; seed <= 16; seed += 1) {
+      const random = seededRandom(seed);
+      const w = new PurchaseWorld();
+      worlds.push(w);
+      const accountId = random() < 0.5 ? `account_${"f".repeat(64)}` : null;
+      if (accountId !== null)
+        w.run(
+          "INSERT INTO accounts(id,label,role,status) VALUES(?,'Synthetic card','liability','identified')",
+          accountId,
+        );
+      const rows = Math.floor(random() * 81);
+      // Some stores' lines all fit a full page; others' pass the byte bound.
+      const longest = [0, 12, 40, 80][Math.floor(random() * 4)]!;
+      for (let row = 0; row < rows; row += 1) {
+        const char = [" ", "a", escaped, astral][Math.floor(random() * 4)]!;
+        await w.recognise(
+          w.usage({
+            externalId: `vpass:card-009:202609:web:row-${row}:0`,
+            amount: -(1 + Math.floor(random() * 2_000_000_000)),
+            usageDate: `2026-08-${String(1 + Math.floor(random() * 28)).padStart(2, "0")}`,
+            sourceAccount: "vpass:card-009",
+            ...(accountId === null ? {} : { accountId }),
+            counterparty: char.repeat(Math.floor(random() * (longest + 1))),
+          }),
+        );
+      }
+      for (const sort of ["date", "amount"] as const) {
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const outcome = await explainCardPurchaseLines({
+            grant: grant(),
+            sql: w.sql,
+            request: { period: "2026-09", sort, ...(cursor === undefined ? {} : { cursor }) },
+          });
+          if (!outcome.ok) throw new Error(`refused: ${outcome.error.code}`);
+          const answer = outcome.explanation;
+          const { paging } = answer;
+          expect(validPagedFields(answer), JSON.stringify({ seed, sort, paging })).toBe(true);
+          expect(paging.limit).toBe(CARD_PURCHASE_LINES_MAX);
+          if (paging.stoppedBy === "bytes") {
+            expect(paging.returned).toBeLessThan(CARD_PURCHASE_LINES_MAX);
+            shortPages += 1;
+          }
+          // And a short page that continues was ended by the byte bound.
+          if (paging.hasMore && paging.returned < CARD_PURCHASE_LINES_MAX)
+            expect(paging.stoppedBy).toBe("bytes");
+          if (paging.hasMore && paging.returned === CARD_PURCHASE_LINES_MAX) {
+            expect(paging.stoppedBy).toBe("limit");
+            fullPages += 1;
+          }
+          seen.push(...answer.data.lines.map((line) => line.eventId));
+          cursor = answer.data.nextCursor ?? undefined;
+        } while (cursor !== undefined);
+        expect(new Set(seen).size).toBe(rows);
+        expect(seen).toHaveLength(rows);
+      }
+    }
+    // Both stops were reached, so neither check above is vacuous.
+    expect(shortPages).toBeGreaterThan(0);
+    expect(fullPages).toBeGreaterThan(0);
+  }, 60_000);
 });
 
 describe("no path writes", () => {

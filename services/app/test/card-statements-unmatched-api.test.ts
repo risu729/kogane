@@ -2,13 +2,15 @@
 // real CORE migrations: `GET /api/v2/reconciliation/card-statements-unmatched`
 // for the operator's カード照合 page and `kogane.card-settlements.unmatched`
 // for an agent answer one page of one read (docs/card-settlements.md,
-// Statements without a candidate). The store holds one MyJCB statement total
-// and no bank debit. The codes and the planner's answers are exercised on the
+// Statements without a candidate). The store holds four MyJCB statement
+// totals: one exact, one the decimal-v1 projection could not read, one with no
+// due date and one whose due date is not a civil date; and no bank debit. The codes and the planner's answers are exercised on the
 // complete schema in services/processor/test/card-statements-unmatched.test.ts.
 // Every value is invented.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { STATEMENT_DUE_DATE_REASONS } from "../../../packages/domain/src/card-settlement";
 import { validUnmatchedCardStatementsReview } from "../../../packages/observation-shared/src/card-statements-unmatched-contract";
 import worker from "../src/worker";
 import { callTool, toolContext } from "../src/agent-service";
@@ -47,19 +49,30 @@ beforeAll(async () => {
     VALUES(?,'myjcb-credit-statement-total','1','2099-01-12T00:00:00Z','ok','[]') RETURNING id`)
       .bind(run.artifacts[0]!.id)
       .first<{ id: number }>();
-  await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
-    VALUES(?,'myjcb:synthetic:root','credit_statement_payment_amount',4000,'4000',0,'JPY','2099-01-01','synthetic-total',?)`)
-    .bind(
-      parse!.id,
-      JSON.stringify({
-        _kogane: {
-          period: "2099-01",
-          paymentDate: "2099-01-10",
-          snapshotSemantics: "provider-reported-monthly-payment-amount",
-        },
-      }),
-    )
-    .run();
+  // The second card's total is not a number: decimal-v1 records it `unparsed`.
+  // The third records no due date, and the fourth one that is not a civil date.
+  for (const [card, minor, text, paymentDate] of [
+    ["myjcb:synthetic:root", 4000, "4000", "2099-01-10"],
+    ["myjcb:synthetic:unreadable", null, "unreadable", "2099-01-10"],
+    ["myjcb:synthetic:undated", 4000, "4000", undefined],
+    ["myjcb:synthetic:misdated", 4000, "4000", "2099-02-30"],
+  ] as const)
+    await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+    VALUES(?,?,'credit_statement_payment_amount',?,?,0,'JPY','2099-01-01','synthetic-total',?)`)
+      .bind(
+        parse!.id,
+        card,
+        minor,
+        text,
+        JSON.stringify({
+          _kogane: {
+            period: "2099-01",
+            ...(paymentDate === undefined ? {} : { paymentDate }),
+            snapshotSemantics: "provider-reported-monthly-payment-amount",
+          },
+        }),
+      )
+      .run();
   await publishParse(parse!.id);
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
@@ -184,8 +197,44 @@ describe("GET /api/v2/reconciliation/card-statements-unmatched", () => {
           planner: null,
           acceptable: false,
         },
+        {
+          statement: {
+            sourceAccount: "myjcb:synthetic:unreadable",
+            period: "2099-01",
+            // Not exact: its status and reason, never null or zero (INV05).
+            amount: {
+              unitRef: "JPY",
+              value: { status: "unparsed", reasonCode: "stored:unparsed" },
+            },
+          },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          planner: null,
+          acceptable: false,
+        },
+        // A null due date says why (INV05): nothing recorded, or not a civil date.
+        {
+          statement: {
+            sourceAccount: "myjcb:synthetic:undated",
+            paymentDate: null,
+            paymentDateReason: "payment_date_absent",
+          },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+        },
+        {
+          statement: {
+            sourceAccount: "myjcb:synthetic:misdated",
+            paymentDate: null,
+            paymentDateReason: "payment_date_invalid",
+          },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+        },
       ],
     });
+    // A dated statement carries no reason.
+    expect(page["items"][0].statement).not.toHaveProperty("paymentDateReason");
     expect(await tables()).toEqual(before);
   });
 
@@ -217,6 +266,11 @@ describe("kogane.card-settlements.unmatched", () => {
   it("answers the same page over HTTP and MCP, and is listed to a whole-store records.read grant only", async () => {
     const listed = await mcp({ method: "tools/list" });
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(TOOL);
+    // The description names a null due date's reason field and every code it takes.
+    const described = listed["result"].tools.find((tool: { name: string }) => tool.name === TOOL)
+      .description as string;
+    for (const term of ["paymentDateReason", ...STATEMENT_DUE_DATE_REASONS])
+      expect(described).toContain(term);
     const summaryOnly = readMcpTools(narrow({ capabilities: ["summary.read"] }), {
       reportedState: true,
       cardSettlements: true,
@@ -300,7 +354,7 @@ describe("kogane.card-settlements.unmatched", () => {
         path: "agent-http",
         risk_class: "R0",
         result: "read",
-        diff_json: JSON.stringify({ kind: "read", rows: 1, truncated: false }),
+        diff_json: JSON.stringify({ kind: "read", rows: 4, truncated: false }),
       },
     ]);
   });

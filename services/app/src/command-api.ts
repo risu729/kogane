@@ -27,11 +27,11 @@ import type {
 } from "../../../packages/application/src/index";
 import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
-import { assertOwnOrigin, boundedText, HttpError, json } from "./http";
+import { assertMethod, assertOwnOrigin, boundedText, HttpError, json, WRITE_METHODS } from "./http";
 
 const PREFIX = "/api/command/v1/";
-export const COMMAND_OPERATIONS = ["plan", "simulate", "approve", "commit", "operation"] as const;
-export type CommandOperation = (typeof COMMAND_OPERATIONS)[number];
+const COMMAND_OPERATIONS = ["plan", "simulate", "approve", "commit", "operation"] as const;
+type CommandOperation = (typeof COMMAND_OPERATIONS)[number];
 /** Operations that accept a judgement; agents never reach these. */
 const ACCEPTING: readonly string[] = ["approve", "commit"];
 const BODY_LIMIT = 16 * 1024;
@@ -120,7 +120,7 @@ async function commandRoute(
   operation: CommandOperation,
   call: OperationCall,
 ): Promise<Answer> {
-  if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, WRITE_METHODS);
   if (url.search) throw new HttpError(400, "invalid_query");
   // A page on another site never reaches the flag, the grant or the body
   // (ADR 0078): the operator's browser session is not the operator's intent.
@@ -154,7 +154,7 @@ async function commandRoute(
   if (!executor || typeof executor.fetch !== "function")
     throw new HttpError(503, "command_executor_unavailable");
   let upstream: Response;
-  let text: string;
+  let bytes: ArrayBuffer;
   try {
     upstream = await executor.fetch(
       new Request(`https://observation-pipeline.internal/command/v1/${operation}`, {
@@ -170,16 +170,19 @@ async function commandRoute(
         body: body === "" ? "{}" : body,
       }),
     );
-    text = await upstream.text();
+    // The bytes are relayed; the text is read from them only for the record
+    // (`Response.text()` would drop a leading byte-order mark).
+    bytes = await upstream.arrayBuffer();
   } catch {
     // The answer is the one a thrown executor always produced (500
     // internal_error); the record says the Processor's answer was lost.
     throw new UpstreamLost(500, "internal_error");
   }
-  // Only the status and the JSON body cross back: no upstream headers, no
+  const text = new TextDecoder().decode(bytes);
+  // Only the status and the body's bytes cross back: no upstream headers, no
   // exception text, no provider content.
   return {
-    response: new Response(text, {
+    response: new Response(bytes, {
       status: upstream.status,
       headers: { "content-type": "application/json" },
     }),

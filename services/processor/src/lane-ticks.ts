@@ -26,6 +26,7 @@ import {
   type LaneTickOutcome,
 } from "../../../packages/storage-d1/src/core/lane-ticks.ts";
 import type { CardPurchaseSweepResult } from "./card-purchase-job.ts";
+import { safeFailureCode } from "./collection/failure-code.ts";
 import type { CardDebitAccountSweepResult } from "./card-debit-account-job.ts";
 import {
   CARD_SETTLEMENT_UNMATCHED_CODES,
@@ -133,7 +134,13 @@ export const LANE_TICK_COUNTS = {
     ],
     { skipped: CARD_USAGE_EXCLUSIONS },
   ),
-  reward_claims_sweep: countsOf<RewardPromotionResult>(["scanned", "promoted", "skipped"]),
+  reward_claims_sweep: countsOf<RewardPromotionResult>([
+    "scanned",
+    "promoted",
+    "known",
+    "skipped",
+    "quantity_incomplete",
+  ]),
   price_promotion: countsOf<PricePromotionResult>([
     "scanned",
     "promoted",
@@ -222,7 +229,8 @@ export function laneTick(
 
 /**
  * Writes the tick of a recorded lane. Observability never changes what the
- * lane did: a write that fails is logged as a safe code and the tick goes on.
+ * lane did: a write that fails is logged with the error's built-in class
+ * (`safeFailureCode`), never its own class name or message, and the tick goes on.
  */
 export async function recordTick(
   db: D1Database,
@@ -240,7 +248,7 @@ export async function recordTick(
       JSON.stringify({
         event: "lane_tick_record_failed",
         lane,
-        code: error instanceof Error ? error.constructor.name : "unknown",
+        code: safeFailureCode(error),
       }),
     );
   }

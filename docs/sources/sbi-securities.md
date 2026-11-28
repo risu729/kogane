@@ -433,6 +433,123 @@ behavior remain limits. The catalogue therefore changes only to `partial`,
 not complete. The 67-row browser proof establishes the list contract, not a
 stored production archive.
 
+### 2026-11-20: main-to-mobile hand-off before the mailbox
+
+Seven scheduled mailbox attempts through 2026-11-19, after the archive
+shipped in [#1281](https://github.com/risu729/kogane/pull/1281), each ended in a
+mailbox terminal with `sbi_mailbox_transport_failed`, while the financial
+terminal of the same run published. The owner's ordinary Chrome session showed
+a likely cause, with only paths, statuses and form shapes read; later steps
+share the same code, so the next scheduled run decides whether it was the only
+one. The main-site report link
+answers with an HTTP redirect (a `fetch` with `redirect: "manual"` returned an
+opaque redirect) to the mobile site's one-time hand-off
+`https://m.sbisec.co.jp/switchnavi?page=Edeliv&parm=<one-time>&SwitchFromSite=site4.sbisec.co.jp&...`,
+which redirects again to `https://m.sbisec.co.jp/switchnaviMain` with no
+query. A sandboxed frame without scripts landed on `switchnaviMain`, so neither
+hop is a script or meta-refresh navigation. The collector admitted only a
+direct redirect to `switchnaviMain` and refused the hand-off. It now admits
+that hand-off as an intermediate redirect only (HTTPS, host `m.sbisec.co.jp`,
+path `/switchnavi`, exactly one `page=Edeliv`, no fragment, no port or user
+information); a 200 there is still refused, and the one-time hand-off URL is
+not sent as the landing's referer.
+
+The rest of the chain matched the earlier observations in the same session:
+the entry `deisw070.jsp?ePoboxFlag=true` is 200 `text/html; charset=Shift_JIS`
+with the HTML 4.01 Transitional doctype and one POST form to `/deisw081` with
+the field `ePoboxFlag`; `deisw081` is 200 Shift_JIS HTML with one POST form to
+the mailbox SSO carrying the seven fields `sfn`, `ric`, `ked`, `epr`, `itv`,
+`hav` and `spm`; the SSO redirects to `DPAW010501000`, which leads to the
+application, whose summary (`DPAW010501030`) and list (`DPAW010501010`)
+answered 200. The application also posts `DPAW010601020`, which the collector
+does not need.
+
+The first scheduled run with that change (2026-11-20 21:00 UTC) still ended
+its mailbox with `sbi_mailbox_transport_failed`, so another step refuses too.
+Every refusal collapses into that one closed code, so the client now logs one
+`sbi-mailbox-refused` line per refusal with closed values only: the step
+(`landing`, `entry`, `connect`, `sso`, `application` or `api` with the API
+name), the redirect hop, the last HTTP status, the media type when it is one
+of the flow's own (else `other`), and for a refused redirect its host when it
+is one of the flow's hosts and its route by name (`main-link`, `handoff`,
+`landing`, `entry`, `connect`, `sso`, `bootstrap`, `application`, `api-<name>`),
+else `other`. It never logs provider text: no path, query, cookie, form field
+or body.
+
+The next run (2026-11-21 21:00 UTC) logged the refusal at step `landing`, hop
+0, with no HTTP status: the first request never left. The client called the
+runtime's `fetch` as a method of itself, which the Workers runtime refuses
+with "Illegal invocation" before sending anything; local tests pass any
+function and could not see it. Every mailbox attempt since the archive shipped
+probably ended there, so the hand-off above was never reached in production.
+The client now calls the fetcher unbound, as the Sony Bank client already
+does, and a test fetcher that refuses a receiver pins it.
+
+With requests leaving, the 2026-11-22 21:00 UTC run logged the refusal at
+step `landing`, hop 0: the report link answered 301 to `login.sbisec.co.jp`.
+The collector had opened it with the assets session alone, which is not
+signed in to the classic site that serves the link. The mailbox now signs in
+to the classic site the same way the history pages do (the `ETGate` site link
+from the domestic session, then its redirects) and opens the report link on
+the classic host that sign-in lands on when it is a `site<n>.sbisec.co.jp`
+host, else on the observed `site4` host. A failed sign-in logs
+`sbi-mailbox-refused` with step `session`.
+
+The 2026-11-23 21:00 UTC run, the first with that sign-in, passed it and the
+report link: the refusal moved to step `landing`, hop 1 (the mobile
+hand-off), status 302, with no refused host. The status could be the hand-off's
+own redirect or the report link's, because a hop kept the previous hop's
+status until its own response arrived. So the hand-off either failed to answer
+(a network failure or the per-request timeout), or answered a redirect that a
+rule other than the redirect target refused: a missing or unparsable
+`Location`, a response URL that differs from the request, or a `Set-Cookie`
+the jar refuses. Each hop now starts without a status, and a refusal by the
+navigation's own rules also carries `reason`, the name of the rule (`status`,
+`unexpected-page`, `no-location`, `bad-location`, `redirect-target`,
+`redirect-loop`, `post-redirect`, `too-many-hops`, `request-url`,
+`request-failed` for a request that never answered, `response-url`, or
+`cookie-pair`, `cookie-attribute`, `cookie-domain`, `cookie-path`,
+`cookie-name`, `cookie-header` for a refused cookie), and for a repeated cookie
+attribute its name when it is a standard one (else `other`). Refusals outside
+the navigation (a page's media type or form, an API answer, the response
+bound, a lost lease) still carry no `reason`. Still no header value, cookie
+name or provider text.
+
+The 2026-11-24 21:00 UTC run named it: step `landing`, hop 1, status 302,
+`reason` `cookie-attribute`, `cookieAttribute` `httponly`. The hand-off's
+redirect sets a cookie that repeats `HttpOnly`, and the jar refused every
+repeated attribute. A repeat with the same value says nothing new, so the jar
+now keeps it once; a repeat with another value (two `Path`, `Domain` or
+`Max-Age` values, for example) is still refused as ambiguous.
+
+The 2026-11-25 and 2026-11-26 21:00 UTC runs passed the hand-off, the entry and
+the connecting page, then refused at step `sso`, hop 1, status 200 `text/html`
+with `sbi_mailbox_bootstrap_unobserved`: the SSO redirect reached the bootstrap
+page, but that page departed from the witnessed grammar (one script that stores
+eight known `sessionStorage` keys and then redirects to the application). The
+refusal line now also carries `bootstrapRule`, the part of that grammar the page
+departed from (`html`, `elements`, `script-element`, `script-parse`,
+`statements`, `onload`, `storage`, `redirect-call`, `redirect-function`, and
+since 2026-11-27 `redirect-navigation`, `redirect-dynamic`, `redirect-origin`,
+`redirect-path`), and for a count rule `bootstrapCount`, how many scripts,
+statements, handler actions or redirect-body statements the page had (at most
+99). Never the page text, a script, a key or a
+value.
+
+The 2026-11-27 21:00 UTC run named it: `bootstrapRule` `redirect-function`. The
+page still had one script that stored the eight known keys and then called
+`autoRedirect()`, but the redirect function no longer matched the witnessed
+`window.location.href = origin + path` form. The client never executes the
+page and opens the application itself, so the redirect now only has to be a
+navigation (`[window.]location[.href] = X` or `[window.]location.assign(X)` /
+`.replace(X)`) whose destination is a constant string (literals, an
+expression-free template, or `+` of those, at most nine pieces) equal to the
+application URL. A
+refusal there names `redirect-function` (declaration shape, or the number of
+statements in its body as `bootstrapCount`), `redirect-navigation` (another
+statement), `redirect-dynamic` (a destination that is not a constant),
+`redirect-origin` or `redirect-path`.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
@@ -980,9 +1097,10 @@ was not observable with the current one-page data and remains unsupported.
 shapes and exact labels. The normal collector requests all retained yen pages
 and the retained USD statement, preserving per-page raw inputs. Unknown labels,
 positive transfer controls, unknown currencies, changed totals or missing pages
-keep coverage partial. The catalogue remains partial under #1226 until foreign
-continuation/transfer semantics and actual scheduled retained publication,
-freshness and the execution budget are verified. Dividend-labelled cash rows
+keep coverage partial. Scheduled runs now publish every retained yen page and
+the USD statement with complete coverage; the catalogue remains partial under
+#446 because a USD statement longer than one page has not been observed and is
+refused. Dividend-labelled cash rows
 publish settlement cash only; they establish no separate income dataset.
 
 ## 2026-11-10: My Assets income and realised gains
@@ -1082,3 +1200,48 @@ each element to that exact key set, and emits provider valuations under
 elements that would give the same subject. Whether those amounts are a breakdown of a `summaryDetails` category was
 not established, so nothing sums them with other subjects; the container stays
 an aggregate excluded from the dated-state perimeter.
+
+## 2026-11-19: US dividend summary without yen gross and tax
+
+Every scheduled income collection since 2026-11-12 stopped with
+`sbi_income_history_schema` before retaining anything. A read-only check in the
+owner's signed-in Chrome on 2026-11-19 (normal `配当金・分配金履歴` menu, same
+summary and row requests as above; types, codes and counts only, no values
+copied) found:
+
+- Summary: `countTotal` 15, categories `DOMESTIC_STOCK_SPOT` (12, currency
+  null, all yen totals numeric) and `FOREIGN_STOCK_US` (3, currency USD).
+  For the US category `dividendTotal` and `taxTotal` are now **null**, while
+  `receivedTotal` and the three `Lc` totals are numbers.
+- Rows: 15, dates `YYYYMMDD`. US rows (`SPECIFIC_NORMAL` 1, `NISA_GROWTH` 2)
+  have null yen `dividendUnitCost`, `dividendTotal`, `taxTotal`, `incomeTax`,
+  `residentTax`, numeric yen `receivedAmount`, and numeric `Lc` values.
+  Domestic rows are as before.
+
+The summary audit admitted null only for the `Lc` totals, so the first
+response was refused. Null yen `dividendTotal` and `taxTotal` are now accepted
+only for `FOREIGN_STOCK_US`, only both together, and only while all three USD
+totals are present; the yen `receivedTotal` stays required, and a domestic
+null is still refused. The parsers move to 0.1.3, and migration 0103 moves the
+two snapshot-policy pins from 0.1.2 to 0.1.3 so their parses can become current. The
+parser already publishes US payments in USD from the `Lc` fields, so nothing
+it emits changes. Tracked under #1236.
+
+## 2026-11-22: foreign cash schedule dates are read only as calendar dates
+
+No provider data was read for this entry; the stored captures' `businessDate`
+form was not re-checked. The repository's `GetForeignCashBalance` fixtures
+state it as a calendar `YYYY-MM-DD` date. Parser `sbi-foreign-cash-balances` 0.2.2 reads only that
+form as a row's `as_of`; any other stated value is a `row_unreadable`
+membership issue that leaves the capture partial, instead of a text `as_of`
+that could rank ahead of the real schedule dates
+([release note](../observations.md#sbi-securities-a-foreign-cash-schedule-date-that-is-not-a-date-is-no-as_of-cash-balances-022)).
+
+## 2026-11-22: domestic trade dates are read only as calendar dates
+
+No provider data was read for this entry. The collector turns the execution
+page's `YY/MM/DD` cell into `20YY-MM-DD` without checking the calendar.
+Parser `sbi-domestic-trade-records` 0.2.2 reads only a calendar `YYYY-MM-DD`
+date as a record's `as_of`; any other stated value is a warning and no `as_of`,
+the value staying in the record's `extra`
+([release note](../observations.md#sbi-securities-a-domestic-trade-date-that-is-not-a-date-is-no-as_of-trade-records-022)).

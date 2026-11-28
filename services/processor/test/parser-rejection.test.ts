@@ -2,7 +2,7 @@
 // (scripts/parser-rejection.ts). Every payload here is synthetic, built from
 // the repository's synthetic SBI Shinsei fixtures; SENTINEL strings stand in
 // for values so the test can prove no value reaches a category.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { sbiShinseiExchangeRate } from "../../../packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts";
@@ -33,6 +33,23 @@ import {
   type RejectionCategory,
 } from "../scripts/parser-rejection.ts";
 import { LAYER_A_SQL, applyMigration, layerBMigrations, publishParse } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
+
+// Started while the module loads, never in a hook (test/support/settle.ts);
+// the cases of "replay selection against the migrated CORE schema" read it.
+const mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {fetch(){return new Response('local')}}",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
+afterAll(async () => {
+  await mf.dispose();
+});
 
 const FIXTURES = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/",
@@ -315,6 +332,32 @@ describe("SBI Securities closed replay categories", () => {
     expect(classifySbiCashIssue({ code: "row_unreadable", locator: row })).toEqual({
       reason: "row_unreadable",
       label: `${root}[].currencyCashBalances[].foreignScheduleCashBalances[]`,
+    });
+    // A stated schedule date that is not a calendar date (parser 0.2.2) is
+    // named by its field, never by the value the issue message leaves out.
+    const dated = sbiForeignCashBalances.parse(
+      encode({
+        listForeignScheduleCashBalances: {
+          foreignCashBalances: [
+            {
+              currencyCashBalances: [
+                {
+                  currencyCode: "USD",
+                  foreignScheduleCashBalances: [{ businessDate: "SENTINEL", keepCash: "1.00" }],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      meta("foreign-cash-balances"),
+    );
+    expect(dated.issues).toHaveLength(1);
+    expect(dated.issues![0]!.message).not.toContain("SENTINEL");
+    expect(classifySbiCashIssue(dated.issues![0]!)).toEqual({
+      reason: "row_unreadable",
+      label: `${root}[].currencyCashBalances[].foreignScheduleCashBalances[]`,
+      field: "businessDate",
     });
     for (const locator of [
       "SENTINEL",
@@ -1050,6 +1093,13 @@ describe("throw sites", () => {
     expect(sites.join()).not.toContain("12345");
     expect(throwSites("SENTINEL")).toEqual([]);
   });
+
+  test("Windows backslash stack frames name the same parser site", () => {
+    const error = new Error("synthetic");
+    error.stack =
+      "Error: synthetic\n    at parse (C:\\repo\\packages\\parsers\\src\\parsers\\sbi-cash-history-schema.ts:271:20)";
+    expect(throwSites(error)).toEqual(["sbi-cash-history-schema.ts:271:20"]);
+  });
 });
 
 describe("top activity shape summary", () => {
@@ -1100,17 +1150,8 @@ describe("top activity shape summary", () => {
 });
 
 describe("replay selection against the migrated CORE schema", () => {
-  let mf: Miniflare;
   let db: D1Database;
   beforeAll(async () => {
-    mf = new Miniflare(
-      convertV4MiniflareOptions({
-        modules: true,
-        script: "export default {fetch(){return new Response('local')}}",
-        compatibilityDate: "2026-09-07",
-        d1Databases: ["DB"],
-      }),
-    );
     const binding: unknown = await mf.getD1Database("DB");
     if (!binding || typeof binding !== "object" || !("prepare" in binding))
       throw new Error("missing DB");
@@ -1258,13 +1299,10 @@ describe("replay selection against the migrated CORE schema", () => {
       }
     }
     await run(22, "sbi-foreign-trade-records", "1.0.1", "error");
-    // Starting Miniflare and applying every CORE migration in order is a
-    // one-time cost that grows with each migration and crossed the 5 s default
-    // hook budget; the budget matches every other schema hook in this suite.
+    // Applying every CORE migration in order is a one-time cost that grows
+    // with each migration and crossed the 5 s default hook budget; the budget
+    // matches every other schema hook in this suite.
   }, 30_000);
-  afterAll(async () => {
-    await mf?.dispose();
-  });
   const select = async (filter: Parameters<typeof replaySelectionSql>[0]) =>
     (await db.prepare(replaySelectionSql(filter)).all<Record<string, unknown>>()).results;
 

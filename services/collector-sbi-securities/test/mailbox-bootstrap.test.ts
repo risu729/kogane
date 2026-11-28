@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mailboxBootstrap } from "../src/mailbox-bootstrap";
+import { BootstrapRefusal, mailboxBootstrap } from "../src/mailbox-bootstrap";
 
 const keys = [
   "dp-csrf",
@@ -74,7 +74,6 @@ test("rejects executable variations and incomplete or ambiguous storage material
     script.replace("function()", "function(parameter)"),
     script.replace("autoRedirect();", "autoRedirect(1);"),
     script.replace("autoRedirect();", "autoRedirect?.();"),
-    script.replace("window.location.href", "location.href"),
     script.replace('plus.e-shishobako.ne.jp" +', 'plus.e-shishobako.ne.jp.evil.invalid" +'),
     script.replace('"/dp_apl/usr/"', '"/dp_apl/usr/?unexpected=1"'),
     script.replace('"/dp_apl/usr/"', '"/dp_apl/usr/#fragment"'),
@@ -118,4 +117,99 @@ test("parser failures expose only a closed code and no source or opaque value", 
     expect(JSON.stringify(error)).not.toContain("SYNTHETIC_PRIVATE_SENTINEL");
     expect((error as Error).cause).toBeUndefined();
   }
+});
+
+test("a refused bootstrap names the grammar part it departed from, never the page text", () => {
+  const rule = (page: string) => {
+    try {
+      mailboxBootstrap(page);
+    } catch (error) {
+      expect(error).toBeInstanceOf(BootstrapRefusal);
+      expect((error as Error).message).toBe("sbi_mailbox_bootstrap_unobserved");
+      const { rule, count } = error as BootstrapRefusal;
+      return count === undefined ? { rule } : { rule, count };
+    }
+    throw new Error("accepted");
+  };
+  const extra = 'sessionStorage.setItem("dp-synthetic-secret", "synthetic-secret");';
+  for (const [page, expected] of [
+    ["x".repeat(300 * 1024), { rule: "html" }],
+    [html().replace("<body>", "<body><template>synthetic</template>"), { rule: "html" }],
+    [
+      html().replace("</body>", '<form action="/synthetic-secret"></form></body>'),
+      { rule: "elements" },
+    ],
+    [
+      html().replace("</body>", "<script>var synthetic = 1;</script></body>"),
+      { rule: "script-element", count: 2 },
+    ],
+    [html().replace("<script>", '<script src="/synthetic-secret.js">'), { rule: "script-element" }],
+    [html("window.onload = function( {"), { rule: "script-parse" }],
+    [html(`${script}\nvar synthetic = 1;`), { rule: "statements", count: 3 }],
+    [html(script.replace("window.onload", "document.onload")), { rule: "onload" }],
+    [
+      html(script.replace("autoRedirect();\n}", `${extra}\nautoRedirect();\n}`)),
+      { rule: "onload", count: 10 },
+    ],
+    [html(script.replace('"dp-sfn"', '"dp-synthetic-secret"')), { rule: "storage" }],
+    [html(script.replace("autoRedirect();\n}", "synthetic();\n}")), { rule: "redirect-call" }],
+    [html(script.replace('"/dp_apl/usr/"', '"/synthetic-secret/"')), { rule: "redirect-path" }],
+    [
+      html(
+        script.replace('"https://plus.e-shishobako.ne.jp"', '"https://synthetic-secret.invalid"'),
+      ),
+      { rule: "redirect-origin" },
+    ],
+    [html(script.replace('"/dp_apl/usr/"', "secret")), { rule: "redirect-dynamic" }],
+    [
+      html(
+        script
+          .replace("window.location.href =", "fetch(")
+          .replace('"/dp_apl/usr/";', '"/dp_apl/usr/");'),
+      ),
+      { rule: "redirect-navigation" },
+    ],
+    [
+      html(script.replace("window.location.href =", "document.location.href =")),
+      { rule: "redirect-navigation" },
+    ],
+    [
+      html(
+        script.replace(
+          "function autoRedirect() {\n",
+          "function autoRedirect() {\nvar synthetic = 1;\n",
+        ),
+      ),
+      { rule: "redirect-function", count: 2 },
+    ],
+  ] as const)
+    expect(rule(page)).toEqual(expected);
+});
+
+test("any spelling of the redirect is accepted only when it names the application", () => {
+  const witnessed = mailboxBootstrap(html());
+  const navigation = 'window.location.href = "https://plus.e-shishobako.ne.jp" + "/dp_apl/usr/";';
+  expect(script).toContain(navigation);
+  for (const spelling of [
+    'window.location.href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location.href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location = "https:\\/\\/plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'window.location = "https://plus.e-shishobako.ne.jp" + "/dp_apl/" + "usr/";',
+    'location.replace("https://plus.e-shishobako.ne.jp" + "/dp_apl/usr/");',
+    "window.location.assign(`https://plus.e-shishobako.ne.jp/dp_apl/usr/`);",
+  ])
+    expect(mailboxBootstrap(html(script.replace(navigation, spelling)))).toEqual(witnessed);
+  for (const spelling of [
+    'window.location.href += "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location.reload("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
+    "location.href = `https://plus.e-shishobako.ne.jp/${secret}`;",
+    'window["location"].href = "https://plus.e-shishobako.ne.jp/dp_apl/usr/";',
+    'location?.replace("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
+    'location.replace("https://plus.e-shishobako.ne.jp/dp_apl/usr/", 1);',
+    'location.replace?.("https://plus.e-shishobako.ne.jp/dp_apl/usr/");',
+    'location.assign(...["https://plus.e-shishobako.ne.jp/dp_apl/usr/"]);',
+  ])
+    expect(() => mailboxBootstrap(html(script.replace(navigation, spelling)))).toThrow(
+      "sbi_mailbox_bootstrap_unobserved",
+    );
 });

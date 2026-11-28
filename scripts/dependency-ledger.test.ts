@@ -9,13 +9,21 @@
 // tracked TypeScript file.
 //
 // This suite pins both halves: the note has exactly one home, and a duplicate
-// top-level `const` really is rejected.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// top-level `const` really is rejected. It also pins how the generator treats
+// the root `bun.lock`: a lockfile it cannot read or parse stops the run, and
+// only a directory the lockfile does not cover reports "No lockfile".
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 import { MIGRATION_NOTE } from "./dependency-ledger-notes.ts";
-import { LEDGER_MARKDOWN_PATH, REPO_ROOT, renderDependencyMarkdown } from "./dependency-ledger.ts";
+import {
+  LEDGER_MARKDOWN_PATH,
+  REPO_ROOT,
+  main,
+  readPackages,
+  renderDependencyMarkdown,
+} from "./dependency-ledger.ts";
 
 const NOTES_MODULE = "scripts/dependency-ledger-notes.ts";
 const GENERATOR = "scripts/dependency-ledger.ts";
@@ -102,5 +110,104 @@ describe("a duplicate top-level declaration is rejected by the linter", () => {
     expect(lint("single.ts", "export const NOTE = `a`;\nexport const OTHER = 1;\n").exitCode).toBe(
       0,
     );
+  });
+});
+
+describe("the root lockfile is read or the run fails", () => {
+  // Synthetic layouts only: one Bun workspace member, one npm-managed
+  // `container/` that the root lockfile does not cover, and one `container/`
+  // with no lockfile of its own.
+  const directories: string[] = [];
+  afterAll(() => {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  });
+
+  function layout(lockfile: string | "directory" | "absent"): string {
+    const root = mkdtempSync(join(tmpdir(), "kogane-dependency-ledger-"));
+    directories.push(root);
+    const write = (path: string, text: string): void => {
+      mkdirSync(join(root, path, ".."), { recursive: true });
+      writeFileSync(join(root, path), text);
+    };
+    write(
+      "packages/alpha/package.json",
+      JSON.stringify({ name: "@example/alpha", dependencies: { left: "^1.0.0" } }),
+    );
+    write(
+      "services/beta/container/package.json",
+      JSON.stringify({ name: "beta-image", dependencies: { right: "^2.0.0" } }),
+    );
+    write(
+      "services/beta/container/package-lock.json",
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: { "": {}, "node_modules/right": { version: "2.1.0" } },
+      }),
+    );
+    write(
+      "services/gamma/container/package.json",
+      JSON.stringify({ name: "gamma-image", dependencies: { right: "^2.0.0" } }),
+    );
+    if (lockfile === "directory") mkdirSync(join(root, "bun.lock"));
+    else if (lockfile !== "absent") write("bun.lock", lockfile);
+    return root;
+  }
+
+  const validLock = `{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": { "name": "example" },
+    "packages/alpha": { "name": "@example/alpha", "dependencies": { "left": "^1.0.0" } },
+  },
+  "packages": {
+    "left": ["left@1.2.3", "", {}, "sha512-x"],
+  },
+}
+`;
+
+  test("a valid lockfile keeps the per-directory fallback for what it does not cover", () => {
+    const records = readPackages(layout(validLock));
+    expect(
+      records.map(({ directory, lockfile, resolved }) => ({ directory, lockfile, resolved })),
+    ).toEqual([
+      { directory: "packages/alpha", lockfile: "bun.lock", resolved: { left: "1.2.3" } },
+      {
+        directory: "services/beta/container",
+        lockfile: "package-lock.json",
+        resolved: { right: "2.1.0" },
+      },
+      { directory: "services/gamma/container", lockfile: "none", resolved: {} },
+    ]);
+    expect(renderDependencyMarkdown(records)).toContain("No lockfile; resolved versions unknown.");
+  });
+
+  test.each([
+    ["is not JSONC", '{ "workspaces": {', /Cannot read the root bun\.lock/u],
+    ["is not a Bun text lockfile", '{ "lockfileVersion": 1 }', /root bun\.lock .*workspaces/u],
+    ["has no packages map", '{ "workspaces": {}, "packages": [] }', /root bun\.lock .*packages/u],
+    ["is a directory", "directory", /Cannot read the root bun\.lock/u],
+    ["is missing", "absent", /Cannot read the root bun\.lock/u],
+  ] as const)("a root bun.lock that %s fails the run", async (_case, lockfile, message) => {
+    const root = layout(lockfile);
+    expect(() => readPackages(root)).toThrow(message);
+    // `main` is what `mise run ledger:deps` awaits at the top level, so a
+    // rejection here is a non-zero exit, and no misleading ledger is written.
+    await expect(main(root)).rejects.toThrow(message);
+    expect(existsSync(join(root, LEDGER_MARKDOWN_PATH))).toBe(false);
+  });
+
+  test("the command exits non-zero with the reason on stderr", () => {
+    const root = layout('{ "workspaces": {');
+    const result = Bun.spawnSync(
+      [
+        process.execPath,
+        "-e",
+        `const { main } = await import(${JSON.stringify(join(REPO_ROOT, GENERATOR))}); await main(${JSON.stringify(root)});`,
+      ],
+      { cwd: root },
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("Cannot read the root bun.lock");
+    expect(existsSync(join(root, LEDGER_MARKDOWN_PATH))).toBe(false);
   });
 });

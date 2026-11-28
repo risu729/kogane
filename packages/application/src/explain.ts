@@ -3,17 +3,26 @@
 // The graph is ids only. It never carries provider text, a provider URL, a
 // credential, a raw body or an exception string, and it is depth-limited so
 // "explain" can never become "download everything". Reaching a raw locator is
-// a separate capability: `records.read` gets the adopted claim, the identity
-// decision and the parse run; only `evidence.read` gets the artifact and
-// object references under them, and a caller without it is told which
-// capability is missing rather than being shown a shorter graph silently.
+// a separate capability: `summary.read` gets the scope, the adopted claims,
+// the identity decision and the parse run (no level checks `records.read`);
+// only `evidence.read` gets the artifact and object references under them,
+// and a caller without it is told which capability is missing rather than
+// being shown a shorter graph silently.
 //
 // Every ref is re-authorized here. A ref that names something outside the
 // grant and a ref that names nothing at all get the same answer, so an agent
-// cannot probe for the existence of a hidden account (SC18).
+// cannot probe for the existence of a hidden account (SC18). The organization
+// (the adopted mapping claims and the identity decision under them) is read
+// only after that check, for the one observation the grant allows, under the
+// context's identity mode, and it contributes ids and revisions only: never a
+// label, a reason, an account entity or an instrument's identifier value.
 import type { FinancialError } from "../../domain/src/result.ts";
-import type { ObservationReader } from "../../read-model/src/index";
-import { financialError } from "./errors.ts";
+import type { ObservationKind } from "../../observation-shared/src/api-contract.ts";
+import type { ObservationOrganization } from "../../observation-shared/src/organization-contract.ts";
+import type { IdentityReadMode, ObservationReader } from "../../read-model/src/index";
+import type { SqlExecutor } from "../../read-model/src/reader.ts";
+import { observationOrganizations, organizationKey } from "./query/observation-organization.ts";
+import { financialError, unknownKeyRefs } from "./errors.ts";
 import { type Grant, grantAllows, grantAllowsRow, grantAllowsSource } from "./grants.ts";
 import type { OpenedContext } from "./context/open.ts";
 
@@ -63,7 +72,33 @@ const OBSERVATION_REF =
   /^observation:(transaction|balance|position|valuation):([1-9][0-9]{0,15})$/u;
 const SOURCE_REF = /^source:([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/u;
 
-export type ExplainReader = Pick<ObservationReader, "getObservation">;
+export interface ExplainReader extends Pick<ObservationReader, "getObservation"> {
+  /**
+   * The organization of one observation the grant already allows, read under
+   * `mode`. `organizedExplainReader` serves it with the read the observation
+   * detail route makes; nothing else reads it for `explain`.
+   */
+  getOrganization(
+    ref: { kind: ObservationKind; id: number },
+    mode: IdentityReadMode,
+  ): Promise<ObservationOrganization | undefined>;
+}
+
+/**
+ * The served reader: the observation from the evidence reader, and its
+ * organization from `observationOrganizations`, the function the observation
+ * detail route calls (`services/app/src/observation-api.ts`).
+ */
+export function organizedExplainReader(
+  reader: Pick<ObservationReader, "getObservation">,
+  sql: SqlExecutor,
+): ExplainReader {
+  return {
+    getObservation: (ref) => reader.getObservation(ref),
+    getOrganization: async (ref, mode) =>
+      (await observationOrganizations(sql, [ref], mode)).get(organizationKey(ref)),
+  };
+}
 
 export async function explain(input: {
   grant: Grant;
@@ -135,7 +170,10 @@ export async function explain(input: {
       parents: [request.ref],
     });
 
-  const organization = detail.organization;
+  // Read under the context's identity mode, so the graph's mapping revisions
+  // are the ones the context's `identityDecisionManifestRef` names the rule
+  // for (`latest`: the current revision of each mapping).
+  const organization = await reader.getOrganization({ kind, id }, opened.interpretation.mode);
   const claimParents = [request.ref];
   if (organization?.account) {
     const claim = `account_mapping:${organization.account.referenceId}@${String(organization.account.revision)}`;
@@ -189,7 +227,7 @@ export function parseExplainRequest(
   const body = value as Record<string, unknown>;
   const unknown = Object.keys(body).filter((key) => key !== "ref" && key !== "depth");
   if (unknown.length > 0)
-    return { ok: false, code: "unsupported_semantics", refs: unknown.slice(0, 10) };
+    return { ok: false, code: "unsupported_semantics", refs: unknownKeyRefs(unknown) };
   const ref = body["ref"];
   if (typeof ref !== "string" || ref.length === 0 || ref.length > 512)
     return { ok: false, code: "invalid_query", refs: ["ref"] };

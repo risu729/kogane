@@ -208,6 +208,7 @@ const SBI_CASH_ACCOUNT = `${SBI_CASH_ROOT}[]`;
 const SBI_CASH_CURRENCY = `${SBI_CASH_ACCOUNT}.currencyCashBalances[]`;
 const SBI_CASH_ROW = `${SBI_CASH_CURRENCY}.foreignScheduleCashBalances[]`;
 const SBI_CASH_FIELDS = [
+  "businessDate",
   "buyPossibleAmount",
   "keepCash",
   "transferPossibleAmount",
@@ -299,7 +300,8 @@ export function throwSites(error: unknown): string[] {
   if (!(error instanceof Error)) return [];
   const stack = error.stack ?? "";
   const frames = error.message === "" ? stack : stack.replace(error.message, "");
-  return [...frames.matchAll(/parsers\/([a-z0-9-]+\.ts:\d+:\d+)/gu)].map((match) => match[1]!);
+  // Windows stacks use backslash separators.
+  return [...frames.matchAll(/parsers[\\/]([a-z0-9-]+\.ts:\d+:\d+)/gu)].map((match) => match[1]!);
 }
 
 /** The coarse reasons `diagnose.ts` printed before throw sites were closed. */

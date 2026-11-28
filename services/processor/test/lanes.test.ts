@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { runScheduled, sweep } from "../src/worker.ts";
@@ -7,12 +7,13 @@ import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { layerBMigrations, publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -45,10 +46,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0102", () => {
+test("harness applies every Layer B migration in order through 0110", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0102_vpass_authori_transition_policy.sql");
+  expect(names.at(-1)).toBe("0110_processor_sweep_passes_one_page.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -128,6 +129,14 @@ test("harness applies every Layer B migration in order through 0102", () => {
     "0100_sbi_supplemental_unit_eligibility.sql",
     "0101_myjcb_document_unit_eligibility.sql",
     "0102_vpass_authori_transition_policy.sql",
+    "0103_sbi_income_policy_version_0_1_3.sql",
+    "0104_vpass_credit_card_name_policy.sql",
+    "0105_observation_no_replace.sql",
+    "0106_no_replace_rowid.sql",
+    "0107_scheduled_read_guards.sql",
+    "0108_snapshot_selection_memo.sql",
+    "0109_processor_sweep_passes.sql",
+    "0110_processor_sweep_passes_one_page.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });

@@ -148,7 +148,9 @@ organized lists and on `/api/identity/*` (production only): `latest` reads
 the current mapping revisions, `as-recorded` the revisions the sealed
 identity run pinned, and every such response carries an
 `interpretationContext` naming the mode and the releases it was computed
-under. `snapshot` is refused as `unsupported_semantics` until that contract
+under: the releases of the rows the page returns (a position's valuations
+included), never of the row a list reads past its 500 to say it is
+truncated. `snapshot` is refused as `unsupported_semantics` until that contract
 exists. See [decision-log.md](decision-log.md).
 
 Capabilities are not authorization. The production Worker verifies the
@@ -167,7 +169,11 @@ shared CORE migrations, which are not counted), the source registry
 with artifact counts, every fetch run, and every parse run with its parser
 and version, status, warning count, and whether it is current or
 superseded. Answers: what is in here, where did it come from, and which
-parser versions are live.
+parser versions are live. On the central store the route's default is a
+summary that collapses the run lists by status, so the page asks for
+`/api/overview?detail=full`; the local store takes no parameter and answers
+in full ([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment
+of 2026-11-19).
 
 ### Transactions — `/transactions`
 
@@ -219,6 +225,12 @@ succeeded.
 
 A balance is a measurement, so each metric an institution reports is its
 own row; nothing is collapsed into one number per account.
+
+On the central store the route's default is a summary of both lists (the
+first lines of each, under 8 KB a page), so the page asks for
+`/api/balances?detail=full`; the local store takes no `detail` and answers
+in full ([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment
+of 2026-11-20).
 
 ### Positions — `/positions`
 
@@ -358,9 +370,11 @@ The pieces:
 - `packages/parsers/src/money.ts` — the minor-unit table, `formatAmount` and
   `amountSign`. It imports no runtime API, so the same module runs on Bun, on
   Workers, and in the browser. `packages/parsers/src/parsers/util.ts`
-  re-exports `minorUnitExponent` from it, and `apps/web/src/money.ts` is a
-  re-export that keeps
-  "nothing in the client formats an amount itself" enforceable by grep.
+  re-exports `minorUnitExponent` from it, and `apps/web/src/money.ts`
+  re-exports it beside `formatDecimal`, the client's one display format for
+  an exact decimal (kept out of the parser digest closure), which keeps
+  "nothing in the client formats an amount outside src/money.ts" enforceable
+  by grep.
 - `src/api.ts` — a Hono app. Every route it defines is a GET, and any
   method other than GET or HEAD is refused before routing.
 - `src/serve.ts` — the Bun entry point: binds loopback only, serves the
@@ -417,9 +431,9 @@ is true today.
 What holds: the request handler writes nothing. No query in
 `src/queries.ts` is an `INSERT`, `UPDATE` or `DELETE`, and the first
 middleware in `src/api.ts` refuses any method other than `GET` or `HEAD`
-with 405 before any route runs, so a write could not reach a handler even
-if one were added carelessly later. `test/api.test.ts` asserts that for
-POST, PUT, PATCH and DELETE.
+with 405 (and `Allow: GET, HEAD`) before any route runs, so a write could not reach a handler even
+if one were added carelessly later. `test/api.test.ts` asserts that, and the
+`Allow` header, for POST, PUT, PATCH and DELETE.
 
 What does not: the process is not read-only. The entrypoint calls the same
 `openStore()` as the ingesting and parsing tools, and `openStore()`
@@ -437,8 +451,11 @@ the deployed shape. Neither is done; both are in the open questions.
 The deployed Worker (`services/app`) gained exactly one
 non-GET path set: `POST /api/command/v1/{plan,simulate,approve,commit,operation}`
 ([change-lifecycle.md](change-lifecycle.md)). It is not a relaxation of the
-boundary above — every other request that is not `GET` or `HEAD` is still
-`405`, and `test/command-api.test.ts` asserts that for `/api/meta` and
+boundary above — outside the Worker's POST route families
+(`/api/command/v1/*`, `/api/agent/v1/*` and `/mcp`, and `/api/ops/v1/*`),
+every request that is not `GET` or `HEAD` is still `405`, with
+`Allow: GET, HEAD`
+([production evidence browser](production-evidence-browser.md#methods)), and `test/command-api.test.ts` asserts that for `/api/meta` and
 `/api/evidence/v1/meta` while the command flag is on.
 
 Three properties hold on that path set:
@@ -712,7 +729,11 @@ deployment facts are:
   `/api/ops/v1/*` operations and schedules routes). Each is registered
   explicitly in `src/worker.ts` before the GET-only check, behind the same
   `auth.ts` gate as every read route, with bounded bodies, `no-store` and the
-  same closed 401/403 answers. Everything outside them is refused with 405.
+  same closed 401/403 answers. Everything outside them is refused with 405
+  and `Allow: GET, HEAD`; a method other than POST on one of their POST
+  routes is 405 with `Allow: POST`, except `GET` and `HEAD` on an operations
+  acceptance route, which are its 404
+  ([methods](production-evidence-browser.md#methods)).
 - The principal on both is the subject `authenticate` returned; no route reads
   an actor from a request body or a header.
 - Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
@@ -845,9 +866,20 @@ tables. Every answer is checked by `validApiResponse` against
 are answered by one reader, `readCollectionQuality`
 (`services/app/src/collection-quality-api.ts`), which
 `kogane.collection-quality.read` also calls
-([agent API](agent-api.md#ui-read-pages)).
+([agent API](agent-api.md#ui-read-pages)). The summary, the cells and the
+accounts take `detail`: absent or `summary` answers them as short lines
+derived from the answers below, and `detail=full` answers them as described
+here, which the collection quality page asks for
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
+[agent API](agent-api.md#ui-read-pages)). Each summary pages its lines by
+`offset`: up to 20 a page, fewer when the next would carry the tool's answer
+past 8,192 bytes, with `coverage.nextOffset` where the next page starts; a
+page whose first line alone passes that (on the summary, with its jobs under
+no source) is `413 result_limit_exceeded`, never cut ([ADR 0123, amendment of 2026-11-21](adr/0123-summary-detail-for-large-reads.md#amendment-every-collection-quality-summary-page-is-held-to-8-kb-2026-11-21)).
+`offset` with `detail=full` on the summary or the accounts is
+`400 invalid_query`.
 
-- **Summary** (`/api/collection-quality`, no parameters): every configured job
+- **Summary** (`/api/collection-quality?detail=full`, no other parameter): every configured job
   (`collection_schedules`) under the CORE sources its collectors register
   under, and every visible source. Per job: enabled, supported, a held
   execution lease, and the newest receipt with each run it names as CORE has
@@ -860,7 +892,18 @@ are answered by one reader, `readCollectionQuality`
   `user_action_required`, `lease_held`, `dataset_withheld`, ...). Jobs whose
   source registers under no CORE source (the Processor tick) are listed apart.
   More than 200 jobs or sources is `413 result_limit_exceeded`, never cut.
-- **Cells** (`/api/collection-quality/<sourceId>?offset=N`): per dataset,
+- **Status** (`/api/collection-quality?view=status`, that query exactly, no `detail`;
+  [ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job)):
+  one line per configured job saying whether it is stuck: `lastRun` (with
+  `recovered` when a successful fetch run of its source followed a failed
+  receipt before the next one), `lastSuccessAt`,
+  `failuresSinceSuccess` (from the newest 100 receipts, else `"100+"`),
+  `failureCode`, a closed `state` (`ok`, `degraded`, `failing`,
+  `needs-owner`, `disabled`) and `notPublishing` (datasets whose newest
+  capture has no published parse, with the cells' reasons). The page shows
+  it as a table at its top. It is compact already, so it has no summary
+  detail ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)).
+- **Cells** (`/api/collection-quality/<sourceId>?offset=N&detail=full`): per dataset,
   parser, fetch unit and period, the newest capture (run success, unit outcome,
   artifacts, raw objects stored, parse states, failure codes, incomplete
   coverage claims) and the current capture (its fetch run and capture time),
@@ -869,8 +912,11 @@ are answered by one reader, `readCollectionQuality`
   `coverage_incomplete`, `newer_capture_not_current`, `period_unplaced`,
   `query_rule_not_composed`, `not_in_latest_run`, ...). 500 cells a page with
   `coverage.nextOffset`; an unknown or invisible source is 404.
-- **Accounts** (`/api/collection-quality/<sourceId>/accounts`, no query at
-  all; [ADR 0088](adr/0088-collection-quality-per-account.md)): every cell of
+- **Accounts** (`/api/collection-quality/<sourceId>/accounts?detail=full`,
+  no other parameter; [ADR 0088](adr/0088-collection-quality-per-account.md);
+  its summary, one line per account and per unit of unattributed cells paged
+  by `offset` within 8 KB a page, is the default:
+  [ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)): every cell of
   the source, unpaged, regrouped by the accounts the observations of its
   newest or current capture name (through the newest sealed identity runs and
   the current account mappings, never through a unit key): per account its

@@ -6,7 +6,7 @@
 // stored once, the extraction rule is later corrected, and the manifest is
 // still there. The correction must be expressible without rewriting the
 // stored value and without changing what an existing parse read.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { parseJob, sweep } from "../src/worker.ts";
@@ -17,14 +17,15 @@ import {
 } from "../src/metadata-extractors/index.ts";
 import { applyMigration, layerBMigrations, seedArtifact, startPipeline } from "./harness.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline(layerBMigrations(), {
-    RELEASE_CANDIDATES_ENABLED: "true",
-  }));
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline(layerBMigrations(), {
+  RELEASE_CANDIDATES_ENABLED: "true",
+}));
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -375,8 +376,12 @@ test("with the release flag off a targeted job publishes normally and no command
 }, 60000);
 
 test("0027 and 0028 apply to a store that already has metadata and parses, and backfill exactly", async () => {
+  // 0105 guards `parse_input_references`, which 0027 creates, so it is held
+  // back with the two and applied after them, in migration order.
   const upgrade = await startPipeline(
-    layerBMigrations().filter((name) => !name.startsWith("0027_") && !name.startsWith("0028_")),
+    layerBMigrations().filter(
+      (name) => !name.startsWith("0027_") && !name.startsWith("0028_") && !name.startsWith("0105_"),
+    ),
   );
   try {
     const db = upgrade.env.DB;
@@ -413,6 +418,7 @@ test("0027 and 0028 apply to a store that already has metadata and parses, and b
 
     await applyMigration(db, "0027_metadata_projections.sql");
     await applyMigration(db, "0028_parse_releases.sql");
+    await applyMigration(db, "0105_observation_no_replace.sql");
 
     // The legacy table is untouched, and every row became a projection of the
     // compatibility extractor with an honest 'unknown' digest.

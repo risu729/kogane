@@ -28,13 +28,15 @@ import {
   isRewardPath,
   rewardQueryParameters,
 } from "../../../packages/observation-shared/src/api-schema";
+import { tokyoToday } from "../../../packages/application/src/index";
 import { d1Executor } from "../../../packages/read-model/src/d1";
 import {
   createRewardReader,
+  HOLDING_CUT_BY_PAGE,
   type Page,
   type RewardHoldingView,
 } from "../../../packages/read-model/src/index";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
 const REWARDS_PREFIX = "/api/v2/rewards";
@@ -50,7 +52,8 @@ const REWARDS_PREFIX = "/api/v2/rewards";
 function searchClock(now: number) {
   return {
     kind: "local-date",
-    value: new Date(now + 9 * 3_600_000).toISOString().slice(0, 10),
+    // The expiry window's default `from` is the same day (`tokyoToday`).
+    value: tokyoToday(now),
     zone: "Asia/Tokyo",
     basis: "derived",
   } as const;
@@ -81,8 +84,28 @@ function bucketDto(bucket: RewardBucket): BucketDto {
   };
 }
 
-function holdingDto(view: RewardHoldingView, membership: readonly MembershipState[]) {
+/**
+ * A holding's totals, or the reason there are none: when the page holds only
+ * some of the holding's buckets, a sum of them is a part of the holding and
+ * is never given as its consumable quantity or a per-kind subtotal (INV05).
+ * The buckets themselves are still listed.
+ */
+function holdingTotals(view: RewardHoldingView) {
   const summary = summarizeHolding(view.holding, view.qualification);
+  if (!view.cutByPage) return summary;
+  const cut = (unitRef: string): Quantity => ({
+    unitRef,
+    value: { status: "missing", reasonCode: HOLDING_CUT_BY_PAGE },
+  });
+  return {
+    ...summary,
+    consumable: cut(summary.consumable.unitRef),
+    byKind: summary.byKind.map((entry) => ({ ...entry, quantity: cut(entry.quantity.unitRef) })),
+  };
+}
+
+function holdingDto(view: RewardHoldingView, membership: readonly MembershipState[]) {
+  const summary = holdingTotals(view);
   return {
     programId: view.program.programId,
     programRef: view.program.programRef,
@@ -106,8 +129,15 @@ function holdingDto(view: RewardHoldingView, membership: readonly MembershipStat
       period: measure.period,
       consumable: measure.consumable,
     })),
+    // Membership is keyed by programme and holding, as MEMBERSHIP_SQL ranks it
+    // and `estimateExpiry` reads it: another programme's claim that names the
+    // same holding reference is not this holding's.
     membership: membership
-      .filter((state) => state.holdingRef === view.holding.holdingRef)
+      .filter(
+        (state) =>
+          state.programId === view.holding.programId &&
+          state.holdingRef === view.holding.holdingRef,
+      )
       .map((state) => ({
         tier: state.tier,
         valid: state.valid,
@@ -154,8 +184,7 @@ function pageEnvelope<T, U>(source: Page<T>, map: (row: T) => U): Page<U> {
 export async function rewardsApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== REWARDS_PREFIX && !path.startsWith(`${REWARDS_PREFIX}/`)) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   return json(await readRewardRoute(env, url));
 }
 

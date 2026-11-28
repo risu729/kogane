@@ -252,17 +252,39 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["operations"]) ? value["operations"].length : 0,
       truncated: typeof value["nextCursor"] === "string",
     };
-  if (operation === "purchases.explain") return { rows: countOf(value["data"]), truncated: false };
-  // One account's reconstructed state, when there is one to show.
+  // A page of events counts its items; the per-card view (ADR 0125) its cards,
+  // truncated when more cards exist than it lists.
+  if (operation === "purchases.explain") {
+    const data = value["data"];
+    const page =
+      data !== null && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {};
+    const cards = page["cards"];
+    if (Array.isArray(cards))
+      return { rows: cards.length, truncated: page["cardsTruncated"] === true };
+    // The line view (ADR 0125 amendment) its lines, truncated while lines follow.
+    const lines = page["lines"];
+    if (Array.isArray(lines))
+      return {
+        rows: lines.length,
+        truncated:
+          typeof page["nextCursor"] === "string" || value["nextPage"] === "budget_exceeded",
+      };
+    return { rows: countOf(data), truncated: false };
+  }
+  // One reconstructed state (of one account or a scope, ADR 0116), when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
-  // The dated reported state: its accounts and its payables. A read past the
-  // route's bound is refused, never cut, so it is never truncated.
+  // The dated reported state: its accounts, its payables and its
+  // scheduled-payment captures. A read past the route's bound is refused,
+  // never cut, so it is never truncated.
   if (operation === "reported-state.read")
     return {
       rows:
         (Array.isArray(value["accounts"]) ? value["accounts"].length : 0) +
-        (Array.isArray(value["payables"]) ? value["payables"].length : 0),
+        (Array.isArray(value["payables"]) ? value["payables"].length : 0) +
+        (Array.isArray(value["scheduledPayments"]) ? value["scheduledPayments"].length : 0),
       truncated: false,
     };
   // One UI page read (`{ schemaVersion, data }`, src/page-read-tools.ts): the
@@ -281,12 +303,20 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     return { rows: data ? 1 : 0, truncated: false };
   }
   // The collection quality account view (ADR 0088) counts the cells it read
-  // (its `cells`, a number), never an account; it is never cut. The summary
-  // and the cell page fall through to the page rule below.
+  // (its `cells`, a number), never an account; its full answer is never cut,
+  // and its summary is truncated while more lines follow (ADR 0123,
+  // amendment 2026-11-20). The summary and the cell page fall through to the
+  // page rule below.
   if (operation === "collection-quality.read") {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     if (typeof data["cells"] === "number" && Array.isArray(data["accounts"]))
-      return { rows: data["cells"], truncated: false };
+      return {
+        rows: data["cells"],
+        truncated: ((data["coverage"] ?? {}) as Record<string, unknown>)["truncated"] === true,
+      };
+    // The status view (ADR 0045, amendment 2026-11-19) counts its job lines; it is never cut.
+    if (data["view"] === "status" && Array.isArray(data["sources"]))
+      return { rows: data["sources"].length, truncated: false };
   }
   if (
     operation === "identity.read" ||
@@ -328,10 +358,52 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: rowsFollow(value),
     };
+  // One row per kind; truncated when a line's count reached its bound.
+  if (operation === "decisions.pending")
+    return {
+      rows: Array.isArray(value["kinds"]) ? value["kinds"].length : 0,
+      truncated:
+        Array.isArray(value["kinds"]) &&
+        value["kinds"].some(
+          (line) =>
+            typeof line === "object" &&
+            line !== null &&
+            (line as Record<string, unknown>)["state"] === "counted" &&
+            (line as Record<string, unknown>)["complete"] === false,
+        ),
+    };
+  // Sources the answer covers (listed or unchanged); truncated when it
+  // continues past the byte bound, a count is a lower bound, or the events
+  // walk ended on a new revision.
+  if (operation === "changes.since") {
+    const sources = Array.isArray(value["sources"]) ? value["sources"] : [];
+    const unchanged = Array.isArray(value["unchanged"]) ? value["unchanged"] : [];
+    const events = (value["events"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: sources.length + unchanged.length,
+      truncated:
+        value["next"] !== null ||
+        sources.some(
+          (line) =>
+            typeof line === "object" &&
+            line !== null &&
+            Array.isArray((line as Record<string, unknown>)["cut"]) &&
+            ((line as Record<string, unknown>)["cut"] as unknown[]).length > 0,
+        ) ||
+        (events["state"] === "counted" && events["complete"] === false),
+    };
+  }
   // Cards listed; truncated when more cards exist than the answer lists.
+  // The upcoming view counts its bills and the cards it does not list.
   if (operation === "card-settlements.debit-accounts")
     return {
-      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      rows:
+        value["view"] === "upcoming"
+          ? (Array.isArray(value["bills"]) ? value["bills"].length : 0) +
+            (Array.isArray(value["notListed"]) ? value["notListed"].length : 0)
+          : Array.isArray(value["items"])
+            ? value["items"].length
+            : 0,
       truncated: value["cardsTruncated"] === true,
     };
   if (operation === "instruments.candidates" || operation === "accounts.candidates") {
@@ -443,12 +515,17 @@ const MCP_TRANSPORT_CODES: Readonly<Record<number, string>> = {
  * than a JSON-RPC message, once, as `mcp.request`; never throws. JSON-RPC
  * answers (`200`, an unknown method or tool inside the envelope) and an
  * accepted notification (`202`) are the protocol's own and not recorded.
+ * So is `404`: the 2026-07-28 revision answers a method the server does not
+ * serve (an unknown one, or `ping`, which that revision does not have) with
+ * the same `-32601` under that status, where the initialize-based revisions
+ * answer it inside a `200`; no other `/mcp` answer is a `404`, as neither
+ * transport keeps a session that could be missing.
  */
 export async function recordTransportStatus(
   context: ExecuteContext,
   status: number,
 ): Promise<void> {
-  if (status < 400) return;
+  if (status < 400 || status === 404) return;
   const failed = status >= 500;
   const code = MCP_TRANSPORT_CODES[status] ?? (failed ? "internal_error" : "request_refused");
   await executeOperation(context, "mcp.request", () => Promise.resolve(null), {

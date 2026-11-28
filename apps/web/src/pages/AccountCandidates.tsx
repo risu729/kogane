@@ -25,10 +25,18 @@ import {
   type UnreviewedAggregatorAccount,
 } from "../account-candidates-api.ts";
 import { AccountHistory } from "../AccountHistory.tsx";
+import { BusyButton } from "../busy-button.tsx";
 import { CodeList } from "../instrument-candidate-display.tsx";
 import { displayLabel } from "../labels.ts";
 import { Link, navigate } from "../router.tsx";
+import { PageBudgetNote } from "../reconciliation-display.tsx";
 import { Badge, EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
+import {
+  PlanRefreshNotice,
+  PlanRefreshScope,
+  PlanRefusal,
+  usePlanRefresh,
+} from "../plan-refresh.tsx";
 
 const VIEWS: { view: AccountCandidateView; label: string; empty: string }[] = [
   { view: "open", label: "確認待ち", empty: "確認待ちの候補はありません。" },
@@ -104,13 +112,16 @@ function SourceAccount({
 function DecisionActions({ candidate }: { candidate: AccountCandidate }): ReactNode {
   const features = useFeatures();
   const [reason, setReason] = useState("");
+  const refresh = usePlanRefresh();
   const plan = useMutation({
+    ...refresh,
     mutationFn: (decision: AccountCandidateDecision) =>
       planAccountCandidateDecision(candidate, decision, reason),
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
-  const canPlan =
-    features.known && features.commands && reason.trim().length > 0 && !plan.isPending;
+  // A plan in flight holds the buttons through `busy`, never `disabled`, so
+  // the pressed button keeps focus when the answer arrives.
+  const canPlan = features.known && features.commands && reason.trim().length > 0;
   const id = `reason-${candidate.candidateId.replace(/[^A-Za-z0-9_-]/gu, "-").slice(-80)}`;
   return (
     <div className="settlement-decision">
@@ -128,33 +139,27 @@ function DecisionActions({ candidate }: { candidate: AccountCandidate }): ReactN
       </div>
       <div className="button-row">
         {candidate.commands.accept === null ? null : (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("accept")}
           >
             この連携に含まれる口座として採用する内容を確認
-          </button>
+          </BusyButton>
         )}
         {candidate.commands.reject === null ? null : (
-          <button
-            className="button"
-            type="button"
+          <BusyButton
+            busy={plan.isPending}
             disabled={!canPlan}
             onClick={() => plan.mutate("reject")}
           >
             {candidate.status === "accepted"
               ? "採用を取り消す内容を確認"
               : "含まれないものとして扱う内容を確認"}
-          </button>
+          </BusyButton>
         )}
       </div>
-      {plan.isError ? (
-        <Notice tone="bad" inline role="alert">
-          {plan.error.message}
-        </Notice>
-      ) : null}
+      <PlanRefusal error={plan.error} />
       {features.known && !features.commands ? (
         <p className="footnote">この接続先では確認操作が有効になっていません。</p>
       ) : null}
@@ -326,7 +331,7 @@ export function AccountCandidatesPage(): ReactNode {
   const current = VIEWS.find((entry) => entry.view === view)!;
   if (!features.known) return <Loading label="口座の対応候補" />;
   return (
-    <>
+    <PlanRefreshScope queryKeys={[["account-candidates"]]}>
       <div className="page-head">
         <h1>口座の対応候補</h1>
         <p className="lede">
@@ -338,6 +343,7 @@ export function AccountCandidatesPage(): ReactNode {
           <Link to="/identities">口座・銘柄の整理に戻る</Link>
         </p>
       </div>
+      <PlanRefreshNotice />
       {!features.identities ? (
         <EmptyState>この接続先は口座の整理を提供していません。</EmptyState>
       ) : (
@@ -370,7 +376,14 @@ export function AccountCandidatesPage(): ReactNode {
                   </div>
                   {page.items.length === 0 ? (
                     <div className="panel-body">
-                      <EmptyState>{current.empty}</EmptyState>
+                      {/* A decision can move an item out of its view, so a later
+                          page can be empty while the view still holds items:
+                          only a total of zero says the view is empty. */}
+                      <EmptyState>
+                        {page.total === 0
+                          ? current.empty
+                          : "このページに表示する項目はありません。判断などで一覧の件数が減った可能性があります。先頭に戻って確認してください。"}
+                      </EmptyState>
                     </div>
                   ) : (
                     <div className="identity-grid">
@@ -389,7 +402,9 @@ export function AccountCandidatesPage(): ReactNode {
                     <span role="status" aria-live="polite">
                       {page.total === 0
                         ? "0 件"
-                        : `${String(offset + 1)}–${String(offset + page.items.length)} 件目 / ${String(page.total)} 件`}
+                        : page.items.length === 0
+                          ? `表示なし / ${String(page.total)} 件`
+                          : `${String(offset + 1)}–${String(offset + page.items.length)} 件目 / ${String(page.total)} 件`}
                     </span>
                     <button
                       className="button"
@@ -410,12 +425,25 @@ export function AccountCandidatesPage(): ReactNode {
                       次の候補
                     </button>
                   </nav>
+                  {/* Items follow that the reader's row budget withholds
+                      (`paging.stoppedBy: "budget"`, ADR 0128): said, never
+                      shown as the end of the view (INV05). */}
+                  <PageBudgetNote
+                    nextPage={
+                      page.paging?.stoppedBy === "budget"
+                        ? "budget_exceeded"
+                        : page.nextOffset === null
+                          ? "none"
+                          : "offered"
+                    }
+                    list={`「${current.label}」の候補`}
+                  />
                 </>
               );
             }}
           </QueryBoundary>
         </Panel>
       )}
-    </>
+    </PlanRefreshScope>
   );
 }

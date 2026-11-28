@@ -20,9 +20,11 @@ tested source rules. The production pipeline persists their interpretation in
 migration `0018`. All four observation shapes and every merged parser's
 observations are organized; the manual PayPay CSV path is also handled. A
 reference no rule classifies stays `unresolved` with a closed issue: today SBI
-Securities' foreign cash history, reported income and realised gains, and the
-SMBC AUD ordinary deposit. Provider specifics are in [SBI](identity-sbi.md)
-and [other sources](identity-sources.md).
+Securities' foreign cash history, reported income and realised gains. From
+identity policy 2 the SMBC AUD foreign ordinary deposit is a provider-local
+`deposit` with its own label; policy-1 runs keep the unresolved mapping they
+recorded ([ADR 0118](adr/0118-smbc-aud-deposit-identity.md)). Provider specifics
+are in [SBI](identity-sbi.md) and [other sources](identity-sources.md).
 
 A source account reference consists of source, producer, and exact source
 account/discriminators. **Producer is a collector credential-slot boundary,
@@ -32,7 +34,12 @@ carry their connection/account keys). Changing the principal in that slot
 requires a new producer/connection epoch, not silently reusing it. No rule
 claims multi-login identity from a parser constant. Provider-local accounts
 remain visibly provider-local until evidence or an explicit correction links
-them. Ordinal-only card/reward references are scoped to the fetch run.
+them. Ordinal-only card/reward references are scoped to the fetch run, and
+so, from identity policy 3, is an SBI Securities foreign custody or cash
+balance row that states no account discriminator, so it never joins the
+foreign cash history's account
+([ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md),
+[SBI](identity-sbi.md)).
 
 `source_accounts` preserve the exact reference; `accounts` are the independent
 targets. Append-only `account_mappings` can link several references to one
@@ -178,7 +185,11 @@ second candidate or separated pair for the bare code. Example: `7203` held on
 An adoption is an `assign` identity command under actor
 `rule:instrument-auto-v1`: a `rule` mapping revision onto the listing's
 instrument and a `rule` `assign` decision naming both identifiers, guarded on
-both identifiers' revisions as read, and a `lane` audit record. A later
+both identifiers' revisions as read and on no `listed_as` relation, in any
+status, naming either identifier or either instrument when it is written (a
+keep-apart or a proposal recorded after the read stops it,
+[ADR 0055 amendment 2026-11-19](adr/0055-instrument-candidates.md#amendment-2026-11-19-the-adoption-re-checks-listed_as-when-it-writes)),
+and a `lane` audit record. A later
 identity policy version does not revert it. A person or an agent undoes it
 with `identity.assign` of the bare code back onto its own instrument, which
 the rule never touches again (a `release-override` of that mapping hands it
@@ -206,7 +217,10 @@ policy, bounds and closed codes; the summary counts of the whole read.
   proposed candidate's buttons plan its own `identity.assign` or
   `relation.reject` payload with the reason a person writes, and open the
   confirmation screen; approval and commit happen there. A held candidate
-  offers keeping apart only.
+  offers keeping apart only. A decision moves a candidate out of its view,
+  so a later page can come back empty while the view still holds items: the
+  page then says that this page lists nothing, shows the view's total and
+  keeps 先頭に戻る, and says the view is empty only when its total is zero.
 
 Each request walks every current identity observation once, so its cost is
 linear in captured history (about 0.8 to 0.95 s per 100,000 on workerd and
@@ -215,7 +229,9 @@ the figures). Before the walk the service counts them from the identity run
 seals, in milliseconds, and refuses above 500,000 (`budget_exceeded`,
 `budget:identityObservations=500000`). That is acceptable today for one owner
 reading the page behind Access; routine agent polling needs a written bound
-first. A reader pages to offset 950 of a view (no `nextOffset` past it);
+first. A reader pages to offset 950 of a view (no `nextOffset` past it; the
+950 page's `paging` says `stoppedBy: "budget"` when items follow, ADR 0128,
+and the page says under its pager that items follow which it cannot show);
 `identifierId` narrows a larger one. The page re-reads a candidate before it
 plans and plans nothing if the candidate, its commands or either
 identifier's mapping revision changed. Candidate adoption payloads carry the
@@ -235,7 +251,10 @@ an `instrument-candidate:` base context without that bundle.
 
 `GET /api/identity/instrument-history?identifierId=` serves the complete
 stored mapping/decision/relation history for one identifier under
-`records.read` and whole-store scope. The page opens it on request. The
+`records.read` and whole-store scope. The page opens it on request and
+reads it again on each reopening; if that read fails, the earlier entries stay
+only under the shared `前回読み込んだ訂正履歴` warning
+([frontend](frontend.md#stack-decision)). The
 service counts by index before loading entries and refuses past `maxRows`;
 it never truncates the history. This is recorded history, not effective-date
 mapping. An agent reads the same history through `kogane.instruments.history`
@@ -343,7 +362,12 @@ store: `GET /api/identity/account-candidates?view=&offset=&sourceAccountId=`
 and the page `/identities/account-candidates` (`口座の対応候補`), whose
 buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
+As on the instrument page, an emptied later page says that it lists nothing
+and keeps its pager; only a view total of zero says the view is empty.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
+A reader pages to offset 950 of a view: past it the next page is withheld
+(`paging.stoppedBy: "budget"`, ADR 0128), and the page says under its pager
+that items follow which it cannot show.
 Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),
 refused whole past each. Every read is keyed (ADR 0077, Cost).
@@ -375,7 +399,9 @@ and decision indexes, one probe per relation kind on `entity_relations_from`
 and `_to`, each decision by primary key), so the cost grows with that
 account's own history only. The browser checks the answer with
 `validAccountHistoryRead`, which refuses a relation entry that does not name
-the account on exactly one side.
+the account on exactly one side. Reopening reads it again; if that read
+fails, the earlier entries stay only under the shared
+`前回読み込んだ取得元の口座の訂正履歴` warning.
 
 Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two

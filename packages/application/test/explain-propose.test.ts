@@ -89,6 +89,94 @@ describe("explanation graphs are bounded, id-only and re-authorised", () => {
     expect(hidden.error.refs).toEqual(absent.error.refs);
   });
 
+  test("the organization adds the claim and decision levels, ids and revisions only", async () => {
+    const full = grant();
+    const detail = observationDetail("fixture-a", "account-a");
+    detail.organization!.instruments.push({
+      referenceId: "ii_fixture",
+      targetId: "instrument_fixture",
+      label: "Fixture unit",
+      status: "identified",
+      revision: 2,
+      method: "manual",
+      reason: "fixture instrument reason",
+      role: "unit",
+      namespace: "iso4217",
+      scope: "fixture-scope",
+      value: "FIXTUREVALUE",
+    });
+    const reader = explainReader(detail);
+    const outcome = await explain({
+      grant: full,
+      opened: await opened(full),
+      reader,
+      request: { ref: "observation:transaction:1", depth: null },
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // Read once, for the explained row, under the context's identity mode.
+    expect(reader.organizationReads).toEqual(["transaction:1@latest"]);
+    const levels = outcome.graph.nodes.filter(
+      (node) => node.kind === "adopted-claim" || node.kind === "identity-decision",
+    );
+    expect(levels).toEqual([
+      {
+        ref: "account_mapping:sa_1@3",
+        kind: "adopted-claim",
+        depth: 2,
+        parents: ["observation:transaction:1"],
+      },
+      {
+        ref: "identity-decision:rule:sa_1@3",
+        kind: "identity-decision",
+        depth: 3,
+        parents: ["account_mapping:sa_1@3"],
+      },
+      {
+        ref: "instrument_mapping:ii_fixture@2",
+        kind: "adopted-claim",
+        depth: 2,
+        parents: ["observation:transaction:1"],
+      },
+    ]);
+    // No label, reason, account entity or identifier value reaches the graph.
+    const serialized = JSON.stringify(outcome.graph);
+    for (const hidden of [
+      "Fixture account",
+      "acc_1",
+      "Fixture unit",
+      "instrument_fixture",
+      "fixture instrument reason",
+      "FIXTUREVALUE",
+      "fixture-scope",
+      "iso4217",
+    ])
+      expect(serialized).not.toContain(hidden);
+    const shallow = await explain({
+      grant: full,
+      opened: await opened(full),
+      reader: explainReader(detail),
+      request: { ref: "observation:transaction:1", depth: 2 },
+    });
+    if (!shallow.ok) throw new Error("expected a graph");
+    const kinds = shallow.graph.nodes.map((node) => node.kind);
+    expect(kinds).toContain("adopted-claim");
+    expect(kinds).not.toContain("identity-decision");
+  });
+
+  test("an out-of-scope row is refused before its organization is read", async () => {
+    const narrow = grant({ scopes: { sources: ["fixture-a"], accounts: "*" } });
+    const reader = explainReader(observationDetail("fixture-b", "account-b"));
+    const hidden = await explain({
+      grant: narrow,
+      opened: await opened(narrow),
+      reader,
+      request: { ref: "observation:transaction:1", depth: null },
+    });
+    expect(hidden.ok).toBe(false);
+    expect(reader.organizationReads).toEqual([]);
+  });
+
   test("a ref that is not a known reference kind is refused", async () => {
     const full = grant();
     for (const ref of [
@@ -124,8 +212,12 @@ function store(
     resolveTarget: async (ref) => known[ref] ?? null,
     resolveEvidence: async (ref) => known[ref] ?? null,
     appendProposal: async (proposal) => {
+      // The append-only store refuses a second row under the same id.
+      if (written.some((row) => row.decisionRevisionId === proposal.decisionRevisionId))
+        throw new Error("synthetic UNIQUE constraint failed");
       written.push(proposal);
     },
+    proposalRecorded: async (id) => written.some((row) => row.decisionRevisionId === id),
   };
 }
 
@@ -243,5 +335,45 @@ describe("proposals are immutable claims, never adoptions", () => {
     );
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe("budget_exceeded");
+  });
+});
+
+describe("a failed proposal write is the store's failure, not a duplicate", () => {
+  async function proposeWith(target: ProposalStore) {
+    const full = grant();
+    const parsed = parseProposalRequest(BODY, full.budget.maxProposalTargets);
+    if (!parsed.ok) throw new Error("unreachable");
+    return proposeReconciliation({
+      grant: full,
+      opened: await opened(full),
+      store: target,
+      request: parsed.value,
+      now: "2026-09-09T00:00:00Z",
+    });
+  }
+
+  test("a write the store could not make throws, so the caller answers internal_error", async () => {
+    // Nothing was recorded: telling the agent `idempotency_conflict` ("do not
+    // resend") would leave it believing a proposal exists that does not.
+    const failing: ProposalStore = {
+      ...store(KNOWN),
+      appendProposal: async () => {
+        throw new Error("synthetic store outage");
+      },
+      proposalRecorded: async () => false,
+    };
+    await expect(proposeWith(failing)).rejects.toThrow("synthetic store outage");
+  });
+
+  test("the same proposal in the same instant is idempotency_conflict, and is not written twice", async () => {
+    const target = store(KNOWN);
+    const first = await proposeWith(target);
+    expect(first.ok).toBe(true);
+    const second = await proposeWith(target);
+    expect(second.ok).toBe(false);
+    if (second.ok || !first.ok) return;
+    expect(second.error.code).toBe("idempotency_conflict");
+    expect(second.error.refs).toEqual([first.receipt.proposalId]);
+    expect(target.written).toHaveLength(1);
   });
 });

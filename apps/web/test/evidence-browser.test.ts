@@ -1,6 +1,6 @@
 // Synthetic production-contract responses only. No collector, store or raw
 // financial body is opened by this browser suite.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import type {
   EvidenceRun,
   EvidenceRunList,
 } from "../../../packages/observation-shared/src/evidence-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const CLIENT = join(import.meta.dir, "..", "dist-evidence");
 const configuredBrowser = process.env["CHROMIUM_PATH"];
@@ -85,9 +86,14 @@ const detail: EvidenceArtifactDetail = {
   },
 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("production evidence navigation", () => {
   let server: ReturnType<typeof Bun.serve>;
-  let browser: Browser;
   let origin: string;
   let runStatus = 200;
   let metadataStatus = 200;
@@ -173,7 +179,6 @@ describe.if(runnable)("production evidence navigation", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();
@@ -251,7 +256,7 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(await page.getByRole("alert").innerText()).toContain("認証が必要");
     expect(await page.locator("body").innerText()).not.toContain("PRIVATE_RUN_RESPONSE");
     runStatus = 200;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "取得履歴を再試行", exact: true }).click();
     await page.getByText("一部取得", { exact: true }).waitFor();
     metadataStatus = 403;
     await page.getByRole("button", { name: "表示を更新", exact: true }).click();
@@ -260,7 +265,7 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(await page.locator("body").innerText()).not.toContain("PRIVATE_AUTH_RESPONSE");
     expect(await page.getByRole("alert").innerText()).toContain("権限がありません");
     metadataStatus = 200;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "取得履歴の接続情報を再試行", exact: true }).click();
     await page.getByText("一部取得", { exact: true }).waitFor();
     await page.close();
   }, 60_000);
@@ -309,7 +314,7 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
     expect(await page.locator("body").innerText()).not.toContain("PRIVATE_RUN_RESPONSE");
     runStatus = 200;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "取得履歴を再試行", exact: true }).click();
     await page.getByRole("alert").waitFor({ state: "detached" });
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
     await page.close();

@@ -21,6 +21,8 @@ import {
   financialError,
   type Grant,
   grantAllows,
+  narrowedScopeRefs,
+  REWARD_EXPIRY_DETAILS,
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
@@ -32,19 +34,21 @@ import {
   readHoldingsChange,
   reportedHoldingsChangeAvailable,
 } from "./reported-holdings-change-api";
+import { HOLDINGS_CHANGE_DETAILS } from "../../../packages/domain/src/holdings-change-summary.ts";
 import { readRewardRoute } from "./rewards-api";
 import { eventsV2Available, readEventsRoute } from "./events-api";
 import { ACTIVITY_BASES } from "../../../packages/read-model/src/index";
 import { readReportRoute, reportArtifactsAvailable } from "./reports-api";
 import { collectionQualityAvailable, readCollectionQuality } from "./collection-quality-api";
 import { catalogue, rawBytes } from "./read";
+import { BALANCE_READ_DETAILS } from "../../../packages/application/src/query/read-detail.ts";
 import { mcpInputSchema } from "./mcp-input-schema";
 import { schedulesServed } from "./schedule-tools";
-import { relayScheduleSnapshot } from "./schedules-api";
+import { scheduleSnapshotResponse } from "./schedules-api";
 import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
-
-/** The result envelope of every page read: the route's answer, under `data`. */
-const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
+// The result envelope of every page read: the route's answer, under `data`.
+// Shared, so the overview summary's byte budget measures this very envelope.
+import { PAGE_READ_SCHEMA_VERSION } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /** A free query value a route accepts: bounded, non-empty, no control character. */
 const routeText = (max: number) =>
@@ -59,6 +63,8 @@ const ROUTE_TEXT = routeText(128);
 const FILTER_TEXT = routeText(512);
 const IDENTITY_READ = z.enum(["latest", "as-recorded"]);
 const MEASURE_VIEW = z.enum(["balances", "summaries"]);
+/** How much each row or line says (ADR 0123); absent is `summary`, as on the routes. */
+const READ_DETAIL = z.enum(BALANCE_READ_DETAILS);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 interface PageReadTool<Schema extends z.ZodType> {
@@ -97,9 +103,9 @@ function tool<Schema extends z.ZodType>(definition: PageReadTool<Schema>) {
 
 const TOOLS = {
   "kogane.identity.read": tool({
-    title: "Identity pages: connections, account and instrument mappings, coverage",
+    title: "Identity pages: connections, accounts, account and instrument mappings, coverage",
     description:
-      "One page of the owner UI's identity read: `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only.",
+      "One page of the owner UI's identity read: `account-list` (one line per account with its readable label and where the label came from, its role, status, sources, reference and observation counts, aggregator connection state and newest capture time; start here to name accounts), `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `coverage.nextOffset` is deprecated.",
     schema: z.strictObject({
       collection: z.enum(IDENTITY_COLLECTIONS),
       source: ROUTE_TEXT.optional(),
@@ -114,11 +120,12 @@ const TOOLS = {
   "kogane.store.read": tool({
     title: "Store metadata, overview and filter options",
     description:
-      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the latest fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). The same answer as GET /api/meta, /api/overview or /api/filter-options, under records.read and a whole-store read grant. Read-only.",
+      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the newest 500 fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). `overview` takes `detail`: `summary` (the default) keeps the counts and coverage, lists the sources by artifact count (equal counts share a line with `sourceIds`), and collapses each run window by status (fetch `success`/`partial`, parse `ok`/`pending`/`error`) into runs, sources or parsers, superseded and warning counts, every closed `failureCodes` of a parse status and the newest run's ids, with a line per source or parser for each status that is not a success (`notSuccessful`, `notOk` with its newest three `failureCodes` and `moreFailureCodes`) and per partial-unit dataset (`unitUpdates`), the five with the newest runs each, the rest counted in `notSuccessfulOmitted`, `notOkOmitted` and `unitUpdatesOmitted`. The summary is held to 8,192 bytes: past it, sources (the last by id first, counted in `sourcesOmitted`), then line codes (into `moreFailureCodes`), then lines (oldest first, into the omitted counts) are left out and `budget.trimmed` is true; every status keeps every code. When its counts and status lines alone pass it, the read is 413 result_limit_exceeded with `retryWith: {detail: \"full\"}`. `full` lists every run with its producer, session id, parser version, warnings and error. The same answer as GET /api/meta, /api/overview or /api/filter-options with the same `detail`, under records.read and a whole-store read grant. Read-only.",
     schema: z.strictObject({
       page: z.enum(["meta", "overview", "filter-options"]),
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]).optional(),
       view: MEASURE_VIEW.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
     routes: ["/api/meta", "/api/overview", "/api/filter-options"],
@@ -127,7 +134,7 @@ const TOOLS = {
   "kogane.observations.list": tool({
     title: "Lists of transactions, balances, positions or artifacts",
     description:
-      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind>, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. Read-only.",
+      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind> with the same `detail`, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. `balances` takes `detail`: `summary` (the default) answers the first lines of each list, latest and history in turn, up to 10 each and under 8 KB: observationId, `account` and `metric` refs into page-local `accounts` (source, sourceAccount, entity, label, mapping status, lineage) and `metrics` (source, providerMetric and the interpretation's closed kind, measurementKind, assetClass, timeBasis), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status, never a zero) and asOf; a latest line's `duplicates` (the ids its group folded in) and `interpretation:conflict`, a history line's `parse:superseded`, `parse:pending`, `parse:error`; `coverage.nextOffset` and `latestNextOffset` start each list's next page; `coverage.next` is both offsets of the next page (an ended list at its end), null when both lists have ended: pass both with the same filters. A first line over the budget alone is 413 result_limit_exceeded with `retryWith: {detail: \"full\"}`. `full` answers up to 500 rows a list with each row's organization and interpretation. The adopted balances of the published snapshot are kogane.balances.read's. Read-only.",
     schema: z.strictObject({
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]),
       source: FILTER_TEXT.optional(),
@@ -142,6 +149,7 @@ const TOOLS = {
       latestOffset: OFFSET.optional(),
       cursor: FILTER_TEXT.optional(),
       identityRead: IDENTITY_READ.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
     routes: ["/api/transactions", "/api/balances", "/api/positions", "/api/artifacts"],
@@ -165,11 +173,11 @@ const TOOLS = {
       ),
   }),
   "kogane.balances.read": tool({
-    title: "Latest balances and balance history of the published snapshot",
+    title: "Latest balances, balance history and cash per account of the published snapshot",
     description:
-      "One page of the v2 balance read: `latest` (each adopted balance of the published snapshot with its quantity, metric, adoption state, evidence, freshness, coverage and known-asset subtotals) or `history` (the visible balance observations up to that snapshot). The same answer as GET /api/v2/balances/latest or /api/v2/balances/history, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is one of the route's page sizes; `cursor` is the previous page's `nextCursor`. 503 read_model_unavailable while no snapshot is published. Read-only.",
+      "One page of the v2 balance read of the published snapshot: `latest` (each adopted balance, with the coverage and known-asset subtotals), `history` (the visible balance observations up to it) or `cash` (how much cash per account and per bank, in one call). `detail: summary` (the default) answers one line per row: observationId, source, account with its label, mapping status and lineage, metric (registry id, provider name), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status as the reason, never a zero), asOf, reasons, and for `latest` freshness and adoption; a superseded, pending or failed `history` row says so (`parse:superseded`, `parse:pending`, `parse:error`); 10 rows by default. `detail: full` answers each row with its whole provenance; 100 rows by default. `cash` takes no `detail`, `metric` or `view`: one line per account (entity, label, amounts of deposit.balance, broker.foreign-cash-deposit and exchange.cash-balance, each with source, sourceAccount, unit, value, status, adoption, `counted`, asOf, reasons; whole lines up to `limit` amounts, under 8 KB a page), exact `subtotals` byUnit and bySource over the whole scope (never across units; no value when nothing is counted, never a zero; `partial` with reasons when an amount is not counted; two adopted amounts of one unit on one account are `cash:account_reported_twice`, not added), `leftOut` (every other measurement, by closed reason) and liabilitiesCoverage unknown. The same answer as GET /api/v2/balances/<collection>, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is 10, 25, 50, 100, 200 or 500; `cursor` is the previous `nextCursor` and continues at any offered `limit` and `detail`. A cursor read with other filters is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. 503 read_model_unavailable while no snapshot is published; `cash` is 413 result_limit_exceeded past 5,000 rows or when no line fits in 8 KB. Read-only.",
     schema: z.strictObject({
-      collection: z.enum(["latest", "history"]),
+      collection: z.enum(["latest", "history", "cash"]),
       source: FILTER_TEXT.optional(),
       account: FILTER_TEXT.optional(),
       instrument: FILTER_TEXT.optional(),
@@ -178,22 +186,26 @@ const TOOLS = {
       identityRead: IDENTITY_READ.optional(),
       limit: z.number().int().min(1).max(1000).optional(),
       cursor: FILTER_TEXT.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
-    routes: ["/api/v2/balances/latest", "/api/v2/balances/history"],
+    routes: ["/api/v2/balances/latest", "/api/v2/balances/history", "/api/v2/balances/cash"],
     read: (env, { collection, ...params }) =>
       observationBody(env, `/api/v2/balances/${collection}`, params),
   }),
   "kogane.rewards.read": tool({
     title: "Reward holdings and expiry",
     description:
-      "One page of the reward read: `holdings` (each programme's provider-observed quantity in its own unit, with membership) or `expiry` (the published reward snapshot's expiry estimates, with the provider's own display sections). The same answer as GET /api/v2/rewards/holdings or /api/v2/rewards/expiry, under records.read and a whole-store read grant. `program` narrows to one programme; `offset` pages holdings, `limit` and `cursor` page expiry. Expiry is 503 while no reward snapshot is published. Read-only; no exchange or simulation is run.",
+      "One page of the reward read: `holdings` (each programme's provider-observed quantity in its own unit, with membership) or `expiry` (the published reward snapshot's expiry estimates, with the provider's own display sections). The same answer as GET /api/v2/rewards/holdings or /api/v2/rewards/expiry, under records.read and a whole-store read grant. `program` narrows to one programme; `offset` pages holdings, `limit` and `cursor` page expiry. Expiry takes a deadline window: `from` (inclusive, YYYY-MM-DD, default today in Asia/Tokyo) and `before` (exclusive); with neither there is no window, so a summary counts every dated bucket inside, past deadlines too. A windowed page lists the rows inside it and `window.rows` counts the others, a row with no date left out as `deadline_unknown`. A cursor is bound to its window: another window is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. `detail: summary` (unpaged: no `limit` or `cursor`) answers per programme and unit the buckets inside the window with their exact total (`not-exact` with reasons when an amount is not exact, never a partial sum or zero), the earliest 20 bucket lines, up to 3 provider-displayed portions (listed, never added), and how many buckets and displays fell before, inside and after the window or were left out (`deadline_unknown`, `deadline_differs_by_rule`, `display_date_unknown`, `provider_expiry_not_displayed`, `provider_expiry_unavailable`). A malformed date is 400 invalid_date, a window with no day 400 invalid_date_range, a snapshot over 1,000 rows 413 result_limit_exceeded. Expiry is 503 while no reward snapshot is published. Read-only; no exchange or simulation is run.",
     schema: z.strictObject({
       collection: z.enum(["holdings", "expiry"]),
       program: ROUTE_TEXT.optional(),
       offset: OFFSET.optional(),
       limit: z.number().int().min(1).max(1000).optional(),
       cursor: FILTER_TEXT.optional(),
+      from: ROUTE_TEXT.optional(),
+      before: ROUTE_TEXT.optional(),
+      detail: z.enum(REWARD_EXPIRY_DETAILS).optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/rewards/holdings", "/api/v2/rewards/expiry"],
@@ -206,12 +218,15 @@ const TOOLS = {
   "kogane.reported-holdings-change.read": tool({
     title: "Reported holdings of two dates side by side",
     description:
-      "The holdings each provider reported on two dates (YYYY-MM-DD, Asia/Tokyo, not after today), side by side per provider holding key, with the exact change where both dates list a holding; optionally one source or one account. The same answer as GET /api/v2/reported-holdings-change, under records.read and a whole-store read grant. Provider figures only: nothing is added up, valued or netted. Served where GET /api/v2/reported-state is. Read-only.",
+      "How the holdings each provider reported changed between two dates (YYYY-MM-DD, Asia/Tokyo, not after today), per provider holding key; optionally one source or one account. `detail` is `summary` (default) or `full`. The summary lists changed lines only: `compared` with a nonzero exact change, `listed_at_start_only` (removed), `listed_at_end_only` (added) and `not_comparable` with its reasons, in that order; a `compared` holding with a zero change is counted in `unchanged`, not listed. A quantity that is not exact is its `quantityStatus` (`missing`, `unparsed`, `conflict`) with no number, never unchanged. Each line keeps its unit and its `position:` and `artifact:` refs (read them with kogane.observations.get); `containers` maps a line's `container` ref to its source, parser and dataset; `reasonCounts` counts each reason. `limit` is 10 (default), 25, 50 or 100 lines; `cursor` is the previous page's `nextCursor` (any `limit`): `cursor_mismatch` (with `mustMatch`, the arguments to repeat) for other dates or filters, `context_expired` (410) once the comparison's inputs moved, `invalid_cursor` otherwise. `full` is the unpaged comparison with each side's capture, identity and provider text and the manifest; it takes no `limit` or `cursor`. `contextId` is the comparison's in both. The same answer as GET /api/v2/reported-holdings-change, under records.read and a whole-store read grant. Provider figures only: nothing is added up, valued or netted (`total: not-computed`). Served where GET /api/v2/reported-state is. Read-only. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `page.nextCursor` is deprecated.",
     schema: z.strictObject({
       from: ROUTE_TEXT,
       to: ROUTE_TEXT,
       source: ROUTE_TEXT.optional(),
       account: ROUTE_TEXT.optional(),
+      detail: z.enum(HOLDINGS_CHANGE_DETAILS).optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      cursor: FILTER_TEXT.optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/reported-holdings-change"],
@@ -221,11 +236,16 @@ const TOOLS = {
   "kogane.events.read": tool({
     title: "Economic activity by basis, and obligations",
     description:
-      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. Served where the projection exists. Read-only.",
+      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. `activity` takes filters, each optional: `since` (inclusive) and `before` (exclusive), ISO 8601 instants with a zone, on when a revision was recorded, as kogane.changes.since counts it; `account`, an account id (or `account:<id>`) a leg names; `source`, a source id an evidence parse run was captured from. A filtered list is in the same order and echoes `filters`; each call walks at most `walk.bound` current revisions, so a page may be short or empty and still continue: merge `next.arguments` (its `cursor`, also `nextCursor`) into the same call, no `offset`; `paging` says how the page ended (`stoppedBy` `limit` or `walk`). Other filters are 400 cursor_mismatch with `mustMatch`. A malformed filter is 400 invalid_query naming it. Served where the projection exists. Read-only. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `nextCursor` is deprecated.",
     schema: z.strictObject({
       collection: z.enum(["activity", "obligations"]),
       basis: z.enum(ACTIVITY_BASES).optional(),
       offset: OFFSET.optional(),
+      since: ROUTE_TEXT.optional(),
+      before: ROUTE_TEXT.optional(),
+      account: routeText(300).optional(),
+      source: ROUTE_TEXT.optional(),
+      cursor: routeText(2048).optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/activity", "/api/v2/obligations"],
@@ -236,7 +256,7 @@ const TOOLS = {
   "kogane.reports.read": tool({
     title: "Fixed report artifacts (評価レポート): list, body and explanation",
     description:
-      "The stored report artifacts: without `reportId`, one page of the catalogue, newest first (`offset` pages by 50); with `reportId`, that report's stored body (`view: body`, the default) or its cached explanation (`view: explanation`), with its calculation run, replayability and events. The same answer as GET /api/v2/reports and /api/v2/reports/{id}[/explanation], under records.read and a whole-store read grant, except that a restricted or unavailable report is refused here on every view, with the codes the export answers (403 evidence_restricted where its explanation is refused, 404 not_found where only its body is gone), where the operator page still re-displays it (ADR 0072). Re-display only: nothing is recomputed, and the export view is not offered. Served while the store has report artifacts.",
+      "The stored report artifacts: without `reportId`, one page of the catalogue, newest first (`offset` pages by 50); with `reportId`, that report's stored body (`view: body`, the default) or its cached explanation (`view: explanation`), with its calculation run, replayability and events. The same answer as GET /api/v2/reports and /api/v2/reports/{id}[/explanation], under records.read and a whole-store read grant, except that a restricted or unavailable report is refused here on every view, with the codes the export answers (403 evidence_restricted where its explanation is refused, 404 not_found where only its body is gone), where the operator page still re-displays it (ADR 0072). Re-display only: nothing is recomputed, and the export view is not offered. Served while the store has report artifacts. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; the list's `nextCursor` is deprecated.",
     schema: z.strictObject({
       reportId: z
         .string()
@@ -276,14 +296,15 @@ const TOOLS = {
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source, dataset and account",
     description:
-      "Collection stages in closed codes: without `source`, job/source summaries (schedules, known alarm, latest runs and stages); with `source`, cells by unit, dataset and period (`view: cells`, the default; `offset` pages them) or the same cells regrouped by the accounts the observations of their newest or current capture name (`view: accounts`, unpaged: per account its stored label, mapping statuses and data types with their periods, standing and reasons, and apart the cells no observation attributes to an account; a fetch unit key is never read as an account, and a period no capture has is not listed). Each source and cell carries its freshness under `collection-freshness-v1`, counted to the answer's `freshnessAsOf` (Asia/Tokyo civil days): `same-day`, `recent` (1-3 days), `stale`, or for data that is not fresh `human-required` (collection waits on the owner) or `disabled` (no collecting job enabled), and `no-capture`; in `view: accounts` each period carries the freshness of its named capture, independent of standing, and each data type and account that of its newest named capture. The account answer is self-contained: `dataTypesVersion` and source-level `dataTypes` describe the provider catalogue, and each parser entry's `providerTypes` reverses that catalogue's parser membership (unknown parsers have an empty array). Each summary source with a collector also lists the data types its provider offers under `provider-data-types-v1` (balances, movements, card usage and statements, positions, executions, income, documents, points, ...), each `collected`, `partial` or `not_collected` with its parsers and the issue that tracks the rest. Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality, /api/collection-quality/{source} and /api/collection-quality/{source}/accounts, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
+      "Collection stages in closed codes. `detail: summary` (default) or `full`. Summaries page lines by `offset` (`coverage.nextOffset`), up to 20 and 8,192 bytes a page; one line too large is 413 result_limit_exceeded. Without `source`: summary: a line per source (freshness, newest fetch run, reasons, each job's newest receipt status, failure and terminal codes, unregistered collectors' codes, data types by status; equal lines share one via `sourceIds`); full (unpaged): jobs and sources (schedules, alarm, runs, stages, terminals, `provider-data-types-v1` data types with status, parsers, issue). `view: status` (no `source`, `offset` or `detail`): anything stuck, a line per job: `lastRun` (`recovered` if a later fetch run succeeded), `lastSuccessAt`, `failuresSinceSuccess` (of the newest 100, else `100+`), `failureCode`, `state` (`ok`; `degraded`: a parse over 3 days old; `failing`; `needs-owner`; `disabled`), `notPublishing` datasets with reasons. With `source`, `view: cells` (default): summary: a line per dataset, parser and unit (cells by state, first/last period, newest capture, freshness, reasons, failure codes, coverage causes); full: cells by unit, dataset and period (`offset` pages 500). `view: accounts`: cells by the accounts their newest or current capture's observations name; summary: a line per account (id, label, statuses, freshness, kinds, providerTypes, periods by standing and cell state, reasons), then per unit of unattributed cells; full (unpaged): data types with periods, standing, reasons; unattributed cells. Freshness is `collection-freshness-v1`, to `freshnessAsOf` (Tokyo days): `same-day`, `recent` (1-3 days), `stale`, `human-required`, `disabled`, `no-capture`; in `view: accounts` per named capture, independent of standing, with `dataTypesVersion` and `dataTypes`. Ids, times, counts, labels, codes; no amount. Same answer as GET /api/collection-quality[/{source}[/accounts]] (or ?view=status) with the same `detail`, under evidence.read on the whole store. Served while its tables exist. Read-only.",
     schema: z.strictObject({
       source: z
         .string()
         .regex(/^[a-z0-9][a-z0-9-]{0,99}$/u)
         .optional(),
-      view: z.enum(["cells", "accounts"]).optional(),
+      view: z.enum(["cells", "accounts", "status"]).optional(),
       offset: OFFSET.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "evidence.read",
     routes: [
@@ -293,10 +314,30 @@ const TOOLS = {
     ],
     needs: "collectionQuality",
     read: (env, { source, view, ...params }) => {
-      // A view names one source's page; the account view is unpaged.
+      // The status view is the summary's: no source and no offset; it is
+      // compact already, so it has one detail and takes no `detail` (ADR 0123).
+      if (view === "status") {
+        const wrong = [
+          ...(source === undefined ? [] : ["source"]),
+          ...(params.offset === undefined ? [] : ["offset"]),
+          ...(params.detail === undefined ? [] : ["detail"]),
+        ];
+        if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
+        return readCollectionQuality(env, {
+          pathname: "/api/collection-quality",
+          searchParams: new URLSearchParams({ view: "status" }),
+        });
+      }
+      // Any other view names one source's page.
       if (source === undefined && view !== undefined)
         throw new HttpError(400, "invalid_request", ["view"]);
-      if (view === "accounts" && params.offset !== undefined)
+      // The summary's and the account view's full answers are unpaged; their
+      // summaries page lines (ADR 0123, amendments 2026-11-20 and 2026-11-21).
+      if (
+        (source === undefined || view === "accounts") &&
+        params.detail === "full" &&
+        params.offset !== undefined
+      )
         throw new HttpError(400, "invalid_request", ["offset"]);
       return readCollectionQuality(env, {
         pathname:
@@ -310,7 +351,7 @@ const TOOLS = {
   "kogane.evidence.read": tool({
     title: "Evidence browser: sealed runs and their artifacts",
     description:
-      "The evidence browser's catalogue of the configured source's sealed collection runs: `meta` (the store and its source), `runs` (one page of a source's sealed runs, newest first; needs `source`), `artifacts` (one page of a run's artifacts; needs `runId`) or `artifact` (one artifact's detail: its key, role, dataset, digests, size, container and declared media type; needs `runId` and `artifactId`). `cursor` (`c_<n>`, from the previous page's `nextCursor`) pages runs and artifacts. The same answer as GET /api/evidence/v1/meta, /sources/{source}/runs, /runs/{run}/artifacts and /runs/{run}/artifacts/{artifact}, under evidence.read and a whole-store read grant. Never the raw bytes. Read-only.",
+      "The evidence browser's catalogue of the configured source's sealed collection runs: `meta` (the store and its source), `runs` (one page of a source's sealed runs, newest first; needs `source`), `artifacts` (one page of a run's artifacts; needs `runId`) or `artifact` (one artifact's detail: its key, role, dataset, digests, size, container and declared media type; needs `runId` and `artifactId`). `cursor` (`c_<n>`, from the previous page's `nextCursor`) pages runs and artifacts. The same answer as GET /api/evidence/v1/meta, /sources/{source}/runs, /runs/{run}/artifacts and /runs/{run}/artifacts/{artifact}, under evidence.read and a whole-store read grant. Never the raw bytes. Read-only. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended; `nextCursor` is deprecated.",
     schema: z.strictObject({
       page: z.enum(["meta", "runs", "artifacts", "artifact"]),
       source: z
@@ -425,8 +466,8 @@ const TOOLS = {
   "kogane.schedules.read": tool({
     title: "Collection schedules page",
     description:
-      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run, and `collectionRequest`: the CORE source a kogane.ops.collection.request names for the job and whether the Processor would dispatch it — `enabled`, `lane_disabled` or `connection_disabled`, null when no collector serves a request for it), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
-    schema: z.strictObject({}),
+      "The schedules page as the operator sees it. `detail: summary` (the default) answers one line per configured job (id, source, kind, enabled, supported, next run, reservation, `dispatch` (its `collectionRequest`'s), and its newest occurrence's nominal time, status and closed failure code), each source's maintenance reference status with its number of maintenance rules, and the held execution leases. `detail: full` answers each job in full (times, the actual alarm, the maintenance reference, the latest run with its run ids, and `collectionRequest`: the CORE source a kogane.ops.collection.request names for the job and whether the Processor would dispatch it — `enabled`, `lane_disabled` or `connection_disabled`, null when no collector serves a request for it), the maintenance windows, the recent occurrences with their run and evidence ids, and the held leases. The same answer as GET /api/ops/v1/schedules with the same `detail`, without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
+    schema: z.strictObject({ detail: READ_DETAIL.optional() }),
     // The jobs are `schedules.read`'s, over every schedule source; the
     // occurrences' run and evidence ids (`runIds`, `runLinks`) and the held
     // leases are what `schedules.read` alone never reaches (ADR 0046), so the
@@ -436,8 +477,8 @@ const TOOLS = {
     scheduleScope: true,
     routes: ["/api/ops/v1/schedules"],
     needs: "schedules",
-    read: async (env) => {
-      const upstream = await relayScheduleSnapshot(env);
+    read: async (env, { detail }) => {
+      const upstream = await scheduleSnapshotResponse(env, detail ?? "summary");
       let body: unknown;
       try {
         body = await upstream.json();
@@ -513,8 +554,7 @@ function refusedRefs(grant: Grant, definition: PageReadTool<z.ZodType>): string[
     ...(definition.scheduleScope && grant.scopes.scheduleSources !== "*"
       ? ["scope:scheduleSource"]
       : []),
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+    ...narrowedScopeRefs(grant),
   ];
 }
 
@@ -603,7 +643,11 @@ export async function callPageReadTool(
     if (error instanceof HttpError)
       return {
         status: error.status,
-        body: { error: error.code, ...(error.refs.length > 0 ? { refs: error.refs } : {}) },
+        body: {
+          error: error.code,
+          ...(error.refs.length > 0 ? { refs: error.refs } : {}),
+          ...error.hints,
+        },
       };
     throw error;
   }

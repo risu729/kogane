@@ -164,7 +164,8 @@ describe("collection quality", () => {
       },
     } satisfies Fetcher;
     const sourceEnv: Env = { ...env, SCHEDULES_ENABLED: "true", PIPELINE: pipeline };
-    const url = new URL(`https://fixture.test${PATH}`);
+    // The alarms are part of the full summary (ADR 0123).
+    const url = new URL(`https://fixture.test${PATH}?detail=full`);
     const before = await counts();
     const read = async () =>
       (await (await collectionQualityApi(
@@ -194,9 +195,20 @@ describe("collection quality", () => {
   });
   it("serves a signed-in reader the validated summary and writes nothing", async () => {
     const before = await counts();
-    const response = await call(PATH);
+    const response = await call(`${PATH}?detail=full`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
+    // The default is one line per source, of the same summary (ADR 0123).
+    const lines = (await (await call(PATH)).json()) as {
+      detail: string;
+      sources: { sourceIds: string[]; latestFetchRun: { id: number } | null; reasons: string[] }[];
+    };
+    expect(validApiResponse(PATH, lines)).toBe(true);
+    expect(lines.detail).toBe("summary");
+    expect(lines.sources.find((source) => source.sourceIds.includes("sony-bank"))).toMatchObject({
+      latestFetchRun: { id: runId },
+      reasons: expect.arrayContaining(["schedule_never_ran"]),
+    });
     const body = (await response.json()) as {
       sources: { sourceId: string; latestFetchRun: { id: number } | null; reasons: string[] }[];
       otherSchedules: { id: string }[];
@@ -211,10 +223,18 @@ describe("collection quality", () => {
   });
 
   it("serves one source's cells, paged, and refuses what it does not know", async () => {
-    const response = await call(`${PATH}/sony-bank`);
+    const response = await call(`${PATH}/sony-bank?detail=full`);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(validApiResponse(`${PATH}/sony-bank`, body)).toBe(true);
+    // The default collapses the cells into lines (ADR 0123).
+    const lines = await (await call(`${PATH}/sony-bank`)).json();
+    expect(validApiResponse(`${PATH}/sony-bank`, lines)).toBe(true);
+    expect(lines).toMatchObject({
+      detail: "summary",
+      lines: [{ dataset: "yen-history-page-0001", cells: 1, current: 1 }],
+      coverage: { cells: 1, lines: 1, truncated: false, nextOffset: null },
+    });
     expect(body).toMatchObject({
       sourceId: "sony-bank",
       cells: [
@@ -228,7 +248,7 @@ describe("collection quality", () => {
       ],
       coverage: { limit: 500, truncated: false, nextOffset: null },
     });
-    expect((await call(`${PATH}/sony-bank?offset=500`)).status).toBe(200);
+    expect((await call(`${PATH}/sony-bank?offset=500&detail=full`)).status).toBe(200);
     for (const [path, status, code] of [
       [`${PATH}/no-such-source`, 404, "not_found"],
       [`${PATH}/kogane-synthetic`, 404, "not_found"],
@@ -239,6 +259,8 @@ describe("collection quality", () => {
       [`${PATH}/sony-bank?offset=01`, 400, "invalid_offset"],
       [`${PATH}/sony-bank?offset=1&offset=2`, 400, "invalid_query"],
       [`${PATH}/sony-bank?limit=5`, 400, "invalid_query"],
+      [`${PATH}/sony-bank?detail=compact`, 400, "invalid_query"],
+      [`${PATH}?detail=full&detail=full`, 400, "invalid_query"],
     ] as const) {
       const refused = await call(path);
       expect(refused.status, path).toBe(status);
@@ -246,10 +268,10 @@ describe("collection quality", () => {
     }
   });
 
-  it("serves one source's cells regrouped by account, unpaged, and writes nothing (ADR 0088)", async () => {
+  it("serves one source's cells regrouped by account, unpaged in full, and writes nothing (ADR 0088)", async () => {
     const before = await counts();
     const path = `${PATH}/sony-bank/accounts`;
-    const response = await call(path);
+    const response = await call(`${path}?detail=full`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = (await response.json()) as {
@@ -258,7 +280,8 @@ describe("collection quality", () => {
       accounts: unknown[];
       unattributed: { dataset: string | null; state: string }[];
     };
-    expect(validApiResponse(path, body)).toBe(true);
+    expect(validApiResponse(path, body, "full")).toBe(true);
+    expect(validApiResponse(path, body, "summary")).toBe(false);
     // The path names the source the answer is about; another source's path refuses it.
     expect(validApiResponse(`${PATH}/vpass/accounts`, body)).toBe(false);
     expect(body.sourceId).toBe("sony-bank");
@@ -268,17 +291,78 @@ describe("collection quality", () => {
     expect(body.unattributed).toMatchObject([
       { dataset: "yen-history-page-0001", state: "current" },
     ]);
+    // The default is the summary (ADR 0123, amendment 2026-11-20): the same
+    // cell on one line, counted.
+    const summary = await call(path);
+    expect(summary.status).toBe(200);
+    const lines = (await summary.json()) as Record<string, unknown>;
+    expect(validApiResponse(path, lines, "summary")).toBe(true);
+    expect(validApiResponse(path, lines, "full")).toBe(false);
+    expect(lines).toMatchObject({
+      detail: "summary",
+      sourceId: "sony-bank",
+      cells: 1,
+      accounts: [],
+      unattributed: [
+        { dataset: "yen-history-page-0001", cells: 1, current: 1, olderCurrent: 0, noCurrent: 0 },
+      ],
+      coverage: { accounts: 0, unattributedCells: 1, lines: 1, offset: 0, truncated: false },
+    });
     for (const [refusedPath, status, code] of [
       [`${PATH}/no-such-source/accounts`, 404, "not_found"],
       [`${PATH}/kogane-synthetic/accounts`, 404, "not_found"],
       [`${PATH}/Sony_Bank/accounts`, 404, "not_found"],
       [`${PATH}/accounts/accounts`, 404, "not_found"],
       [`${PATH}/sony-bank/accounts/extra`, 404, "not_found"],
-      [`${path}?offset=0`, 400, "invalid_query"],
+      [`${path}?detail=full&offset=0`, 400, "invalid_query"],
+      [`${path}?detail=compact`, 400, "invalid_query"],
+      [`${path}?view=accounts`, 400, "invalid_query"],
+      [`${path}?offset=x`, 400, "invalid_offset"],
     ] as const) {
       const refused = await call(refusedPath);
       expect(refused.status, refusedPath).toBe(status);
       expect(((await refused.json()) as { error: string }).error).toBe(code);
+    }
+    expect((await call(path, { subject: null })).status).toBe(401);
+    expect((await call(path, { method: "POST" })).status).toBe(405);
+    expect((await call(path, { schema: false })).status).toBe(404);
+    expect(await counts()).toEqual(before);
+  });
+
+  it("serves the status view at ?view=status exactly, one line per configured job, and writes nothing (ADR 0045, 2026-11-19)", async () => {
+    const before = await counts();
+    const path = `${PATH}?view=status`;
+    const response = await call(path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as {
+      view: string;
+      sources: { job: string; state: string; notPublishing: unknown[] }[];
+    };
+    expect(validApiResponse(PATH, body)).toBe(true);
+    expect(body.view).toBe("status");
+    const jobs = (
+      await env.DB.prepare("SELECT id FROM collection_schedules ORDER BY id").all<{ id: string }>()
+    ).results.map((job) => job.id);
+    expect(body.sources.map((line) => line.job)).toEqual(jobs);
+    expect(body.sources.find((line) => line.job === "sony-bank")).toMatchObject({
+      state: "ok",
+      notPublishing: [],
+    });
+    for (const refused of [
+      `${PATH}?view=cells`,
+      `${PATH}?view=Status`,
+      `${PATH}?view=status&view=status`,
+      `${PATH}?view=status&offset=0`,
+      `${PATH}?offset=0&view=status`,
+      // The status view is compact already: it takes no `detail` (ADR 0123).
+      `${PATH}?view=status&detail=full`,
+      `${PATH}?view=status&detail=summary`,
+      `${PATH}?detail=full&view=status`,
+    ]) {
+      const answer = await call(refused);
+      expect(answer.status, refused).toBe(400);
+      expect(((await answer.json()) as { error: string }).error).toBe("invalid_query");
     }
     expect((await call(path, { subject: null })).status).toBe(401);
     expect((await call(path, { method: "POST" })).status).toBe(405);

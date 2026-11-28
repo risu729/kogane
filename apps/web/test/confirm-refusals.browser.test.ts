@@ -3,14 +3,19 @@
 //
 //  * a plan the server refuses to simulate is named by the refusal's own
 //    fixed message, not a generic "is the API up" text,
+//  * a refusal code that names a built-in object member (`constructor`)
+//    reads as an unknown refusal, never as the member,
 //  * a refused receipt re-check says what the server refused,
 //  * one receipt re-check runs at a time, so an older answer can never
-//    replace a newer one on screen.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+//    replace a newer one on screen,
+//  * 承認する, 確定する and 反映状況を再確認 keep the focus while their
+//    request is in flight and after its refusal, and ignore a press meanwhile.
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -22,6 +27,8 @@ if (!runnable) {
 
 const PLAN_ID = "a".repeat(64);
 const MISSING_PLAN_ID = "e".repeat(64);
+/** A plan whose simulation the server refuses with a code naming a built-in object member. */
+const PROTOTYPE_CODE_PLAN_ID = "f".repeat(64);
 const SUBJECT = "account_mapping:synthetic-reference";
 const simulation = {
   kind: "identity.assign",
@@ -55,8 +62,13 @@ function receipt(published: boolean) {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("change confirmation refusals", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   /** How the next `operation` re-check answers. */
@@ -64,10 +76,18 @@ describe.if(runnable)("change confirmation refusals", () => {
   /** Settles with the release of a held re-check once the server holds one. */
   let held = Promise.withResolvers<() => void>();
   let operationCalls = 0;
+  /** The approval or commit the server refuses, as the Processor answers it. */
+  let refused: "approve" | "commit" | null = null;
+  /** Every approve and commit waits for it, when set. */
+  let decisionHeld: Promise<void> | null = null;
+  const decisions: string[] = [];
   beforeEach(() => {
     operation = "published";
     held = Promise.withResolvers<() => void>();
     operationCalls = 0;
+    refused = null;
+    decisionHeld = null;
+    decisions.length = 0;
   });
 
   beforeAll(async () => {
@@ -85,6 +105,8 @@ describe.if(runnable)("change confirmation refusals", () => {
         if (url.pathname.startsWith("/api/command/v1/")) {
           const command = url.pathname.slice("/api/command/v1/".length);
           const body = (await request.json()) as { planId?: string };
+          if (command === "simulate" && body.planId === PROTOTYPE_CODE_PLAN_ID)
+            return Response.json({ error: "constructor" }, { status: 400 });
           if (command === "simulate")
             return body.planId === PLAN_ID
               ? Response.json({
@@ -99,6 +121,16 @@ describe.if(runnable)("change confirmation refusals", () => {
                   },
                 })
               : Response.json({ error: "plan_not_found" }, { status: 404 });
+          if (command === "approve" || command === "commit") {
+            decisions.push(command);
+            if (decisionHeld) await decisionHeld;
+          }
+          // A plan past its expiry (409), and a commit whose batch rolled back
+          // whole (500): packages/application/src/command approve.ts, commit.ts.
+          if (command === "approve" && refused === "approve")
+            return Response.json({ error: "plan_expired", refs: [PLAN_ID] }, { status: 409 });
+          if (command === "commit" && refused === "commit")
+            return Response.json({ error: "commit_failed", refs: [PLAN_ID] }, { status: 500 });
           if (command === "approve")
             return Response.json({
               approval: {
@@ -112,12 +144,13 @@ describe.if(runnable)("change confirmation refusals", () => {
             });
           if (command === "commit") return Response.json({ receipt: receipt(false) });
           operationCalls += 1;
-          if (operation === "refused")
-            return Response.json({ error: "receipt_not_found" }, { status: 404 });
           if (operation === "held")
             await new Promise<void>((resolve) => {
               held.resolve(resolve);
             });
+          // Read after a hold too: a held re-check can be answered with the refusal.
+          if (operation === "refused")
+            return Response.json({ error: "receipt_not_found" }, { status: 404 });
           return Response.json({ receipt: receipt(true) });
         }
         const path = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -128,7 +161,6 @@ describe.if(runnable)("change confirmation refusals", () => {
       },
     });
     origin = `http://127.0.0.1:${String(server.port)}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -163,6 +195,21 @@ describe.if(runnable)("change confirmation refusals", () => {
       expect(await alert.getByRole("button", { name: "再試行" }).count()).toBe(0);
       // Nothing can be approved for a plan the server could not show.
       expect(await page.getByRole("button", { name: "承認する" }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a refusal code that names a built-in object member reads as an unknown refusal", async () => {
+    const page = await open(PROTOTYPE_CODE_PLAN_ID);
+    try {
+      const alert = page.getByRole("alert").filter({ hasText: "確認内容を読み込めませんでした" });
+      await alert.waitFor();
+      const text = await alert.innerText();
+      expect(text).toContain("操作を受け付けられませんでした。再試行しても結果は変わりません。");
+      expect(text).toContain("HTTP 400");
+      expect(text).not.toContain("native code");
+      expect(text).not.toContain("function");
     } finally {
       await page.close();
     }
@@ -208,6 +255,110 @@ describe.if(runnable)("change confirmation refusals", () => {
       await record.getByText("反映済み", { exact: true }).waitFor();
       expect(await record.innerText()).toContain("2098-01-01T00:05:00.000Z");
       expect(operationCalls).toBe(2);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  /**
+   * Presses `button` from the keyboard while its request is held (`hold`
+   * returns the release), presses it again, then lets the request be refused
+   * (`answered` waits for what the page says). The button waits with
+   * aria-disabled and keeps the focus throughout.
+   */
+  const refusedInFlight = async (
+    page: Page,
+    button: Locator,
+    hold: () => Promise<() => void> | (() => void),
+    answered: () => Promise<void>,
+  ): Promise<void> => {
+    await button.focus();
+    const holding = Promise.resolve(hold());
+    await page.keyboard.press("Enter");
+    const release = await holding;
+    try {
+      await button.and(page.locator('[aria-disabled="true"]')).waitFor();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      // Another press while the request is in flight sends nothing.
+      await page.keyboard.press("Enter");
+    } finally {
+      release();
+    }
+    await answered();
+    expect(await button.getAttribute("aria-disabled")).toBeNull();
+    expect(await button.isDisabled()).toBe(false);
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+  };
+  const holdDecision = (): (() => void) => {
+    let release!: () => void;
+    decisionHeld = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  };
+
+  test("a refused approval leaves the focus on 承認する, and a press while it is sent is ignored", async () => {
+    refused = "approve";
+    const page = await open(PLAN_ID);
+    try {
+      await refusedInFlight(
+        page,
+        page.getByRole("button", { name: /^(承認する|承認中…)$/u }),
+        holdDecision,
+        () =>
+          page
+            .getByRole("alert")
+            .getByText("計画の有効期限が切れています。再試算してください。", { exact: true })
+            .waitFor(),
+      );
+      expect(decisions).toEqual(["approve"]);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a refused commit leaves the focus on 確定する, and a press while it is sent is ignored", async () => {
+    refused = "commit";
+    const page = await open(PLAN_ID);
+    try {
+      await page.getByRole("button", { name: "承認する" }).click();
+      await page.getByRole("button", { name: "承認済み" }).waitFor();
+      await refusedInFlight(
+        page,
+        page.getByRole("button", { name: /^(確定する|確定中…)$/u }),
+        holdDecision,
+        () =>
+          page
+            .getByRole("alert")
+            .getByText(
+              "変更は保存されませんでした。表示を更新して、対象と計画を確認し直してください。",
+              { exact: true },
+            )
+            .waitFor(),
+      );
+      expect(decisions).toEqual(["approve", "commit"]);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a refused receipt re-check leaves the focus on 反映状況を再確認, and a press while it runs is ignored", async () => {
+    const page = await open(PLAN_ID);
+    try {
+      await commit(page);
+      operation = "held";
+      await refusedInFlight(
+        page,
+        page.getByRole("button", { name: /^(反映状況を再確認|反映状況を確認中…)$/u }),
+        async () => {
+          const release = await held.promise;
+          // The held answer is the refusal.
+          operation = "refused";
+          return release;
+        },
+        () => page.getByRole("region", { name: "操作の記録" }).getByRole("alert").waitFor(),
+      );
+      expect(operationCalls).toBe(1);
     } finally {
       await page.close();
     }

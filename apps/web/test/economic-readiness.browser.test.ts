@@ -1,12 +1,14 @@
 // Synthetic responses in the production client; no provider, login or collection.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import type { ObservationDetail } from "../../../packages/observation-shared/src/api-contract.ts";
 import { economicReadinessFixture } from "../../../packages/observation-shared/test/economic-readiness-fixture.ts";
+import { ERROR_STATUS, financialError } from "../../../packages/application/src/errors.ts";
 import { auditView } from "./a11y-audit.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -47,8 +49,13 @@ function detail(id: number): ObservationDetail {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("transaction economic-readiness explanation", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let mode: "ok" | "unavailable" | "refused" | "mismatch" | "malformed" | "delayed" | "held" = "ok";
@@ -85,7 +92,14 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
               { status: "unavailable", reason: "readiness_store_unavailable" },
               { status: 503 },
             );
-          if (mode === "refused") return Response.json({ error: "unauthorized" }, { status: 403 });
+          // The route answers a refusal as the service's `financial-error-v1`.
+          if (mode === "refused")
+            return Response.json(
+              financialError("unauthorized", "economic-readiness.read", [
+                "capability:records.read",
+              ]),
+              { status: ERROR_STATUS.unauthorized },
+            );
           if (mode === "malformed")
             return Response.json({ status: "ok", providerText: "private response" });
           const body = economicReadinessFixture(mode === "mismatch" ? id + 1 : id);
@@ -109,7 +123,6 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     release?.();
@@ -187,7 +200,7 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
         await optIn.waitFor();
         expect(await page.getByText("これは旧解析の記録です", { exact: true }).count()).toBe(1);
         const before = await diagnostic.innerText();
-        expect(before).not.toContain("新規作成の条件を取得できませんでした。");
+        expect(before).not.toContain("新規作成の条件を読み込めませんでした");
         expect(before).not.toContain("記録の識別状態:");
         expect(before).not.toContain(
           "この機能から新しい計算用取引を作成することは、まだできません。",
@@ -202,10 +215,11 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
           );
         expect(rowRequests()).toHaveLength(0);
         await optIn.click();
-        await diagnostic
-          .getByText("新規作成の条件を取得できませんでした。", { exact: false })
-          .waitFor();
-        await diagnostic.getByText(message, { exact: true }).waitFor();
+        // The shared error state: an alert naming the read, with its retry.
+        const alert = diagnostic.getByRole("alert");
+        await alert.getByText("新規作成の条件を読み込めませんでした", { exact: false }).waitFor();
+        await alert.getByText(message, { exact: true }).waitFor();
+        await alert.getByRole("button", { name: "新規作成の条件を再試行", exact: true }).waitFor();
         expect(requests).toHaveLength(index + 1);
         expect(rowRequests()).toHaveLength(1);
         expect(await diagnostic.innerText()).not.toContain("識別条件を満たしています");
@@ -239,22 +253,50 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
     expect(await panel(page).innerText()).not.toContain("この記録は旧解析のものです");
     await page.close();
   });
-  test("a failed refresh never leaves the preceding diagnostic displayed as current", async () => {
-    const page = await open();
-    await panel(page).getByRole("button").click();
-    await panel(page).getByText("識別条件を満たしています", { exact: false }).waitFor();
+  test("a failed check retries in place and reads the diagnostic again", async () => {
     mode = "unavailable";
-    const refreshed = page.waitForRequest(
-      (request) => new URL(request.url()).pathname === "/api/v2/economic-readiness",
-    );
-    await page.getByRole("button", { name: "表示を更新", exact: true }).click();
-    await refreshed;
-    await panel(page)
-      .getByText("新規作成の条件を取得できませんでした。", { exact: false })
-      .waitFor();
-    expect(await panel(page).innerText()).not.toContain("識別条件を満たしています");
-    expect(await panel(page).innerText()).not.toContain("この記録は旧解析のものです");
-    await page.close();
+    const page = await open();
+    try {
+      await panel(page).getByRole("button", { name: "新規作成の条件を確認する" }).click();
+      const alert = panel(page).getByRole("alert");
+      await alert.getByText("新規作成の条件を読み込めませんでした", { exact: false }).waitFor();
+      expect(requests).toHaveLength(1);
+      mode = "ok";
+      await alert.getByRole("button", { name: "新規作成の条件を再試行", exact: true }).click();
+      await panel(page).getByText("識別条件を満たしています", { exact: false }).waitFor();
+      expect(requests).toHaveLength(2);
+      expect(await panel(page).getByRole("alert").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
+  test("a failed refresh labels the preceding diagnostic as the earlier answer", async () => {
+    const page = await open();
+    try {
+      await panel(page).getByRole("button").click();
+      await panel(page).getByText("識別条件を満たしています", { exact: false }).waitFor();
+      mode = "unavailable";
+      const refreshed = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/api/v2/economic-readiness",
+      );
+      await page.getByRole("button", { name: "表示を更新", exact: true }).click();
+      await refreshed;
+      // The earlier answer stays, under an alert that says it is the earlier one.
+      await panel(page)
+        .getByRole("alert")
+        .getByText("更新できませんでした。前回読み込んだ新規作成の条件を表示しています。", {
+          exact: true,
+        })
+        .waitFor();
+      expect(await panel(page).innerText()).toContain("識別条件を満たしています");
+      mode = "ok";
+      await panel(page)
+        .getByRole("button", { name: "新規作成の条件を再試行", exact: true })
+        .click();
+      await panel(page).getByRole("alert").waitFor({ state: "detached" });
+    } finally {
+      await page.close();
+    }
   });
   test("unsupported card and non-transaction details never offer the diagnostic", async () => {
     for (const id of [3, 4]) {

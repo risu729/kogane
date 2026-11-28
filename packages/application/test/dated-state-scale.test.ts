@@ -15,11 +15,18 @@ import { reportedStateCutoff, payablesFromPaymentDate } from "../../domain/src/r
 import {
   DATED_BALANCES_SQL,
   DATED_POSITIONS_SQL,
+  DATED_SCHEDULED_PAYMENTS_SQL,
   DATED_SNAPSHOTS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { explain, type PlanStep } from "../../read-model/test/card-usage-plan.ts";
+import {
+  LEGACY_DATED_BALANCES_SQL,
+  LEGACY_DATED_POSITIONS_SQL,
+  LEGACY_DATED_SNAPSHOTS_SQL,
+} from "../../read-model/test/dated-state-legacy-sql.ts";
 import {
   STATEMENT_CI_SCALE,
   STATEMENT_SCALE,
@@ -156,8 +163,103 @@ describe("reported state on a scaled store without statistics", () => {
           )
           .get(cutoff, payablesFromPaymentDate(date)) as { n: number };
         expect(state.payables.filter((p) => p.paymentDate !== null)).toHaveLength(expected.n);
+        // Independently: the dated statement keys due before the window are
+        // the ones counted as left out.
+        const before = db
+          .query(
+            `SELECT count(DISTINCT statement_key) AS n FROM (
+               SELECT json_array(a.source_id,b.source_account,
+                 coalesce(json_extract(b.extra_json,'$._kogane.period'),
+                  substr(json_extract(b.extra_json,'$._kogane.statementMonth'),1,4)||'-'||
+                  substr(json_extract(b.extra_json,'$._kogane.statementMonth'),5,2))) AS statement_key
+               FROM balance_observations b
+               JOIN published_parse_runs pub ON pub.parse_run_id=b.parse_run_id
+               JOIN parse_runs p ON p.id=b.parse_run_id
+               JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+               WHERE b.metric='credit_statement_payment_amount' AND a.fetched_at<?
+                 AND p.parser_name IN ('vpass-statement-page','myjcb-credit-statement-total')
+                 AND json_extract(b.extra_json,'$._kogane.snapshotSemantics')='provider-reported-monthly-payment-amount'
+                 AND json_extract(b.extra_json,'$._kogane.paymentDate')<?)`,
+          )
+          .get(cutoff, payablesFromPaymentDate(date)) as { n: number };
+        expect(before.n).toBeGreaterThan(0);
+        expect(
+          state.coverage.statementsBeforeWindow
+            .filter((entry) => entry.reasonCode === "due_before_window")
+            .reduce((total, entry) => total + entry.count, 0),
+        ).toBe(before.n);
         expect(state.payables.some((p) => p.status === "settled_on_or_before_date")).toBe(true);
         expect(state.payables.some((p) => p.status === "due_after_date")).toBe(true);
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "an accounts scope lists, per account, what each one-account read lists (ADR 0116)",
+    async () => {
+      const accounts = (
+        db
+          .query(
+            "SELECT DISTINCT account_id FROM current_account_mappings ORDER BY account_id LIMIT 20",
+          )
+          .all() as { account_id: string }[]
+      ).map((row) => row.account_id);
+      expect(accounts.length).toBeGreaterThan(2);
+      for (const date of [OPTIONS.today, middle()]) {
+        const scoped = await queryDatedState(executor(), { date, accounts });
+        let listed = 0;
+        let payables = 0;
+        for (const account of accounts) {
+          const alone = await queryDatedState(executor(), { date, account });
+          // A one-account list is the `account` read, context id included.
+          expect({
+            ...(await queryDatedState(executor(), { date, accounts: [account] })),
+            filters: null,
+          }).toEqual({ ...alone, filters: null });
+          expect(scoped.accounts.filter((entry) => entry.accountId === account)).toEqual(
+            alone.accounts,
+          );
+          expect(scoped.payables.filter((entry) => entry.accountId === account)).toEqual(
+            alone.payables,
+          );
+          listed += alone.accounts.length;
+          payables += alone.payables.length;
+        }
+        expect(scoped.accounts).toHaveLength(listed);
+        expect(scoped.payables).toHaveLength(payables);
+        expect(listed).toBeGreaterThan(0);
+        expect(payables).toBeGreaterThan(0);
+      }
+      // The scope's settlement read names every account's statements in one key list.
+      const keys = JSON.stringify(accounts.map((account) => [account, "vpass", "2026-09"]));
+      expect(unboundedScans(explain(db, SETTLEMENT_SQL, [keys]))).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "on the scaled store each read is the frozen text's without the moneyforward-me rows",
+    () => {
+      // The store holds no MoneyForward capture, but migration 0091's policy
+      // row put the container in the frozen perimeter, without a snapshot.
+      for (const date of [OPTIONS.today, middle()]) {
+        const cutoff = reportedStateCutoff(date);
+        for (const [shipped, legacy, key] of [
+          [DATED_POSITIONS_SQL, LEGACY_DATED_POSITIONS_SQL, "source_id"],
+          [DATED_BALANCES_SQL, LEGACY_DATED_BALANCES_SQL, "source_id"],
+          [DATED_SNAPSHOTS_SQL, LEGACY_DATED_SNAPSHOTS_SQL, "perimeter_source_id"],
+        ] as const) {
+          const frozen = db.query(legacy).all(cutoff) as Record<string, unknown>[];
+          expect(db.query(shipped).all(cutoff)).toEqual(
+            frozen.filter((row) => row[key] !== "moneyforward-me"),
+          );
+        }
+        expect(
+          (db.query(LEGACY_DATED_SNAPSHOTS_SQL).all(cutoff) as Record<string, unknown>[]).filter(
+            (row) => row["perimeter_source_id"] === "moneyforward-me",
+          ),
+        ).toHaveLength(1);
       }
     },
     TIMEOUT,
@@ -180,6 +282,21 @@ describe("reported state on a scaled store without statistics", () => {
           ["b"],
         ),
       ).toEqual([]);
+      expect(
+        unboundedScans(
+          explain(db, DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
+            cutoff,
+            payablesFromPaymentDate(date),
+            cutoff,
+          ]),
+          ["b"],
+        ),
+      ).toEqual([]);
+      // The scheduled payments read walks the publication pointers once,
+      // filtered by parser name, and reaches each page and its rows by key.
+      expect(
+        unboundedScans(explain(db, DATED_SCHEDULED_PAYMENTS_SQL, [cutoff]), ["pub", "r"]),
+      ).toEqual([]);
       expect(unboundedScans(explain(db, SETTLEMENT_SQL, [keys]))).toEqual([]);
     },
     TIMEOUT,
@@ -201,6 +318,12 @@ describe("reported state on a scaled store without statistics", () => {
               .query(DATED_STATEMENTS_SQL)
               .all(cutoff, payablesFromPaymentDate(OPTIONS.today), cutoff),
           ),
+          statementsBeforeWindow: await timed(() =>
+            db
+              .query(DATED_STATEMENTS_BEFORE_WINDOW_SQL)
+              .all(cutoff, payablesFromPaymentDate(OPTIONS.today), cutoff),
+          ),
+          scheduledPayments: await timed(() => db.query(DATED_SCHEDULED_PAYMENTS_SQL).all(cutoff)),
         };
         console.log(JSON.stringify({ counts: built.counts, today, past, reads }, null, 2));
       }

@@ -577,7 +577,7 @@ its path without `unit`.
 
 ## Amendment: a goal search's clock is today's Asia/Tokyo day
 
-- Status: proposed
+- Status: accepted (merged 2026-11-19 in [#1418](https://github.com/risu729/kogane/pull/1418))
 - Date: 2026-11-18
 
 ### Context
@@ -673,3 +673,366 @@ three days later, and one whose deadline is the previous Tokyo day is
 are the other way round. A `Europe/London` offer is `needs_rule_verification`
 at both instants. Before this change the 16:00 UTC search answered the first
 offer with `offer_not_valid_at_clock` (the test fails on the old route).
+
+## Amendment: a deadline window and a summary on the expiry read
+
+- Status: accepted (merged 2026-11-20 in [#1460](https://github.com/risu729/kogane/pull/1460)). Owner approval was required before merge: it changes the
+  published input schema of `kogane.rewards.read` (three new optional
+  arguments) and the query parameters of `GET /api/v2/rewards/expiry`.
+- Date: 2026-11-19
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
+  (everyday questions in one or two MCP calls, each answer under 8 KB;
+  question Q8, "Which reward points expire soon?", gap G5 of the
+  everyday-questions audit plan)
+- Builds on: [ADR 0081](0081-ui-parity-through-mcp.md) (a route and its MCP
+  read are two adapters over one reader), [ADR 0119](0119-cursor-page-size.md)
+  (a cursor continues at another offered page size), the amendment of
+  2026-11-18 above (today's Asia/Tokyo day),
+  [ADR 0068](0068-provider-reward-expiry-subsets.md) (provider-displayed
+  portions)
+
+### Context
+
+`kogane.rewards.read` with `collection: "expiry"` answers the published
+snapshot's estimate rows in pages of 25 to 200 (default 50), each row with its
+full `expiryBasis`, beside the snapshot's complete provider display sections.
+It has no date filter and no compact form. An MCP client shows the first 8 KB
+of a result, so to answer Q8 a client had to page through every row and filter
+and add by date itself. Two traps sit in that client arithmetic: the READ build
+writes a row for every rule of a bucket's programme (V Point has two), so
+adding rows counts a V Point bucket twice (INV06); and a J-POINT expiring
+portion is a part of a displayed total, never a bucket (ADR 0068), so adding
+it to anything double counts.
+
+Measured on the synthetic store of `services/app/test/reward-expiry-window.test.ts`
+(23 buckets of V Point, V Point Pay and J-POINT; 45 rows), as the bytes of the
+MCP result's structured content:
+
+| `kogane.rewards.read` arguments                             |  Bytes |
+| ----------------------------------------------------------- | -----: |
+| `{collection: expiry}` (50-row page; unchanged)             | 70,995 |
+| `{collection: expiry, before}` (10 rows in the window)      | 12,447 |
+| `{collection: expiry, detail: summary, before}` (4 buckets) |  1,882 |
+| the same, a wider window (6 buckets, one display)           |  2,663 |
+| `{collection: expiry, detail: summary}` (no window)         |  5,293 |
+
+`packages/application/test/reward-expiry-window.test.ts` builds a summary at
+its line limits with promotion-shaped references (60 V Point buckets under two
+rules, two more programmes, eight J-POINT sections): 6,875 bytes.
+
+### Options considered
+
+1. **A window on the full page only.** Smaller pages, but the client still adds
+   rows itself, with both double-counting traps; rejected.
+2. **A window filter in the page's SQL.** The index
+   `reward_expiry_estimates_v2_deadline` would serve it, but a summary needs
+   every row of a bucket to count it once and to see a bucket whose rules
+   disagree, and the left-out counts need the rows outside the window; a second
+   SQL text would need the rewrite proof (frozen legacy SQL, differential and
+   plan tests) for no saving at this size; not chosen.
+3. **Read the snapshot's rows whole, bounded, and window and summarize them in
+   pure functions the route and the tool share (chosen).** The shipped page
+   query is reused unchanged with a larger `LIMIT`; the build caps a snapshot
+   at 200 buckets, so the read is bounded.
+4. **`summary` the default, as [ADR 0123](0123-summary-detail-for-large-reads.md)
+   makes it for the balance, schedule and collection quality reads.** ADR 0123
+   left the reward reads' defaults unchanged, and the web page reads the full
+   page. Here `detail` defaults to `full`, so no published answer changes; a
+   later change can make the expiry read's default `summary` as ADR 0123 did
+   for its reads.
+
+### Decision
+
+Option 3, in `packages/application/src/query/reward-expiry-window.ts`, called
+by `rewardExpiryFromRead` (`services/app/src/rewards-read.ts`), which both
+`GET /api/v2/rewards/expiry` and `kogane.rewards.read` run.
+
+1. **Window.** `from` and `before` are calendar dates (`YYYY-MM-DD`, a real
+   day), compared as text with each row's `expiresOn`: `from` inclusive,
+   `before` exclusive. Without `from` the window starts on today's Asia/Tokyo
+   date, `tokyoToday(now)`, the function the goal search's clock now calls
+   too; without `before` it has no end. A malformed value is
+   `400 invalid_date`; `from` on or after `before` is `400 invalid_date_range`.
+   The answer states the window it used, with `fromBasis` (`request` or
+   `today`), `today` and `calendar: "Asia/Tokyo"`. `expiresOn` is a date in
+   the rule's or the provider's calendar, which this ADR already records as
+   assumed `Asia/Tokyo`.
+2. **`detail`.** `full` (the default) or `summary`; another value is
+   `400 invalid_query` on the route and `400 invalid_request` on the tool's
+   closed schema. Without a window, `full` is the page exactly as before.
+3. **Windowed page** (`full` with a window): the rows inside the window, in
+   snapshot order, paged by `limit` and `cursor`, plus `window.rows`: how many
+   rows of the read were inside, before and after, and left out with no date
+   (`deadline_unknown`). The cursor's query binds `from` and `before` as
+   resolved: a cursor of one window is `400 cursor_mismatch` under another,
+   with no window, or the reverse. An unwindowed read keeps the scope
+   `{ program }` it had, so its cursors are unchanged, and ADR 0119's
+   page-size continuation holds within a window. `providerDisplaySections`
+   stays the snapshot's complete set.
+4. **Summary** (`detail: summary`; unpaged, so `limit` or `cursor` is
+   `400 invalid_query`): `{ detail, window, programs, providerDisplays,
+   counts, lineLimit, snapshot }`.
+   - A bucket is the rows of one programme, holding and bucket. Its deadline
+     is the one date all its rows carry; rows with no date make it
+     `deadline_unknown`, rows that disagree (two dates, or a date beside none)
+     `deadline_differs_by_rule`. Neither is in or out of a window: each is
+     counted under its reason.
+   - `programs`: per programme and unit, the buckets inside the window, their
+     `total` and the earliest lines (`holdingRef`, `bucketRef`, `kind`,
+     `expiresOn`, `basis`, `amount`), at most 20 across programmes, ordered by
+     date. The total is `sumQuantities` over each bucket's amount once, so two
+     units are never added; when any amount is not exact it is
+     `{ status: "not-exact", value: null, reasonCodes }` with the operands'
+     statuses, never a partial sum or a zero (INV05). A stored "exact" amount
+     that is not a decimal-v1 decimal is `unparsed` (`decimal-v1:invalid`).
+   - `providerDisplays`: the provider-displayed portions inside the window, at
+     most 3, each with its parent bucket and display references; never added
+     to a total or to another portion.
+   - `counts.buckets` and `counts.providerDisplays`: inside, before, after,
+     and `leftOut` by the closed `REWARD_EXPIRY_LEFT_OUT_REASONS`
+     (`deadline_unknown`, `deadline_differs_by_rule`, `display_date_unknown`,
+     `provider_expiry_not_displayed`, `provider_expiry_unavailable`).
+   - Without a window every dated bucket and display counts as inside.
+5. **Bound.** Both forms read every estimate row of the snapshot (narrowed to
+   `program`) through the shipped `REWARD_ESTIMATE_PAGE_SQL` with
+   `LIMIT 1001`; more than 1,000 rows is `413 result_limit_exceeded`, never
+   cut. The query text does not change, so no rewrite proof or index is
+   needed and no migration is added.
+6. **Tool.** `kogane.rewards.read` takes `from`, `before` and `detail`; its
+   description names the window, the summary, its line limits and every
+   closed code above (about 1,640 characters of the 2,048 allowed), and
+   `test/ui-mcp-parity.test.ts` fails if one is missing. The shared request
+   schema (`REWARD_REQUEST_SCHEMA`) and response check (`api-validation.ts`)
+   accept the new parameters, the windowed page and the summary.
+
+### Consequences
+
+- Q8 is one call: `{collection: "expiry", detail: "summary", before: <date>}`.
+- No answer changes for a request without the new parameters; the web page is
+  unchanged.
+- A windowed or summary read costs one read of the whole snapshot's rows (at
+  most 400 rows with today's seeded rules) instead of one page.
+- The grant is unchanged: the reward page read needs `records.read` over the
+  whole store, and a source- or account-scoped grant is refused
+  `403 evidence_restricted`, never served a filtered summary. A grant has no
+  programme scope; every MCP client holds the whole-store grant (ADR 0084).
+- The audit record counts a summary's `programs` as its rows (the page rule of
+  `toolRows` takes the first list of the answer).
+
+Limits:
+
+- `from` defaulted to today is resolved per request: a windowed walk without
+  an explicit `from` that crosses Tokyo midnight is `cursor_mismatch` on its
+  next page.
+- A summary lists at most 20 bucket lines and 3 displays; its totals and
+  counts cover the rest, and a narrower window lists them.
+- `deadline_differs_by_rule` needs a rule that computes a date; no stored
+  holding receives one today (the table above).
+- A windowed full page counts rows (one per bucket and rule), a summary
+  buckets.
+- ADR 0123 merged first: this route's `cursor_mismatch` names `mustMatch:
+  ["collection", "program", "from", "before"]`, absent included. Its
+  `detail` stays opt-in here (absent is `full`), unlike the reads ADR 0123
+  defaults to `summary`.
+
+### Verification
+
+- `packages/application/test/reward-expiry-window.test.ts`: today at
+  14:59:59.999 and 15:00:00.000 UTC; the window's inclusive and exclusive
+  ends; malformed dates and windows with no day; a full page's rows and
+  counts; a bucket under two rules counted once with an exact decimal total;
+  undated and disagreeing buckets left out by reason; unparsed, missing and
+  malformed amounts making a total not exact; two units of one programme as
+  two totals; the line limit with every bucket in the total; displays listed
+  apart and every section reason counted; a summary at its line limits under
+  8 KB; the summaries passing the shared response check.
+- `services/app/test/reward-expiry-window.test.ts`, over a snapshot the
+  Processor's lane builds from synthetic claims: the summary is the same
+  `data` on the route, `/api/agent/v1/rewards.read` and `/mcp`, under 8 KB;
+  a not-exact total and a provider portion apart; the default `from` before
+  and after Tokyo midnight; a windowed walk at 25 and 50 rows, its cursor
+  refused under another window, without one and from an unwindowed walk;
+  a cursor of a defaulted `from` kept under the same day named explicitly
+  and refused past Tokyo midnight, while one of an explicit `from` is kept;
+  the unwindowed page without `window` and equal with `detail=full`; the
+  refusals on every path; a source- or account-scoped grant refused; a
+  snapshot over 1,000 rows `413` on both forms.
+- `services/app/test/ui-mcp-parity.test.ts`: the tool description names every
+  closed code, says that without `from` or `before` nothing is windowed, and
+  stays within 2,048 characters.
+
+## Amendment: an unreadable deadline calendar computes nothing
+
+- Status: accepted (merged 2026-11-22 in [#1520](https://github.com/risu729/kogane/pull/1520))
+- Date: 2026-11-21
+
+### Context
+
+`expiryRule` in `packages/read-model/src/rewards.ts` split the stored
+`deadline_calendar_ref` (`zone:dayBoundary:zoneBasis`) and filled every gap:
+an empty or missing zone became `UTC`, any day boundary other than
+`start-of-day` became `end-of-day`, and any basis other than `documented`
+became `assumed`. The zone was not checked against time-zone data. So `""`
+read as `UTC:end-of-day:assumed`, and `:end-of-day:documented` as a
+_documented_ `UTC` zone, which also dropped `deadline_zone_assumed` for a zone
+nobody gave. A rule with such a reference computed dates stamped with a zone
+its terms never named. The seeded references (`Asia/Tokyo:end-of-day:assumed`,
+CORE migration 0033) are well formed, so no stored rule is affected today; the
+gap is in what the reader accepts.
+
+### Options considered
+
+1. Keep the defaults. A missing calendar keeps turning into UTC, a guess ADR
+   0004 forbids and INV05 calls a missing value read as a value; rejected.
+2. Treat a malformed reference as `family: "unsupported"` or
+   `needs-rule-verification`. The family and verification are stored facts of
+   their own and would be misreported in the computed basis; rejected.
+3. Read the reference strictly and leave the calendar `null` when it cannot be
+   read; the domain then refuses the rule with a closed reason, as it does for
+   an unresolved qualifying-activity policy.
+
+### Decision
+
+Option 3.
+
+- `deadlineCalendar(ref)` accepts exactly three parts: a zone the runtime's
+  time-zone data knows (`canonicalZone`, keeping the stored spelling), a day
+  boundary of `end-of-day` or `start-of-day`, and a basis of `documented` or
+  `assumed`. Anything else is `null`.
+- `ExpiryRule.deadlineCalendar` and `ExpiryRuleBasis.deadlineCalendar` are
+  `DeadlineCalendar | null`; `validExpiryRule` and `validBucketExpiryBasis`
+  accept `null` and still refuse a malformed calendar object.
+- `estimateExpiry` makes a `null` calendar a rule-level failure after the
+  existing ones: every bucket's computed side is `unavailable` with the new
+  closed reason `deadline_calendar_unreadable`, for every family (a date is
+  not derived, and verified terms of family `none` do not yield "no expiry"
+  either). No existing reason fits: `rule_family_unsupported` would say the
+  terms are not reduced to a family when the family is known, and
+  `deadline_zone_assumed` qualifies an answer rather than refusing one. The
+  estimate is `needs-rule-verification` and carries `rule_family_unsupported`,
+  the mapping already used for `qualifying_activity_policy_missing`, so
+  `REWARD_UNCERTAINTY_CODES` is unchanged. `deadline_zone_assumed` is raised
+  only for a calendar that was read and says `assumed`.
+- `EXPIRY_DERIVATION_RELEASE` is `reward-expiry-v3`: the same stored rule can
+  now produce a different reason. The reward READ build digest includes it, so
+  the Processor builds a new snapshot; `REWARD_PROJECTION_RELEASE` is
+  unchanged, and the App keeps serving the current snapshot until then.
+
+### Consequences
+
+- A rule whose calendar reference is malformed shows its buckets with an
+  unknown deadline and `deadline_calendar_unreadable` (labelled on the
+  Rewards page); a provider display is still returned as an observation.
+- The seeded rules read and compute exactly as before; only the stamped
+  derivation release changes.
+- The day boundary is checked but not yet consumed by any computation: a
+  computed deadline is a civil date in the rule's zone, not an instant.
+- Whether an alias zone (`Japan`) is known depends on the runtime's
+  time-zone data, as for every other `canonicalZone` reader.
+
+### Verification
+
+- `packages/read-model/test/rewards.test.ts`: `""`, `:end-of-day:documented`,
+  missing and extra parts, an unknown or wrongly cased day boundary, an empty
+  or unknown basis, an unknown zone and an offset each give a `null` calendar
+  and an estimate that is `needs-rule-verification`, computes no date, carries
+  `deadline_calendar_unreadable` and not `deadline_zone_assumed`; the seeded
+  reference and other well-formed ones are read exactly as stored. These
+  fail on the previous reader.
+- `packages/domain/test/reward-expiry-basis.test.ts`: the closed-reason table
+  reaches `deadline_calendar_unreadable`; inactivity, fixed-lot and `none`
+  rules with a `null` calendar compute nothing; a provider display stays an
+  observation beside the refusal; the validators accept only `null` as the
+  unreadable calendar.
+
+## Amendment: an instant counts on the rule's deadline calendar
+
+- Status: accepted (merged 2026-11-24 in [#1654](https://github.com/risu729/kogane/pull/1654))
+- Date: 2026-11-23
+
+### Context
+
+`estimateExpiry` turned a `TemporalValue` into a calendar day with a private
+`localDate` that read an `instant` by the first ten characters of its text:
+the date its offset was written in, not its date in any zone.
+`2026-09-30T20:00:00Z` is 2026-10-01 in Asia/Tokyo, but it anchored an
+inactivity deadline on 2026-09-30, and an instant clock one second after Tokyo
+midnight on the last day of a rule version kept that version in force. Two
+inputs reach it: the evaluation clock (which rule versions and tier claims
+cover the evaluation day, and whether a deadline has passed) and each
+qualifying activity's date (the anchor).
+ADR 0056 makes `civilDateOfInstant` the domain's reader of an instant's civil
+date in a named zone, and `reward-conversion.ts` already reads instants with
+it.
+
+No current input reaches the slice. The only caller outside tests is
+`buildRewardProjection` (`packages/read-model/src/reward-projection.ts`): its
+clock is `evaluationClock`, always a `local-date` (the UTC day of the
+evaluation instant), and its history is `UNCLASSIFIED_REWARD_HISTORY`, with no
+activities.
+
+### Options considered
+
+1. Keep the slice and write it down as a limit. The first instant-dated
+   activity a collector classifies would anchor a deadline a day early for
+   nine hours of every Tokyo day; rejected.
+2. Read an instant in its own zone, as `reward-conversion.ts` reads a clock or
+   an offer date. The day would be right when the instant's zone is the rule's,
+   but the anchor and deadline are stamped with the rule's deadline zone, so
+   an instant of another zone would yield a day of one calendar labelled with
+   another; rejected.
+3. Read an instant on the rule's deadline calendar (`civilDateOfInstant` in
+   `deadlineCalendar.zone`), the calendar the anchor and deadline are stated
+   in, as the goal search reads an instant deadline on its clock's calendar
+   (amendment of 2026-11-18 above). When the rule has no readable calendar,
+   read the clock in its own zone; such a rule computes no date either way,
+   and the clock's day decides only what it decided before #1520's refusal:
+   whether the version is in force (`rule_out_of_force` precedes
+   `deadline_calendar_unreadable` in the refusal order) and whether a
+   provider display has passed (`deadline_passed`).
+
+### Decision
+
+Option 3. `localDate` in `packages/domain/src/rewards.ts` takes the calendar
+zone: a `local-date` is read as before; an `instant` is
+`civilDateOfInstant(value, calendarZone ?? value.zone)`; anything else is no
+day. A zone the runtime does not know gives no day, so an activity is
+`activity_date_unknown` and a clock establishes no evaluation day, as an
+unreadable date already did: a version with a validity period is
+`rule_out_of_force` and no deadline is `deadline_passed`. No closed code is
+added.
+
+`EXPIRY_DERIVATION_RELEASE` stays `reward-expiry-v3`. A release names a
+derivation that changed for an input it can be given (the rule of #1520).
+Every input the projection gives today is a `local-date` clock and an empty
+history, whose derivation is unchanged, so every stored and future snapshot
+row is the one v3 already produced. The release is bumped when a change in
+derivation would reach a current input.
+
+### Consequences
+
+- An instant clock or activity date counts on the rule's calendar day: an
+  activity at `2026-09-30T20:00:00Z` anchors an `Asia/Tokyo` rule on
+  2026-10-01, whatever zone the instant is stamped with.
+- A plain date is read exactly as before, and its zone is still not compared
+  with the rule's (a limit, unchanged).
+- The projection's output, build digest and snapshots are unchanged.
+- An instant display is still compared with the computed date by
+  `compareTemporal` (`agreementOf`), which takes the instant's day as its
+  offset wrote it; such a display never agrees, and it can disagree by that
+  day (a limit this amendment does not change).
+
+### Verification
+
+`packages/domain/test/reward-expiry-basis.test.ts` ("an instant counts on the
+rule's deadline calendar, ..."), with synthetic instants around one Tokyo
+midnight: a `Z` instant after Tokyo midnight anchors on the Tokyo day; the same
+moment at `+09:00` and the plain date anchor on the same day; one second before
+Tokyo midnight anchors on the previous day; an instant stamped `UTC` still
+counts on the `Asia/Tokyo` calendar; a calendar zone the runtime does not know
+makes an instant `activity_date_unknown` while a plain date still anchors;
+an instant clock at Tokyo midnight is on the next version's first day; and,
+for a rule without a readable calendar, an instant clock is read in its own
+zone (in force or not, a display passed or not), an unknown clock zone passes
+nothing, and no date is computed. The `Z`, `UTC`, unknown-zone and clock cases
+fail on the slicing reader.

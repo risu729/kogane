@@ -30,6 +30,24 @@ export type IdentityResolver = (input: IdentityInput) => IdentityPlan;
 export { BASE_IDENTITY_POLICY_VERSION, IDENTITY_POLICY_VERSION, identityKey };
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 
+/**
+ * The pins of a batch's trusted Vpass policy-2 runs (ADR 0129, decision 4).
+ * `CROSS JOIN`, which SQLite never reorders, makes the batch's candidates the
+ * only scan: each reaches its identity run, parse and bindings by key. With
+ * plain joins the planner started from every binding artifact and searched
+ * every Vpass artifact for each, 9.4M rows in one production run on
+ * 2026-11-25. The rows are those of the plain joins
+ * (`services/processor/test/tick-rows-read.test.ts`).
+ */
+export const VPASS_BINDING_INSERT_SQL = `INSERT INTO identity_vpass_bindings
+        SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
+        CROSS JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]')
+          AND r.policy_version=json_extract(candidate.value,'$[2]') AND r.policy_version=2
+        CROSS JOIN parse_runs p ON p.id=r.parse_run_id AND p.id=json_extract(candidate.value,'$[1]')
+        CROSS JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id
+        WHERE p.status='ok' AND ${EMPTY_PARSE_SQL}
+          AND NOT EXISTS(SELECT 1 FROM identity_vpass_bindings pin WHERE pin.identity_run_id=r.id)`;
+
 /** Automatic policy yields to the latest effective decision (migration 0029):
  * an active manual override, or a manual row the log does not describe. */
 const PROTECTED_SQL = (subjectKind: "account_mapping" | "instrument_mapping") =>
@@ -263,7 +281,10 @@ async function instrumentMapping(db: D1Like, instrument: InstrumentIdentity, ver
 }
 
 type ParseIdentity = IdentityParseMeta;
-interface ObservationRow {
+/** One Layer B form the identity projection interprets. */
+export type IdentityObservationKind = (typeof kinds)[number];
+/** The Layer B columns an identity input is built from. */
+export interface IdentityObservationRow {
   id: number;
   source_account: string;
   currency: string | null;
@@ -297,6 +318,108 @@ async function policyRecord(runId: string, parseId: number, selection: IdentityP
   ] as const;
 }
 
+/**
+ * The policy the projection applies to one parse: the module's selection for
+ * the requested version, the stored version it settles on, and the single
+ * trusted Vpass binding when the Vpass family was selected. A standard request
+ * (`IDENTITY_POLICY_VERSION`) gives each parse its own required version, so a
+ * parse without auxiliary evidence stays at the base version. `identifyParse`
+ * and the read-only classifier audit (`services/processor/scripts/audit-identities.ts`)
+ * both resolve through this, so the audit reports what the projection writes.
+ */
+export interface ParseIdentityPolicy {
+  selection: IdentityPolicySelection;
+  version: number;
+  binding: VpassBinding | undefined;
+}
+
+export async function parseIdentityPolicy(
+  db: D1Like,
+  parse: ParseIdentity,
+  requestedVersion = IDENTITY_POLICY_VERSION,
+): Promise<ParseIdentityPolicy> {
+  // The source's policy module decides the release and its evidence; the
+  // store only persists the selected plan.
+  const evidence = await loadIdentityEvidence(db, parse, requestedVersion);
+  const selection = selectIdentityPolicy(parse, evidence, requestedVersion);
+  return {
+    selection,
+    version: selection.policyVersion,
+    binding:
+      selection.policyFamily === VPASS_POLICY_FAMILY ? trustedVpassBinding(evidence) : undefined,
+  };
+}
+
+/** The resolver input for one observation of a parse under its selected policy. */
+export function identityObservationInput(
+  parse: ParseIdentity,
+  policy: ParseIdentityPolicy,
+  kind: IdentityObservationKind,
+  row: IdentityObservationRow,
+): IdentityInput {
+  const extra: unknown = JSON.parse(row.extra_json);
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra))
+    throw new Error("identity_extra_invalid");
+  const binding = policy.binding;
+  return {
+    kind,
+    observationId: row.id,
+    parseRunId: parse.id,
+    artifactId: parse.artifact_id,
+    fetchRunId: parse.fetch_run_id,
+    sourceId: parse.source_id,
+    producerId: parse.producer_id,
+    sourceAccount: row.source_account,
+    currency: row.currency,
+    instrument: row.instrument,
+    securityCode: row.security_code,
+    securityName: row.security_name,
+    market: row.market,
+    subject: row.subject,
+    extra: record(extra),
+    policyVersion: policy.version,
+    ...(binding && row.source_account === `vpass:${binding.financial_unit_key}`
+      ? {
+          trustedVpassBinding: {
+            cardToken: binding.card_token,
+            bindingArtifactId: binding.binding_artifact_id,
+            financialUnitId: binding.financial_unit_id,
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The resolver's plan for one input, as the projection applies it: a
+ * still-effective manual decision on the run-scoped reference of a trusted
+ * Vpass row is retained instead of being replaced by the automatic token
+ * mapping.
+ */
+export async function planObservationIdentity(
+  db: D1Like,
+  input: IdentityInput,
+  resolver: IdentityResolver,
+): Promise<IdentityPlan> {
+  const plan = resolver(input);
+  if (input.trustedVpassBinding) {
+    const fallbackKey = [input.sourceAccount, "fetch-run", String(input.fetchRunId)];
+    const fallbackRef = await identityKey("sa", [input.sourceId, input.producerId, fallbackKey]);
+    if (
+      await db
+        .prepare(
+          `SELECT 1 FROM protected_mapping_subjects WHERE subject_kind='account_mapping' AND subject_ref=?`,
+        )
+        .bind(fallbackRef)
+        .first()
+    ) {
+      plan.account.key = fallbackKey;
+      plan.issues.push("manual-run-scoped-account-mapping-preserved");
+    }
+  }
+  return plan;
+}
+
 export async function identifyParse(
   db: D1Like,
   parse: ParseIdentity,
@@ -321,13 +444,9 @@ export async function identifyParse(
     verified.fetch_run_id !== parse.fetch_run_id
   )
     throw new Error("identity_parse_provenance_invalid");
-  // The source's policy module decides the release and its evidence; the
-  // store only persists the selected plan.
-  const evidence = await loadIdentityEvidence(db, parse, version);
-  const selection = selectIdentityPolicy(parse, evidence, version);
-  version = selection.policyVersion;
-  const binding: VpassBinding | undefined =
-    selection.policyFamily === VPASS_POLICY_FAMILY ? trustedVpassBinding(evidence) : undefined;
+  const policy = await parseIdentityPolicy(db, parse, version);
+  const { selection, binding } = policy;
+  version = policy.version;
   const runId = await identityKey("ir", [parse.id, version]);
   if (
     await db.prepare("SELECT 1 FROM identity_run_seals WHERE identity_run_id=?").bind(runId).first()
@@ -369,63 +488,13 @@ export async function identifyParse(
             ORDER BY id LIMIT ?`,
         )
         .bind(parse.id, after, runId, kind, Math.min(50, maxRows - total))
-        .all<ObservationRow>();
+        .all<IdentityObservationRow>();
       if (!rows.results.length) break;
       const observations: unknown[][] = [];
       const uses: unknown[][] = [];
       for (const row of rows.results) {
-        const extra: unknown = JSON.parse(row.extra_json);
-        if (extra === null || typeof extra !== "object" || Array.isArray(extra))
-          throw new Error("identity_extra_invalid");
-        const input: IdentityInput = {
-          kind,
-          observationId: row.id,
-          parseRunId: parse.id,
-          artifactId: parse.artifact_id,
-          fetchRunId: parse.fetch_run_id,
-          sourceId: parse.source_id,
-          producerId: parse.producer_id,
-          sourceAccount: row.source_account,
-          currency: row.currency,
-          instrument: row.instrument,
-          securityCode: row.security_code,
-          securityName: row.security_name,
-          market: row.market,
-          subject: row.subject,
-          extra: record(extra),
-          policyVersion: version,
-          ...(binding && row.source_account === `vpass:${binding.financial_unit_key}`
-            ? {
-                trustedVpassBinding: {
-                  cardToken: binding.card_token,
-                  bindingArtifactId: binding.binding_artifact_id,
-                  financialUnitId: binding.financial_unit_id,
-                },
-              }
-            : {}),
-        };
-        const plan = resolver(input);
-        if (input.trustedVpassBinding) {
-          // A still-effective manual decision on the run-scoped reference is
-          // retained instead of being replaced by the automatic token mapping.
-          const fallbackKey = [input.sourceAccount, "fetch-run", String(input.fetchRunId)];
-          const fallbackRef = await identityKey("sa", [
-            input.sourceId,
-            input.producerId,
-            fallbackKey,
-          ]);
-          if (
-            await db
-              .prepare(
-                `SELECT 1 FROM protected_mapping_subjects WHERE subject_kind='account_mapping' AND subject_ref=?`,
-              )
-              .bind(fallbackRef)
-              .first()
-          ) {
-            plan.account.key = fallbackKey;
-            plan.issues.push("manual-run-scoped-account-mapping-preserved");
-          }
-        }
+        const input = identityObservationInput(parse, policy, kind, row);
+        const plan = await planObservationIdentity(db, input, resolver);
         const accountKey = JSON.stringify(plan.account.key);
         let account = accounts.get(accountKey);
         if (!account) {
@@ -482,6 +551,9 @@ export async function identifyParse(
   return total;
 }
 
+/** The observations one identity sweep identifies before it stops. */
+export const IDENTITY_SWEEP_OBSERVATIONS = 200;
+
 /** Runs on the existing private pipeline. No new public service or credentials. */
 export async function identitySweep(
   db: D1Like,
@@ -504,12 +576,14 @@ export async function identitySweep(
     const values = JSON.stringify(
       await Promise.all(
         empty.map(async (parse) => {
-          // The same selector as the row path decides the release and evidence
-          // digest; the SQL below still rechecks the required version itself.
+          // The same selector and standard request as the row path decide the
+          // release and evidence digest, so a module that falls back selects
+          // the base version here too, not the required one (ADR 0117); the
+          // SQL below still rechecks the required version itself.
           const selection = selectIdentityPolicy(
             parse,
-            await loadIdentityEvidence(db, parse, parse.required_policy),
-            parse.required_policy,
+            await loadIdentityEvidence(db, parse, IDENTITY_POLICY_VERSION),
+            IDENTITY_POLICY_VERSION,
           );
           const [runId, , family, release, digest, dependencies] = await policyRecord(
             await identityKey("ir", [parse.id, selection.policyVersion]),
@@ -543,16 +617,7 @@ export async function identitySweep(
         WHERE NOT EXISTS(SELECT 1 FROM identity_run_policies existing WHERE existing.identity_run_id=r.id)
           AND NOT EXISTS(SELECT 1 FROM identity_run_seals sealed WHERE sealed.identity_run_id=r.id)`)
         .bind(values),
-      db
-        .prepare(`INSERT INTO identity_vpass_bindings
-        SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
-        JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]')
-          AND r.policy_version=json_extract(candidate.value,'$[2]') AND r.policy_version=2
-        JOIN parse_runs p ON p.id=r.parse_run_id AND p.id=json_extract(candidate.value,'$[1]')
-        JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id
-        WHERE p.status='ok' AND ${EMPTY_PARSE_SQL}
-          AND NOT EXISTS(SELECT 1 FROM identity_vpass_bindings pin WHERE pin.identity_run_id=r.id)`)
-        .bind(values),
+      db.prepare(VPASS_BINDING_INSERT_SQL).bind(values),
       db
         .prepare(`INSERT INTO identity_run_seals
         SELECT r.id,0,? FROM json_each(?) candidate
@@ -575,13 +640,13 @@ export async function identitySweep(
   const fastIds = new Set(empty.map((parse) => parse.id));
   for (const parse of candidates.results) {
     if (fastIds.has(parse.id)) continue;
-    if (observations >= 200) break;
+    if (observations >= IDENTITY_SWEEP_OBSERVATIONS) break;
     observations += await identifyParse(
       db,
       parse,
       resolver,
       IDENTITY_POLICY_VERSION,
-      200 - observations,
+      IDENTITY_SWEEP_OBSERVATIONS - observations,
     );
     processedRuns++;
     const sealed = await db

@@ -76,6 +76,7 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 | `parsingHealth`         | `observation_parse_jobs`, `parse_runs`; probes `observation_fetch_artifacts`        | job repaired by a newer published parse                                       | none                                                                                                                                                                                           | —                                                   | —                                   |
 | `globalPassEmptyMonths` | the GLOBAL PASS snapshot CTEs, probing `transaction_observations` by run and month  | the month's current snapshot is empty and an older eligible snapshot had rows | none; a notice, not a visibility rule                                                                                                                                                          | source, month desc                                  | 100 months, plus one for truncation |
 | `listTransactions`      | `transaction_observations` via `activeStateProjection`                              | published + successful run + per-source current page/container                | **Group first, then filter.** Duplicates within (source, account, parser family, external id) are ranked over the whole active set and rank 1 kept; the filter applies to that derived result. | `COALESCE(as_of,'') DESC, id DESC`                  | 501                                 |
+| `undatedTransactions`   | the same derived set as `listTransactions`                                          | as `listTransactions`                                                         | **Group first, then filter**, as `listTransactions`, with `source`, `account` and `q` only, then the rows whose `as_of` starts with no calendar date, counted per source account.              | `source_id, source_account`                         | 5,000 bound                         |
 | `listLatestBalances`    | `balance_observations` via `activeStateProjection` + `completeSnapshotCandidates`   | as above, plus current complete snapshot, MyJCB and V Point windows           | **Group first, then filter.** Latest witness per (source, parser family, unit, account, metric, instrument) is ranked over the whole active set; the filter applies after.                     | `source_id, source_account, metric, instrument, id` | 501, or 5001 for the candidate set  |
 | `listBalanceHistory`    | `balance_observations` via `visibleEvidence.parseRuns`                              | recorded: failed, superseded and partial-run rows included, marked            | No grouping; filter, order, page.                                                                                                                                                              | `COALESCE(as_of, observed_at,'') DESC, id DESC`     | 501                                 |
 | `listPositions`         | `position_observations` via `activeStateProjection` + snapshot membership           | published + successful run + current complete snapshot                        | No grouping; filter, order, page, then valuations are matched for the first 500 positions of the page.                                                                                         | `source_id, source_account, security_code, id`      | 501 positions; pairs bounded        |
@@ -97,6 +98,71 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
   `413 result_limit_exceeded`. A result is never silently cut to look complete.
 - `/api/artifacts` walks an immutable descending id cursor; derived lists use
   deterministic total orderings (each ends in `id`) with an offset.
+- Each offset page is its own read of what is current then, so pages read
+  while a parse is published can repeat or skip a row, and a republished
+  snapshot brings its holdings back under new ids, so one holding can appear
+  on two pages under two ids. `POSITION_CUT_SQL` lets a caller that reads the
+  unscoped positions page by page check afterwards that the ids it read are
+  one cut: over the same text `positionsSql` pages, it counts the current
+  rows, the read ids still current, and the current rows that sort at or
+  before the greatest row read. The report job uses it and reads again or
+  refuses
+  ([ADR 0072, amendment of 2026-11-21](adr/0072-report-artifact-pages.md#amendment-the-report-job-reads-its-positions-from-one-cut-2026-11-21));
+  the evidence browser's pages do not. `test/position-cut.test.ts` checks it
+  against an oracle on seeded random stores and checks its plan without
+  table statistics: the same whole-store snapshot passes as one page, the
+  bound row searched by key, the id lists read once.
+
+### Order of `as_of` across shapes
+
+`listTransactions` orders by the text of `as_of` (`COALESCE(as_of, '') DESC,
+id DESC`), and `listBalanceHistory` by the text of `as_of` or `observed_at`.
+The text is not one shape. Transaction parsers write a calendar date
+(`2026-03-04`: MyJCB, Sony Bank, SBI Securities and most others), an instant
+with the `+09:00` offset (PayPay CSV; Mizuho ordinary history at
+`T00:00:00+09:00`; SBI VC Trade's slash-form timestamps), an instant in UTC
+with milliseconds (`2026-03-03T23:00:00.000Z`: V Point Pay notification
+events), or SBI VC Trade's ISO timestamps verbatim with the offset the
+provider wrote. So the order is newest text first, not newest time first:
+
+- Two instants written in different offsets order by their text, not by
+  absolute time: an instant at 05:00 `+09:00` lists above one at 10:00
+  `+09:00` written as `01:00:00.000Z`. Between the `Z` and `+09:00` shapes
+  the error is at most nine hours.
+- A date lists below every instant whose text starts with that date and
+  above every instant whose text starts with an earlier one; an instant in
+  UTC starts with its UTC date. A missing `as_of` lists last.
+- The `from` and `to` filters read the date an `as_of` starts with, so an
+  instant in UTC falls on its UTC date: a V Point Pay event at 08:00
+  `+09:00` on 2026-03-04 is in `to=2026-03-03`. The Transactions page's
+  column sort and date filter in the browser read the same text the same
+  way.
+
+Balance history mixes more shapes than these: a year-month (`2026-03`:
+MyJCB statement payment amounts), which lists below every date and instant
+of its month; a local date-time with no zone (Sony Bank gross balance); an
+instant in UTC with milliseconds (Vpass credit availability); and a row
+without `as_of` sorts by its `observed_at`. It takes no `from` or `to`.
+
+None of this skips or repeats a row: the order is total and ends in `id`,
+so offset pages over a fixed store return every row once. No read picks a
+"latest" transaction from this order. The `activity` intent of
+`kogane.financial.query` merges its per-scope reads with a comparator of
+the same text and id (`compareActivity` in
+`packages/application/src/query/execute.ts`), so its merge takes exactly the
+rows each scope's read put first. `test/transaction-order.test.ts` pins the
+three points above and the paging over mixed shapes.
+
+Ordering by absolute time is an owner decision, not made: instants alone
+could be ordered by their UTC instant, but every total order must also
+place a date among instants, and the domain leaves that open.
+`compareTemporal` (`packages/domain/src/time.ts`) orders an instant against
+a date only when the instant's own calendar date lies wholly outside the
+date (`within_day` otherwise), and `temporalOrderingKey`, the domain's total
+key for paging, sorts every instant before every date rather than among
+them ([domain contracts](domain-contracts.md#timets--role-typed-time)).
+Normalizing the instants alone would also move each date against the
+`+09:00` instants of its own day, which is the same undecided question.
 
 ### Coverage run counts
 
@@ -118,6 +184,94 @@ which `overview`'s own `COUNT(*)` of `fetch_runs` already does on each call.
 The same file is the differential: on 8 random stores inside the window it
 returns the window's count for every scope, and on 8 random stores and a
 fixed one past it the exact count, unmoved by an unlisted source's runs.
+
+### Latest witness ranking
+
+`listLatestBalances` ranks the witnesses of one group (source, parser family,
+unit, account, metric, instrument) by the text of
+`COALESCE(as_of, observed_at, '')`, greatest first, then by `id`. Two
+families rank differently in `src/sql.ts`: MyJCB past-month balances by
+`detailMonth`, and Sony Bank history by capture and then the CSV, after the
+text. Text order is time order only while every key of a group has one
+shape. Which shapes reach one group, from every parser that writes
+`balance_observations` (read from the parsers on 2026-11-21; production was
+not read):
+
+- A parser with a snapshot policy (`SNAPSHOT_DATASETS` and
+  `ARTIFACT_SNAPSHOT_CONTAINERS` in `packages/parsers/src/snapshot-query.ts`)
+  contributes only its current complete capture: `CURRENT_SNAPSHOT` admits
+  one fetch run per source, parser, dataset and unit, each such parser has
+  one dataset, and a group's key holds the parser and the unit, so every key
+  of a group comes from one capture. The keys are the fetch instant, which the
+  `observation_fetch_artifacts` view always writes in UTC with milliseconds
+  (Mizuho, Prestia, SBI Shinsei, Money Forward, MyJCB J-POINT history); one
+  provider time for the whole response (SBI VC Trade `statusDate`, else
+  `meta.timestamp`; Sony Bank `updateDttm`; the SMBC and St.George recorded
+  instant; Vpass `shokaiDate`, while the Vpass revolving rows carry neither
+  `as_of` nor `observed_at`); or SBI foreign cash balances' per-row
+  `businessDate`.
+- Every other group spans captures, and its parser writes one shape: a
+  calendar date (Mobile Suica, the MyJCB statement total, Vpass statement
+  months as `YYYY-MM-01`, Sony Bank history in JSON and CSV), the fetch
+  instant as `observed_at` (MyJCB J-POINT balance; V Point, read from its
+  newest complete run only), a canonical UTC instant (V Point Pay events), or
+  SBI VC Trade's `eventDatetime` (cashflow balances), which the audited
+  captures carry only in the slash form, read as `+09:00`.
+
+So no group of today's parsers mixes a calendar date with an instant, or two
+offsets, and the ranking picks the greatest key in time. Limits, in shapes
+the code accepts and nobody has observed:
+
+- SBI VC Trade's `providerTimestamp` keeps an ISO date-time verbatim with the
+  offset the provider wrote. Cashflow balances span captures, so an
+  `eventDatetime` sent in UTC would put `Z` and `+09:00` text in one group,
+  and the ranking could then be up to nine hours wrong.
+- SBI foreign cash balances keep `businessDate` verbatim as any string; the
+  fixtures, which mirror the captured shape, carry only `YYYY-MM-DD`. Rows of
+  one capture with differently shaped dates would rank by their text, and a
+  row whose `businessDate` is not a string has an empty key and ranks last.
+
+Where a parser leaves `as_of` empty, `observed_at` (when the source displayed
+a value) stands in for `as_of` (the time the value describes), and the two
+are ranked as one kind of time.
+
+### Rows a date window cannot place
+
+The `from` and `to` filters keep a transaction only when its `as_of` starts
+with a real calendar date (`CALENDAR_DATED_AS_OF` in `src/scope.ts`), and
+then compare that date. A row whose `as_of` is null, a year-month
+(`2026-03`), an impossible day (`2026-02-30`) or any other text is in no
+window: a windowed `listTransactions` leaves it out, neither inside nor
+outside the range. An instant, with or without a zone, starts with a date
+and is placed by it.
+
+`undatedTransactions` counts those rows. It reads the same derived set as
+`listTransactions` (`undatedTransactionsSql` wraps `TRANSACTIONS_SQL`),
+applies the same `source`, `account` and `q` predicates, and keeps the rows
+for which `(CALENDAR_DATED_AS_OF) IS NOT 1`, the exact complement of the
+window's date check, grouped per source account. The windowed SQL is the
+shipped text (the predicate moved into the constant unchanged; a test pins
+the frozen text). `test/undated-transactions.test.ts` checks that the
+count's derived set is `TRANSACTIONS_SQL`'s text byte for byte for every
+scope, and, on five seeded random stores (about a quarter of their parses
+never published) and eleven scopes each, that the unwindowed rows of a scope
+are the rows the widest window places plus the counted ones, and that the
+count per source account equals an independent calendar oracle over the
+published rows. Its plan, on every CORE migration with no table statistics,
+makes exactly the scans and searches of the windowed `listTransactions`
+plan, as many times: only the final temporary B-tree differs (`GROUP BY` in
+place of `ORDER BY`).
+
+The `activity` intent of `kogane.financial.query` calls it once per scope
+pair when a request has `from` or `to`, and names each source with such a
+row as the gap `undated_rows_excluded`
+([agent API](agent-api.md#rows-a-date-window-cannot-place)). Its cost is a
+second evaluation of the derived transaction set per scope pair, the same
+work as one `listTransactions` page, and only on windowed requests. The v1
+`/api/transactions` route and `kogane.observations.list` read the same
+windowed SQL and have no field to carry a reason, so they still leave these
+rows out without saying so: a limit, not a guarantee that the window is
+everything in scope.
 
 ### Raw download
 
@@ -285,10 +439,17 @@ stale-key read probed each live revision's keys once per current key (quadratic
 in the live and current sets); it now names the revisions holding a current key
 once, through `card_purchase_recognition_keys_key`. No index was added: a
 partial index on the two card datasets saved about 10 ms. What still grows with
-history is the snapshot step shared with the Transactions page, which reads
-every artifact once per call (about 50 ms here, nearly all of it the 4,869 Vpass
-statement pages; 40,000 unrelated artifacts added 4 ms); the rest grows with the
-current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
+history is the snapshot step shared with the Transactions page (about 50 ms
+here, nearly all of it the 4,869 Vpass statement pages; 40,000 unrelated
+artifacts added 4 ms). It does not read each artifact once: without statistics
+the current card usage page scans every artifact twice, for the Vpass statement
+snapshots (through `sqlite_autoindex_fetch_artifacts_1`) and for the MyJCB
+ledger ranking (through `idx_fetch_artifacts_source_dataset_time`), probing each
+scanned artifact's run, unit reports and parse; the stale-key read reaches the
+same artifacts by walking every terminal run report twice through an automatic
+index on `report_kind`. Its rows read therefore grow linearly with the history
+([rows read by the latest-state reads](#rows-read-by-the-latest-state-reads)).
+The rest grows with the current rows, ranked whole before the cursor by design. `card-usage-scale.test.ts`
 compares every read with the shipped text (`card-usage-legacy-sql.ts`) on a
 smaller store and fails on a plan that scans observations, parses, runs, reports
 or identity rows whole; `KOGANE_CARD_USAGE_SCALE=full` builds this store and
@@ -305,6 +466,161 @@ confirmed captures at positions 0 and 1 so that the substituted rules decide
 rows; the plan checks run the unmodified shipped text. This proves the plan
 rewrite and the rule change separately: the rewrite returns what the shipped
 plan returns under the intended rules, not the shipped rows byte for byte.
+
+### Rows read by the latest-state reads
+
+The shipped latest-state reads (`listLatestBalances`, `listPositions`, the
+valuation pairs, the reward buckets) compute which capture of each container is
+current inside every statement, from the whole stored history (issue
+[#1491](https://github.com/risu729/kogane/issues/1491)). The app and MCP still
+read them that way, on request. The Processor's scheduled lanes read the
+[snapshot memo](#snapshot-memo) instead (ADR 0129, slice 2). The inline plans
+without table statistics, as D1 plans them (`EXPLAIN QUERY PLAN` on every CORE
+migration):
+
+- `listLatestBalances` (`LATEST_BALANCE_CANDIDATES_SQL` in the app's form)
+  scans `fetch_artifacts` three times through
+  `idx_fetch_artifacts_source_dataset_time`: its own active chain,
+  `eligible_snapshots` and `eligible_artifact_containers`. It walks every
+  terminal fetch-run report twice more, through an automatic index on
+  `report_kind`, for the MyJCB past months and the V Point runs, and reaches
+  every artifact of each run by `fetch_run_id`. Each scanned artifact runs
+  correlated probes: the visible-run checks (annotation, seal, terminal
+  report), its unit reports, the expected-artifact count, the unit policy and
+  unit success, its parse, publication and coverage claim, and `json_each` over
+  the parse's warnings. The window functions then rank the whole set.
+- `listPositions` walks every terminal report for its active chain and makes
+  the two snapshot scans; its valuation pairs (`POSITION_VALUATIONS_SQL`)
+  reach the positions by id and make the two snapshot scans again.
+- `CURRENT_REWARD_BUCKETS_SQL` evaluates `ELIGIBLE_VPOINT_RUNS`, the same walk
+  of every terminal report, whenever a current claim is a V Point one, and
+  scans every reward bucket claim (`SCAN c USING INDEX
+  reward_bucket_claims_v2_holding`).
+- The card usage page and the stale-key read make the passes in
+  [Cost](#cost) above.
+- The Vpass binding insert of `identitySweep`'s empty-parse batch
+  (`VPASS_BINDING_INSERT_SQL`, `packages/storage-d1/src/core/identity-store.ts`)
+  joins `trusted_vpass_card_bindings` (migration 0057) by artifact. Until ADR
+  0129's decision 4 (2026-11-25) its plan started from every binding artifact
+  and, for each, searched every Vpass artifact, with the batch's candidates
+  the innermost loop: binding artifacts times Vpass artifacts whatever the
+  batch held, whenever it held an empty parse of any source (about 9.4M rows in
+  the run of 02:02 UTC on 2026-11-25). Its joins are now `CROSS JOIN`s, which
+  SQLite never reorders, so the candidates are the outer loop and the only
+  scan, and each reaches its run, parse and bindings by key. The frozen text
+  (`services/processor/test/vpass-binding-insert-legacy-sql.ts`) selects the
+  same rows on both scaled stores (`tick-rows-read.test.ts`), and over every
+  policy-2 identity run of those stores (260 and 510) its select reads 37 and
+  38 rows per candidate, against 1,766 and 3,500 before; the insert's probes
+  and triggers add a constant per candidate.
+
+`services/processor/test/tick-rows-read.test.ts` measures workerd's own
+`meta.rows_read` per call through each statement's real caller, on two
+synthetic stores with the same current balances, positions, reward buckets and
+stale keys over 30 and 60 capture days
+(972 and 1,942 artifacts: the card store of `card-usage-scale-fixture.ts` at
+`STATEMENT_CI_SCALE`, plus a V Point run, an SBI Securities positions run and
+their reward claims per day), copied into Miniflare D1:
+
+| Statement                            | Caller               |        30 days |         60 days | Growth | Rows returned |
+| ------------------------------------ | -------------------- | -------------: | --------------: | -----: | ------------- |
+| `latestBalanceCandidatesSql("memo")` | `captureFixedInput`  | 6,705 (37,703) | 12,705 (74,953) |   1.89 | 20 / 20       |
+| `listPositions` on the memo          | `runReportJob`       | 3,102 (20,041) |  5,802 (39,791) |   1.87 | 3 / 3         |
+| `positionValuationsSql("memo")`      | `runReportJob`       |    79 (12,371) |     79 (24,401) |   1.00 | 3 / 3         |
+| `currentRewardBucketsSql("memo")`    | `captureRewardInput` |    290 (8,571) |    530 (17,101) |   1.83 | 2 / 2         |
+| the memo walk (`insertMembers`)      | `ensureSnapshotMemo` |            968 |           1,448 |   1.50 | (insert)      |
+| `STALE_CARD_PURCHASE_KEYS_SQL`       | `cardPurchaseSweep`  |         17,773 |          32,606 |   1.83 | 5 / 5         |
+| `currentCardUsageSql` page           | `cardPurchaseSweep`  |         15,010 |          27,702 |   1.85 | 68 / 85       |
+| Vpass binding insert                 | `identitySweep`      |     3 (75,890) |     3 (283,740) |   1.00 | (insert)      |
+
+Rows read are per call; in brackets, the shipped inline read the lane made
+before ADR 0129's second slice. The memo-backed reads start from the
+memo's members: the valuations of the current positions no longer grow with
+history at all, and the walk that stores the memo runs once per
+snapshot-input revision, not per read. What still grows in the balance and
+position reads is the history parsers' parses (MyJCB statement totals and
+ledgers, Vpass statement pages, SMBC transactions: every published row of a
+parser that no snapshot rule governs is current), which the memo-backed reads
+still visit one index probe each, and in the balance read rank; ADR 0129's
+fourth slice bounds them. The card sweeps are its third; the Vpass binding
+insert reads a constant per candidate (the table's call reaches no Vpass run;
+in brackets, the joins' order before decision 4). The report job's second
+run over unchanged inputs reads 3 rows at either size (its skip gate,
+[calculation and reports](calculation-and-reports.md)); before ADR 0129's
+first slice it read as much as its first, about 52,500 and 104,000 rows, only
+to find the report it stored, and its first run now reads 6,380 and 11,780.
+The current-snapshot selections alone (container snapshots, MyJCB past months,
+V Point runs) are 45,503 of the 74,953 rows of one inline latest-balances read
+at 60 days; the memo-backed read is 12,705.
+
+The test fails when a statement's growth exceeds its ceiling (2.2 for the
+memo-backed reads, 1.1 for the valuations, 1.8 for the walk, 2.4 for the card
+sweeps, 1.1 for the Vpass binding insert) or when a memo-backed read at 60
+days reads more than its measurement plus about a tenth, so a read that falls
+back to the inline selection, or starts to grow faster with history, fails it;
+a read made cheaper passes, and its PR restates the numbers above and lowers
+the ceiling. That these reads do not grow with history, issue #1491's
+acceptance, is a test for the valuations and the Vpass binding insert and a
+`test.todo` for the others.
+`tick-query-plan.test.ts` checks the `SCAN` steps of every statement a tick
+prepares: a whole read of a growing table is either bounded (with the reason)
+or an exception that names the issue removing it and an expiry date after
+which the test fails (ADR 0129, decision 8). Nested searches, automatic indexes
+and per-row probes pass it; its one-capture store does not reach the Vpass
+binding insert, whose plan `tick-rows-read.test.ts` checks instead.
+
+### Snapshot memo
+
+`packages/read-model/src/snapshot-memo.ts`, migration 0108, ADR 0129 slice 2.
+
+- **Snapshot-input revision.** `core_snapshot_input_revision` is a one-row
+  counter that triggers move on every write of the tables that decide which
+  capture is current (`SNAPSHOT_INPUT_REVISION_LEDGER` in
+  `src/source-revision.ts`: parse runs, publications and their events,
+  coverage claims, snapshot policies, fetch run seals and annotations). Each
+  of them is also in the CORE ledger. The acquisition tables are not: a run's
+  rows are fixed once it is sealed, and the selections read sealed runs only.
+  `test/source-revision.test.ts` checks that the triggers are exactly the
+  ledger and that a write of each table moves the counter.
+- **Container registry.** `snapshot_selection_containers` holds each (source,
+  parser, dataset, unit, MyJCB connection) that has a published parse, filled
+  by a trigger on `published_parse_runs` and backfilled by the migration. A
+  shared dataset name (`realised-gains` of SBI and Sony) is walked only with
+  the parser that publishes it.
+- **The walk.** `SNAPSHOT_MEMBERS_SQL` starts at each registered container's
+  newest capture (`idx_fetch_artifacts_source_dataset_capture`, partial so that
+  no other plan moves to it) and stops at the first one the shipped rules call
+  eligible; tied captures are ranked by group id as `snapshotCtes` ranks them.
+  The V Point runs walk terminal reports newest first
+  (`idx_fetch_run_reports_terminal_completion`), and the MyJCB past months
+  walk each connection. Its members are ids: every sealed artifact of each
+  current group, with the parser (and the version the policy requires), and
+  the current V Point run. `test/snapshot-memo.test.ts` checks the members
+  against the shipped selection on random stores (`KOGANE_RANDOM_SEEDS`,
+  24 by default) and the scaled card store.
+- **Storing.** `ensureSnapshotMemo` (Processor,
+  `services/processor/src/snapshot-memo-step.ts`) reads whether this build's
+  key exists for the current revision and core epoch; if not, one batch drops
+  the keys of other revisions with their members, adds the key and inserts the
+  walk's members (`STORE_SNAPSHOT_MEMO_SQL`). The key's digest is the SHA-256
+  of the walk's text, pinned as `SNAPSHOT_SELECTION_DIGEST` (a test fails when
+  the walk changes and the pin does not), so two builds during a rollout keep
+  their own keys.
+- **Reading.** A memo-backed statement names this build's current key in its
+  own text. When there is none (a write moved the revision since the memo was
+  stored), it fails with SQLite's "malformed JSON" error as soon as it needs a
+  member, instead of reading an empty set; `withSnapshotSelection` then stores
+  the memo again and repeats the read, and after two attempts reads the
+  shipped selection inline. The balance and position reads start from
+  `memo_candidate_parses`: the published parses of member artifacts and of the
+  current V Point runs, and every published parse of a parser no snapshot rule
+  governs. It is a superset; the shipped predicates still decide each row.
+  `test/snapshot-memo.test.ts` checks every memo-backed read against its inline
+  text on the random stores and the scaled card store.
+- **What it does not change.** The app and MCP never read or write the memo.
+  The report job's skip gate stays keyed on the CORE revision: its inputs
+  include exact decimals (`observation_decimal_values`) and restrictions,
+  which move the CORE revision and not the snapshot-input one.
 
 ## Parity proof
 
@@ -365,7 +681,15 @@ the compatibility adapter uses. See
 holds the SQL behind `GET /api/collection-quality`,
 `GET /api/collection-quality/<sourceId>` and
 `GET /api/collection-quality/<sourceId>/accounts`
-([ADR 0088](adr/0088-collection-quality-per-account.md));
+([ADR 0088](adr/0088-collection-quality-per-account.md)), and the two bounded
+reads of the status view `GET /api/collection-quality?view=status`
+([ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job)):
+`STATUS_OCCURRENCES_SQL` (the newest 101 receipts per job, by
+`UNIQUE(schedule_id, nominal_at)`) and `STATUS_RUNS_SQL` (the newest 100
+visible fetch runs per source, by `idx_fetch_runs_source`, with whether each
+succeeded), whose plans `test/collection-quality-status.test.ts` checks
+without statistics; `packages/application/src/query/collection-quality-status.ts`
+composes them with `SCHEDULE_QUALITY_SQL` and the cell page;
 `packages/application/src/query/collection-quality.ts`
 maps its rows to the contract and the closed reason codes. It is not an
 `ObservationReader` method: like the dated reads it is composed by an
@@ -505,7 +829,7 @@ method; `GET /api/v2/reconstructed-state` and the agent tool
 | `KEY_HOLDERS_SQL`, `ALIAS_HOLDERS_SQL`               | every event holding a given (book, key) in any of the view's three sources, or a given (book, alias class)                            |
 | `LEGS_SQL`, `TIMES_SQL`, `EFFECTS_SQL`, `SEALS_SQL`  | the children of the given events                                                                                                      |
 | `COMMITS_SQL`, `SUBJECTS_SQL`, `PINS_SQL`            | the commits seals name; the account each leg subject names; the current revision of `account_mapping:` and `instrument_mapping:` pins |
-| `ACCOUNT_SOURCES_SQL`                                | the sources an account's current mappings come from, for the query's reported-container check                                         |
+| `ACCOUNTS_SOURCES_SQL`                               | the sources each listed account's current mappings come from, for the query's reported-container check                                |
 | `LOT_INSTRUMENT_IDENTIFIERS_SQL` (application, lots) | every identifier any of whose mapping revisions names a given instrument, with whether its current one does (ADR 0059)                |
 
 The closure (supersession both ways, claim holders) repeats until it adds
@@ -521,8 +845,9 @@ CORE schema without table statistics: each reads by primary key or by
 `card_purchase_recognition_keys_key`, `card_settlement_candidates_bank` and
 `card_settlement_decisions_event`; the view's arms are each searched by event
 id. The whole reads left are the JSON argument, the schema catalogue, the
-identity epochs read newest first (one row) and, in `ACCOUNT_SOURCES_SQL`, the
-operator-curated mapping table (no index by account). Two reads grow with
+identity epochs read newest first (one row) and, in `ACCOUNTS_SOURCES_SQL`, the
+operator-curated mapping table, once for the whole scope (no index by account;
+ADR 0116). Two reads grow with
 history: the seed reads every leg ever written on the account, and
 `INSTANT_CUT_SQL` walks the commits made after the instant along the primary
 key (no index orders `known_at`). Measured once on `bun:sqlite`, not
@@ -536,7 +861,7 @@ workerd over a local D1 by `services/app/scripts/reconstructed-state-workerd.ts`
 
 `LOT_INSTRUMENT_IDENTIFIERS_SQL`
 (`packages/application/src/query/lots-on-selection.ts`, ADR 0059) is, like
-`ACCOUNT_SOURCES_SQL`, one pass over a mapping table: no index orders
+`ACCOUNTS_SOURCES_SQL`, one pass over a mapping table: no index orders
 `instrument_mappings` by instrument, and adding one would be a migration. Its
 currency check searches the `(identifier_id, revision)` key, and its plan
 without statistics is tested (one scan of the table, nothing else whole).

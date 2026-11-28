@@ -87,6 +87,22 @@ count) inserts no second approval and answers with that row: its stored
 for, so the receipt always equals what `readOwnApproval` and `commit` read.
 The processor route always asks for the default ten-minute lifetime.
 
+The approval insert carries the conditions `approve` checked before it: the
+plan is open and unexpired and every expected revision still holds. When the
+plan's status or a pin moved between those reads and the batch, the insert
+writes nothing, and `approve` runs its pre-check again over the stored plan
+to name it, with the code and refs a request arriving after the move gets:
+`stale_context` with the moved refs (and the plan marked `stale`) for a moved
+pin, `plan_not_open` for a plan committed or marked stale meanwhile (its
+status is checked before its pins, so a committed plan is never marked
+stale). A miss the pre-check does not see still answers `plan_not_open`,
+never success. The expiry does not move between the two: both compare the
+plan's fixed `expires_at` with the request's one `now`. Before 2026-11-21
+every such miss answered `plan_not_open`,
+so a plan whose pin had moved stayed `planned` and the confirmation screen
+said it was already committed or invalid instead of offering the
+re-simulated plan.
+
 ### Expected revisions
 
 Every impact query joins `published_parse_runs`. Since migration 0026 "current"
@@ -542,6 +558,16 @@ up to 20 due rows under a 60 s lease, runs each target's processor, and turns
 the operation's receipt `published` once no row of that operation is
 unprocessed.
 
+The publication is the second statement of the batch that completes a row,
+so the completion that closes an operation's last row publishes its receipt
+in the same transaction. Before 2026-11-21 the pass published at its end, for
+the operations whose rows it had completed; an invocation that ended between
+those (a D1 call refused at a platform limit by a later row's bookkeeping, or
+the Worker evicted mid-pass) left every such receipt `accepted` with every
+row processed, and no later pass looked at it again, because the publication
+only followed a completion. Receipts stranded that way before the change stay
+`accepted`: nothing publishes them retroactively.
+
 ### The four processor results
 
 A processor no longer returns "some outcome" the dispatcher treats as done
@@ -588,7 +614,9 @@ and forwards to the pipeline's private `POST /command/v1/*` routes over a
 `PIPELINE` service binding (the same pattern the importer uses for
 `kogane-ingest`). Without that binding the browser answers
 `503 command_executor_unavailable`; there is no fallback write path from the
-reader.
+reader. The browser answers with the pipeline's status and body bytes under
+its own `Content-Type: application/json`; no header of the pipeline's crosses
+back, so a pipeline answer never chooses how the browser's origin serves it.
 
 Both sides check the grant. The browser refuses an agent's `approve`/`commit`
 before forwarding; the pipeline refuses it again from the
@@ -622,8 +650,12 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 
 - Access JWT required on every route; the actor is the verified `sub`, never a
   body field or a header the client controls.
-- POST only, on exactly these five paths. Everything else in the evidence
-  browser stays GET-only; any other non-GET request is still `405`.
+- POST only, on exactly these five paths: any other method on them is
+  `405` with `Allow: POST`. Everything else in the evidence browser stays
+  GET-only: outside the Worker's POST route families (`/api/command/v1/*`,
+  `/api/agent/v1/*` and `/mcp`, and `/api/ops/v1/*`), any request that is
+  neither `GET` nor `HEAD` is still `405`, with `Allow: GET, HEAD`
+  ([methods](production-evidence-browser.md#methods)).
 - No query string, body bounded to 16 KiB, `no-store` on every answer.
 - An `Origin` that is present and not the Worker's own is
   `403 origin_not_allowed` before the flag, the grant or the body is read
@@ -754,8 +786,37 @@ advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
 (addendum 11 §5); one re-check runs at a time, so an earlier answer never
-replaces a later one. A refusal from any step (simulate, approve, commit or the
-re-check) is shown by a fixed message for its closed code, and every code in
+replaces a later one. A committed plan is not simulated again: its own commit
+moves the revisions it pinned, so the server would answer it `stale` with
+another re-simulated plan id, or refuse it (`stale_context`: a card
+settlement no longer proposed, a pending-to-posted review already decided;
+`target_missing`: an identity protection already released). The re-read
+stops when the commit is sent, and one already in flight is cancelled. A
+commit the server refuses (a client error other than a timeout, or
+`commit_failed`) wrote nothing, and the plan is read again, so a stale plan
+shows its re-simulated plan id. A commit without such an answer (no response,
+a timeout, a server fault) may have landed: the plan stays as read, and the
+same confirmation sent again, with the same operation id, answers with its
+receipt. Until the server refuses it the reviewed item's checks neither warn
+nor block that resend: the item, read again (a refocused window, a
+reconnect), may show the decision the commit wrote, and a resend that did not
+land is checked against every pinned revision by the server again. In their
+place the commit's alert says that no answer came back, so whether the
+decision was saved is unknown, and that 確定する sends the same operation id,
+which never saves twice and shows the receipt if it was saved. Once a receipt is on screen the screen says that the plan it shows
+was read before the commit, and drops the warnings that guard approval and
+commit: the stale plan, the re-simulated plan id, and a pin that moved or an
+action no longer offered. Every receipt is written in the batch that writes
+its decision, so this holds for any status; an `accepted` or `published`
+receipt reads as committed (`確定済み`), and any other (`failed`) says the
+decision was saved but the operation is recorded as failed, and points to the
+receipt. No writer sets `failed` today: the outbox dispatcher moves a receipt
+only to `published`, so the screen's `failed` wording has not been seen on a
+real receipt. The commit reads the reviewed item (the settlement candidate, the
+ownership review, the purchases) again, so its panel shows it after the
+decision, at a revision newer than the plan pinned and without a warning. A refusal from any step (simulate,
+approve, commit or the re-check) is shown by a fixed message for its closed
+code, and every code in
 `COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the
 server's text is never shown. Of the codes outside that list only the App's
 `command_executor_unavailable` has its own message; any other (such as the
@@ -785,6 +846,30 @@ offered disables Approve and Commit.
 
 One operation id is derived per approval, so a resend of the same confirmation
 is the same operation and a lost response never commits twice.
+
+### What waits for a decision
+
+The ホーム page's `判断待ち` panel and `kogane.decisions.pending` list, in one
+answer, every queue this lifecycle and the review pages decide
+([ADR 0126](adr/0126-pending-decisions-summary.md),
+[agent API](agent-api.md#what-waits-for-a-decision)): card settlement
+statements with an undecided candidate and no live acceptance; the accounts
+those candidates need an ownership decision for; account and instrument
+candidates (`open` and `held`); undecided stage-B pending-to-posted proposals;
+undecided re-survey proposals; and plans `planned` or `approved` whose
+`expires_at` is after now, which wait for `approve` or `commit` here. A plan
+row stays `planned` or `approved` after it expires (only `status` moves, and
+nothing reopens it), so the list reads the 24 hours before now through
+`change_plans_status` and keeps the unexpired ones. Each line gives a count,
+the first ids, the oldest creation time and the page and tool that handle it;
+it decides nothing. The plans line needs `interpretation.propose`, as
+`simulate` does, so a reader without a command grant sees no plan id. The
+panel's total says `以上` when a line is cut at its bound or could not be
+counted; a kind the deployment does not serve leaves it exact. Not listed, with a closed reason in the answer's
+`notCovered`: the economic-event and card purchase review kinds above
+(`no_decision_path`: refused at `plan` until a planner exists), relations an
+agent proposed with `kogane.reconcile.propose` (`no_list`) and unresolved
+account mappings (`no_proposal`).
 
 ## Capability
 
@@ -819,7 +904,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (37 tests):
+- `services/processor/test/change-lifecycle.test.ts` (40 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -841,8 +926,13 @@ already recorded is never undone by a DELETE — an undo is a new revision
   release ends between its reads and its batch → `stale_context` with
   nothing written and its approval unspent; typed
   relations with their own decision and no derived `same_account` (SC06); an
-  agent refused approval and commit; approval digest/expiry/scope binding; the
+  agent refused approval and commit; approval digest/expiry/scope binding; an
+  approval whose pin moves between its reads and its batch refused
+  `stale_context` with its plan marked `stale`, and one whose plan is
+  committed there refused `plan_not_open` with the plan left `committed`; the
   outbox publishing once and a duplicate delivery changing nothing; an
+  invocation that ends right after an operation's last row completes still
+  leaving its receipt `published`; an
   unregistered target leaving the row blocked and the receipt `accepted` until
   an operator clears it; a throwing
   target retried with backoff, never marked processed, with the receipt staying
@@ -850,12 +940,14 @@ already recorded is never undone by a DELETE — an undo is a new revision
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/app/test/command-api.test.ts` (21 tests): 401 without
+- `services/app/test/command-api.test.ts` (23 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding
   is absent, body and query-string bounds, `no-store` and no credentials in the
-  answer, and the capability advertised from the flag.
+  answer, the pipeline's status and bytes relayed under the browser's own
+  `application/json` with none of the pipeline's headers, and the capability
+  advertised from the flag.
 - `packages/application/test/pending-posted-plan.test.ts`: the pending-to-posted
   review on every CORE migration — the candidate and its payload, an accept
   that merges one purchase `authorized → captured` with the captured total
@@ -955,6 +1047,12 @@ already recorded is never undone by a DELETE — an undo is a new revision
   `balance-projection` row reaches A07's real processor and rebuilds the
   projection, and the same target with no processor handed in is blocked with
   `no_processor` because it has no default.
+- `packages/storage-d1/test/decision-outbox-target.test.ts`: the dispatcher
+  looks a processor up by the row's own `target` key only, so a synthetic row
+  whose target names an `Object.prototype` member (`constructor`,
+  `__proto__`, `toString`, `hasOwnProperty`; inserted with the CHECK switched
+  off, since the CHECK refuses them) is blocked with `no_processor` like any
+  unregistered target, and no processor runs.
 - `services/processor/test/projection-input.test.ts` (G2-11 .. G2-13):
   a flag that is off and a build that has not finished both leave the row open
   and the receipt `accepted`; the completion after the read model finished

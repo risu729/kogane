@@ -15,13 +15,13 @@ import type {
 import { CARD_STATEMENTS_UNMATCHED_PATH } from "../../../packages/observation-shared/src/card-statements-unmatched-contract.ts";
 import {
   bankSourceLabel,
-  DateValue,
+  NullableDate,
   PageBudgetNote,
   SettlementQuantity,
 } from "./reconciliation-display.tsx";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
-export function useUnmatchedCardStatements(offset: number) {
+function useUnmatchedCardStatements(offset: number) {
   const features = useFeatures();
   return useQuery({
     queryKey: ["card-settlements", "unmatched", offset],
@@ -93,7 +93,7 @@ function PlannerAnswer({ answer }: { answer: UnmatchedPlannerAnswer }): ReactNod
         // The server lists the first 50 and counts every one (ADR 0074,
         // amendment 2026-11-07): the page says how many it does not show.
         <p className="footnote" role="note">
-          {`一致する組み合わせ ${answer.allocationCount.toLocaleString("ja-JP")}件のうち、` +
+          {`一致する組み合わせ ${answer.allocationCount}件のうち、` +
             `出金の件数が少ない順に先頭の${answer.allocations.length}件を表示しています。`}
         </p>
       ) : null}
@@ -129,17 +129,8 @@ function UnmatchedRow({ item }: { item: UnmatchedCardStatement }): ReactNode {
       <p>
         <strong>{statement.sourceId === "vpass" ? "Vpass" : "MyJCB"}</strong> · 対象月{" "}
         <Nullable value={statement.period} /> · 請求総額{" "}
-        {statement.amount === null ? (
-          <Nullable value={null} placeholder="不明" />
-        ) : (
-          <SettlementQuantity value={statement.amount} />
-        )}{" "}
-        · 引落予定日{" "}
-        {statement.paymentDate === null ? (
-          <Nullable value={null} placeholder="不明" />
-        ) : (
-          <DateValue value={statement.paymentDate} />
-        )}
+        <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
+        <NullableDate value={statement.paymentDate} reason={statement.paymentDateReason} />
       </p>
       <p>{label(CODES, item.code)}</p>
       {item.planner === null ? null : <PlannerAnswer answer={item.planner} />}
@@ -160,16 +151,25 @@ export function UnmatchedStatements(): ReactNode {
         <QueryBoundary
           query={query}
           label="照合候補のない請求"
-          isEmpty={(data) => data.items.length === 0}
+          // A statement leaves this list once a candidate pairs it, so a later
+          // page read again can be empty while earlier pages still list some:
+          // only the first page's emptiness says the list is empty.
+          isEmpty={(data) => data.items.length === 0 && offset === 0}
           empty="照合候補のない請求はありません。"
         >
           {(data) => (
             <>
-              <ul className="unmatched-list">
-                {data.items.map((item) => (
-                  <UnmatchedRow key={item.statement.ref.id} item={item} />
-                ))}
-              </ul>
+              {data.items.length === 0 ? (
+                <p>
+                  このページに表示する請求はありません。照合候補ができた請求は一覧から外れるため、一覧が短くなった可能性があります。先頭に戻って確認してください。
+                </p>
+              ) : (
+                <ul className="unmatched-list">
+                  {data.items.map((item) => (
+                    <UnmatchedRow key={item.statement.ref.id} item={item} />
+                  ))}
+                </ul>
+              )}
               <nav className="pagination" aria-label="照合候補のない請求のページ">
                 <button
                   className="button"

@@ -31,9 +31,13 @@ The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
 reads the partial index `parse_runs_pending` (migration 0083,
 [ADR 0079](adr/0079-pending-parse-run-index.md)), which holds the pending
 parse runs only; before it, every sweep read every parse run. Every statement
-one scheduled tick prepares is explained without table statistics by
-`services/processor/test/tick-query-plan.test.ts`, which lists the whole reads
-a tick still makes and the document that accepts each. Two of them are open
+one scheduled tick prepares on a one-capture store is explained without table
+statistics by `services/processor/test/tick-query-plan.test.ts`, which lists
+the whole scans a tick still makes and the document that accepts each; a
+statement that store does not reach, such as the Vpass binding insert of the
+identity sweep's empty-parse batch, is measured by
+`services/processor/test/tick-rows-read.test.ts` instead
+([read model: rows read by the latest-state reads](read-model.md#rows-read-by-the-latest-state-reads)). Two of the whole reads are open
 limits recorded only here, not changed: the identity sweep's candidate page
 (`identitySweepCandidatesSql`, `identity_page`) orders every successful parse
 run by publication before its `LIMIT`, and the reward claim sweep's candidate
@@ -76,12 +80,23 @@ consumed.
 
 Processing: the incremental lane reads unprocessed items in id order, pages the
 run's eligible artifacts (`observation_fetch_artifacts` with a successful run
-and no failures) 100 at a time, inserts `INSERT OR IGNORE` jobs for every
-deployed parser that accepts the artifact, and advances the item's
-`cursor_artifact_id`. An item is marked processed with an outcome
-(`jobs_created`, `no_new_jobs`, `not_eligible`) only after its last page; a
-sweep interrupted mid-run resumes from the cursor, and re-issued inserts are
-no-ops. The item's `jobs_created` is read from the table when the cursor moves
+and no failures) 100 at a time, inserts a job for every deployed parser that
+accepts the artifact, and advances the item's `cursor_artifact_id`. An item is
+marked processed with an outcome (`jobs_created`, `no_new_jobs`,
+`not_eligible`) only after its last page; a sweep interrupted mid-run resumes
+from the cursor, and re-issued inserts are no-ops: the insert skips only a job
+whose key `(fetch_artifact_id, parser_name, parser_version)` exists
+(`ON CONFLICT … DO NOTHING`; the repair lane's inserts do the same). A job the
+schema refuses (a CHECK or NOT NULL failure) raises and fails the sweep before
+the item's cursor moves, so an artifact is never passed with no job; the same
+page is read again on the next sweep. Limit: the lanes run in order
+(incremental, repair, replay), each creating its jobs before it executes any,
+so while such a job stays refused every sweep fails the same way
+(`observation_sweep_failed`, with the error's class as its code) at the lane
+that creates it, and that lane and every lane after it parse nothing: a job the
+incremental lane creates stops all parsing, one the repair or replay lane
+creates stops that lane and those after it once the earlier lanes have run.
+The shipped writers build no row the shipped schema refuses. The item's `jobs_created` is read from the table when the cursor moves
 (the incremental jobs of the artifacts examined), not from the sweep's own
 inserts, so jobs a stopped sweep inserted before it could move the cursor still
 count, and the update is fenced on the cursor it read, so two sweeps never count
@@ -358,7 +373,7 @@ run…"):
 | 9   | `reward_claims_sweep`      | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                                                                                              |
 | 10  | `reward_read_projection`   | Only when `REWARD_READ_PROJECTION_ENABLED` is `"1"` or `"true"` (U16, `docs/rewards.md` §12).                                                                                                                                                                                                                                                                                                            |
 | 11  | `price_promotion`          | Always; no flag. Promotes provider prices to `price_observations` by the closed rule list of `packages/domain/src/price-sources.ts`, at most 500 claims a tick, one cursor per claim kind; logs `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending` and `written` (ADR 0020, ADR 0031, `docs/calculation-and-reports.md` §1).         |
-| 12  | `report_job`               | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                                                                                                                                                                                                                                                                                             |
+| 12  | `report_job`               | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`). Logs `skipped: "snapshot_changed"` and stores nothing when its position pages were not one cut on two reads (ADR 0072).                                                                                                                                                                                                     |
 | 13  | `maintenance_survey`       | Only when `MAINTENANCE_SURVEY_ENABLED` is `"1"` or `"true"`; not declared in `wrangler.jsonc`, so off. Re-reads allowed official maintenance pages and appends proposals only (ADR 0050, `docs/schedules.md`).                                                                                                                                                                                           |
 | 14  | `operation_dispatch`       | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                                                                                          |
 | 15  | `decision_outbox`          | Always, after every lane that changes what a projection reads: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                                                          |
@@ -384,8 +399,8 @@ collection delays `decision_outbox` on that tick by the same amount.
 
 Neither is a parse lane: they create no `observation_parse_jobs` rows and have
 no job budget. `collection_scan` is bounded by one R2 list page (25 keys), at
-most five continuations that find their terminal (of up to 25 pending runs
-read) and five registration attempts per tick, and the
+most five continuations that find their terminal and are not answered from
+their row (of up to 25 pending runs read) and five registration attempts per tick, and the
 invocation's operation budget of 500 (ADR 0010); a terminal already
 registered, already blocked or refused `retryable` within the last 24 hours
 is answered from its row and spends none of the five, so a page of judged
@@ -395,10 +410,11 @@ terminals is finished in one tick
 
 Each stage is isolated: a failure is logged as its own `<event>_failed` line
 and never stops the stages after it, so a parse-sweep failure does not prevent
-the identity sweep from running. A failure code is either the pipeline's safe
-code or the error's constructor name, never exception text. Health signals,
-load budgets and the recovery drills for these stages are in
-`docs/operations.md`.
+the identity sweep from running. A failure code is the pipeline's safe code,
+one of the two documented lane error classes, or the error's built-in class
+(`processor.md` §6.1), never exception text or a class name the thrower
+chose. Health signals, load budgets and the recovery drills for these stages
+are in `docs/operations.md`.
 
 The lanes that keep no state of their own — `identity_sweep`,
 `reconciliation_sweep`, `card_debit_account_sweep`, `card_settlement_sweep`,

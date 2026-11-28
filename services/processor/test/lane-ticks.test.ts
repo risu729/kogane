@@ -5,22 +5,24 @@
 // Synthetic stage results only: every count below is invented, and the
 // "provider text" in the failing stage is a made-up string that must never
 // reach a row.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   LANE_TICK_RETENTION,
   recordLaneTick,
 } from "../../../packages/storage-d1/src/core/lane-ticks.ts";
-import { LANE_TICK_COUNTS, laneTick } from "../src/lane-ticks.ts";
+import { IdentityObservationBoundExceeded } from "../src/instrument-auto-adoption.ts";
+import { LANE_TICK_COUNTS, laneTick, recordTick } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -114,7 +116,9 @@ const RESULTS = {
     enabled: true,
     scanned: 4,
     promoted: 2,
+    known: 1,
     skipped: 1,
+    quantity_incomplete: 0,
     cursor: 812,
     release: "reward-promotion-v1",
   },
@@ -275,7 +279,13 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   expect(counts["instrument_auto_adoption"]).toEqual(RESULTS.instrumentAutoAdoption);
   // Identifiers, cursors, release names and open-ended outcome keys stay in
   // the log line only.
-  expect(counts["reward_claims_sweep"]).toEqual({ scanned: 4, promoted: 2, skipped: 1 });
+  expect(counts["reward_claims_sweep"]).toEqual({
+    scanned: 4,
+    promoted: 2,
+    known: 1,
+    skipped: 1,
+    quantity_incomplete: 0,
+  });
   expect(counts["price_promotion"]).toEqual(RESULTS.prices);
   expect(counts["operation_dispatch"]).toEqual({
     claimed: 1,
@@ -350,6 +360,59 @@ test("a failed lane records `failed` with its safe code, never the message, and 
     errorCode: "unknown",
     counts: {},
   });
+}, 60000);
+
+// A class name is free text the throwing code chose; only built-in classes
+// are named (docs/processor.md §6.1).
+class Synthetic_private_account_label extends Error {}
+const ImpostorRewardClaimWriteRefused = class RewardClaimWriteRefused extends Error {};
+/** A value every inspection of which throws, `instanceof` included. */
+function hostileProxy(): object {
+  const refuse = () => {
+    throw new Error("synthetic private trap");
+  };
+  return new Proxy({}, { get: refuse, getPrototypeOf: refuse, has: refuse, ownKeys: refuse });
+}
+
+test("a failed lane names only a built-in error class, never a custom class name", async () => {
+  const lines: Record<string, unknown>[] = [];
+  await runScheduled(
+    withFlags(ALL_FLAGS),
+    stagesFor({
+      purchases: () => Promise.reject(new Synthetic_private_account_label("synthetic")),
+      settlements: () => Promise.reject({ name: "Synthetic_private_name", message: "synthetic" }),
+      rewards: () => Promise.reject(hostileProxy()),
+      prices: () => Promise.reject(new RangeError("synthetic")),
+      // A class that only shares a documented code's name is not that code.
+      debitAccounts: () => Promise.reject(new ImpostorRewardClaimWriteRefused("synthetic")),
+      instrumentAutoAdoption: () => Promise.reject(new IdentityObservationBoundExceeded()),
+    }),
+    (line) => lines.push(JSON.parse(line)),
+  );
+  expect(lines).toContainEqual({ event: "purchase_recognition_failed", code: "Error" });
+  expect(lines).toContainEqual({ event: "card_debit_account_sweep_failed", code: "Error" });
+  expect(lines).toContainEqual({
+    event: "instrument_auto_adoption_failed",
+    code: "IdentityObservationBoundExceeded",
+  });
+  expect(lines).toContainEqual({ event: "card_settlement_sweep_failed", code: "unknown" });
+  expect(lines).toContainEqual({ event: "reward_claims_sweep_failed", code: "unknown" });
+  expect(lines).toContainEqual({ event: "price_promotion_failed", code: "RangeError" });
+  const byLane = Object.fromEntries((await ticks()).map((row) => [row.lane, row]));
+  expect(byLane["purchase_recognition"]).toMatchObject({ outcome: "failed", error_code: "Error" });
+  expect(byLane["card_settlement_sweep"]).toMatchObject({
+    outcome: "failed",
+    error_code: "unknown",
+  });
+  expect(byLane["reward_claims_sweep"]).toMatchObject({ outcome: "failed", error_code: "unknown" });
+  expect(byLane["price_promotion"]).toMatchObject({ outcome: "failed", error_code: "RangeError" });
+  expect(byLane["card_debit_account_sweep"]).toMatchObject({ error_code: "Error" });
+  expect(byLane["instrument_auto_adoption"]).toMatchObject({
+    error_code: "IdentityObservationBoundExceeded",
+  });
+  // The hostile value stopped no later lane.
+  expect(byLane["decision_outbox"]).toMatchObject({ outcome: "ran" });
+  expect(JSON.stringify(lines)).not.toMatch(/Synthetic_private|synthetic private/u);
 }, 60000);
 
 test("a lane whose flag is off records `skipped-by-flag`, is not run and still logs nothing", async () => {
@@ -479,6 +542,30 @@ test("a tick that cannot be recorded is logged as a code and stops no lane", asy
     RECORDED.map((lane) => ({ event: "lane_tick_record_failed", lane, code: "RangeError" })),
   );
   expect(lines.at(-2)).toMatchObject({ event: "audit_overflow" });
+  expect(await ticks()).toEqual([]);
+}, 60000);
+
+test("a tick record failure names only a built-in error class", async () => {
+  for (const [thrown, code] of [
+    [new Synthetic_private_account_label("synthetic"), "Error"],
+    ["synthetic private text", "unknown"],
+    [hostileProxy(), "unknown"],
+  ] as const) {
+    const lines: Record<string, unknown>[] = [];
+    await recordTick(
+      {
+        prepare: (sql: string) => env.DB.prepare(sql),
+        batch: () => Promise.reject(thrown),
+      } as unknown as D1Database,
+      "purchase_recognition",
+      1,
+      { outcome: "ran", result: PURCHASES },
+      (line) => lines.push(JSON.parse(line)),
+    );
+    expect(lines).toEqual([
+      { event: "lane_tick_record_failed", lane: "purchase_recognition", code },
+    ]);
+  }
   expect(await ticks()).toEqual([]);
 }, 60000);
 

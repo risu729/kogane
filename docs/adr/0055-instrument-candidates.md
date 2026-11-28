@@ -4,9 +4,18 @@
   [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
   (route, page, agent read tool and cost) is accepted (#608)
 - The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is accepted (#629).
+- The [pure temporal selector amendment](#amendment-2026-10-09-pure-temporal-selector)
+  is accepted (#637), and the two 2026-10-10 amendments,
+  [local temporal journal storage primitives](#amendment-2026-10-10-local-temporal-journal-storage-primitives)
+  and [refuse temporal-to-current command fallback](#amendment-2026-10-10-refuse-temporal-to-current-command-fallback),
+  are accepted (#652).
 - The [2026-11-08 amendment](#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)
   (rule `instrument-auto-v1`: SBI's bare domestic code adopted onto its listing
-  by a recorded rule decision) is accepted (#1123).
+  by a recorded rule decision) is accepted (#1123), and the
+  [second 2026-11-08 amendment](#amendment-2026-11-08-adoption-and-keeping-apart-pin-the-whole-pair)
+  (adoption and keeping apart pin the whole pair) is accepted (#1128).
+- The [2026-11-19 amendment](#amendment-2026-11-19-the-adoption-re-checks-listed_as-when-it-writes)
+  (the rule's write re-checks `listed_as`) is accepted (merged 2026-11-20 in [#1430](https://github.com/risu729/kogane/pull/1430)).
 - Date: 2026-10-08
 - Issue: part of #546
 
@@ -1404,3 +1413,90 @@ not pin the pair's forward orientation, commits after a decision under it and
 leaves the pair's candidate status unchanged) and
 `packages/application/test/instrument-candidate-anchor.test.ts` (the adoption
 plan's pins).
+
+## Amendment 2026-11-19: the adoption re-checks `listed_as` when it writes
+
+- Status: accepted (merged 2026-11-20 in [#1430](https://github.com/risu729/kogane/pull/1430))
+- Date: 2026-11-19
+- Carried by: `INSTRUMENT_AUTO_ADOPTION_SQL.adoptionGuard` and
+  `adoptInstrument` in `services/processor/src/instrument-auto-adoption.ts`;
+  [identity](../identity.md#automatic-adoption-rule-instrument-auto-v1),
+  [processor](../processor.md#6-lanes)
+- Amends: [the 2026-11-08 amendment](#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule),
+  Decision 2 (the write's guard)
+
+### Context
+
+Rule `instrument-auto-v1` adopts a pair only when no `listed_as` relation, in
+any status, names either identifier or either instrument (Decision 1). That
+was checked only by the candidate read. The write's guard checked the
+subject's revision and the anchor's mapping, and a `listed_as` decision does
+not move either: a person's keep-apart (`relation.reject` of `listed_as`, the
+candidate's own command) or an agent's `listed_as` proposal committed after
+the lane's read and before its write did not stop the adoption. The rule then
+re-mapped the subject onto the anchor's instrument over a recorded rejection,
+an automatic change of adopted state against a decision (INV07). The window
+is the lane's read (about a second per 100,000 identity observations) plus
+the writes before it in the tick. The purchase lane's provider-link merge
+already re-checks a reviewer's decision inside its batch
+([economic events](../economic-events.md#pending-to-posted-links)); this
+write did not.
+
+### Options considered
+
+1. **Re-run the candidate read inside the write.** Rejected: the read walks
+   every current identity observation and cannot be one batch condition.
+2. **Pin the pair's `listed_as` triples by row count, as a plan does.**
+   Rejected: the rule's condition is any relation naming either identifier
+   or either instrument, in any orientation, not the pair's two triples.
+3. **Re-check the rule's own condition as a keyed `NOT EXISTS` in the guard
+   (chosen).** It is the same set the read checks, read by
+   `entity_relations_to` and `entity_relations_from`.
+
+### Decision
+
+The write's guard (`adoptionGuard`) holds only when, in the same batch as the
+mapping revision and the decision:
+
+- the anchor's current mapping is still the `rule` revision the read saw, on
+  the target instrument (unchanged);
+- no `listed_as` row, of any status, has `to_ref` `identifier:<anchor>` or
+  `identifier:<subject>`;
+- no `listed_as` row, of any status, has `from_ref` `instrument:<target>` or
+  the subject's current instrument (the instrument of the revision the
+  command expects).
+
+Otherwise the command writes nothing and answers `target_missing`, which the
+lane counts as `refused`. The next evaluation reads the relation and leaves
+the pair to a person. No migration, and nothing else about what the rule
+adopts changes.
+
+### Consequences
+
+- A keep-apart or a `listed_as` proposal recorded while the lane runs is
+  never overridden by the rule.
+- Limit, unchanged by this amendment: a manual mapping of a third identifier
+  onto the anchor's or the subject's instrument recorded between the read and
+  the write is not re-checked (Decision 1's "every identifier on the anchor's
+  instrument is mapped by rule" and "the subject shares its instrument with
+  nobody"). `instrument_mappings` has no index by instrument, so the check
+  would scan the table; a person who wants the pair apart records the
+  keep-apart, which this guard does see.
+- Cost: four key seeks of `entity_relations` and one of the subject's
+  mapping per adoption, at most 50 a tick.
+
+### Verification
+
+`services/processor/test/instrument-auto-adoption.test.ts`, synthetic SBI
+rows only: the lane, run over a database that records a person's keep-apart
+(through the change lifecycle) after the lane's read and before its first
+write, writes no mapping revision, decision or ledger row and leaves the candidate
+`rejected` and the subject `kept-separate`; the same with an agent's
+`listed_as` proposal in the other orientation; both fail on the guard this
+amendment replaces (the rule adopted the pair). A `listed_as` row from the
+target instrument, from the subject's instrument, to the anchor or to the
+subject, each with an unrelated other end, refuses the write on its own; one
+naming none of them, or another relation kind naming the pair, does not. The
+guard's plan without table statistics is key searches only, of `entity_relations_to`,
+`entity_relations_from` and the mappings' `(identifier_id, revision)` key.
+The anchor-moved test now runs through `adoptInstrument`.

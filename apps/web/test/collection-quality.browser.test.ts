@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -10,7 +10,9 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
+import { queryCollectionQualityStatus } from "../../../packages/application/src/query/collection-quality-status.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 /** Every age is counted to this instant: two Tokyo days after the synthetic capture. */
 const AS_OF = "2099-01-03T00:00:00.000Z";
 const client = join(import.meta.dir, "../dist-production");
@@ -18,8 +20,13 @@ const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath()
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] === "true"))
   process.exitCode = 1;
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
 describe.if(runnable)("collection quality browser", () => {
-  let browser: Browser, server: ReturnType<typeof Bun.serve>, store: QualityStore, origin: string;
+  let server: ReturnType<typeof Bun.serve>, store: QualityStore, origin: string;
   const requests: { path: string; method: string }[] = [];
   beforeAll(async () => {
     store = new QualityStore();
@@ -97,6 +104,16 @@ describe.if(runnable)("collection quality browser", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
+        if (url.pathname === "/api/collection-quality" && url.search === "?view=status")
+          return Response.json(await queryCollectionQualityStatus(executor, { asOf: AS_OF }));
+        // The page reads the full summary, cells and account view; the routes'
+        // default is the summary (ADR 0123 and its amendment of 2026-11-20).
+        // The status view, matched above, takes no `detail`.
+        if (
+          url.pathname.startsWith("/api/collection-quality") &&
+          url.searchParams.get("detail") !== "full"
+        )
+          return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
         if (url.pathname === "/api/collection-quality")
           return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (
@@ -124,7 +141,6 @@ describe.if(runnable)("collection quality browser", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60000);
   afterAll(async () => {
     await browser?.close();
@@ -265,6 +281,44 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 30000);
+  test("the status table at the top lists every configured job's state, failures and datasets that do not publish", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 375, height: 812 });
+      const before = requests.length;
+      await page.goto(`${origin}/collection-quality`);
+      const region = page.getByRole("region", { name: "収集の状況" });
+      await region.waitFor();
+      expect(
+        requests.slice(before).filter((request) => request.path.includes("view=status")),
+      ).toEqual([{ path: "/api/collection-quality?view=status", method: "GET" }]);
+      // Vpass's newest receipt failed with no stored code and nothing recovered it.
+      const vpass = region.locator('tr[data-state="failing"]').filter({
+        has: page.getByRole("rowheader", { name: "vpass", exact: true }),
+      });
+      expect(await vpass.getByText("失敗が続いています", { exact: false }).count()).toBe(1);
+      expect(await vpass.getByText("1件", { exact: false }).count()).toBe(1);
+      expect(await vpass.getByText("unclassified", { exact: true }).count()).toBe(1);
+      // GLOBAL PASS has a month whose newest capture is still waiting for its parse.
+      const globalPass = region.locator("tr").filter({
+        has: page.getByRole("rowheader", { name: /^prestia-globalpass/ }),
+      });
+      expect(await globalPass.getAttribute("data-state")).toBe("ok");
+      expect(await globalPass.getByText("globalpass-activity", { exact: true }).count()).toBe(1);
+      expect(await globalPass.getByText("解析待ち・解析中です", { exact: false }).count()).toBe(1);
+      // A disabled job says its datasets were not read, never that none is stuck.
+      const disabled = region.locator('tr[data-state="disabled"]').filter({
+        has: page.getByRole("rowheader", { name: "prestia-bank", exact: true }),
+      });
+      expect(await disabled.getByText("停止中のため未確認", { exact: true }).count()).toBe(1);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("the scope picker and a chosen source pass the accessibility audit", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     try {
@@ -282,6 +336,20 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 60000);
+  test("the time the page read its answer is shown in Japan time, not as a UTC instant", async () => {
+    const page = await browser.newPage();
+    try {
+      // 15:30 UTC on 01-01 is 00:30 on 01-02 in Tokyo.
+      await page.clock.setFixedTime(new Date("2099-01-01T15:30:00Z"));
+      await page.goto(`${origin}/collection-quality?source=vpass`);
+      const read = page.locator("p", { hasText: "表示を読んだ時刻:" });
+      await read.waitFor();
+      expect(await read.textContent()).toBe("表示を読んだ時刻: 2099/01/02 0:30（日本時間）");
+      expect(await read.locator("time").getAttribute("datetime")).toBe("2099-01-01T15:30:00.000Z");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("the account view lists a source's periods per account and the records no account names", async () => {
     const page = await browser.newPage();
     try {
@@ -290,7 +358,7 @@ describe.if(runnable)("collection quality browser", () => {
       await page.goto(`${origin}/collection-quality?source=global-pass`);
       // The default view reads the cells, never the account regrouping.
       await page.getByRole("heading", { name: "口座・カード × データ種別 × 期間" }).waitFor();
-      expect(requests.slice(before).some((request) => request.path.endsWith("/accounts"))).toBe(
+      expect(requests.slice(before).some((request) => request.path.includes("/accounts"))).toBe(
         false,
       );
       await page.getByRole("link", { name: "口座ごと", exact: true }).click();
@@ -334,8 +402,10 @@ describe.if(runnable)("collection quality browser", () => {
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
       expect(
-        requests.slice(before).filter((request) => request.path.endsWith("/accounts")),
-      ).toEqual([{ path: "/api/collection-quality/global-pass/accounts", method: "GET" }]);
+        requests.slice(before).filter((request) => request.path.includes("/accounts")),
+      ).toEqual([
+        { path: "/api/collection-quality/global-pass/accounts?detail=full", method: "GET" },
+      ]);
       expect(await auditView(page)).toEqual([]);
     } finally {
       await page.close();
@@ -390,8 +460,9 @@ describe.if(runnable)("collection quality browser", () => {
       expect(await auditView(page)).toEqual([]);
       // More cells than the bound is refused whole (413): no account, period
       // or count is shown, only the refusal.
-      await page.route("**/api/collection-quality/global-pass/accounts", (route) =>
-        route.fulfill({ status: 413, json: { error: "result_limit_exceeded" } }),
+      await page.route(
+        (url) => url.pathname === "/api/collection-quality/global-pass/accounts",
+        (route) => route.fulfill({ status: 413, json: { error: "result_limit_exceeded" } }),
       );
       await page.goto(`${origin}/collection-quality?source=global-pass&view=accounts`);
       await page.getByRole("alert").filter({ hasText: "(HTTP 413)" }).waitFor();

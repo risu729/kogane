@@ -12,12 +12,15 @@
 // not-computable body can never present a whole-portfolio subtotal; and the
 // capabilities a report states must be the ones its replayability implies,
 // so a restricted report cannot claim it may still be explained.
+import { pagedFieldsSay, type PagedWireFields } from "./paging-contract.ts";
+import type { ResultPartition } from "../../domain/src/calculation.ts";
 import { REPLAYABILITY, type Replayability } from "../../domain/src/context.ts";
 import { PRICE_KINDS, type PriceKind } from "../../domain/src/metrics.ts";
 import {
   REPORT_EVENT_KINDS,
   REPORT_PURPOSES,
   replayCapabilities,
+  reportPartition,
   reportStorageRef,
   validReportBody,
   type ReportBody,
@@ -31,7 +34,9 @@ export const REPORTS_PATH = "/api/v2/reports";
 const REPORT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 /** The explanation node schema the report job writes. */
 const REPORT_EXPLANATION_SCHEMA = "report-explanation-v1";
-const REPORT_INPUT_MANIFEST_SCHEMA = "report-inputs-v1";
+/** The manifest schema the report job writes; v1 nodes stored before it stay readable. */
+const REPORT_INPUT_MANIFEST_SCHEMA = "report-inputs-v2";
+const REPORT_INPUT_MANIFEST_SCHEMA_V1 = "report-inputs-v1";
 const CALCULATION_RUN_STATUSES = ["building", "complete", "failed"] as const;
 const LIST_BOUND = 200;
 const EVENT_BOUND = 200;
@@ -48,10 +53,13 @@ export interface ReportListItem {
   createdAt: string;
 }
 
-export interface ReportListPage {
+export interface ReportListPage extends PagedWireFields {
   apiVersion: 2;
   items: ReportListItem[];
-  /** The next page's offset as a decimal string, or null on the last page. No total. */
+  /**
+   * The next page's offset as a decimal string, or null on the last page. No
+   * total. Deprecated in favour of `next` and `paging` (ADR 0128); kept for one release.
+   */
   nextCursor: string | null;
 }
 
@@ -103,6 +111,12 @@ export type ReportDetail =
       interpretationContext: InterpretationContext;
       events: ReportEventRow[];
       view: "body";
+      /**
+       * The partition the report states, derived by the reader from the body
+       * (`reportPartition`): a body stored `complete` with `truncated: true`
+       * states `partial-verified-scope`. The body is shown as stored.
+       */
+      partition: ResultPartition;
       body: ReportBody;
     }
   | {
@@ -112,8 +126,8 @@ export type ReportDetail =
       body: null;
     };
 
-interface ReportInputManifest {
-  schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA;
+interface ReportInputManifestV1 {
+  schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA_V1;
   perimeterRef: string;
   unitRef: string;
   /** Newest moment any included evidence was recorded, or "none". */
@@ -124,6 +138,25 @@ interface ReportInputManifest {
   valuationObservationIds: number[];
   priceObservationIds: string[];
 }
+
+/**
+ * The manifest of a report stored since 2026-11-19: the v1 fields and the
+ * release of the price selection, the admitted price rules, the valuation and
+ * the body build, and whether the positions were cut at the row bound (ADR
+ * 0072, amendment of 2026-11-19). A v1 node stays valid:
+ * stored explanation nodes are never rewritten.
+ */
+interface ReportInputManifestV2 extends Omit<ReportInputManifestV1, "schemaVersion"> {
+  schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA;
+  priceSelectionRelease: string;
+  priceRuleIds: string[];
+  valuationRelease: string;
+  reportBuildRelease: string;
+  /** More positions were in scope than the report kept (its body's `coverage.truncated`). */
+  truncated: boolean;
+}
+
+type ReportInputManifest = ReportInputManifestV1 | ReportInputManifestV2;
 
 interface ReportExplanationPrice {
   id: string;
@@ -204,14 +237,20 @@ function validListItem(value: unknown): value is ReportListItem {
 function validReportListPage(value: unknown): value is ReportListPage {
   return (
     record(value) &&
-    exactKeys(value, ["apiVersion", "items", "nextCursor"]) &&
+    (exactKeys(value, ["apiVersion", "items", "nextCursor"]) ||
+      exactKeys(value, ["apiVersion", "items", "nextCursor", "next", "paging"])) &&
     value.apiVersion === 2 &&
     Array.isArray(value.items) &&
     value.items.length <= LIST_BOUND &&
     value.items.every(validListItem) &&
     new Set(value.items.map((item) => item.reportId)).size === value.items.length &&
     (value.nextCursor === null ||
-      (typeof value.nextCursor === "string" && /^[1-9][0-9]{0,15}$/u.test(value.nextCursor)))
+      (typeof value.nextCursor === "string" && /^[1-9][0-9]{0,15}$/u.test(value.nextCursor))) &&
+    // `next` and `paging` (ADR 0128) agree with the deprecated `nextCursor`.
+    pagedFieldsSay(value, {
+      next: value.nextCursor === null ? null : { offset: Number(value.nextCursor) },
+      returned: value.items.length,
+    })
   );
 }
 
@@ -311,33 +350,62 @@ function validReportDetail(value: unknown, reportId: string): value is ReportDet
       value.report.replayability === "unavailable"
     );
   return (
-    exactKeys(value, ["report", "interpretationContext", "events", "view", "body"]) &&
+    exactKeys(value, ["report", "interpretationContext", "events", "view", "partition", "body"]) &&
     value.view === "body" &&
     Array.isArray(value.events) &&
     value.events.length <= EVENT_BOUND &&
     value.events.every((event) => validEventRow(event, reportId)) &&
     validReportBody(value.body) &&
+    // The stated partition is the one the body implies, so a truncated body
+    // can never be shown as complete (INV05).
+    value.partition === reportPartition(value.body.partition, value.body.coverage.truncated) &&
     value.body.contextId === value.report.contextId &&
     value.body.purpose === value.report.purpose &&
     value.body.schemaVersion === value.report.schemaVersion
   );
 }
 
-function validManifest(value: unknown): value is ReportInputManifest {
+const MANIFEST_V1_KEYS = [
+  "schemaVersion",
+  "perimeterRef",
+  "unitRef",
+  "knowledgeCutoffEffective",
+  "decimalPolicyRelease",
+  "instrumentValuationPolicyId",
+  "positionObservationIds",
+  "valuationObservationIds",
+  "priceObservationIds",
+] as const;
+const MANIFEST_V2_KEYS = [
+  ...MANIFEST_V1_KEYS,
+  "priceSelectionRelease",
+  "priceRuleIds",
+  "valuationRelease",
+  "reportBuildRelease",
+  "truncated",
+] as const;
+
+/** The fields v2 adds: the releases (the rule list sorted as the job writes it) and the cut. */
+function validManifestReleases(value: Record<string, unknown>): boolean {
   return (
-    record(value) &&
-    exactKeys(value, [
-      "schemaVersion",
-      "perimeterRef",
-      "unitRef",
-      "knowledgeCutoffEffective",
-      "decimalPolicyRelease",
-      "instrumentValuationPolicyId",
-      "positionObservationIds",
-      "valuationObservationIds",
-      "priceObservationIds",
-    ]) &&
-    value.schemaVersion === REPORT_INPUT_MANIFEST_SCHEMA &&
+    text(value.priceSelectionRelease, 128) &&
+    textList(value.priceRuleIds, 100) &&
+    value.priceRuleIds.every((id, index, ids) => index === 0 || ids[index - 1]! < id) &&
+    text(value.valuationRelease, 128) &&
+    text(value.reportBuildRelease, 128) &&
+    typeof value.truncated === "boolean"
+  );
+}
+
+function validManifest(value: unknown): value is ReportInputManifest {
+  if (!record(value)) return false;
+  const versioned =
+    value.schemaVersion === REPORT_INPUT_MANIFEST_SCHEMA
+      ? exactKeys(value, MANIFEST_V2_KEYS) && validManifestReleases(value)
+      : value.schemaVersion === REPORT_INPUT_MANIFEST_SCHEMA_V1 &&
+        exactKeys(value, MANIFEST_V1_KEYS);
+  return (
+    versioned &&
     text(value.perimeterRef) &&
     text(value.unitRef, 128) &&
     text(value.knowledgeCutoffEffective, 64) &&

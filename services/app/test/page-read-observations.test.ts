@@ -66,7 +66,7 @@ describe("observation page reads", () => {
       ["/api/meta", "/api/overview", "/api/filter-options"],
       ["/api/transactions", "/api/balances", "/api/positions", "/api/artifacts"],
       ["/api/observations/:kind/:id", "/api/artifacts/:id"],
-      ["/api/v2/balances/latest", "/api/v2/balances/history"],
+      ["/api/v2/balances/latest", "/api/v2/balances/history", "/api/v2/balances/cash"],
     ]);
   });
 
@@ -91,6 +91,12 @@ describe("observation page reads", () => {
     const cases: [string, string, Record<string, unknown>][] = [
       ["/api/meta", "kogane.store.read", { page: "meta" }],
       ["/api/overview", "kogane.store.read", { page: "overview" }],
+      ["/api/overview?detail=full", "kogane.store.read", { page: "overview", detail: "full" }],
+      [
+        "/api/overview?detail=summary",
+        "kogane.store.read",
+        { page: "overview", detail: "summary" },
+      ],
       [
         "/api/filter-options?kind=transactions",
         "kogane.store.read",
@@ -124,6 +130,16 @@ describe("observation page reads", () => {
         "/api/balances?metric=available&latestOffset=0",
         "kogane.observations.list",
         { kind: "balances", metric: "available", latestOffset: 0 },
+      ],
+      [
+        "/api/balances?detail=full",
+        "kogane.observations.list",
+        { kind: "balances", detail: "full" },
+      ],
+      [
+        "/api/balances?offset=0&latestOffset=0&detail=summary",
+        "kogane.observations.list",
+        { kind: "balances", offset: 0, latestOffset: 0, detail: "summary" },
       ],
       [
         "/api/positions?account=synthetic-securities",
@@ -174,6 +190,11 @@ describe("observation page reads", () => {
     const latest = await page.mcp("kogane.balances.read", { collection: "latest" });
     expect(
       latest.body.data.items.map((item: { observationId: number }) => item.observationId),
+    ).toEqual([ids.balance]);
+    const list = await page.mcp("kogane.observations.list", { kind: "balances" });
+    expect(list.body.data.detail).toBe("summary");
+    expect(
+      list.body.data.latest.map((line: { observationId: number }) => line.observationId),
     ).toEqual([ids.balance]);
     const positions = await page.mcp("kogane.observations.list", { kind: "positions" });
     expect(positions.body.data.positions).toHaveLength(1);
@@ -230,6 +251,19 @@ describe("observation page reads", () => {
         400,
       ],
       ["/api/meta?kind=balances", "kogane.store.read", { page: "meta", kind: "balances" }, 400],
+      // `detail` is the balance list's alone.
+      [
+        "/api/transactions?detail=full",
+        "kogane.observations.list",
+        { kind: "transactions", detail: "full" },
+        400,
+      ],
+      [
+        "/api/positions?detail=summary",
+        "kogane.observations.list",
+        { kind: "positions", detail: "summary" },
+        400,
+      ],
       [
         "/api/observations/transaction/999999",
         "kogane.observations.get",
@@ -262,6 +296,7 @@ describe("observation page reads", () => {
       ["kogane.observations.list", { kind: "transactions", source: "" }],
       ["kogane.observations.list", { kind: "transactions", q: "x".repeat(513) }],
       ["kogane.observations.list", { kind: "transactions", view: "all" }],
+      ["kogane.observations.list", { kind: "balances", detail: "compact" }],
       ["kogane.observations.get", { kind: "transaction", id: 0 }],
       ["kogane.observations.get", { kind: "transaction", id: "1" }],
       ["kogane.observations.get", { kind: "raw", id: 1 }],

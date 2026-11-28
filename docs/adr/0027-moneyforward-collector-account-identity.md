@@ -2,7 +2,11 @@
 
 - Status: accepted (merged 2026-09-27 in #276); amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the identity is derived without a key; see
-  [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key))
+  [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key)); the
+  [2026-11-04 amendment](#amendment-2026-11-04-captured-month-ranges-preserve-gaps)
+  is accepted (merged 2026-11-06 in #915); the
+  [2026-11-21 amendment](#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)
+  is accepted (merged 2026-11-22 in [#1540](https://github.com/risu729/kogane/pull/1540))
 - Date: 2026-09-27
 - Carried by:
   `services/collector-moneyforward/src/account-identity.ts`,
@@ -326,3 +330,43 @@ calendar months are refused before any bucket write. CORE registration is
 checked with the collector's real plan. The existing range limit still fails
 closed; this amendment does not enlarge it. Authenticated provider observation
 and scoped production acceptance remain separate work in #452.
+
+## Amendment 2026-11-21: a successful input without its account count fails closed
+
+Status: accepted (merged 2026-11-22 in [#1540](https://github.com/risu729/kogane/pull/1540)).
+
+### Context and options
+
+INV05 made `accountDetailCount` and `monthlyFragmentCount` optional in
+`SharedRunInput`: a run that stopped before the collection returned never
+learned them, so they are absent rather than 0. The fail-closed list above
+checks a successful run's identities against its `accountDetailCount`, and
+`moneyForwardAccountIdentities` skips that check when no count is passed. With
+the field optional, a `success` input without it would skip the check and could
+derive identities for a run whose account count nobody verified. The options
+were: (1) keep the count required in the input type and make only the run
+result optional, which would force a failed run to invent a value; (2) a
+discriminated input type whose `success` arm requires the count, which no
+caller outside the worker can be held to at runtime; (3) treat a `success`
+input without the count as an account without an identity. Option 3 is
+chosen.
+
+### Decision
+
+`moneyForwardRunPlan` gives a `success` input that carries no
+`accountDetailCount` the identity state `identity_incomplete`, an existing code
+of this list, without reading its pages; its units stay positional and the
+parser keeps rejecting its account pages, as for every other fail-closed case.
+A `partial` or `failed` input is unchanged: its count is not checked, as
+before.
+
+### Consequences and verification
+
+The worker sets both counts exactly when the collection returns, and only such
+a run is `success`, so no run the worker produces changes. Before this change the
+type required the count, so no typed caller could omit it. A failed run keeps
+no artifact and writes no `manifest.json`; every manifest the worker writes
+still carries both counts. Verified in
+`services/collector-moneyforward/test/diagnostics.test.ts` ("a successful
+input without its account count derives no identity"), which fails on the
+code before this amendment (it derived identities).

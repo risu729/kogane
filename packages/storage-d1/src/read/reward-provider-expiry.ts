@@ -50,8 +50,11 @@ export async function writeRewardProviderSectionChunk(
   const results = await runBatch(db, [
     ...rows.map((row) =>
       db
-        .prepare(`INSERT OR IGNORE INTO reward_provider_expiry_sections(snapshot_id,row_key,row_seq,program_id,payload_json,row_digest)
- SELECT ?1,?2,?3,?4,?5,?6 WHERE EXISTS(SELECT 1 FROM reward_expiry_snapshots WHERE snapshot_id=?1 AND status='building' AND writer_lease=?7 AND writer_fence=?8)`)
+        // Only a re-sent row (same key; the conflict trigger has checked its
+        // digest) is skipped; a CHECK or NOT NULL failure raises, as in rewards.ts.
+        .prepare(`INSERT INTO reward_provider_expiry_sections(snapshot_id,row_key,row_seq,program_id,payload_json,row_digest)
+ SELECT ?1,?2,?3,?4,?5,?6 WHERE EXISTS(SELECT 1 FROM reward_expiry_snapshots WHERE snapshot_id=?1 AND status='building' AND writer_lease=?7 AND writer_fence=?8)
+ ON CONFLICT(snapshot_id,row_key) DO NOTHING`)
         .bind(
           snapshotId,
           row.rowKey,

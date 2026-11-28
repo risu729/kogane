@@ -15,6 +15,7 @@ import {
   type BucketKind,
   BUCKET_KINDS,
   type ConversionOffer,
+  type DeadlineCalendar,
   type ExpiryFamily,
   EXPIRY_FAMILIES,
   type ExpiryRule,
@@ -28,10 +29,13 @@ import {
   RULE_VERIFICATIONS,
   validOfferValidity,
 } from "../../domain/src/rewards";
+import { canonicalZone } from "../../domain/src/civil-date";
 import { validTemporalValue, type TemporalValue } from "../../domain/src/time";
 import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/values";
 import type { SqlExecutor } from "./reader";
 import { ELIGIBLE_VPOINT_RUNS, VPOINT_MEMBER } from "./current-captures";
+import { MEMO_MEMBERS_CTE, MEMO_VPOINT_RUNS_CTES } from "./snapshot-memo";
+import type { SnapshotSource } from "./sql";
 import { activeStateProjection } from "./concepts";
 import {
   JPOINT_CURRENT_COHORT_CTES,
@@ -66,8 +70,11 @@ export function page<T>(rows: T[], offset: number, limit = REWARD_PAGE_LIMIT): P
  * with Transactions/Balances. An absent slot is absent, even when an older
  * run still has a published claim. Empty snapshots need no sentinel claim. `?1` is the
  * promotion release, `?2` an optional programme filter, `?3` the offset.
+ * `source` picks where the latest V Point run comes from (see `SnapshotSource`).
  */
-export const CURRENT_REWARD_BUCKETS_SQL = `WITH ${ELIGIBLE_VPOINT_RUNS}, ${JPOINT_CURRENT_COHORT_CTES}, ranked AS (
+export const currentRewardBucketsSql = (
+  source: SnapshotSource = "inline",
+): string => `WITH ${source === "memo" ? `${MEMO_MEMBERS_CTE}, ${MEMO_VPOINT_RUNS_CTES}` : ELIGIBLE_VPOINT_RUNS}, ${JPOINT_CURRENT_COHORT_CTES}, ranked AS (
   SELECT c.id,c.program_id,c.holding_ref,c.bucket_ref,c.bucket_kind,c.restriction_refs_json,
     c.unit_ref,c.quantity_coefficient,c.quantity_scale,c.quantity_status,c.observed_expiry_json,
     c.observed_at,c.parse_run_id,c.source_fact_kind,c.source_fact_id,
@@ -91,6 +98,8 @@ FROM ranked r JOIN reward_programs p ON p.program_id=r.program_id
 WHERE r.rank=1
 ORDER BY r.program_id,r.holding_ref,r.bucket_ref
 LIMIT ${REWARD_PAGE_LIMIT + 1} OFFSET ?3`;
+
+export const CURRENT_REWARD_BUCKETS_SQL = currentRewardBucketsSql();
 
 export const EXPIRY_RULES_SQL = `SELECT rule_id,version,family,program_id,applicability_json,
  qualifying_activity_policy_ref,deadline_calendar_ref,priority_policy_ref,evidence_refs_json,verification
@@ -349,6 +358,24 @@ export const QUALIFYING_ACTIVITY_POLICIES: Readonly<
   },
 };
 
+/**
+ * A stored `zone:dayBoundary:zoneBasis` reference, read strictly: exactly three
+ * parts, a zone the runtime's time-zone data knows (`canonicalZone`), and a
+ * day boundary and zone basis from their closed lists. Anything else is
+ * `null`, never a UTC, end-of-day or assumed default: a calendar nobody
+ * recorded is not guessed (ADR 0004), and the rule computes no deadline
+ * (`deadline_calendar_unreadable`, INV05).
+ */
+export function deadlineCalendar(ref: string): DeadlineCalendar | null {
+  const parts = ref.split(":");
+  if (parts.length !== 3) return null;
+  const [zone, dayBoundary, zoneBasis] = parts as [string, string, string];
+  if (canonicalZone(zone) === null) return null;
+  if (dayBoundary !== "end-of-day" && dayBoundary !== "start-of-day") return null;
+  if (zoneBasis !== "documented" && zoneBasis !== "assumed") return null;
+  return { zone, dayBoundary, zoneBasis };
+}
+
 export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
   let applicability: ExpiryRule["applicability"] = {
     bucketKinds: [],
@@ -385,8 +412,6 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
   } catch {
     /* An unreadable applicability leaves the rule scoped to nothing. */
   }
-  // `zone:dayBoundary:zoneBasis`, kept separate from any display zone.
-  const [zone, dayBoundary, zoneBasis] = row.deadline_calendar_ref.split(":");
   const family = (EXPIRY_FAMILIES as readonly string[]).includes(row.family)
     ? (row.family as ExpiryFamily)
     : "unsupported";
@@ -401,16 +426,16 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
     applicability,
     // The policy body is resolved from the registry above. An unresolved
     // reference leaves it null, and `estimateExpiry` then reports
-    // needs-rule-verification instead of computing anything.
+    // needs-rule-verification instead of computing anything. Only the
+    // registry's own keys resolve: a reference such as `constructor` names an
+    // inherited property, not a policy.
     qualifyingActivity:
-      row.qualifying_activity_policy_ref === null
-        ? null
-        : (QUALIFYING_ACTIVITY_POLICIES[row.qualifying_activity_policy_ref] ?? null),
-    deadlineCalendar: {
-      zone: zone && zone.length > 0 ? zone : "UTC",
-      dayBoundary: dayBoundary === "start-of-day" ? "start-of-day" : "end-of-day",
-      zoneBasis: zoneBasis === "documented" ? "documented" : "assumed",
-    },
+      row.qualifying_activity_policy_ref !== null &&
+      Object.hasOwn(QUALIFYING_ACTIVITY_POLICIES, row.qualifying_activity_policy_ref)
+        ? QUALIFYING_ACTIVITY_POLICIES[row.qualifying_activity_policy_ref]!
+        : null,
+    // `zone:dayBoundary:zoneBasis`, kept separate from any display zone.
+    deadlineCalendar: deadlineCalendar(row.deadline_calendar_ref),
     priorityPolicyRef: row.priority_policy_ref,
     evidenceRefs: refs(row.evidence_refs_json),
     verification,
@@ -498,13 +523,28 @@ export interface RewardHoldingView {
   /** Observed-at text per bucket, exactly as the provider reported it. */
   observedAt: Record<string, string>;
   qualification: QualificationMeasure[];
+  /**
+   * The page may hold only some of this holding's buckets: its buckets run
+   * past the page's last row, or the page starts at an offset and the
+   * holding may have begun on the page before. A total over `buckets` is then
+   * a part of the holding, never its whole (INV05).
+   */
+  cutByPage: boolean;
 }
+
+/** The reason a holding's totals are not given while the page cuts its buckets. */
+export const HOLDING_CUT_BY_PAGE = "holding_cut_by_page";
 
 export interface RewardReader {
   holdings(scope: { programId?: string; offset: number }): Promise<Page<RewardHoldingView>>;
   expiryRules(programId?: string): Promise<ExpiryRule[]>;
   membership(programId?: string): Promise<MembershipState[]>;
   offers(scope: { offerId?: string; offset: number }): Promise<Page<ConversionOffer>>;
+}
+
+/** One holding's key among a page's bucket rows. */
+function holdingKey(row: RewardBucketSqlRow): string {
+  return `${row.program_id}\u0000${row.holding_ref}`;
 }
 
 export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEASE): RewardReader {
@@ -521,7 +561,7 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
       const truncated = rows.length > REWARD_PAGE_LIMIT;
       const views = new Map<string, RewardHoldingView>();
       for (const row of rows.slice(0, REWARD_PAGE_LIMIT)) {
-        const key = `${row.program_id} ${row.holding_ref}`;
+        const key = holdingKey(row);
         let view = views.get(key);
         if (!view) {
           view = {
@@ -537,6 +577,9 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
             sourceId: row.source_id,
             observedAt: {},
             qualification: [],
+            // The rows are ordered by holding, so only the first holding of
+            // a page that starts past row 0 can have begun on an earlier page.
+            cutByPage: views.size === 0 && scope.offset > 0,
           };
           views.set(key, view);
         }
@@ -565,6 +608,11 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
           });
         else view.holding.buckets.push(bucket);
       }
+      // The row past the page belongs to the page's last holding: that
+      // holding continues on the next page.
+      const next = rows[REWARD_PAGE_LIMIT];
+      const continued = next ? views.get(holdingKey(next)) : undefined;
+      if (continued) continued.cutByPage = true;
       return {
         rows: [...views.values()],
         coverage: {

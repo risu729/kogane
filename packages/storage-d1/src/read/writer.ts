@@ -184,7 +184,10 @@ export interface StartedSnapshot {
  * both start one: the loser's insert matches nothing (or hits the unique
  * attempt), the refs in the same batch then abort it, and the batch is rolled
  * back. The caller gets `null` and continues the winner's build on its next
- * tick.
+ * tick. Two starts that read the same next attempt name the same snapshot id:
+ * the loser's refs then hit the primary key the winner's wrote and are
+ * skipped, so both return that snapshot and the writer lease decides which
+ * one builds it.
  */
 export async function beginSnapshot(
   db: D1Like,
@@ -229,11 +232,15 @@ export async function beginSnapshot(
       // The first ref doubles as the guard's witness: with no row inserted,
       // its `building` trigger aborts the batch. A plan without refs cannot
       // occur (the restriction revision is always one), and is refused below.
+      // Only the primary key is skipped: a ref an earlier start of the same
+      // snapshot id already recorded. A ref the schema refuses (a CHECK or NOT
+      // NULL failure) raises instead of being left out with `changes=0`.
       ...plan.inputRefs.map((ref) =>
         db
           .prepare(
-            `INSERT OR IGNORE INTO snapshot_input_refs(snapshot_id,ref_kind,ref_id,ref_digest,
-              core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)`,
+            `INSERT INTO snapshot_input_refs(snapshot_id,ref_kind,ref_id,ref_digest,
+              core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING`,
           )
           .bind(snapshotId, ref.kind, ref.id, ref.digest, plan.coreEpoch, now),
       ),
@@ -319,15 +326,28 @@ export async function rowDigest(row: ProjectionRow): Promise<string> {
   return await sha256Hex(canonicalJson(row));
 }
 
+/**
+ * One projection row. A re-sent chunk hits the primary key
+ * `(snapshot_id,scope_key)` and is skipped (its trigger has already refused
+ * one with a different digest). Only that key is skipped: a row the schema
+ * refuses (a CHECK or NOT NULL failure, or a second scope at a `row_seq` the
+ * order index already holds) raises and rolls the chunk back, instead of being
+ * left out for `writtenRowsMatch` to report as `projection_rows_unverified`
+ * without naming it.
+ *
+ * The row is written only while `lease` still holds the build, like the
+ * checkpoint of its chunk: a writer whose lease was taken writes no row.
+ */
 function insertRow(
   db: D1Like,
   snapshotId: string,
   row: ProjectionRow,
   digest: string,
+  lease: string,
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO current_balance_projection(
+      `INSERT INTO current_balance_projection(
         snapshot_id,scope_key,subject_scope_key,row_seq,representative_observation_ref,
         member_evidence_refs_json,member_metrics_json,evidence_count,metric_id,definition_release,
         quantity_coefficient,quantity_scale,value_status,unit_ref,state,reason_code,
@@ -335,8 +355,10 @@ function insertRow(
         source_id,source_account,metric,instrument,parser,observation_id,parse_run_id,
         fetch_artifact_id,amount_minor,amount_text,as_of,observed_at,measure_view,latest_in_group,
         row_digest)
-      VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
-        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)`,
+      SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
+        ?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38
+      WHERE ${HELD_BY_LEASE("?39")}
+      ON CONFLICT(snapshot_id,scope_key) DO NOTHING`,
     )
     .bind(
       snapshotId,
@@ -377,8 +399,18 @@ function insertRow(
       row.measureView,
       row.latestInGroup ? 1 : 0,
       digest,
+      lease,
     );
 }
+
+/**
+ * "The build `?1` names is still building under the lease `param` names": the
+ * condition of every row, relation and checkpoint a chunk writes, so a writer
+ * whose lease was taken changes nothing.
+ */
+const HELD_BY_LEASE = (param: string): string =>
+  `EXISTS(SELECT 1 FROM balance_read_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='building' AND s.writer_lease=${param})`;
 
 function checkpointStatement(
   db: D1Like,
@@ -422,7 +454,7 @@ export async function writeRowChunk(
   if (rows.length === 0) return "written";
   const last = rows[rows.length - 1] as { row: ProjectionRow; digest: string };
   const results = await runBatch(db, [
-    ...rows.map((entry) => insertRow(db, snapshotId, entry.row, entry.digest)),
+    ...rows.map((entry) => insertRow(db, snapshotId, entry.row, entry.digest, context.lease)),
     checkpointStatement(
       db,
       snapshotId,
@@ -459,7 +491,8 @@ export async function writeScopeRelations(
         db
           .prepare(
             `INSERT INTO scope_relations(snapshot_id,from_scope_key,to_scope_key,relation,source,
-              decision_revision_id,release,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+              decision_revision_id,release,created_at) SELECT ?1,?2,?3,?4,?5,?6,?7,?8
+             WHERE ${HELD_BY_LEASE("?9")}
              ON CONFLICT(snapshot_id,from_scope_key,to_scope_key) DO UPDATE SET
               relation=excluded.relation,source=excluded.source,
               decision_revision_id=excluded.decision_revision_id`,
@@ -473,6 +506,7 @@ export async function writeScopeRelations(
             relation.decisionRevisionId,
             relation.release,
             context.now,
+            context.lease,
           ),
       ),
       checkpointStatement(
@@ -656,6 +690,12 @@ export async function publishedSnapshotAt(
  * Retire builds older than the retained window and delete their rows. A reader
  * on an older cursor gets `context_expired` rather than a silently different
  * list, and the published snapshot is never retired.
+ *
+ * Each build is retired and loses its rows in one batch. The retirement
+ * restates "not the published snapshot" in its own statement, because another
+ * writer may switch the pointer to a build of the same content (a watermark
+ * advance) after the selection read it; such a build stays `complete` and keeps
+ * its rows. Returns the number of builds this call retired.
  */
 export async function retireOldSnapshots(
   db: D1Like,
@@ -667,35 +707,52 @@ export async function retireOldSnapshots(
     .prepare(RETIREABLE_SNAPSHOTS_SQL)
     .bind(keep, Math.max(retained - 1, 0))
     .all<{ snapshot_id: string }>();
-  for (const row of stale.results) {
-    await db
-      .prepare("UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1")
-      .bind(row.snapshot_id)
-      .run();
-    await runBatch(db, [
-      db
-        .prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1")
-        .bind(row.snapshot_id),
-      db.prepare("DELETE FROM scope_relations WHERE snapshot_id=?1").bind(row.snapshot_id),
-      db.prepare("DELETE FROM snapshot_input_refs WHERE snapshot_id=?1").bind(row.snapshot_id),
-      db.prepare("DELETE FROM read_build_checkpoints WHERE snapshot_id=?1").bind(row.snapshot_id),
-    ]);
-  }
-  return stale.results.length;
+  let retired = 0;
+  for (const row of stale.results)
+    if (
+      await retireSnapshot(
+        db,
+        row.snapshot_id,
+        `status IN ('complete','building')
+          AND snapshot_id<>coalesce((SELECT p.snapshot_id FROM balance_snapshot_pointer p
+            WHERE p.id=1),'')`,
+      )
+    )
+      retired += 1;
+  return retired;
 }
 
-/** Retire one unfinished build and drop what it wrote; the next tick starts a new attempt. */
+/**
+ * Retire one unfinished build and drop what it wrote; the next tick starts a
+ * new attempt. A build another writer sealed in the meantime is left as it is.
+ */
 export async function abandonSnapshot(db: D1Like, snapshotId: string): Promise<void> {
-  await db
-    .prepare(
-      "UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1 AND status='building'",
-    )
-    .bind(snapshotId)
-    .run();
-  await runBatch(db, [
-    db.prepare("DELETE FROM current_balance_projection WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM scope_relations WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM snapshot_input_refs WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM read_build_checkpoints WHERE snapshot_id=?1").bind(snapshotId),
+  await retireSnapshot(db, snapshotId, "status='building'");
+}
+
+/**
+ * The retirement and the deletion of the build's rows, in one batch, so a
+ * failure leaves the build either untouched or retired without rows — never
+ * retired with rows no later call selects again. Each delete names only a
+ * retired build, so it removes nothing when the retirement's condition `when`
+ * did not hold. True when this batch retired it.
+ */
+async function retireSnapshot(db: D1Like, snapshotId: string, when: string): Promise<boolean> {
+  const retired = `snapshot_id=?1 AND EXISTS(SELECT 1 FROM balance_read_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='retired')`;
+  const results = await runBatch(db, [
+    db
+      .prepare(
+        `UPDATE balance_read_snapshots SET status='retired' WHERE snapshot_id=?1 AND ${when}
+         RETURNING snapshot_id`,
+      )
+      .bind(snapshotId),
+    ...[
+      "current_balance_projection",
+      "scope_relations",
+      "snapshot_input_refs",
+      "read_build_checkpoints",
+    ].map((table) => db.prepare(`DELETE FROM ${table} WHERE ${retired}`).bind(snapshotId)),
   ]);
+  return (results[0]?.results?.length ?? 0) === 1;
 }

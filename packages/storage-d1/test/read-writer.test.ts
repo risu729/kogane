@@ -27,8 +27,10 @@ import {
   writeScopeRelations,
   writerFence,
   writtenRowsMatch,
+  type SnapshotInputRef,
   type SnapshotPlan,
 } from "../src/read/index.ts";
+import type { ProjectionRow } from "../../read-model/src/index.ts";
 import { CURRENT_REVISION_SNAPSHOT_SQL } from "../src/read/sql.ts";
 import { createSqliteReadDatabase } from "./sqlite-read-database.ts";
 import type { D1Like } from "../src/d1.ts";
@@ -178,7 +180,7 @@ describe("writing a build", () => {
   });
 
   test("a writer whose lease was taken writes nothing and cannot seal (G2-09)", async () => {
-    const { db, instanceId } = await claimed();
+    const { db, sqlite, instanceId } = await claimed();
     const { snapshotId } = (await beginSnapshot(db, instanceId, await plan(), NOW))!;
     await claimWriterLease(db, snapshotId, "lease-1", 1_000, 60_000);
     // The lease expires and a second invocation takes the build over.
@@ -192,6 +194,19 @@ describe("writing a build", () => {
         rowsWritten: 0,
       }),
     ).toBe("lease_lost");
+    // Nothing means no row either: the rows are fenced on the lease like the
+    // checkpoint, not only reported as lost.
+    expect(
+      await writeScopeRelations(db, snapshotId, [decisionRelation("decision-1")], {
+        lease: "lease-1",
+        fence: 1,
+        now: NOW,
+      }),
+    ).toBe("lease_lost");
+    for (const table of ["current_balance_projection", "scope_relations", "read_build_checkpoints"])
+      expect(
+        sqlite.query(`SELECT count(*) AS n FROM ${table} WHERE snapshot_id=?1`).get(snapshotId),
+      ).toEqual({ n: 0 });
     expect(await writerFence(db, snapshotId, "lease-1")).toBeNull();
     const sealed = await sealAndPublish(
       db,
@@ -270,6 +285,124 @@ describe("writing a build", () => {
   });
 });
 
+// The writer skips only a re-sent primary key (`ON CONFLICT … DO NOTHING`).
+// Under `INSERT OR IGNORE` SQLite also skipped a row that failed a CHECK, a
+// NOT NULL or another UNIQUE index, with `changes=0`: the chunk's checkpoint
+// moved past it and the build stopped later at `projection_rows_unverified`
+// without naming the row, and a refused input ref was left out of the snapshot.
+describe("only a re-sent key is skipped", () => {
+  async function building() {
+    const { db, sqlite, instanceId } = await claimed();
+    const { snapshotId } = (await beginSnapshot(db, instanceId, await plan(), NOW))!;
+    await claimWriterLease(db, snapshotId, "lease-1", 1_000, 60_000);
+    return { db, sqlite, instanceId, snapshotId };
+  }
+  const context = { lease: "lease-1", fence: 1, now: NOW, rowsWritten: 0 };
+  const stored = (sqlite: Database, snapshotId: string) =>
+    (
+      sqlite
+        .query(
+          "SELECT row_seq FROM current_balance_projection WHERE snapshot_id=? ORDER BY row_seq",
+        )
+        .all(snapshotId) as { row_seq: number }[]
+    ).map((row) => row.row_seq);
+  async function entry(row: ProjectionRow) {
+    return { row, digest: await rowDigest(row) };
+  }
+
+  test("a row that fails a CHECK raises and the checkpoint stays where it was", async () => {
+    const { db, sqlite, snapshotId } = await building();
+    // `exact` without its coefficient: the projection's own CHECK refuses it.
+    const chunk = [
+      ...(await buildRows(2)),
+      await entry(projectionRow(2, { quantityCoefficient: null })),
+    ];
+    await expect(writeRowChunk(db, snapshotId, chunk, context)).rejects.toThrow(
+      /CHECK constraint failed/u,
+    );
+    expect(await rowCheckpoint(db, snapshotId)).toBe(-1);
+    expect(stored(sqlite, snapshotId)).toEqual([]);
+  });
+
+  test("a row that fails a NOT NULL raises", async () => {
+    const { db, sqlite, snapshotId } = await building();
+    const refused = await entry(projectionRow(0, { unitRef: null as unknown as string }));
+    await expect(writeRowChunk(db, snapshotId, [refused], context)).rejects.toThrow(
+      /NOT NULL constraint failed/u,
+    );
+    expect(await rowCheckpoint(db, snapshotId)).toBe(-1);
+    expect(stored(sqlite, snapshotId)).toEqual([]);
+  });
+
+  test("a new scope at a written row_seq raises on the order index", async () => {
+    const { db, sqlite, snapshotId } = await building();
+    const rows = await buildRows(2);
+    expect(await writeRowChunk(db, snapshotId, rows, context)).toBe("written");
+    // Not a re-send: another scope key at position 1, then position 2.
+    const chunk = [
+      await entry(projectionRow(1, { scopeKey: "balsyntheticsetparseracct-otherbalanceJPY" })),
+      await entry(projectionRow(2)),
+    ];
+    await expect(
+      writeRowChunk(db, snapshotId, chunk, { ...context, rowsWritten: 2 }),
+    ).rejects.toThrow(
+      /UNIQUE constraint failed: current_balance_projection.snapshot_id, current_balance_projection.row_seq/u,
+    );
+    expect(await rowCheckpoint(db, snapshotId)).toBe(1);
+    expect(stored(sqlite, snapshotId)).toEqual([0, 1]);
+    // The re-sent first chunk, which hits both keys, is still skipped (G2-07).
+    expect(await writeRowChunk(db, snapshotId, rows, context)).toBe("written");
+    expect(
+      await writtenRowsMatch(
+        db,
+        snapshotId,
+        rows.map((row) => row.digest),
+      ),
+    ).toBe(true);
+  });
+
+  test("an input ref that fails a CHECK or NOT NULL starts no build", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    for (const refused of [
+      { kind: "decision_revision", id: "decision-2", digest: "not-a-digest" },
+      { kind: "decision_revision", id: "decision-2", digest: null as unknown as string },
+    ] as SnapshotInputRef[]) {
+      const snapshotPlan = await plan({ inputRefs: [await decisionRef("decision-1"), refused] });
+      await expect(beginSnapshot(db, instanceId, snapshotPlan, NOW)).rejects.toThrow(
+        /constraint failed/u,
+      );
+      expect(await snapshotForContent(db, snapshotPlan.contentKey)).toBeNull();
+    }
+    expect(
+      sqlite.query("SELECT count(*) AS n FROM snapshot_input_refs").get() as { n: number },
+    ).toEqual({ n: 0 });
+  });
+
+  test("two starts that race to the same snapshot id record each ref once", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const snapshotPlan = await plan({
+      inputRefs: [await decisionRef("decision-1"), await decisionRef("decision-2")],
+    });
+    // Both read the same next attempt before either writes, so both name the
+    // same snapshot: the second row insert matches nothing and its refs hit
+    // the primary key. Which of them builds is the lease's to decide.
+    const [first, second] = await Promise.all([
+      beginSnapshot(db, instanceId, snapshotPlan, NOW),
+      beginSnapshot(db, instanceId, snapshotPlan, NOW),
+    ]);
+    expect(first).toEqual({ snapshotId: first!.snapshotId, attempt: 1 });
+    expect(second).toEqual(first);
+    expect(
+      sqlite
+        .query("SELECT ref_id FROM snapshot_input_refs WHERE snapshot_id=? ORDER BY ref_id")
+        .all(first!.snapshotId),
+    ).toEqual([{ ref_id: "decision-1" }, { ref_id: "decision-2" }]);
+    expect(
+      sqlite.query("SELECT count(*) AS n FROM balance_read_snapshots").get() as { n: number },
+    ).toEqual({ n: 1 });
+  });
+});
+
 describe("sealing and publishing", () => {
   async function published(db: D1Like, instanceId: string, sourceRevision: number) {
     const inputDigest = String(sourceRevision).padStart(64, "0");
@@ -339,6 +472,101 @@ describe("sealing and publishing", () => {
       { snapshot_id: second.snapshotId, status: "retired" },
       { snapshot_id: third.snapshotId, status: "complete" },
     ]);
+  });
+
+  // A D1 batch that fails (a subrequest error, a Worker that hits its limit)
+  // must not leave a build retired with its rows: no later call selects a
+  // retired build again, so those rows would stay for ever.
+  test("a retirement whose batch fails keeps the build and its rows for the next pass", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const first = await published(db, instanceId, 10);
+    const second = await published(db, instanceId, 20);
+    let failing = true;
+    const flaky: D1Like = {
+      prepare: (sql) => db.prepare(sql),
+      batch: async (statements) => {
+        if (failing) throw new Error("synthetic batch failure");
+        return await db.batch(statements);
+      },
+    };
+    await expect(retireOldSnapshots(flaky, second.snapshotId, NOW, 1)).rejects.toThrow(
+      "synthetic batch failure",
+    );
+    const state = () =>
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM current_balance_projection p
+            WHERE p.snapshot_id=s.snapshot_id) AS rows FROM balance_read_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(first.snapshotId);
+    expect(state()).toEqual({ status: "complete", rows: 2 });
+    failing = false;
+    expect(await retireOldSnapshots(flaky, second.snapshotId, NOW, 1)).toBe(1);
+    expect(state()).toEqual({ status: "retired", rows: 0 });
+  });
+
+  // Another writer advances the watermark onto a retained build of the same
+  // content after this call selected it: the pointer now names it, so it stays.
+  test("a build the pointer is switched to after the selection is not retired", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const first = await published(db, instanceId, 10);
+    const second = await published(db, instanceId, 20);
+    const outputDigest = (
+      sqlite
+        .query("SELECT output_digest FROM balance_read_snapshots WHERE snapshot_id=?1")
+        .get(first.snapshotId) as { output_digest: string }
+    ).output_digest;
+    let raced = false;
+    const racing: D1Like = {
+      prepare: (sql) => db.prepare(sql),
+      batch: async (statements) => {
+        if (!raced) {
+          raced = true;
+          const switched = await activePointerStatement(
+            db,
+            {
+              snapshotId: first.snapshotId,
+              readInstanceId: instanceId,
+              sourceRevision: 21,
+              visibilityRevision: 3,
+              coreEpoch: "core-epoch-1",
+              outputDigest,
+            },
+            NOW,
+          ).run();
+          expect(switched.meta.changes).toBe(1);
+        }
+        return await db.batch(statements);
+      },
+    };
+    expect(await retireOldSnapshots(racing, second.snapshotId, NOW, 1)).toBe(0);
+    expect((await activePointer(db))?.snapshot_id).toBe(first.snapshotId);
+    expect(
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM current_balance_projection p
+            WHERE p.snapshot_id=s.snapshot_id) AS rows FROM balance_read_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(first.snapshotId),
+    ).toEqual({ status: "complete", rows: 2 });
+  });
+
+  test("abandoning a build another writer sealed leaves it published with its rows", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const { snapshotId } = await published(db, instanceId, 10);
+    await abandonSnapshot(db, snapshotId);
+    expect((await activePointer(db))?.snapshot_id).toBe(snapshotId);
+    expect(
+      sqlite
+        .query(
+          `SELECT s.status,(SELECT count(*) FROM current_balance_projection p
+            WHERE p.snapshot_id=s.snapshot_id) AS rows FROM balance_read_snapshots s
+            WHERE s.snapshot_id=?1`,
+        )
+        .get(snapshotId),
+    ).toEqual({ status: "complete", rows: 2 });
   });
 });
 

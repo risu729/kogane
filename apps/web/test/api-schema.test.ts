@@ -26,6 +26,7 @@ import { capabilityState, clientFeatures, NO_FEATURES } from "../src/capabilitie
 describe("shared API schema", () => {
   test("the request schema and capability objects match their pinned contract", () => {
     expect(LIST_REQUEST_SCHEMA).toEqual({
+      "/api/overview": { detail: "sharedQuery" },
       "/api/transactions": {
         source: "collectionFilters",
         account: "collectionFilters",
@@ -44,6 +45,7 @@ describe("shared API schema", () => {
         offset: "paginationVersion:offset-v1",
         latestOffset: "paginationVersion:offset-v1",
         identityRead: "identityReadModes",
+        detail: "sharedQuery",
       },
       "/api/positions": {
         source: "collectionFilters",
@@ -62,6 +64,7 @@ describe("shared API schema", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
       },
       "/api/v2/balances/history": {
         source: "collectionFilters",
@@ -72,17 +75,36 @@ describe("shared API schema", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
+      },
+      "/api/v2/balances/cash": {
+        source: "collectionFilters",
+        account: "collectionFilters",
+        instrument: "collectionFilters",
+        identityRead: "identityReadModes",
+        cursor: "balancesV2",
+        limit: "balancesV2",
       },
     });
     expect(LIST_PATH_CAPABILITY).toEqual({
       "/api/v2/balances/latest": "balancesV2",
       "/api/v2/balances/history": "balancesV2",
+      "/api/v2/balances/cash": "balancesV2",
     });
     expect(REWARD_REQUEST_SCHEMA).toEqual({
       "/api/v2/rewards/holdings": ["program", "offset"],
       // U16: `cursor` and `limit` page a published reward snapshot; `offset`
       // stays for the request-time answer of a deployment without one.
-      "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+      // ADR 0049, amendment of 2026-11-19: a deadline window and a summary.
+      "/api/v2/rewards/expiry": [
+        "program",
+        "offset",
+        "cursor",
+        "limit",
+        "from",
+        "before",
+        "detail",
+      ],
       "/api/v2/rewards/simulations": ["cursor", "limit"],
       "/api/v2/rewards/offers/simulate": ["offer", "version", "quantity", "unit", "goal", "depth"],
     });
@@ -122,6 +144,8 @@ describe("shared API schema", () => {
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
       reportArtifacts: false,
+      pendingDecisions: false,
+      changesSince: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -153,6 +177,8 @@ describe("shared API schema", () => {
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
       reportArtifacts: false,
+      pendingDecisions: false,
+      changesSince: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -168,6 +194,7 @@ describe("shared API schema", () => {
       "offset",
       "latestOffset",
       "identityRead",
+      "detail",
     ]);
     expect(allowedQueryParameters("/api/artifacts", CENTRAL_STORE_CAPABILITIES)).toEqual([
       "source",
@@ -198,8 +225,25 @@ describe("shared API schema", () => {
     expect(validIdentityReadMode("latest", LOCAL_STORE_CAPABILITIES)).toBe(false);
     for (const path of Object.keys(LIST_REQUEST_SCHEMA))
       expect(allowedQueryParameters(path, LOCAL_STORE_CAPABILITIES)).toEqual([]);
-    for (const path of ["/api/meta", "/api/overview", "/api/artifacts/1", "/api/raw/a"])
+    for (const path of ["/api/meta", "/api/artifacts/1", "/api/raw/a"])
       expect(allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES)).toEqual([]);
+    // The overview's one parameter is its detail (ADR 0123), where the shared
+    // service shapes the summary; the local store answers in full only.
+    expect(allowedQueryParameters("/api/overview", CENTRAL_STORE_CAPABILITIES)).toEqual(["detail"]);
+    expect(
+      listRequestSearch(
+        "/api/overview",
+        CENTRAL_STORE_CAPABILITIES,
+        new URLSearchParams("detail=full&page=2"),
+      ),
+    ).toBe("?detail=full");
+    expect(
+      listRequestSearch(
+        "/api/overview",
+        LOCAL_STORE_CAPABILITIES,
+        new URLSearchParams("detail=full"),
+      ),
+    ).toBe("");
     const params = new URLSearchParams(
       "cursor=1&source=demo-bank&account=x&unexpected=1&view=balances&source=other",
     );
@@ -210,6 +254,22 @@ describe("shared API schema", () => {
       "?source=demo-bank&account=x&view=balances",
     );
     expect(listRequestSearch("/api/balances", LOCAL_STORE_CAPABILITIES, params)).toBe("");
+    // The balance list's detail (ADR 0123, amendment 2026-11-20) is sent where
+    // the shared service shapes its summary, never to the local store.
+    expect(
+      listRequestSearch(
+        "/api/balances",
+        CENTRAL_STORE_CAPABILITIES,
+        new URLSearchParams("view=summaries&detail=full"),
+      ),
+    ).toBe("?view=summaries&detail=full");
+    expect(
+      listRequestSearch(
+        "/api/balances",
+        LOCAL_STORE_CAPABILITIES,
+        new URLSearchParams("view=summaries&detail=full"),
+      ),
+    ).toBe("");
     const partial: ApiCapabilities = { ...CENTRAL_STORE_CAPABILITIES, measureViews: ["balances"] };
     expect(listRequestSearch("/api/balances", partial, new URLSearchParams("view=summaries"))).toBe(
       "",
@@ -323,6 +383,8 @@ describe("client behaviour depends on capabilities, never on the connection name
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
       reportArtifacts: false,
+      pendingDecisions: false,
+      changesSince: false,
     });
     expect(clientFeatures(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).balanceReadModel).toBe(
       true,
@@ -351,6 +413,8 @@ describe("client behaviour depends on capabilities, never on the connection name
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
       reportArtifacts: false,
+      pendingDecisions: false,
+      changesSince: false,
     });
   });
 });

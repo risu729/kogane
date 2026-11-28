@@ -66,7 +66,20 @@ stored receipt without a second revision, and reusing the key with a changed
 body is refused) and `"action": "release-override"` with `"targetId": null`,
 which appends a decision that lets automatic policy apply to the reference
 again from its current revision on. A release does not delete the manual
-mapping; the next scheduled sweep appends the rule's revision. Corrections
+mapping, and it re-identifies nothing: the sweep only identifies parses that
+have no sealed run at their required policy, so the manual mapping stays
+current until a parse whose plan names the same reference is next identified,
+which appends the rule's revision. Such a parse is a later capture of the
+reference, a reparse of an artifact that carries it (a new parser version or
+a replay), or a parse re-identified because its required policy version rose.
+A run-scoped reference (a Vpass card ordinal without a trusted binding, a
+V Point store-limited bucket or a common bucket without consistent point type
+and expiry, an SBI Securities foreign row without its account discriminator:
+every key that carries `fetch-run`) is named by its own fetch run only, so no
+later capture plans it: after a release its manual mapping stays current
+until a reparse or re-identification of that fetch run's artifact plans the
+same key again. This is a limit (`identity-decisions.test.ts` pins both
+cases). Corrections
 sent through this script are recorded with the actor `legacy-cli`
 (verification `legacy-unknown`); the trusted-caller header
 `x-kogane-verified-actor` records a named actor. The response carries the
@@ -150,6 +163,16 @@ the same history through `kogane.accounts.history`.
   (`apps/web/test/identities.browser.test.ts`, desktop and phone width).
 - `/api/identity/accounts` and `/api/identity/instruments` read effective mapping
   revisions, expose their evidence links, and paginate at 100 rows.
+- `/api/identity/account-list` lists one line per account entity with its
+  readable label and `labelOrigin` (`manual`, `connection`, `card-name`,
+  `mapping`), role, status, sources, reference and observation counts,
+  connection review status and newest capture time, 100 accounts a page; it
+  reads every reference at once (refused past 2,000) so an account is never
+  split across pages. Every account label in the organization, the
+  `accounts` page and the filter options is the account's label, not the
+  reference's, unless the mapping is manual
+  ([ADR 0120](adr/0120-readable-account-labels.md)). The identity page shows
+  it as `口座一覧`.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
   pages it at 50 items per view; it writes nothing.
 - `/api/identity/instrument-coverage` runs the same candidate read and counts,
@@ -607,14 +630,14 @@ rows are always country `JP` and the foreign trade parser refuses a row
 without a country. No observed capture does.
 
 The rule reads the identity run's own version, so an explicit policy-1 run
-still records the placeholder. The `sbi-securities` policy module
-(`identity-policies/sbi-securities.ts`) requires version 2 only for foreign
-positions captures (artifact dataset `foreign-cash-positions`), with family
-`identity-default`, release `identity-default-v2` and an empty dependency set.
-Every other SBI Securities parse falls back to the base policy
-(`not-a-foreign-positions-capture`) and gains no revision. The bounded sweep
-treats the sealed policy-1 positions parses as candidates again and appends a
-policy-2 run; the current views select the newer sealed run. A position that
+still records the placeholder. The rule applies from version 2, so it holds
+in the policy-3 runs the `sbi-securities` policy module now requires for
+foreign positions captures (with foreign trade and cash balances captures,
+[below](#policy-3-sbi-securities-foreign-rows-with-no-account-discriminator));
+when it was introduced the module required version 2 for positions captures
+only. The bounded sweep treats sealed positions parses below the required
+version as candidates again and appends a run at that version; the current
+views select the newer sealed run. A position that
 used the placeholder moves to its capture's unresolved identifier; the
 placeholder identifier, its revisions and the policy-1 runs stay as recorded,
 and a manual decision on the placeholder is not carried over. Every other
@@ -634,8 +657,82 @@ sbi-securities` and continue only if the bounded run reports more candidates.
 Then run the read-only [identity audit](identity-audit.md): `pending_parses`
 for `sbi-securities` reads zero, and its `issues` count
 `missing-security-scope` for any observation that reached the rule. No
-reimport or B reparse is needed. Rolling back the code leaves the policy-2
-runs current: an older build cannot replace a newer sealed decision.
+reimport or B reparse is needed. Rolling back the code leaves the newer runs
+current: an older build cannot replace a newer sealed decision.
+
+## Policy 3: SBI Securities foreign rows with no account discriminator
+
+Policies 1 and 2 keyed a foreign SBI Securities row whose discriminator is
+missing (`specificAccountCode` for a trade, position or valuation,
+`account.accountKind` for a cash balance; a value that is not a string, is
+empty or is whitespace only) on the bare `["sbi-securities:foreign"]`
+reference. Every foreign cash history row is on that reference too (its
+schema states no discriminator), and the account entity is derived from the
+source account, so such a row joined the USD cash ledger's account. The
+foreign trade parser accepts `specificAccountCode: ""`, and the positions and
+cash balances parsers do not require their field. From policy 3 the resolver
+maps such a row `unresolved` on a source account scoped to its fetch run,
+`["sbi-securities:foreign", "missing-<field>", "fetch-run", "<id>"]`, with the
+reason `missing-<field>` (also in the plan's issues, as before), and plans
+every other shape exactly as policy 2 did
+([ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md)). A
+foreign transaction that does not state `specificAccountCode` at all is a cash
+history row and keeps the bare reference under every version. No observed
+capture omits a discriminator.
+
+The rule reads the identity run's own version, so an explicit policy-1 or
+policy-2 run still records the bare reference. The `sbi-securities` policy
+module requires version 3 for foreign trade, positions and cash balances
+captures (artifact datasets `foreign-trade-records`, `foreign-cash-positions`
+and `foreign-cash-balances`), with family `identity-default`, release
+`identity-default-v3` and an empty dependency set. Every other SBI Securities
+parse, the foreign cash history included, falls back to the base policy
+(`not-a-discriminated-foreign-capture`) and gains no revision. The build's
+highest version (`IDENTITY_POLICY_VERSION`) is 3; every other source's
+module keeps its own version, and the sweep compares a sealed run with its
+source's highest version before it reads any evidence.
+
+The bounded sweep treats sealed trade and cash balances parses (policy 1) and
+positions parses (policy 1 or 2) as candidates again and appends one policy-3
+run each; the current views select it. The cash history keeps its policy-1
+runs, and its bare source account, account entity and mapping revisions gain
+nothing. A row that was on the bare reference moves to its capture's
+unresolved account, with an entity of its own; its earlier runs still name
+the bare reference, and a manual decision on the bare reference is not
+carried over. Every other source account and identifier those parses use,
+including the shared currency identifiers `iso4217/global/USD` and
+`iso4217/global/JPY` (no other source's run has revised them at policy 3),
+gains one policy-3 rule revision equal to the current one except for its id,
+revision and version, unless a manual mapping or a rule adoption onto another
+instrument holds it. For USD and JPY that is one revision in all: later runs
+of any source that name them cite it and append none. Their account entity and instrument do not change, but
+an open plan that pinned the earlier revision is refused at approval with
+`stale_context` and has to be planned again; a cash history parse kept at
+policy 1 still cites the revisions it recorded.
+
+Whether any production observation outside the cash history is on the bare
+reference was not read. A read-only aggregate answers it:
+
+```sql
+SELECT a.dataset, count(*) AS observations
+FROM identity_observations o
+JOIN identity_runs r ON r.id = o.identity_run_id
+JOIN parse_runs p ON p.id = r.parse_run_id
+JOIN fetch_artifacts a ON a.id = p.fetch_artifact_id
+JOIN source_accounts sa ON sa.id = o.source_account_id
+WHERE a.source_id = 'sbi-securities' AND sa.reference_json = '["sbi-securities:foreign"]'
+GROUP BY a.dataset;
+```
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; each trade, positions and cash balances
+parse is re-identified once. To finish sooner run `node
+scripts/identity-ops.ts catchup 100 sbi-securities` and continue only if the
+bounded run reports more candidates. Then run the read-only
+[identity audit](identity-audit.md): `pending_parses` for `sbi-securities`
+reads zero. No reimport or B reparse is needed. Rolling back the code leaves
+the policy-3 runs current: an older build cannot replace a newer sealed
+decision.
 
 ## Policy 2: SBI Shinsei non-account references
 
@@ -678,3 +775,61 @@ reads zero, and its `account_status` counts the board and stage observations
 under `aggregate`. No reimport or B reparse is needed. Rolling back the code
 leaves the policy-2 runs current: an older build cannot replace a newer sealed
 decision.
+
+## Policy 2: SMBC AUD foreign ordinary deposit
+
+The resolver had no rule for the AUD balance parser's reference
+`smbc-bank:ordinary-foreign-aud` (`smbc-foreign-ordinary-balance`), so every
+policy-1 run mapped it as `unresolved` / `unrecognized-source-account` under
+the source's yen-deposit label `三井住友銀行 円普通預金`. From policy 2 the rule
+accepts that exact reference as a provider-local `deposit`
+(`collector-single-foreign-ordinary-aud-scope`, label
+`三井住友銀行 外貨普通預金（AUD）`): the AUD balance of the login's one foreign
+ordinary account, which the collector selects from the only foreign ordinary
+detail link on the top page and the only `通貨：A$` section of that detail
+([sources](sources/smbc-bank.md)). The key is unchanged, so each observation
+keeps its source account, apart from the yen ordinary deposit's. Any other
+`smbc-bank:` shape stays unresolved
+([ADR 0118](adr/0118-smbc-aud-deposit-identity.md)).
+
+The rule reads the identity run's own version, so an explicit policy-1 run
+still records the policy-1 mapping. The `smbc-bank` policy module
+(`identity-policies/smbc-bank.ts`) requires version 2 only for AUD balance
+captures (artifact dataset `foreign-ordinary-aud-balance`), with family
+`identity-default`, release `identity-default-v2` and an empty dependency set.
+Every other SMBC parse falls back to the base policy
+(`not-a-foreign-ordinary-aud-balance-capture`): yen parses are never
+re-identified, so the yen deposit keeps its current mapping revision and id,
+which card-settlement ownership evidence (`account_mapping:<id>`) cites and
+readiness compares by id, and the explicit-empty AUD history parses, which
+publish no observation, gain no run. The bounded sweep treats the sealed
+policy-1 AUD balance parses as candidates again and appends a policy-2 run, a
+policy-2 mapping revision of the AUD source account and, unless another
+source's policy-2 run already revised it, a policy-2 rule revision of
+`iso4217/global/AUD` equal to the policy-1 one except for its id, revision and
+version; the current views select the newer sealed run. The account entity
+keeps the role, label and status it was first written with (`source-account`,
+the yen fallback label, `unresolved`); the classification is on the policy-2
+mapping revision. Reads of the current mapping show the new label and
+`provider-local`: the identity read and 識別 page, observation organization,
+account history, account candidates, dated state and holdings change, the
+audit's `account_status` and collection quality's `unresolved_identities`.
+Reads of the entity do not: the identity read's role (区分) stays
+`source-account`, collection quality's per-account coverage still labels the
+account with the yen fallback label, and the ownership declaration's
+single-account check, which also reads the entity's role and status, still
+refuses the account ([ADR 0118](adr/0118-smbc-aud-deposit-identity.md)).
+Policy-1 runs, their rows and revisions and Layer A/B stay as recorded, and a
+manual decision on the reference is not replaced. SBI Securities income and
+realised-gains references are not changed: their `accountType` names no
+established account scope, so they stay `unresolved`.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; each AUD balance parse is re-identified
+once. To finish sooner run `node scripts/identity-ops.ts catchup 100
+smbc-bank` and continue only if the bounded run reports more candidates. Then
+run the read-only [identity audit](identity-audit.md): `pending_parses` for
+`smbc-bank` reads zero, and `kogane.identity.read` (`accounts`, source
+`smbc-bank`) lists the AUD reference as `provider-local`. No reimport or B
+reparse is needed. Rolling back the code leaves the policy-2 runs current: an
+older build cannot replace a newer sealed decision.

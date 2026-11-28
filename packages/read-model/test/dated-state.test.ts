@@ -4,24 +4,34 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { reportedStateCutoff } from "../../domain/src/reported-state";
+import {
+  payablesFromPaymentDate,
+  reportedStateCutoff,
+  UNDATED_STATEMENT_WINDOW_DAYS,
+} from "../../domain/src/reported-state";
 import {
   DATED_BALANCES_SQL,
   DATED_POSITION_CONTAINER_PARSERS,
   DATED_POSITION_QUANTITIES_SQL,
   DATED_POSITIONS_SQL,
+  DATED_SCHEDULED_PAYMENTS_SQL,
   DATED_SNAPSHOT_UNITS_SQL,
   DATED_SNAPSHOTS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
   type DatedPositionQuantityRow,
   type DatedPositionRow,
+  type DatedScheduledPaymentRow,
   type DatedSnapshotRow,
   type DatedSnapshotUnitRow,
   type DatedStatementRow,
+  type DatedStatementsBeforeWindowRow,
 } from "../src/dated-state";
 import { parserModules } from "../../parsers/scripts/parser-digests";
 import { PARSERS } from "../../parsers/src/parsers/registry";
+import { snapshotCtes } from "../../parsers/src/snapshot-query";
+import { SNAPSHOT_RELATIONS } from "../src/concepts";
 import { DatedStore } from "./dated-state-fixture";
 
 const SBI = {
@@ -198,6 +208,43 @@ describe("the snapshot a cutoff chooses", () => {
     expect(snapshots(store, "2026-09-10").map((row) => row.parser_name)).not.toContain(
       "sony-bank-gross-balance",
     );
+  });
+
+  test("MoneyForward, an aggregator, is neither read nor expected, though its policy selects", () => {
+    // The aggregator restates accounts the direct sources list (ADR 0019,
+    // decision 2). Its detail container has a selecting policy row (0091), so
+    // the perimeter must leave it out by source, not rely on the policy table.
+    const store = new DatedStore();
+    store.capture({
+      source: "moneyforward-me",
+      dataset: "account-detail",
+      parser: "moneyforward-detail-balances",
+      version: "1.0.1",
+      unitKey: "synthetic-connection",
+      claim: "complete",
+      fetchedAt: "2026-09-08T01:00:00Z",
+      balances: [
+        {
+          account: "moneyforward-me:synthetic-connection",
+          metric: "reported_account_value_jpy",
+          instrument: "JPY",
+          minor: 1_000,
+        },
+      ],
+    });
+    store.capture({ ...SMBC, fetchedAt: "2026-09-08T02:00:00Z", balances: [] });
+    // The MoneyForward capture is complete and eligible as the current state's.
+    expect(
+      all<{ n: number }>(
+        store,
+        `WITH ${snapshotCtes(SNAPSHOT_RELATIONS)} SELECT count(*) AS n FROM current_snapshots WHERE source_id='moneyforward-me'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    expect(balances(store, "2026-09-10")).toEqual([]);
+    const perimeter = snapshots(store, "2026-09-10");
+    expect(perimeter.map((row) => row.perimeter_source_id)).not.toContain("moneyforward-me");
+    expect(perimeter.map((row) => row.source_id)).not.toContain("moneyforward-me");
+    expect(perimeter.map((row) => row.parser_name)).toContain("smbc-direct-balance");
   });
 });
 
@@ -441,6 +488,235 @@ describe("statements as of the cutoff", () => {
   });
 });
 
+describe("statements the payable window leaves out", () => {
+  const listed = (store: DatedStore, date: string, from: string, undated: string) =>
+    all<DatedStatementRow>(store, DATED_STATEMENTS_SQL, reportedStateCutoff(date), from, undated);
+  const counted = (store: DatedStore, date: string, from: string, undated: string) =>
+    all<DatedStatementsBeforeWindowRow>(
+      store,
+      DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+      reportedStateCutoff(date),
+      from,
+      undated,
+    );
+  const DUE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
+
+  test("counted per source, account and reason, and never listed", () => {
+    const store = new DatedStore();
+    // Due before the window, resolved; due before it, unresolved; undated and
+    // captured before the undated bound; one listed of each kind.
+    const old = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 1,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    store.identify(old, "vpass", "acct-card", "identified");
+    store.statement({
+      card: "card-b",
+      period: "2026-07",
+      paymentDate: "2026-07-26",
+      minor: 2,
+      fetchedAt: "2026-07-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-b",
+      period: "2026-05",
+      paymentDate: null,
+      minor: 3,
+      fetchedAt: "2026-05-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-a",
+      period: "2026-09",
+      paymentDate: "2026-09-26",
+      minor: 4,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-b",
+      period: "2026-09",
+      paymentDate: null,
+      minor: 5,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    const window = ["2026-09-10", "2026-08-10", "2026-07-27T15:00:00.000Z"] as const;
+    expect(listed(store, ...window).map((row) => row.coefficient)).toEqual(["4", "5"]);
+    expect(counted(store, ...window)).toEqual([
+      {
+        source_id: "vpass",
+        account_id: null,
+        reason_code: "due_before_window",
+        statements: 1,
+      },
+      {
+        source_id: "vpass",
+        account_id: null,
+        reason_code: "undated_captured_before_window",
+        statements: 1,
+      },
+      {
+        source_id: "vpass",
+        account_id: "acct-card",
+        reason_code: "due_before_window",
+        statements: 1,
+      },
+    ]);
+    // A window that reaches every statement leaves none out.
+    expect(counted(store, "2026-09-10", "0000-00-00", "")).toEqual([]);
+  });
+
+  test("on random stores, listed and counted split the statements as of the cutoff exactly", () => {
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x5eed;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    // The bounds the query layer passes (queryDatedState): the first listed
+    // due date, and the first listed capture instant of an undated statement.
+    const windows = ["2026-09-10", "2026-05-20", "2026-11-01"].map((date) => {
+      const cutoff = reportedStateCutoff(date);
+      return {
+        date,
+        cutoff,
+        from: payablesFromPaymentDate(date),
+        undated: new Date(
+          Date.parse(cutoff) - UNDATED_STATEMENT_WINDOW_DAYS * 86_400_000,
+        ).toISOString(),
+      };
+    });
+    expect(windows.map(({ from, undated }) => [from, undated])).toEqual([
+      ["2026-08-10", "2026-07-27T15:00:00.000Z"],
+      ["2026-04-19", "2026-04-05T15:00:00.000Z"],
+      ["2026-10-01", "2026-09-17T15:00:00.000Z"],
+    ]);
+    const dayBefore = (date: string): string =>
+      new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    const shifted = (instant: string, ms: number): string =>
+      new Date(Date.parse(instant) + ms).toISOString();
+    const seen = { listed: 0, due: 0, undated: 0, resolved: 0 };
+    // Statements placed on each boundary of some window, and where each went.
+    const edges = {
+      dueOnFrom: { listed: 0, counted: 0 },
+      dueDayBeforeFrom: { listed: 0, counted: 0 },
+      undatedOnBound: { listed: 0, counted: 0 },
+      undatedJustBeforeBound: { listed: 0, counted: 0 },
+      atCutoff: { listed: 0, counted: 0 },
+      justBeforeCutoff: { listed: 0, counted: 0 },
+    };
+    type Edge = keyof typeof edges;
+    const EDGES = Object.keys(edges) as Edge[];
+    for (let round = 0; round < 6; round += 1) {
+      const store = new DatedStore();
+      // Observation id -> the boundary it sits on, and for which date.
+      const placed = new Map<number, { edge: Edge; date: string }>();
+      for (let index = 0; index < 36; index += 1) {
+        const month = String(1 + random(10)).padStart(2, "0");
+        const card = `card-${random(4)}`;
+        const due = random(4);
+        const window = windows[random(windows.length)]!;
+        // A third of the statements sit on a boundary of one window.
+        const edge: Edge | null = random(3) === 0 ? EDGES[random(EDGES.length)]! : null;
+        const paymentDate =
+          edge === "dueOnFrom"
+            ? window.from
+            : edge === "dueDayBeforeFrom"
+              ? dayBefore(window.from)
+              : edge === "undatedOnBound" || edge === "undatedJustBeforeBound"
+                ? null
+                : // A readable due date, none, or text that is not one.
+                  due === 0
+                  ? null
+                  : due === 1
+                    ? "unknown"
+                    : `2026-${month}-26`;
+        const fetchedAt =
+          edge === "undatedOnBound"
+            ? window.undated
+            : edge === "undatedJustBeforeBound"
+              ? shifted(window.undated, -1)
+              : edge === "atCutoff"
+                ? window.cutoff
+                : edge === "justBeforeCutoff"
+                  ? shifted(window.cutoff, -1)
+                  : edge === "dueOnFrom" || edge === "dueDayBeforeFrom"
+                    ? shifted(window.cutoff, -86_400_000)
+                    : `2026-${month}-${String(1 + random(28)).padStart(2, "0")}T0${random(10)}:00:00Z`;
+        const capture = store.statement({
+          card,
+          // A boundary statement has a period of its own, so a later random
+          // capture never replaces it as the newest of its statement key.
+          period:
+            edge === null ? `2026-${month}` : `2025-${String(1 + (index % 12)).padStart(2, "0")}`,
+          paymentDate,
+          minor: 1 + random(9_000),
+          fetchedAt,
+        });
+        if (edge !== null && !placed.has(capture.balances[0]!))
+          placed.set(capture.balances[0]!, { edge, date: window.date });
+        if (random(3) > 0) store.identify(capture, "vpass", `acct-${card}`, "identified");
+      }
+      for (const { date, from, undated } of windows) {
+        const every = listed(store, date, "0000-00-00", "");
+        const shown = new Set(listed(store, date, from, undated).map((row) => row.id));
+        const asOf = new Set(every.map((row) => row.id));
+        for (const [id, { edge, date: on }] of placed) {
+          if (on !== date || !asOf.has(id)) continue;
+          edges[edge][shown.has(id) ? "listed" : "counted"] += 1;
+        }
+        // A capture at the cutoff is after the date: neither listed nor counted.
+        for (const [id, { edge, date: on }] of placed)
+          if (on === date && edge === "atCutoff") expect(asOf.has(id)).toBe(false);
+        const expected = new Map<string, number>();
+        for (const row of every) {
+          if (shown.has(row.id)) continue;
+          const reason =
+            row.payment_date !== null && DUE.test(row.payment_date)
+              ? "due_before_window"
+              : "undated_captured_before_window";
+          const key = JSON.stringify([row.source_id, row.account_id, reason]);
+          expected.set(key, (expected.get(key) ?? 0) + 1);
+          seen[reason === "due_before_window" ? "due" : "undated"] += 1;
+          if (row.account_id !== null) seen.resolved += 1;
+        }
+        seen.listed += shown.size;
+        const rows = counted(store, date, from, undated);
+        expect(
+          Object.fromEntries(
+            rows.map((row) => [
+              JSON.stringify([row.source_id, row.account_id, row.reason_code]),
+              row.statements,
+            ]),
+          ),
+        ).toEqual(Object.fromEntries(expected));
+        expect(shown.size + rows.reduce((total, row) => total + row.statements, 0)).toBe(
+          every.length,
+        );
+      }
+    }
+    // The rounds exercise every branch, not only an empty split.
+    for (const value of Object.values(seen)) expect(value).toBeGreaterThan(0);
+    // Each boundary is reached, and falls on its side: a due date on D − 31
+    // days and an undated capture on the 45-day bound are listed, a day or a
+    // millisecond earlier counted; a capture just before the cutoff is a
+    // statement of the date, one at the cutoff is not (checked above).
+    expect(edges.dueOnFrom.listed).toBeGreaterThan(0);
+    expect(edges.dueOnFrom.counted).toBe(0);
+    expect(edges.dueDayBeforeFrom.counted).toBeGreaterThan(0);
+    expect(edges.dueDayBeforeFrom.listed).toBe(0);
+    expect(edges.undatedOnBound.listed).toBeGreaterThan(0);
+    expect(edges.undatedOnBound.counted).toBe(0);
+    expect(edges.undatedJustBeforeBound.counted).toBeGreaterThan(0);
+    expect(edges.undatedJustBeforeBound.listed).toBe(0);
+    expect(edges.justBeforeCutoff.listed).toBeGreaterThan(0);
+    expect(edges.atCutoff).toEqual({ listed: 0, counted: 0 });
+  });
+});
+
 describe("the quantities of dated positions", () => {
   test("each named position with its parse run and decimal-v1 quantity, an unreadable one null-valued", () => {
     const store = new DatedStore();
@@ -538,6 +814,126 @@ describe("the fetch units of chosen snapshots", () => {
     expect(plan.some((line) => /^SEARCH a USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
     expect(plan.some((line) => /^SEARCH u USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
     expect(plan.filter((line) => /^SCAN (a|u)\b/u.test(line))).toEqual([]);
+  });
+});
+
+describe("scheduled payments as of the cutoff", () => {
+  const scheduled = (store: DatedStore, date: string) =>
+    all<DatedScheduledPaymentRow>(store, DATED_SCHEDULED_PAYMENTS_SQL, reportedStateCutoff(date));
+  const row = { usageDate: "2026-08-03", dueDate: "2026-10-10", asOf: "2026-09-05" };
+
+  test("per fetch unit, the newest run's published pages before the cutoff, each row as stored", () => {
+    const store = new DatedStore();
+    store.scheduledPage({
+      fetchedAt: "2026-09-01T12:00:00Z",
+      payments: [{ ...row, amount: "100" }],
+    });
+    const newest = store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [
+        { ...row, dueDate: "2026-11-10", amount: "-30" },
+        { ...row, amount: "4500" },
+      ],
+    });
+    // Captured after the end of 2026-09-10 in Tokyo: not as of that date.
+    const late = store.scheduledPage({ fetchedAt: "2026-09-10T15:00:00Z", payments: [] });
+    // Another connection is its own unit, with a page that listed none.
+    const other = store.scheduledPage({ fetchedAt: "2026-09-02T12:00:00Z", connection: "conn-2" });
+    const rows = scheduled(store, "2026-09-10");
+    expect(rows).toEqual([
+      {
+        artifact_id: newest.artifact,
+        source_id: "myjcb",
+        fetched_at: "2026-09-05T12:00:00.000Z",
+        parse_run_id: newest.parse,
+        id: newest.payments[1]!,
+        source_account: "myjcb:conn-1:root",
+        schedule_kind: "card-skip-payment",
+        usage_date: "2026-08-03",
+        due_date: "2026-10-10",
+        amount_text: "4500",
+        amount_scale: 0,
+        currency: "JPY",
+        counterparty: "Synthetic merchant 1",
+        as_of: "2026-09-05",
+      },
+      expect.objectContaining({
+        artifact_id: newest.artifact,
+        id: newest.payments[0]!,
+        amount_text: "-30",
+      }),
+      // The empty page is listed as itself, never dropped.
+      {
+        artifact_id: other.artifact,
+        source_id: "myjcb",
+        fetched_at: "2026-09-02T12:00:00.000Z",
+        parse_run_id: other.parse,
+        id: null,
+        source_account: null,
+        schedule_kind: null,
+        usage_date: null,
+        due_date: null,
+        amount_text: null,
+        amount_scale: null,
+        currency: null,
+        counterparty: null,
+        as_of: null,
+      },
+    ]);
+    // On the next day the later empty page is the capture: it listed none.
+    expect(scheduled(store, "2026-09-11").map((entry) => [entry.artifact_id, entry.id])).toEqual([
+      [late.artifact, null],
+      [other.artifact, null],
+    ]);
+    // Before any capture there is nothing.
+    expect(scheduled(store, "2026-08-31")).toEqual([]);
+  });
+
+  test("an unpublished newer page leaves the older published run current; one run's two pages are both listed", () => {
+    const store = new DatedStore();
+    const older = store.scheduledPage({
+      fetchedAt: "2026-09-01T12:00:00Z",
+      payments: [{ ...row, amount: "100" }],
+    });
+    const second = store.scheduledPage({
+      fetchedAt: "2026-09-01T12:00:01Z",
+      position: 9,
+      run: { run: older.run, unit: older.unit },
+    });
+    store.scheduledPage({
+      fetchedAt: "2026-09-03T12:00:00Z",
+      payments: [{ ...row, amount: "999" }],
+      published: false,
+    });
+    expect(
+      scheduled(store, "2026-09-10").map((entry) => [entry.artifact_id, entry.amount_text]),
+    ).toEqual([
+      [older.artifact, "100"],
+      [second.artifact, null],
+    ]);
+  });
+
+  test("without table statistics it reaches artifacts by primary key and rows by their parse run", () => {
+    const store = new DatedStore();
+    expect(
+      store.db
+        .query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+        .get(),
+    ).toEqual({ n: 0 });
+    const plan = (
+      store.db
+        .query(`EXPLAIN QUERY PLAN ${DATED_SCHEDULED_PAYMENTS_SQL}`)
+        .all(reportedStateCutoff("2026-09-10")) as { detail: string }[]
+    ).map((entry) => entry.detail);
+    expect(
+      plan.some((line) => /^SEARCH s USING INDEX idx_sched_pay_obs_parse_run/u.test(line)),
+    ).toBe(true);
+    expect(plan.some((line) => /^SEARCH a USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
+    // Of the stored tables, only the publication pointers are scanned (filtered
+    // by parser name); the rows are never scanned. (The view's correlated
+    // `collector_error` probe scans artifacts here only because this stub has
+    // no `idx_fetch_artifacts_run_role`, and the status it feeds is not read.)
+    expect(plan.filter((line) => /^SCAN (s|pub|u|seal|t)\b/u.test(line))).toEqual(["SCAN pub"]);
   });
 });
 

@@ -26,7 +26,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract";
+import {
+  validOperationListPage,
+  validOperationRecord,
+} from "../../../packages/observation-shared/src/operation-contract";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_MCP_TOOLS, OPS_TOOL_NAMES } from "../src/ops-tools";
@@ -40,6 +43,7 @@ import {
   projectionRequirementWrite,
   recordCollectorOutcome,
   recordOperationStage,
+  SELECT_STAGES_OF_PAGE,
   trackCollectorPublication,
 } from "../../../packages/application/src/index";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
@@ -205,6 +209,14 @@ describe("the operations API does not exist until its flag is on", () => {
       const verb = await call(`${OPS}/collections`, { method, environment: ENABLED });
       expect(verb.status, method).toBe(405);
       expect(await verb.json()).toMatchObject({ error: "method_not_allowed" });
+    }
+    // GET and HEAD are verbs this API routes: on an acceptance route, which
+    // does not take them, each is that path's 404 with no Allow (ADR 0130;
+    // HEAD was 405 before it).
+    for (const method of ["GET", "HEAD"]) {
+      const verb = await call(`${OPS}/collections`, { method, environment: ENABLED });
+      expect(verb.status, method).toBe(404);
+      expect(verb.headers.get("allow"), method).toBeNull();
     }
     expect(await rowCount("collection")).toBe(0);
   });
@@ -742,12 +754,14 @@ describe("stage progress is evidence, not a guess", () => {
     const accepted = await ops("/projections", { reason: "stage progress fixture" });
     const operationId = accepted.json.operationId as string;
     const store = d1CommandStore(env.DB);
+    // Short of completion, a rebuild's `projected` stage is only ever `pending`
+    // with no code: no executor records another state for it, and READ is
+    // consulted only for kinds that reach `adopted` (docs/ops-api.md).
     await recordOperationStage({
       store,
       operationId,
       stage: "projected",
-      state: "retryable",
-      failureCode: "snapshot_incomplete",
+      state: "pending",
       now: "2026-09-07T00:00:00Z",
     });
     let receipt = (await (
@@ -756,14 +770,14 @@ describe("stage progress is evidence, not a guess", () => {
     expect(receipt.stages).toEqual([
       {
         stage: "projected",
-        state: "retryable",
+        state: "pending",
         evidenceRef: null,
-        failureCode: "snapshot_incomplete",
+        failureCode: null,
         attempts: 1,
         updatedAt: "2026-09-07T00:00:00Z",
       },
     ]);
-    // A retryable stage is not completion: the operation is still accepted.
+    // A pending stage is not completion: the operation is still accepted.
     expect(receipt.status).toBe("accepted");
     await recordOperationStage({
       store,
@@ -1042,6 +1056,36 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
       receipts.forEach((receipt, index) =>
         expect(validOperationRecord(receipt, ids[index])).toBe(true),
       );
+      // The list answers each request with the status its record reads, on
+      // the route and over MCP alike, filtered by the stored `running` it
+      // names (ADR 0086, amendment of 2026-11-18, projection).
+      const listedHttp = await call(`${OPS}/operations?kind=collection&status=running&limit=50`, {
+        environment: ENABLED,
+      });
+      expect(listedHttp.status).toBe(200);
+      const listedMcp = await mcp(
+        "tools/call",
+        {
+          name: "kogane.ops.operation.list",
+          arguments: { kind: "collection", status: "running", limit: 50 },
+        },
+        THROUGH_MCP,
+      );
+      expect(listedMcp.result.isError).not.toBe(true);
+      const pages = [
+        (await listedHttp.json()) as Record<string, any>,
+        listedMcp.result.structuredContent,
+      ];
+      expect(pages[1]).toEqual(pages[0]);
+      for (const page of pages) {
+        expect(validOperationListPage(page, { kind: "collection", status: "running" })).toBe(true);
+        expect(page.statusFilterMatches).toBe("storedStatus");
+        receipts.forEach((receipt, index) =>
+          expect(
+            page.operations.find((entry: any) => entry.operationId === ids[index]),
+          ).toMatchObject({ status: receipt.status, storedStatus: "running" }),
+        );
+      }
       return receipts;
     };
     const projected = (receipt: Record<string, any>) => ({
@@ -1275,7 +1319,10 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     const ids = await seed();
     const own = await list("?limit=50");
     expect(own.status).toBe(200);
-    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
+    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v2");
+    expect(own.json["statusFilterMatches"]).toBe("storedStatus");
+    // The page the 依頼の一覧 page reads, over the real migrations.
+    expect(validOperationListPage(own.json)).toBe(true);
     const stored = await storedIds();
     expect(idsOf(own.json)).toEqual(stored.slice(0, 50));
     expect(own.json["nextCursor"]).toBe(stored.length > 50 ? stored[49] : null);
@@ -1294,9 +1341,15 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
       "operationId",
       "source",
       "status",
+      "storedStatus",
       "updatedAt",
     ]);
-    expect(projection).toMatchObject({ kind: "projection", status: "accepted", source: null });
+    expect(projection).toMatchObject({
+      kind: "projection",
+      status: "accepted",
+      storedStatus: "accepted",
+      source: null,
+    });
     // The stored request is not read: a rebuild's reason is the operator's text.
     expect(JSON.stringify(own.json)).not.toContain(REASON);
     // The peer is shown the same page.
@@ -1314,7 +1367,10 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     const second = await list(`?limit=2&cursor=${first.json["nextCursor"]}`, LISTER_PEER);
     expect(idsOf(second.json)).toEqual(all.slice(2, 4));
     expect(second.json["nextCursor"]).toBe(all.length > 4 ? all[3] : null);
+    expect(validOperationListPage(first.json)).toBe(true);
+    expect(validOperationListPage(second.json)).toBe(true);
     const imports = await list("?kind=import&limit=50");
+    expect(validOperationListPage(imports.json, { kind: "import" })).toBe(true);
     expect(idsOf(imports.json)).toEqual((await storedIds("kind='import'")).slice(0, 50));
     expect(idsOf(imports.json).length).toBeGreaterThan(0);
     const projections = await list("?status=accepted&kind=projection&limit=50");
@@ -1347,9 +1403,10 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     // A cursor of another principal pages on; one of no operation is refused.
     const peer = await request("/projections", { reason: REASON }, LISTER_PEER);
     expect((await list(`?cursor=${peer}`)).status).toBe(200);
+    // A cursor this list did not issue is the paging family's (ADR 0128).
     const refused = await list(`?cursor=op_${"0".repeat(64)}`);
-    expect(refused.status).toBe(404);
-    expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
+    expect(refused.status).toBe(400);
+    expect(refused.json).toMatchObject({ error: "invalid_cursor", refs: ["cursor"] });
   });
 
   it("refuses an agent and a stranger on the route, and is absent while the flag is off", async () => {
@@ -1424,5 +1481,15 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
             `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range}`,
           );
       }
+    // The page's stages, read once for the rows whose status is derived: a
+    // primary-key search per id, never a scan.
+    const stages = (
+      await env.DB.prepare(`EXPLAIN QUERY PLAN ${SELECT_STAGES_OF_PAGE}`)
+        .bind(JSON.stringify([`op_${"0".repeat(64)}`, `op_${"1".repeat(64)}`]))
+        .all<{ detail: string }>()
+    ).results.map((entry) => entry.detail);
+    expect(stages.filter((line) => /\bops_request_stages\b/u.test(line))).toEqual([
+      "SEARCH ops_request_stages USING INDEX sqlite_autoindex_ops_request_stages_1 (operation_id=?)",
+    ]);
   });
 });

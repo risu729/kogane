@@ -109,6 +109,23 @@ read by statement `period`. The operator route is unchanged. The card
 settlement reads and the unmatched statements still offer a page past
 `maxRows`, an open limit recorded in the [agent API](../agent-api.md#card-purchase-explanation).
 
+Note (2026-11-18): that limit is closed.
+[#1274](https://github.com/risu729/kogane/pull/1274) (merged 2026-11-10,
+[ADR 0081, 2026-11-08 amendment](0081-ui-parity-through-mcp.md#amendment-no-card-settlement-page-offers-a-next-page-its-budget-refuses-2026-11-08))
+gave the card settlement reads and the unmatched statements the same
+`nextPage` codes, decided by the same `pageBeyondBudget`
+(`packages/application/src/query/page-budget.ts`), so none of them offers a
+page past `maxRows`.
+
 **Verification.** `packages/application/test/purchases-explain.test.ts`
 ("a next page the same grant would be refused is not offered, and says why"),
 on 101 synthetic events.
+
+## Amendment: a per-card view (2026-11-19, ADR 0125)
+
+Status: accepted (merged 2026-11-20 in [#1449](https://github.com/risu729/kogane/pull/1449)). [ADR 0125](0125-card-purchases-per-card-view.md) adds
+`view: cards` (with `usageMonth`) to this tool and to the operator route: the
+same whole-filter figures grouped by card, without the per-event explanation.
+Its amendment adds `view: lines` (with `account`, `sort` and `cursor`): one
+month's events as compact lines, keyset-paged. `view: events` (the default) is
+the page this ADR decided, unchanged.

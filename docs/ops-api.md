@@ -59,8 +59,21 @@ in protected GitHub workflows (02 §6).
 
 All seven are authenticated, and all seven are refused unless `OPS_API_ENABLED`
 is `"true"`. The route set is closed: any other path under `/api/ops/v1` is
-`404 not_found`, and any verb other than `POST` (accept) and `GET` (read) is
-`405 method_not_allowed`, exactly as everywhere else on this Worker.
+`404 not_found`. The verbs are `POST` (accept), `GET` (read) and `HEAD` (the
+read's answer without its body, recorded as that read); one of them on a path
+that does not take it is `404 not_found`, and any other verb is
+`405 method_not_allowed` with an `Allow` header naming what the path serves —
+`POST` on an acceptance route, `GET, HEAD` on a read, all three on a path that
+is neither — as everywhere else on this Worker
+([methods](production-evidence-browser.md#methods)). A route's fixed segments
+are matched as they were sent: a percent-encoded spelling of one
+(`/api/ops/v1/coll%65ctions`) is another path and `404 not_found`, because the
+function that names a request's audit operation (`opsOperation`) is the route
+table, and a path it does not name never reaches a handler, so the router's own
+percent-decoding cannot accept a request no audit record names (ADR 0064). The
+one variable segment, `{source}` or `{id}`, may be percent-encoded: it is
+decoded before its schema checks it, and the request is named and recorded
+like any other.
 
 | Route                                        | Body                                                       | Answers                     | What "done" means                                                          |
 | -------------------------------------------- | ---------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------- |
@@ -112,7 +125,11 @@ a postcheck that only works once an unrelated flag is on is not a postcheck
 It is read-only: one `SELECT 1` per database, one migration list, one bucket
 `head`, one capability snapshot, one service-binding read. No write, no
 provider request, no bank access, no collection and no backfill — and no value
-of any kind in the answer.
+of any kind in the answer. It takes no query string (`400 invalid_query`).
+`HEAD` is the same read, answering its status and headers without the body;
+any other method is `405 method_not_allowed` with `Allow: GET, HEAD`, decided
+after the caller, so a caller that may not read the route learns nothing of
+its shape from the method.
 
 Who may read it (`services/app/src/health.ts`):
 
@@ -210,12 +227,14 @@ whichever principal made it: the operator in the browser or any MCP client
 
 ```jsonc
 {
-  "schemaVersion": "kogane-operation-list-v1",
+  "schemaVersion": "kogane-operation-list-v2",
+  "statusFilterMatches": "storedStatus", // what the `status` filter matched
   "operations": [
     {
       "operationId": "op_<64 hex>",
       "kind": "collection",
-      "status": "running",
+      "status": "completed", // the status the single read answers
+      "storedStatus": "running", // `ops_requests.status`
       "source": "sony-bank",
       "dispatch": { "state": "dispatched", "attempts": 1 },
       "failureCode": null,
@@ -223,7 +242,9 @@ whichever principal made it: the operator in the browser or any MCP client
       "updatedAt": "2026-09-11T00:05:00Z",
     },
   ],
-  "nextCursor": null, // or the operationId to pass as `cursor` for the next page
+  "nextCursor": null, // deprecated: the operationId `next.arguments.cursor` also names
+  "next": null, // or { "arguments": { "cursor": "op_<64 hex>" } } (ADR 0128)
+  "paging": { "limit": 20, "returned": 1, "hasMore": false, "stoppedBy": null },
 }
 ```
 
@@ -231,19 +252,32 @@ whichever principal made it: the operator in the browser or any MCP client
   descending. Neither column changes after insert, so the order is stable,
   and a cursor taken from one page continues after it under any filter.
 - **Query.** `kind` (one of the five kinds), `status` (one of the six
-  statuses), `cursor` (the `nextCursor` of the previous page) and `limit`
+  statuses), `cursor` (from the previous page's `next.arguments`, or its
+  deprecated `nextCursor`) and `limit`
   (1–50, default 20). Each key at most once. An unknown key is
   `400 invalid_query` without a ref; a repeated key or a value outside its
   list is `400 invalid_query` naming the key. A cursor that names no
-  operation is `404 receipt_not_found` with ref `cursor`; any principal's
-  operation is a cursor.
+  operation is not one the list issued: `400 invalid_cursor` with ref
+  `cursor` ([ADR 0128](adr/0128-one-paging-contract.md)); any principal's
+  operation is a cursor. The cursor is not bound to `kind` or `status`: a
+  cursor read under other filters continues the other list after that row.
 - **Content.** A summary has no stages, no `execution` block, no target and
   no principal; read one operation for the first three, and the
   [audit log](audit-log.md) for who requested it. The stored request is not
-  read, so a rebuild's `reason` never appears. `status` is the stored status,
-  and the `status` filter matches it: READ is not read, so a request whose
-  record reads `completed` through the derived `projected` stage
-  ([projected](#projected-read)) is listed, and filtered, as `running`.
+  read, so a rebuild's `reason` never appears.
+- **Status.** `status` is the status the single read answers for the same
+  request: a stored `running` collection, import or replay whose `projected`
+  stage the READ pointer covers reads `completed`
+  ([projected](#projected-read)), and READ changes no other status.
+  `storedStatus` is `ops_requests.status`. The two differ only in that one
+  way. The `status` filter matches `storedStatus`, and every page says so
+  with `statusFilterMatches: "storedStatus"`: `status=running` lists stored
+  `running` requests, including those whose `status` reads `completed`, and
+  `status=completed` lists only stored `completed` ones. The filter cannot
+  follow READ without losing the cost bound below: the index holds the stored
+  status, and a stored `running` collection never turns `completed` (ADR 0086,
+  amendment of 2026-11-18, projection). Version 1 of the page
+  (`kogane-operation-list-v1`) showed the stored status as `status`.
 - **Cost.** One range of the index `ops_requests_open` per allowed
   (status, kind) pair (thirty without a filter, six for a kind, five for a
   status, one for both), each limited to the page, merged newest first. Rows
@@ -251,7 +285,15 @@ whichever principal made it: the operator in the browser or any MCP client
   at or ahead of it are skipped. No range reads another pair's rows, so a
   page reads at most (pairs × (limit + 1)) rows plus ties, at any store
   size; the rows it does not return are the other pairs' candidates and
-  those ties. No migration was added.
+  those ties. No migration was added. The statuses are then derived for the
+  page's rows only, with a fixed number of reads whatever the page holds:
+  when a row is a stored `running` request of a kind that reaches `adopted`,
+  one read of those rows' stages by primary key (`SELECT_STAGES_OF_PAGE`),
+  and, when one of them has a stored requirement to compare, READ's instance
+  and pointer and CORE's epoch once for the page. A page with no such row
+  reads nothing more. Every row of a page is judged against that one
+  reading; a single read made later takes its own, so the two can differ if
+  READ or CORE's epoch moved in between, as two single reads would.
 - **Audit.** Each request is recorded once as `ops.operation.list`, with the
   number of rows shown and whether a next page exists
   ([audit log](audit-log.md)).
@@ -296,7 +338,8 @@ already does. Between them, on a `POST`, sits the own-origin rule: an
 `Origin` that is present and not the Worker's own is
 `403 origin_not_allowed` before a grant, a schema or the store is touched
 ([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). With the flag
-off the route answers as it did before (a `POST` is `405`), whatever its
+off the route answers as it did before (a `POST` is `405`, with
+`Allow: GET, HEAD`), whatever its
 `Origin`. An operator's `curl` sends no `Origin` and is unaffected.
 
 1. the deployment flag `OPS_API_ENABLED`;
@@ -353,7 +396,8 @@ carries the route label, the status and the code, never a ref.
 | `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record                        |
 | `origin_not_allowed`   | 403  | A `POST` carried another site's `Origin` (ADR 0078)                                    |
 | `not_found`            | 404  | No such operations route                                                               |
-| `receipt_not_found`    | 404  | No such operation, as an id or a list cursor                                           |
+| `invalid_cursor`       | 400  | A list cursor that names no operation (ADR 0128)                                       |
+| `receipt_not_found`    | 404  | No such operation id                                                                   |
 | `idempotency_conflict` | 409  | The same key was reused for a different payload                                        |
 | `request_too_large`    | 413  | The body exceeds 16 KiB                                                                |
 | `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded                         |
@@ -633,23 +677,51 @@ completed; the existing CORE epoch/revision and READ requirements still apply.
 This result is derived on each read, not a durable recovery observation. If
 current pointers cease to prove publication it returns
 `publication_not_observed` again. No historical polling queue or migration is
-needed. The operations list remains a stored summary and does not include
-this detail-only extension. The detail page labels both the original deadline
-failure and the current publication result in Japanese.
+needed. The operations list does not include this detail-only extension.
+The detail page labels both the original deadline failure and the current
+publication result in Japanese.
 
 Limits: only the connections `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names are
 started; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick. The web UI requests only a
-collection, from `/schedules`, and no page lists operations: the list route
-([ADR 0086](adr/0086-operator-operations-list.md)) is read over HTTP and MCP
-only.
+collection, from `/schedules`; it lists requests on the 依頼の一覧 page below
+and follows one on the 依頼の経過 page.
+
+**The 依頼の一覧 page.** `/operations` in the observation client reads the
+list route above, read-only
+([ADR 0086, amendment of 2026-11-18](adr/0086-operator-operations-list.md#amendment-2026-11-18-the-依頼の一覧-page-reads-the-list)).
+It is in the navigation for every caller, and the server's operator check is
+the only gate. It sends the closed `kind` and `status` from its own URL and
+the cursor of the page it pages to, and no `limit`, so a page is the route's
+20 rows. A filter outside the closed lists is refused on the page and sends
+nothing; a new filter, or 最新の依頼から読み直す, starts from the newest
+request. Each row shows the accepted time, kind, status, failure code,
+source, dispatch state and attempts, and last update, and links its
+operation id to its 依頼の経過 page. Neither the principal nor the request
+payload is shown, as the summary carries neither. The status is the one the
+依頼の経過 page shows (a collection whose `projected` stage READ covers is
+完了 on both); where it differs from the stored status, the row also shows
+the stored one (保存された状態). The status filter is labelled 保存された状態
+and matches the stored status, as the route's does, and the page says above
+the list that a 進行中 filter can list 完了 rows and a 完了 filter does not
+list them. The browser
+validates each page first (`validOperationListPage` in
+`packages/observation-shared/src/operation-contract.ts`: exact keys, closed
+values, a `status` its `storedStatus` can read as, `statusFilterMatches`
+naming the stored status, at most 50 rows in the list's order, each once, a
+cursor that is the last row's id or null, and rows of the kind and stored
+status asked for); a page outside it is an error. A `403` says the list is
+the operator's; a `404` says this deployment does not provide it, which
+covers `OPS_API_ENABLED` off. Every page read is one audited `ops.operation.list`, and the page reads
+again only when asked.
 
 **The 依頼の経過 page.** `/operations/op_<id>` in the observation client
 shows this record read-only: status, stages with their evidence (a fetch run
 links to its 取得記録), the execution and every reported run with its counts,
 each closed code by Japanese name beside the code. It reads once per opening
 and again only when asked. The 監査ログ page links each `op_` target to it,
-and the schedules page links a request it has just sent
+the 依頼の一覧 page links every request, its breadcrumb leads back to that
+list, and the schedules page links a request it has just sent
 ([schedules](schedules.md#収集を依頼-collection-request)). The browser validates the record first
 (`packages/observation-shared/src/operation-contract.ts`); a record outside
 the contract is an error. A `403` says the trail is the operator's; a `404`
@@ -684,10 +756,11 @@ whenever it is read, and writes nothing:
 
 The record's `status` reads `completed` when the stored status is `running`
 and every stage, this one included, is `completed`; a re-send of the request
-answers with that same status. The stored request stays
-`running` and its `projected` row `pending`, so the answer follows READ: it
-falls back to `running` with the reason if READ is lost or CORE is restored
-under a new epoch. Coverage compares revisions over the whole CORE input, so
+answers with that same status, and the list shows it as the request's
+`status` beside its `storedStatus` ([the list](#the-list)). The stored
+request stays `running` and its `projected` row `pending`, so the answer
+follows READ: it falls back to `running` with the reason if READ is lost or
+CORE is restored under a new epoch. Coverage compares revisions over the whole CORE input, so
 a collection whose parses add no balance row is covered once the published
 snapshot was verified at or above its revision. A use restriction that makes
 the snapshot unservable does not reopen the stage. Requests of the other
@@ -707,12 +780,13 @@ operation id beyond its first eight hex characters, and no source data.
    `kogane.ops.operation.list` and `kogane.ops.operation.get`, both read-only
    (`operations.read`). The operator may read the same records over
    `GET /api/ops/v1/operations` and `GET /api/ops/v1/operations/{id}`, or on
-   the 依頼の経過 page. Only the one-operation read (that tool, that route or
-   the page) derives `projected`; the list shows stored status.
+   the 依頼の経過 page. The one-operation read derives `projected` and shows
+   it; the list shows the status that derivation gives, beside the stored one.
 2. **List.** `kogane.ops.operation.list` with `kind: "collection"` and
    `limit: 50`, following `nextCursor` to the end. Count the summaries by
-   stored `status`. A request that `get` reads `completed` is listed `running`,
-   because the stored row never turns `completed` for a collection.
+   (`storedStatus`, `status`). A request that `get` reads `completed` is
+   listed with `status: "completed"` and `storedStatus: "running"`, because
+   the stored row never turns `completed` for a collection.
 3. **Read each candidate.** `kogane.ops.operation.get` for every summary listed
    `running` or `failed`. From each record take `execution.state`, the
    `adopted` stage's `state`, the `projected` stage's `state`, `failureCode`

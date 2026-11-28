@@ -27,6 +27,43 @@ from a statement, or calculate net assets.
   Other banks and aggregator copies are not implicitly interchangeable with
   these adapters; see [Bank adapters](#bank-adapters).
 
+### A statement's capture
+
+`card_statement_facts` (migration 0044) keeps one capture per statement key
+(source, producer, external-id namespace, source account and period). Of the
+published `credit_statement_payment_amount` totals of `vpass-statement-page`
+(Vpass) and `myjcb-credit-statement-total` (MyJCB) under one key, it keeps the
+newest capture (`fetched_at`); among captures with the same `fetched_at`, one
+with a `_kogane.paymentDate` before one without; then the highest observation
+id. The dated state's statement facts (`DATED_STATEMENT_FACTS_CTE`,
+`packages/read-model/src/dated-state.ts`) and the readiness check's
+`ready_statements` (`packages/read-model/src/card-settlement-readiness.ts`)
+rank the same way.
+
+Limit: the second key asks only whether a date is present, not whether it
+names a calendar day. If two captures of one statement had the same
+`fetched_at` and one carried a date that names no day, such as 2026-09-31, it
+could win on id over one with a real date. The statement's due date would then
+be unreadable: the [reported state](reported-state.md) gives it
+`payment_date_unknown`, the [debit account answer](#debit-account-per-card)
+gives `paymentDateReason: payment_date_invalid`, and the settlement sweep
+counts it unmatched and proposes nothing for it. An unknown is disclosed, and
+no wrong due date is read.
+
+No store can hold such a date today. Only these two parsers feed the
+rankings, and every release of both since they first emitted the statement
+total (#213) refuses a payment date that is not a calendar day: Vpass in
+`statementPaymentDate` (`vpass.ts`), MyJCB through `normalizedDate`
+(`sbi-strict.ts`). The parse fails and publishes nothing.
+`packages/read-model/test/statement-payment-date-guard.test.ts` pins this: it
+reads the parsers out of the three ranking texts, requires them to be exactly
+these two, and parses synthetic pages with 2026-02-30, 2026-09-31 and
+2026-13-01 through each release in the parser registry, failing if one
+publishes any of them as a date (a release may refuse or leave the date out).
+A parser release that starts to publish such dates, or a ranking that reads
+another parser, fails that test, and the tie-break above would then need a
+calendar check.
+
 ### Bank adapters
 
 | Adapter                                | Rows admitted                                                                                                                                                                                                                       | Provider key          | `debit_date`                                                         |
@@ -62,13 +99,16 @@ the row's fields and its position (`mizuho:<fingerprint>:<occurrence>`,
 payment re-observed after the page changed could carry another id and count
 twice. They need a stable row identity first.
 
-Which card pays from which bank: the code does not know, and no setting names
-a card's debit account. A card and a bank are paired only as a candidate
-(equal amount, due date ±3 days) and only an accepted review with shared
-ownership makes the pairing a decision. In production at the time of writing
-(2026-09-26), every proposed review pairs a Vpass or MyJCB statement with an
-SMBC debit, none is accepted, and there is no published SBI Shinsei
-transaction: every stored capture of the SBI Shinsei activity page was
+Which card pays from which bank: no setting names a card's debit account. A
+card and a bank are paired only as a candidate (equal amount, due date ±3
+days) and only an accepted review with shared ownership makes the pairing a
+decision. [Debit account per card](#debit-account-per-card) answers it per
+card: the account the provider's statement names, else the account of the
+newest accepted settlement, else `unknown`; a candidate nobody decided never
+answers ([ADR 0114](adr/0114-card-debit-account-answer.md)). In production at
+the time of writing (2026-09-26), every proposed review pairs a Vpass or MyJCB
+statement with an SMBC debit, none is accepted, and there is no published SBI
+Shinsei transaction: every stored capture of the SBI Shinsei activity page was
 rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
 adapter admits nothing until the parser accepts them. A card provider's own
 statement of the debit account is recorded beside each MyJCB candidate as
@@ -121,6 +161,14 @@ Contests between statements and competing refused debits are judged within
 one run only, so a caller that splits overlapping windows across runs would
 lose them.
 
+A refused debit competes only for a statement whose own exact sums it could
+complete. When it could instead complete another statement's exact sum
+together with a debit of this statement's single candidate, this statement
+stays `proposed`, although, had the refused debit been admitted, the shared
+debit would have made both statements `needs_review`
+(`debit_in_other_statement_allocation`). In that case the refusal does pick
+which statement the shared debit pays.
+
 A debit given twice, two debits sharing a key or alias class, a debit whose
 key or alias class is held, and a debit without an admitted identity take no
 part; currencies are never combined. Ownership is a rejection condition as in
@@ -138,7 +186,7 @@ statement are not handled.
 Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md), its
 2026-09-27 amendment and its
 [2026-11-07 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader)
-(proposed). What the code does today:
+(accepted). What the code does today:
 
 **The page.** Every MyJCB credit detail page observed in round 4 (the
 confirmed statement and the ショッピングスキップ払い page, live and in the
@@ -283,7 +331,13 @@ Limits:
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
   artifacts; parser releases 1.1.0 and 1.1.1 preserve this context, and both
-  qualify for account matching and readiness diagnostics. Policy v3 compares only the
+  qualify for account matching and readiness diagnostics
+  (`SMBC_DEBIT_CONTEXT_PARSER_VERSIONS` in
+  `services/processor/src/card-debit-account-job.ts`, read by both). A debit
+  parsed by any other release is uncomparable, so
+  `card-debit-account.test.ts` fails while the deployed
+  `smbc-direct-transactions` release is not listed: a parser bump adds it
+  there once it is known to keep the context. Policy v3 compares only the
   candidate debit's own published transaction/parse context and cites that
   observation. A later balance or another capture never supplies missing
   historical digits (ADR 0034). Unenriched account lists are cached once per
@@ -304,7 +358,7 @@ Limits:
 
 ### Debit account per card
 
-Design: [ADR 0114](adr/0114-card-debit-account-answer.md) (proposed).
+Design: [ADR 0114](adr/0114-card-debit-account-answer.md).
 `reviewCardDebitAccounts`
 (`packages/application/src/query/card-debit-accounts.ts`) answers which bank
 account each card is debited from, under rule `card-debit-account-answer-v1`
@@ -314,9 +368,27 @@ card with a current statement total, a stated reading with evidence or a
 settlement candidate is listed, by source and source account, at most 100
 (`cardsTruncated` says when more exist). Per card:
 
-- `latestStatement`: its newest current statement total (by period, then due
-  date), with the provider's total and due date, so a card whose last
-  statement is zero still shows how old its answer is;
+- `latestStatement`: its newest current statement total: of its
+  `card_statement_facts` rows, the latest period (compared as its `YYYY-MM`
+  text), then the latest due date (compared as the stored
+  `_kogane.paymentDate` text, not as a calendar date), then the highest
+  observation id, a row without a period or due date after one with it
+  (`CARD_DEBIT_ACCOUNT_CARDS_SQL`). It carries the provider's total and due
+  date, so a card whose last
+  statement is zero still shows how old its answer is. The total is always a
+  quantity: one that is not exact keeps its decimal-v1 status with the reason
+  `stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
+  `decimal_not_projected` when no decimal-v1 value was recorded, the reasons
+  the card purchase read gives the same view's `providerTotal`; it is never
+  null or zero (INV05), and the page shows it as unknown with that reason. An
+  `exact` status without both decimal-v1 columns, which CORE 0024's CHECK
+  never stores, fails the read (`card_debit_accounts_row_invalid`). The due
+  date (`paymentDate`) is a `local-date` when the stored `_kogane.paymentDate`
+  is a civil `YYYY-MM-DD` date, else null with `paymentDateReason`
+  ([ADR 0114, amendment 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)):
+  `payment_date_absent` when nothing is recorded there, `payment_date_invalid`
+  when a value that is not a civil date is. The reason is there exactly when
+  the date is null;
 - `stated`: the readings the settlement sweep compared with a candidate (the
   `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
   that `card_settlement_debit_account_evidence` cites under
@@ -333,13 +405,31 @@ settlement candidate is listed, by source and source account, at most 100
   `evidence_not_recorded` for a MyJCB card;
 - `settled`: per bank account, the candidates whose latest decision is
   `accepted`, with the number of distinct statements and the one with the
-  latest debit date. A withdrawn or rejected candidate is not counted;
+  latest debit date (`latest.debitDate`; null with `debitDateReason`
+  `debit_date_invalid` when the candidate's stored `bankDebit.occurred` is
+  not a `local-date` with a civil value, which the only candidate writer
+  never stores). A withdrawn or rejected candidate is not counted;
 - `proposed`: the same for candidates still `proposed`, of statements no
   accepted candidate covers. They are listed for the reviewer and never
-  answer (INV07);
+  answer (INV07). A statement is covered as the acceptance guard reserves it
+  (`card_settlement_readiness.allocation_available`, migration 0044): an
+  accepted candidate with the same `statement_key`, or with the same
+  `statement.sourceId`, `statement.accountId` and `statement.period` in its
+  facts (each compared with `=`, so a fact that is absent on either side
+  covers nothing beyond the key). One card month can have two statement
+  keys, when it is read through two producers or namespaces or under a new
+  card ordinal (`vpass:card-00N`) that resolves to the same account; once a
+  candidate of one is accepted, the guard refuses every candidate of the
+  other, and they are not listed. Under a new ordinal they belong to another
+  card entry, which reads `no_debit_account_evidence` rather than
+  `only_unreviewed_candidates` when it has no other evidence. A
+  candidate whose bank debit another statement's accepted candidate holds is
+  still listed: the guard refuses it too (`allocation_already_used` on the
+  review), but its statement is not settled;
 - `answer`: `provider-stated` from `lastNamed` (the account, the reading and
   its capture time); else `accepted-settlement` from the newest accepted
-  settlement (the account, the candidate and its debit date), which is an
+  settlement (the account, the candidate and its debit date, with its
+  `debitDateReason` when null), which is an
   amount match a person accepted and so weaker than a stated account; else
   `unknown` with `stated_reading_conflicting`, `only_unreviewed_candidates`
   or `no_debit_account_evidence`. Closed `codes` say what disagrees:
@@ -351,9 +441,10 @@ settlement candidate is listed, by source and source account, at most 100
 
 The page shows it as `カードの引落口座` above `照合候補のない請求`, from
 `GET /api/v2/reconciliation/card-debit-accounts` (operator-only, no
-parameter: any is `400 invalid_query`); agents read the same answer through
+parameter but `view=upcoming`, [below](#upcoming-bills): any other is
+`400 invalid_query`); agents read the same answer through
 `kogane.card-settlements.debit-accounts` ([agent API](agent-api.md#each-cards-debit-account)).
-A malformed evidence or candidate row fails the read
+A malformed evidence, candidate or statement-total row fails the read
 (`card_debit_accounts_row_invalid`), never an answer.
 
 Limits:
@@ -386,6 +477,127 @@ Limits:
   per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
+- A null date's reason says only what is stored: `payment_date_absent` and
+  `payment_date_invalid` do not say why the provider page or the parser left
+  the due date so, and a stored debit date that is an `unknown` time with its
+  own `reasonCode` would read `debit_date_invalid` too (the candidates read
+  takes the date only from a `local-date`). The two parsers the view reads
+  today (`vpass-statement-page`, `myjcb-credit-statement-total`) always
+  record a civil due date, and the only candidate writer always a civil
+  debit date, so the reasons are for rows they did not write. The page shows a null date as
+  不明（reason）; the 次回の引落 view keeps its own `payment_date_not_published`
+  for a card whose due date is null, whichever reason it has.
+
+### Upcoming bills
+
+Design: [ADR 0114's 2026-11-19 amendment](adr/0114-card-debit-account-answer.md#amendment-2026-11-19-the-upcoming-view-answers-each-cards-next-bill-and-whether-its-account-covers-it).
+`reviewUpcomingCardBills` (`packages/application/src/query/card-upcoming-bills.ts`,
+rule `card-upcoming-bills-v1` in `packages/domain/src/card-upcoming-bills.ts`)
+answers, for today in Asia/Tokyo, each card's next bill, the account it is
+debited from and whether that account's reported balance covers it. It reads
+the per-card answer above and the [reported state](reported-state.md) for the
+date, and nothing else but the account entities' labels. It uses only the
+state's accounts and pins no reported-state context id, so it reads the state
+with `includeStatementsBeforeWindow: false`: neither the count of the
+statements before the payable window nor the scheduled payments is read.
+
+- A bill is a card's newest current statement whose provider due date is on
+  or after the date and whose total is not an exact zero or below. Any other
+  card is listed with a closed reason and its last statement: `no_statement`,
+  `payment_date_not_published` (a statement with no readable due date, such
+  as an importer-era Vpass row), `no_statement_due`, `statement_settled` (an
+  accepted settlement of the card covers that month), or
+  `statement_total_refund_or_zero` (an exact total of zero or below, the
+  [unmatched statements](#unmatched-statements) code: nothing is debited for
+  it, so it is never summed into a line, where a refund would offset the
+  bills of other cards debited from the same account). A total that is not
+  exact has no known sign: it stays a bill with its status and reason, and
+  makes its lines `unknown` (`bill_not_exact`).
+- The debit account is the per-card answer's, with its basis and codes. The
+  bank source account is mapped to the account entity the reported state maps
+  it to, when it maps it to exactly one.
+- One line per debit account and debit date counts every bill to the account
+  due by then, summed with `sumQuantities`. The balance is the
+  `deposit.balance` of the entity's references from the newest capture,
+  never a sum of references. `covers` is `yes` or `no` only on exact figures
+  with no reason; otherwise `unknown` with `debit_account_unknown`,
+  `unit_mismatch` (the bills the line counts are in more than one unit, so
+  `sumQuantities` does not add them and `cardBills` is `missing` with that
+  code),
+  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
+  balance was captured on or before the latest card debit from the account
+  due by the date, so it may not show it; or on the due date of a bill the
+  line counts, so it may already show it, and comparing it with that bill
+  would count the debit twice), `cards_with_unknown_account` (a bill with no known
+  account is due by the line's date) or `cards_with_unknown_due_date` (a card
+  of this account, or of an unknown one, has a newest statement with no
+  readable due date that no accepted settlement pays, so its total may be
+  debited by then: it is never left out as if it were zero).
+- The latest card debit from an account is the latest of: the debit date of
+  each card's newest accepted settlement per bank account; the due date of
+  each card's newest statement when it is due before the date; and, for each
+  card whose debit account is answered, the latest due date on or before the
+  date among its current statements of other months than its newest
+  (`EARLIER_STATEMENT_DUE_SQL`), settled or not. So a card whose newest
+  statement is a bill still has its earlier statement's debit counted: a
+  balance captured on or before that statement's due date reads `unknown`,
+  never compared with the bill as if it showed that debit.
+- An account entity's balance comes from the newest capture among its
+  references; two references captured together that disagree are
+  `conflict` / `balances_disagree`, and references are never added.
+
+The page shows it as `次回の引落` above `カードの引落口座`, from
+`GET /api/v2/reconciliation/card-debit-accounts?view=upcoming` (operator-only;
+`view=upcoming` is the route's one parameter, and any other parameter or
+value is `400 invalid_query`); agents read the same answer through
+`kogane.card-settlements.debit-accounts` with `view: "upcoming"`
+([agent API](agent-api.md#next-card-bills)).
+
+Limits:
+
+- `covers` compares known card bills with the provider's latest balance only:
+  other debits, deposits before the debit date and unbilled card usage are
+  not modelled (`other_debits_not_modelled` on every line).
+- No closing date is answered: neither card source stores one, only the
+  statement month and the due date.
+- Whether a refund statement's credit reaches the bank account, or is carried
+  into the card's next statement, is not observed: a refund is never netted
+  against a bill or added to a balance, so a line can read `no` where the
+  bank would have paid.
+- A card whose debit account is unknown (every Vpass card without an accepted
+  settlement) makes the account lines due on or after its bill `unknown`.
+- A card whose newest statement has no readable due date and no accepted
+  settlement paying it makes every line of its account, or every line when
+  its account is unknown, `unknown` (`cards_with_unknown_due_date`), with no
+  age bound: it lasts until the card has a newer statement with a due date or
+  that settlement is accepted, so a closed card's last such statement keeps
+  it until then. Until the Vpass collector's finalized statements are parsed
+  (proposal v2, Unit A), an importer-era Vpass row with no due date as a
+  card's newest statement does this.
+- Vpass cards are labelled by their account entity, the same for every Vpass
+  card; the source account (`vpass:card-00N`) tells them apart.
+- The reported state reads every account to find the debit accounts. Past its
+  row bound every balance is `missing` / `reported_state_limit_exceeded`.
+- A bank source account is joined to its account entity only through the
+  reported state's entries. A source account the answer names that has no
+  balance or position in the reported state for the date keeps a line of its
+  own (`balance_not_reported`), even if an identity mapping puts it under an
+  entity another line names; that entity's line then does not count its bills.
+- A statement already due before the date is taken as debited on its due
+  date (`no_statement_due`). A bank that debits it later, for example on the
+  next business day, is not modelled; `balance_before_previous_debit` only
+  covers a balance captured on or before the due date itself.
+- A card's earlier statements are taken as debited from the account its
+  answer names now. One the bank took from another account before the card
+  moved counts for that account only through the debit date of the card's
+  newest accepted settlement from it, when there is one. A card whose debit
+  account is unknown has no statement's due date taken as any account's
+  previous debit (only its accepted settlements' debit dates count), so a
+  balance captured before such a card's statement already due is still
+  compared; only its bill (`cards_with_unknown_account`) or an undated newest
+  statement (`cards_with_unknown_due_date`) makes lines `unknown`. An earlier
+  statement with no readable due date (absent, or not a civil date) is not
+  taken as debited.
 
 ## Candidate and decision lifecycle
 
@@ -431,8 +643,10 @@ Limits:
   `no_debit_in_window` when no other debit falls in its window and
   `no_equal_amount_debit` when one does. Telling them apart would mean
   summing the window's debits, which the sweep does not do.
-- **Per tick, not per store.** The cursor wraps at the last statement, so a
-  statement is counted again on every pass; a tick that stops at 500 written
+- **Per tick, not per store.** A pass that reaches the last statement
+  starts again from the first only once something it reads moves (see
+  [Cost](#cost)), so a statement is counted again on every such pass, and a
+  tick the pass gate skips counts nothing; a tick that stops at 500 written
   candidates leaves the rest of its page uncounted until the next tick.
 - **The bank read stops at 1,000 rows.** A statement whose window holds more
   counts as `no_equal_amount_debit` when none of those rows matches.
@@ -460,8 +674,22 @@ rows, each due date read once per page), or
 `equal_amount_debit_awaiting_sweep` when the window holds a debit the sweep's
 matcher pairs with it, so its candidate appears on the sweep's next pass.
 `debitsInWindow` is the number of rows the read returned (null when none was
-made). Amounts and dates are the provider's; an inexact total is `null`, never
-zero.
+made). Amounts and dates are the provider's. The total is always a quantity
+([ADR 0074, amendment 2026-11-19](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-19-a-statement-total-that-is-not-exact-keeps-its-reason)):
+one that is not exact keeps its decimal-v1 status with the reason
+`stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
+`decimal_not_projected` when no decimal-v1 value was recorded, the reasons
+the card purchase read and each card's debit account give the same view's
+total (one helper, `statementTotal` in
+`packages/application/src/query/card-statement-total.ts`); it is never null
+or zero (INV05), and the page shows it as unknown with that reason. Such a
+statement is still `statement_not_comparable`. An `exact` status without both
+decimal-v1 columns, or a status outside decimal-v1, which CORE 0024's CHECK
+never stores, fails the read (`card_statements_unmatched_row_invalid`).
+A due date (`paymentDate`) that is null carries `paymentDateReason`, the same
+as each card's debit account gives it: `payment_date_absent` or
+`payment_date_invalid` ([ADR 0114, amendment 2026-11-21](adr/0114-card-debit-account-answer.md#amendment-2026-11-21-a-null-due-or-debit-date-carries-its-reason)). Such a
+statement is `statement_not_comparable`, with no window read.
 
 For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
 ([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))
@@ -507,6 +735,9 @@ Limits:
   without a candidate when each page is read: a statement that gains a
   candidate leaves the list and the later ones move back one place, so paging
   on can pass over one of them until the list is read again from the start.
+  A later page read again after statements left the list can be empty: the
+  page then says that this page lists no statement and keeps its pager, and
+  says `照合候補のない請求はありません。` only for an empty first page.
 - A debit without a resolved account has no alias class, so the planner
   excludes it (`identity_not_admitted`).
 - A window row the sweep never compares (no exact amount, or a debit date
@@ -1115,7 +1346,7 @@ exactly those expressions (`card_settlement_candidates_statement_period`), so
 its text is unchanged and each statement's reviews are found by key.
 
 What still grows with history: `card_statement_facts` ranks every captured
-statement total once per request and once per sweep tick (74 ms here; the
+statement total once per request and once per sweep page (74 ms here; the
 scan of every balance observation is 4 ms of it, and neither a partial index
 on the statement metric nor an index on `metric` changed the time), and
 `card_bank_debit_facts` ranks every adapter's rows once per statement of the sweep's
@@ -1123,6 +1354,35 @@ page (51 ms here, so a full page of 100 is about 5 s of D1 time a tick).
 Candidates accrue one per recapture of a paid bill, reached by the index. The
 rest of the purchases page is the current card usage pass
 ([read model](read-model.md#cost)).
+
+The sweep reads its pages only while something may have changed (ADR 0129,
+slice 3; migration `0109_processor_sweep_passes.sql`;
+`services/processor/src/sweep-pass.ts`). A pass that starts from the first
+statement records the CORE revision (source revision, visibility revision,
+core epoch) and the sweep's policy it starts at, and a pass that reaches the
+last statement marks that start clean. While both still equal the clean ones,
+a tick reads the card information mark, then its cursor and the gate in one
+statement, and stops. The statements, debits, owners and decisions it pages through are on
+the CORE dependency ledger. The rest is in the policy:
+`CARD_SETTLEMENT_SWEEP_POLICY` (the matching, debit-account and card
+information reader versions, a digest of the views the sweep's code reads,
+pinned against the migrated schema by `test/sweep-pass.test.ts`, and the
+sweep's own version) and the highest card information reading id
+(`CARD_DEBIT_READING_MARK_SQL`), since the debit-account lane writes those
+readings in its own time and off the ledger. The candidates and debit-account
+evidence it checks for are written only by the sweep and never deleted. So
+the pass that started there saw what a new one would see. The sweep's own
+writes are off the ledger and move nothing; a deploy that changes the policy
+runs a pass again; a change to the code that no version carries (a
+statement's text) is applied by the pass after the next CORE write, or by a
+bump of `sweep-v1`. A pass's end names the token its start recorded, so a pass
+started by an overlapping tick is never marked clean by another's end. A
+tick that stops at the write budget leaves the cursor on its statement, so a
+pass that reaches the end has written everything.
+`services/processor/test/sweep-pass.test.ts` checks that a quiet tick
+prepares those two statements only. In production on 2026-11-24 a pass over
+52 current statements read about 86,000 rows of `card_statement_facts` on
+every 5-minute tick before the gate.
 
 The list of statements without a candidate costs one ranking of
 `card_statement_facts` (as the sweep's page does, the candidate check keyed
@@ -1144,9 +1404,45 @@ cited reading found by its primary key, and one scan of the candidates with
 each latest decision found by `card_settlement_decisions`' key
 (`(proposal_id, revision)`); the evidence returned is that of at most two
 readings per card, and the candidates one row per card, bank account and
-decision state. `services/processor/test/card-debit-accounts.test.ts` checks
-without table statistics that readings and decisions are reached by key. Not
-measured on the scale store or on D1.
+decision state. The settled statement keys and card months (`settled`,
+`settled_month`) are each built once from the scanned candidates, and each
+proposed candidate probes the months through an automatic index on
+`(source, account, period)`. `services/processor/test/card-debit-accounts.test.ts`
+checks without table statistics on D1 that readings, decisions and settled
+months are reached by key, and `card-settlement-review-scale.test.ts` that on
+the scaled store the candidates are the only base table read whole. The
+candidate read returns the rows #1387's text did
+(`packages/application/test/card-debit-account-candidates-legacy-sql.ts`)
+less the proposals an accepted candidate reserves by card month alone:
+`card-debit-account-candidates-differential.test.ts` compares the two on
+random stores, where some seeds draw such proposals and the guard refuses
+each one (`allocation_available` is 0), and the scale test on the scaled
+store, which draws none, so the two texts agree there. Not timed on the
+scale store or on D1.
+
+Upcoming bills cost that read, the reported state for the date without the
+count and the scheduled payments (four reads: positions, balances and
+statements, each bounded by `DATED_STATE_ROW_BOUND`, the snapshots, one row
+per perimeter container and chosen snapshot and not bounded, and its
+settlement read), and `ACCOUNT_LABELS_SQL`, one primary-key lookup per
+account entity named, and `EARLIER_STATEMENT_DUE_SQL` once per card with a
+statement whose debit account is answered (at most `CARD_DEBIT_ACCOUNTS_CARDS_MAX`,
+100, issued together): the card's source and source account are partition
+columns of `card_statement_facts`' ranking, so SQLite pushes them into it and
+ranks only that card's statement totals, found through
+`idx_bal_obs_account (source_account, metric)`, with every other table by key;
+it returns one row. `packages/application/test/card-upcoming-bills.test.ts` checks that the
+view issues only those reads, never `DATED_STATEMENTS_BEFORE_WINDOW_SQL` or
+`DATED_SCHEDULED_PAYMENTS_SQL`; that its answer is byte-identical to the one
+over the full state, on a synthetic store where both skipped reads find rows
+and on random stores; that scheduled payments past the row bound, which
+refused the full state and left every balance `missing`, no longer do; and,
+without table statistics, that labels are reached by `accounts`' key and, on
+the complete CORE schema, that a card's earlier statements are reached as
+above with no scan but of that card's own ranked rows and no automatic index.
+`services/processor/test/card-debit-accounts.test.ts` checks on D1's SQLite
+that the source account is pushed into the ranking there too. Not measured
+on the scale store or on D1.
 
 ### Readiness
 

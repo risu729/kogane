@@ -7,6 +7,15 @@
 // a change figure exists exactly for `compared`, as an exact decimal in the
 // holding's own unit, and never for a holding one date lists only or one that
 // is not comparable; and an answer must say it computed no total or valuation.
+// The summary (`detail=summary`, the default; ADR 0075 amendment 2026-11-19)
+// has its own validator below: changed lines only, the same closed codes and
+// the same refusal of a total.
+import { pagedFieldsAbsentOrValid, pagedFieldsSay } from "./paging-contract.ts";
+import {
+  HOLDINGS_CHANGE_DETAILS,
+  HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES,
+  HOLDINGS_CHANGE_SUMMARY_SCHEMA,
+} from "../../domain/src/holdings-change-summary.ts";
 import {
   HOLDING_CHANGE_REASONS,
   HOLDING_CHANGE_STATUSES,
@@ -20,29 +29,46 @@ import {
   REPORTED_STATE_ZONE,
 } from "../../domain/src/reported-state.ts";
 import { validInstantText, validLocalDateText } from "../../domain/src/time.ts";
-import { validQuantity } from "../../domain/src/values.ts";
+import { validQuantity, VALUE_STATUSES } from "../../domain/src/values.ts";
 
 export const REPORTED_HOLDINGS_CHANGE_PATH = "/api/v2/reported-holdings-change";
 /** Every query parameter the route (and so its agent read) takes; any other is refused. */
-export const HOLDINGS_CHANGE_PARAMETERS = ["from", "to", "source", "account"] as const;
+export const HOLDINGS_CHANGE_PARAMETERS = [
+  "from",
+  "to",
+  "source",
+  "account",
+  "detail",
+  "limit",
+  "cursor",
+] as const;
 // The reported state's own parameter shapes.
 export const HOLDINGS_CHANGE_SOURCE = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 export const HOLDINGS_CHANGE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
+/** A summary cursor: base64url, as `paging.ts` writes it. */
+const HOLDINGS_CHANGE_CURSOR = /^[A-Za-z0-9_-]{1,512}$/u;
 
-/** A request the route takes: two dates and, optionally, one source and one account. */
+/**
+ * A request the route takes: two dates and, optionally, one source, one
+ * account and the detail (`summary` when absent; the page asks for `full`).
+ */
 export interface HoldingsChangeRequest {
   from: string;
   to: string;
   source?: string;
   account?: string;
+  detail?: (typeof HOLDINGS_CHANGE_DETAILS)[number];
 }
 
 /**
  * The route's refusal of a query string's shape, decided before the store is
- * read: `invalid_query` for another, repeated or empty parameter or a
- * malformed source or account, `invalid_date` for a missing, malformed or
- * impossible date, and null when the shape is accepted. The route and the
- * page both apply it, so the page never sends a shape the route refuses.
+ * read: `invalid_query` for another, repeated or empty parameter, a
+ * malformed source, account or cursor, a `detail` other than `summary` or
+ * `full`, a `limit` that is not an offered page size, and a `limit` or
+ * `cursor` with `detail=full` (the full answer is not paged); `invalid_date`
+ * for a missing, malformed or impossible date; null when the shape is
+ * accepted. The route and the page both apply it, so the page never sends a
+ * shape the route refuses.
  */
 export function holdingsChangeQueryRefusal(
   params: URLSearchParams,
@@ -60,6 +86,18 @@ export function holdingsChangeQueryRefusal(
   if (source !== null && !HOLDINGS_CHANGE_SOURCE.test(source)) return "invalid_query";
   const account = params.get("account");
   if (account !== null && !HOLDINGS_CHANGE_ACCOUNT.test(account)) return "invalid_query";
+  const detail = params.get("detail");
+  if (detail !== null && !(HOLDINGS_CHANGE_DETAILS as readonly string[]).includes(detail))
+    return "invalid_query";
+  const limit = params.get("limit");
+  if (
+    limit !== null &&
+    !(HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES as readonly number[]).some((size) => `${size}` === limit)
+  )
+    return "invalid_query";
+  const cursor = params.get("cursor");
+  if (cursor !== null && !HOLDINGS_CHANGE_CURSOR.test(cursor)) return "invalid_query";
+  if (detail === "full" && (limit !== null || cursor !== null)) return "invalid_query";
   return null;
 }
 
@@ -68,6 +106,7 @@ export function holdingsChangeSearch(request: HoldingsChangeRequest): URLSearchP
   const params = new URLSearchParams({ from: request.from, to: request.to });
   if (request.source !== undefined) params.set("source", request.source);
   if (request.account !== undefined) params.set("account", request.account);
+  if (request.detail !== undefined) params.set("detail", request.detail);
   return params;
 }
 
@@ -416,4 +455,261 @@ export function validReportedHoldingsChange(value: unknown): boolean {
     validManifest(value.manifest, value) &&
     digest(value.contextId)
   );
+}
+
+// ── the summary (`detail=summary`) ────────────────────────────────────────
+
+/** An exact decimal as `decimalToString` writes it: no exponent, no trailing zero. */
+const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/u;
+const decimal = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 4200 && DECIMAL.test(value) && value !== "-0";
+const CONTAINER_REF = /^c[1-9][0-9]*$/u;
+
+function validSummarySide(value: unknown): value is Record<string, unknown> {
+  if (!record(value)) return false;
+  switch (value.state) {
+    case "listed":
+      return (
+        exactKeys(value, ["state", "positionRef", "quantity", "quantityStatus"]) &&
+        matches(POSITION_REF)(value.positionRef) &&
+        member(VALUE_STATUSES)(value.quantityStatus) &&
+        // A quantity that is not exact is its status, never a number (INV05).
+        (value.quantityStatus === "exact" ? decimal(value.quantity) : value.quantity === null)
+      );
+    case "listed_more_than_once":
+      return (
+        exactKeys(value, ["state", "positionRefs"]) &&
+        list(value.positionRefs, matches(POSITION_REF)) &&
+        value.positionRefs.length > 1
+      );
+    case "not_listed":
+      return exactKeys(value, ["state", "snapshotRef"]) && matches(ARTIFACT_REF)(value.snapshotRef);
+    case "snapshot_scope_ambiguous":
+      return (
+        exactKeys(value, ["state", "snapshotRefs"]) &&
+        list(value.snapshotRefs, matches(ARTIFACT_REF))
+      );
+    case "no_snapshot":
+      return exactKeys(value, ["state"]);
+    default:
+      return false;
+  }
+}
+
+/** One listed line: the full answer's rules of its status, and never an unchanged holding. */
+function validSummaryLine(value: unknown, containers: Record<string, unknown>): boolean {
+  if (
+    !record(value) ||
+    !exactKeys(value, [
+      "container",
+      "sourceAccount",
+      "market",
+      "securityCode",
+      "unitRef",
+      "status",
+      "reasons",
+      "start",
+      "end",
+      "change",
+    ])
+  )
+    return false;
+  const { start, end, reasons, change } = value;
+  if (
+    typeof value.container !== "string" ||
+    !Object.hasOwn(containers, value.container) ||
+    !text(value.sourceAccount) ||
+    !nullableText(value.market) ||
+    !text(value.securityCode) ||
+    !text(value.unitRef) ||
+    !member(HOLDING_CHANGE_STATUSES)(value.status) ||
+    !validReasons(reasons) ||
+    !validSummarySide(start) ||
+    !validSummarySide(end)
+  )
+    return false;
+  for (const [name, side] of [
+    ["start", start],
+    ["end", end],
+  ] as const) {
+    for (const [state, prefix] of Object.entries(SIDE_REASON))
+      if ((side.state === state) !== reasons.includes(`${prefix}_${name}`)) return false;
+    // Both dates listed: a quantity that is not exact is its reason.
+    if (
+      start.state === "listed" &&
+      end.state === "listed" &&
+      (side.quantityStatus !== "exact") !== reasons.includes(`quantity_not_exact_at_${name}`)
+    )
+      return false;
+  }
+  switch (value.status) {
+    case "compared":
+      // An exact zero change is counted as unchanged, never listed.
+      return (
+        reasons.length === 0 &&
+        start.state === "listed" &&
+        end.state === "listed" &&
+        decimal(change) &&
+        change !== "0"
+      );
+    case "listed_at_start_only":
+      return (
+        reasons.length === 0 &&
+        start.state === "listed" &&
+        end.state === "not_listed" &&
+        change === null
+      );
+    case "listed_at_end_only":
+      return (
+        reasons.length === 0 &&
+        start.state === "not_listed" &&
+        end.state === "listed" &&
+        change === null
+      );
+    default:
+      // `not_comparable`: at least one reason and never a figure.
+      return reasons.length > 0 && change === null;
+  }
+}
+
+/** `c1`, `c2`, … each named by a line, in the order the lines first name them. */
+function validContainers(value: unknown, items: Record<string, unknown>[]): boolean {
+  if (!record(value)) return false;
+  const firstSeen: string[] = [];
+  for (const item of items)
+    if (!firstSeen.includes(item.container as string)) firstSeen.push(item.container as string);
+  return (
+    sameList(Object.keys(value), firstSeen) &&
+    firstSeen.every((ref, index) => ref === `c${index + 1}` && CONTAINER_REF.test(ref)) &&
+    Object.values(value).every(
+      (entry) =>
+        record(entry) &&
+        exactKeys(entry, CONTAINER_KEYS) &&
+        text(entry.sourceId) &&
+        text(entry.parserName) &&
+        text(entry.dataset),
+    ) &&
+    // Two refs never name one container.
+    new Set(
+      Object.values(value).map((entry) => {
+        const container = entry as Record<string, unknown>;
+        return JSON.stringify([container.sourceId, container.parserName, container.dataset]);
+      }),
+    ).size === firstSeen.length
+  );
+}
+
+/** Each reason a `not_comparable` holding carries, counted once per holding. */
+function validReasonCounts(value: unknown, notComparable: number): boolean {
+  if (!record(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    validReasons(keys) &&
+    keys.every((key) => count(value[key]) && value[key] > 0 && value[key] <= notComparable) &&
+    // Every holding without a figure carries at least one reason.
+    (notComparable === 0) === (keys.length === 0)
+  );
+}
+
+/**
+ * The summary body: changed lines only, in status order, with the counts that
+ * say how many holdings were not listed (`unchanged`) and why the others have
+ * no figure. A total, a valuation, an unchanged line or a figure for a
+ * quantity that is not exact is refused.
+ */
+export function validReportedHoldingsChangeSummary(value: unknown): boolean {
+  if (
+    !record(value) ||
+    // `next` and `paging` (ADR 0128) beside the deprecated `page`, in the
+    // release that keeps both.
+    !pagedFieldsAbsentOrValid(value) ||
+    !exactKeys(value, [
+      ...(Object.hasOwn(value, "paging") ? (["next", "paging"] as const) : []),
+      "apiVersion",
+      "schemaVersion",
+      "detail",
+      "policy",
+      "zone",
+      "from",
+      "to",
+      "filters",
+      "quantityPolicy",
+      "counts",
+      "unchanged",
+      "reasonCounts",
+      "containers",
+      "items",
+      "page",
+      "coverage",
+      "contextId",
+    ]) ||
+    value.apiVersion !== 2 ||
+    value.schemaVersion !== HOLDINGS_CHANGE_SUMMARY_SCHEMA ||
+    value.detail !== "summary" ||
+    value.policy !== HOLDINGS_CHANGE_POLICY ||
+    value.zone !== REPORTED_STATE_ZONE ||
+    !date(value.from) ||
+    !date(value.to) ||
+    !(value.from < value.to) ||
+    !validFilters(value.filters) ||
+    !text(value.quantityPolicy) ||
+    !digest(value.contextId) ||
+    !validCoverage(value.coverage) ||
+    !record(value.counts) ||
+    !exactKeys(value.counts, HOLDING_CHANGE_STATUSES) ||
+    !count(value.unchanged) ||
+    !record(value.page) ||
+    !exactKeys(value.page, ["offset", "limit", "listed", "hasMore", "nextCursor"]) ||
+    !Array.isArray(value.items) ||
+    value.items.length > BOUND ||
+    !value.items.every(record)
+  )
+    return false;
+  const counts = value.counts;
+  if (!HOLDING_CHANGE_STATUSES.every((status) => count(counts[status]))) return false;
+  const tally = counts as Record<(typeof HOLDING_CHANGE_STATUSES)[number], number>;
+  const page = value.page;
+  const items = value.items as Record<string, unknown>[];
+  const listed =
+    tally.compared -
+    value.unchanged +
+    tally.listed_at_start_only +
+    tally.listed_at_end_only +
+    tally.not_comparable;
+  if (!count(page.offset) || typeof page.limit !== "number") return false;
+  const order = items.map((item) =>
+    (HOLDING_CHANGE_STATUSES as readonly unknown[]).indexOf(item.status),
+  );
+  return (
+    value.unchanged <= tally.compared &&
+    validReasonCounts(value.reasonCounts, tally.not_comparable) &&
+    (HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES as readonly number[]).includes(page.limit) &&
+    page.listed === listed &&
+    (page.offset === 0 || page.offset < listed) &&
+    // A page holds every line it can, up to its size.
+    items.length === Math.min(page.limit, listed - page.offset) &&
+    page.hasMore === page.offset + items.length < listed &&
+    (page.hasMore
+      ? typeof page.nextCursor === "string" && HOLDINGS_CHANGE_CURSOR.test(page.nextCursor)
+      : page.nextCursor === null) &&
+    pagedFieldsSay(value, {
+      next: typeof page.nextCursor === "string" ? { cursor: page.nextCursor } : null,
+      limit: page.limit as number,
+      returned: items.length,
+    }) &&
+    validContainers(value.containers, items) &&
+    items.every((item) => validSummaryLine(item, value.containers as Record<string, unknown>)) &&
+    order.every((index, at) => at === 0 || index >= order[at - 1]!) &&
+    // A page never lists more lines of a status than the comparison holds.
+    HOLDING_CHANGE_STATUSES.every(
+      (status) => items.filter((item) => item.status === status).length <= tally[status],
+    )
+  );
+}
+
+/** Either detail's body: a summary names itself, the full answer has no `detail`. */
+export function validReportedHoldingsChangeAnswer(value: unknown): boolean {
+  return record(value) && Object.hasOwn(value, "detail")
+    ? validReportedHoldingsChangeSummary(value)
+    : validReportedHoldingsChange(value);
 }

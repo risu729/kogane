@@ -708,6 +708,28 @@ Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
 
+## 2026-11-20: foreign time-deposit history
+
+Read-only check in the owner's signed-in Chrome for
+[issue 1243](https://github.com/risu729/kogane/issues/1243). The transaction
+menu's `取引履歴 定期預金` leads to `/pages/da/daea0200/`, whose product list
+offers `円定期預金商品`, `外貨定期預金商品`, `積み立て定期預金` and further
+products, and, for foreign products, a currency list. `表示` with blank dates
+(the screen's default period) sent POST
+`/custom-web00/daea/cust-web/timedeposit-transaction/hystorylist-acquisition`
+with private account fields plus `timeAndSavingsBasisProductTyp=02` (foreign),
+`currencyCd` (ISO code), `rescDnTrNUSg=0`, `rescTrNUSg=0`, `maximumAcqCnt=10`,
+`acquisitionStartCount=1`. For each currency queried, the response was the
+empty shape seen on 2026-11-09: only `errors` with code `EFA00005` and
+`responseBizCommon.bizResult` `8`, matching the visible
+`該当する定期預金はありません。`.
+
+This is a history route searched over the default period, not a contract
+list. It shows no foreign time-deposit activity in that period; it does not
+prove that no older contract is still held, and products such as
+`積み立て定期預金` were not queried separately. A held contract still needs an
+observed schema before any parser is added.
+
 ## 2026-11-11: retained history row order and CSV encoding
 
 Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start
@@ -752,6 +774,19 @@ retained history keeps the legacy same-day/page-order limitation; it is not a
 substitute for the complete official CSV and is not guaranteed to identify a
 day's final transaction. Unrelated sources keep their existing ordering.
 
+## 2026-11-18: a mid-core failure keeps the finished steps
+
+The 2026-11-08 and 2026-11-09 entries above say that an incomplete or
+unavailable CSV, or the page limit, fails the run. Since the
+[ADR 0099 amendment of 2026-11-18](../adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run),
+such a refusal still keeps nothing of the refused history step, but the core
+steps that finished before it (always the balance; for a retained-range
+refusal also the month window under its `monthly-*` names) are stored as a
+`partial` run with the same closed code. Canonical history names appear only
+once the retained step finished. A partial core run is never parsed, so it
+adds no current balance or transaction. No provider was contacted for this
+change.
+
 ## 2026-11-19: currencies outside the minor-unit table
 
 The first scheduled runs of the retained-history query (from fetch run 1923,
@@ -773,3 +808,9 @@ row identities. For the other currencies the row identity uses canonical exact
 decimals (`1.50` and `1.5` are the same row), so the CSV and a JSON page name
 one row. No exponent is added to the shared table here: that would change
 other parsers' outputs and is a separate decision.
+
+WALLET 1.0.8 (2026-11-22) applies the same rule to the monthly WALLET HTML:
+a transaction amount or fee in a currency the table does not name keeps its
+exact decimal, and a signed amount is published without `amountMinor`. 1.0.7
+refused the whole month for such a row. See
+[observations](../observations.md#sony-bank-wallet-a-currency-outside-the-minor-unit-table-keeps-its-exact-decimal-wallet-108).

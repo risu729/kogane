@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline } from "./harness.ts";
 import {
@@ -15,13 +15,14 @@ import {
   state,
   TIME,
 } from "../../../packages/storage-d1/test/instrument-temporal-fixture.ts";
+import { settledTest } from "./support/settle.ts";
 let mf: Miniflare;
 let store: CommandStore;
-beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  store = d1CommandStore(started.env.DB);
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+store = d1CommandStore(started.env.DB);
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

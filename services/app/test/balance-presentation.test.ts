@@ -119,6 +119,7 @@ async function balances(
   url.searchParams.set("account", fixture.rawAccount);
   if (metric) url.searchParams.set("metric", metric);
   if (view) url.searchParams.set("view", view);
+  url.searchParams.set("detail", "full");
   const response = await observationApi(new Request(url), env, url);
   expect(response?.status).toBe(200);
   const body = (await response!.json()) as { latest: PresentedRow[]; history: PresentedRow[] };

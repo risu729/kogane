@@ -52,6 +52,10 @@ result. What exists, read from the code on main at `f33b121`:
    scope multiplies it, and which accounts a scope may name depends on the
    grant contract (today's grant scopes list sources and provider accounts,
    not resolved accounts; ADR 0058, amendment, Limits).
+   _Pointer (2026-11-18): [ADR 0116](0116-reconstructed-state-account-scope.md)
+   takes this option up: a scope costs one load and one read per date, not
+   one per account, and every caller reads with the whole-store grant since
+   ADR 0084._
 3. **Holdings changes from adopted events.** Not possible: no event moves a
    security quantity (above).
 4. **Reported holdings changes between two dates.** Chosen. It needs no new
@@ -327,7 +331,7 @@ compares its answer with the route's.
 
 ## Amendment 2026-11-18: the page's source and account filters
 
-- Status: proposed
+- Status: accepted (merged 2026-11-18 in [#1388](https://github.com/risu729/kogane/pull/1388))
 - Date: 2026-11-18
 - Replaces: the 2026-11-06 amendment's limit that the page "does not offer
   the `source` or `account` filters the route takes"
@@ -382,3 +386,241 @@ unknown source and account notices and the accessibility audit of the
 filtered panel; `apps/web/test/reported-holdings-change-contract.test.ts`
 checks the shared request rule; the route's refusal tests in
 `services/app/test/reported-holdings-change-api.test.ts` run unchanged.
+
+## Amendment 2026-11-19: a summary that lists changed lines only
+
+- Status: accepted (merged 2026-11-20 in [#1459](https://github.com/risu729/kogane/pull/1459)). Owner approval was required before merge: it changes the
+  published input schema and the default answer of
+  `kogane.reported-holdings-change.read` and of its route.
+- Date: 2026-11-19
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414) (MCP
+  everyday questions: one or two calls, each answer under 8 KB), question Q12
+  "How did my holdings change since last month?" and gap G6 of the plan
+  [MCP everyday questions](../plans/2026-11-mcp-everyday-questions.md)
+- Follows: the `detail` pattern of
+  [ADR 0123](0123-summary-detail-for-large-reads.md) (the balance,
+  schedule and collection quality reads answer a summary by default; merged
+  2026-11-20 in [#1458](https://github.com/risu729/kogane/pull/1458)), and the
+  cursor conventions of [ADR 0119](0119-cursor-page-size.md) (a cursor
+  continues at another offered page size; merged 2026-11-20 in
+  [#1446](https://github.com/risu729/kogane/pull/1446)). Neither is needed to build this one:
+  the summary is shaped in `packages/domain` and pages with the keyset cursor
+  format already in `packages/domain/src/paging.ts`.
+- Carried by: `packages/domain/src/holdings-change-summary.ts`,
+  `packages/observation-shared/src/reported-holdings-change-contract.ts`,
+  `services/app/src/reported-holdings-change-api.ts`,
+  `services/app/src/page-read-tools.ts`,
+  `apps/web/src/reported-holdings-change-api.ts`
+
+### Context
+
+Q12 takes one call today, but the answer lists every holding key of both
+dates, the unchanged ones included, each with both sides' capture time,
+capture date, age, freshness, resolved account and instrument with their
+identity statuses, the provider's text and the decimal quantity object, and a
+manifest that repeats every key. An MCP client shows the first 8 KB of a tool
+result. Measured as the bytes of the MCP result (`{ schemaVersion, data }`,
+the text a client reads) on synthetic stores:
+
+| Store                                                                                                                                 | Before (`full`, the only answer) | After, default `summary`                         |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------: | ------------------------------------------------ |
+| The route's store in `page-read-holdings-change.test.ts`: 80 SBI-shaped domestic holdings, 70 grown, 5 unchanged, 3 removed, 2 added  |                          135,855 | 8 pages of 10 lines, 3,151–5,627 B each          |
+| `holdings-change-summary.test.ts`: 65 holdings at the longest key shape (deposit-type account, market, 12-character code, 8 decimals) |                          106,096 | first page 6,017 B                               |
+| The same shape at the side bound, 500 holdings, every line listed                                                                     |                          806,200 | 50 pages of 10, 5,517–6,147 B; 25 lines 13,026 B |
+
+The owner's store measured 20–250 KB for this read (issue 1414's audit).
+
+### Options considered
+
+1. **`detail: summary | full`, `summary` the default on the route and the
+   tool, the page asking for `full` (chosen).** The pattern ADR 0123 proposes
+   for three other reads, so one argument means the same on every read that
+   has it. The route and the tool take the same `detail` with the same
+   default, so ADR 0081's "the same answer as the route for the same input"
+   stays literal.
+2. **The same with `full` the default.** No published answer changes, but an
+   agent that does not pass the argument still receives an answer it cannot
+   see, which is Q12's problem (ADR 0123, option 2).
+3. **A filter `changes: only` on the full shape.** A full holding is about
+   1.7 KB at the realistic shape with its manifest entry (135,855 B for 80
+   holdings: both sides' provenance and identity), so fewer than five fit in
+   8 KB; and the manifest, which the contract checks
+   against the body holding by holding, would either list holdings the body
+   drops or stop pinning them.
+4. **A total per unit beside the lines.** Rejected: this ADR's decision 6
+   never adds holdings, one unit can be held under several provider accounts
+   or containers that the key keeps apart, and Q12 asks what changed, not a
+   sum. The summary states `total: "not-computed"` as the full answer does.
+5. **A compact default on MCP only.** The tool would answer what its route
+   does not, the special case ADR 0081 point 2 excludes.
+
+### Decision
+
+1. **Input.** The route takes `detail` (`summary` or `full`; absent is
+   `summary`), and, with the summary, `limit` (10, 25, 50 or 100 lines;
+   absent is 10) and `cursor`. `kogane.reported-holdings-change.read` takes
+   the same three. Another `detail` or `limit`, a malformed `cursor` (not
+   base64url, or over 512 characters), or a `limit` or `cursor` with
+   `detail=full` is `400 invalid_query` on the route (`holdingsChangeQueryRefusal`,
+   which the page also applies), and a `detail` outside the closed schema is
+   `400 invalid_request` on the tool.
+2. **`full`** is the comparison as decisions 1–7 answer it, byte for byte the
+   route's answer before this amendment, unpaged, without a `detail` key.
+3. **The summary** (`reported-holdings-change-summary-v1`) is
+   `summarizeHoldingsChange` of that same comparison: it reads nothing the
+   full answer does not and adds no state.
+   - **Lines.** Every holding except a `compared` one whose exact change is
+     zero: `compared` with a nonzero change, `listed_at_start_only`
+     (removed), `listed_at_end_only` (added) and `not_comparable`, in that
+     order, key order within. A `compared` holding with a zero change is
+     counted in `unchanged`, never listed. A holding whose change cannot be
+     determined (a missing, unparsed or conflicting quantity on either side,
+     an ambiguous key or scope, no capture on a date, the same capture on
+     both dates, an identity that differs) is `not_comparable` and is always
+     listed with its reasons (INV05), and `reasonCounts` counts the holdings
+     that carry each reason (a holding may carry several).
+   - **A line** is `{ container, sourceAccount, market, securityCode,
+     unitRef, status, reasons, start, end, change }`. `container` is a
+     page-local ref (`c1`, `c2`, … in order of first use) into `containers`
+     (`sourceId`, `parserName`, `dataset`). A side is `listed` with its
+     `positionRef`, `quantity` (the exact decimal as text, or null) and
+     `quantityStatus` (`exact`, `missing`, `unparsed`, `conflict`); `not_listed`
+     with the `snapshotRef` of the capture that does not list it;
+     `listed_more_than_once` with its `positionRefs`;
+     `snapshot_scope_ambiguous` with its `snapshotRefs`; or `no_snapshot`.
+     `change` is end minus start as exact decimal text, only on `compared`.
+     Each line keeps its own unit and the refs that read it in full
+     (`kogane.observations.get` with the position or artifact id). Dropped:
+     each side's capture time, capture date, age and freshness (stale
+     captures stay in `coverage`), the resolved account and instrument and
+     their identity statuses (a difference stays as `account_differs` or
+     `instrument_differs`), the provider's text, the decimal-v1 object and
+     the manifest.
+   - **The answer** carries the full answer's `from`, `to`, `filters`,
+     `quantityPolicy`, `counts` (per status, over every holding), `coverage`
+     (containers without a capture, stale snapshots, `total` and `valuation`
+     `"not-computed"`) and `contextId`, plus `unchanged`, `reasonCounts`,
+     `containers`, `items` and `page` (`offset`, `limit`, `listed`: every
+     listed line on all pages, `hasMore`, `nextCursor`).
+4. **Paging.** A page is lines `offset` to `offset + limit` of the listed
+   lines. The cursor is the keyset cursor of `paging.ts` (`s` the
+   comparison's `contextId`, `f` a digest of the summary schema, the dates
+   and the filters, `t` the next offset), bound to neither the page size nor
+   the detail (ADR 0119's rule). A cursor that does not decode, names a
+   position outside the lines or carries a read instance or sort key is
+   `400 invalid_cursor`; one of other dates or filters `400 cursor_mismatch`
+   with `mustMatch` naming `from`, `to`, `source` and `account` (ADR 0123's
+   body for a refused cursor);
+   one of the same request whose comparison has another `contextId` (a new
+   capture, mapping, parse or reported context) `410 context_expired`, never
+   a page of the new comparison. Every page computes the comparison again.
+5. **The context id.** The summary's `contextId` is its comparison's, the
+   same as the full answer's for the same request: it names what both details
+   describe, so a summary line can be checked against the full answer. It
+   changes with every input decision 6's manifest pins (dates, filters,
+   quantity policy, both reported context ids and every key's refs, status
+   and reasons); what the reported context ids do not pin yet is under
+   Limits. `detail`, `limit` and `cursor` choose which part of the
+   comparison is shown, not what it is, so they are not in it.
+6. **The page** keeps its full answer: `useReportedHoldingsChange` sends
+   `detail=full` and refuses any answer that is not the full shape.
+7. **Contract.** `validReportedHoldingsChangeSummary` checks the summary:
+   exact keys; closed statuses, reasons, side states and value statuses; a
+   side's own reason; `quantity_not_exact_at_*` exactly when both dates list
+   the key and that side is not exact; a quantity only when exact; a change
+   only on `compared`, as canonical exact decimal text and never `"0"`;
+   lines in status order; `listed` equal to the counts minus `unchanged`;
+   every line the page can hold; `hasMore` and `nextCursor` agreeing;
+   `containers` defined once each in order of first use; `reasonCounts`
+   within the closed list and the `not_comparable` count; no total.
+   `validApiResponse` takes either detail (a body with `detail` is the
+   summary); the page applies `validReportedHoldingsChange` itself.
+8. **Audit.** A summary page is recorded with its line count and as
+   truncated while lines follow (the page-read rule: `items`, `page.hasMore`).
+
+### Consequences
+
+- Q12 is one call under 8 KB; a month with more than ten changed lines is
+  one more call per ten lines, or one call with `limit: 25` where the lines
+  are short.
+- A client of the route that relied on the full default must ask for
+  `detail=full`. The repository's only client, the web page, does.
+- ADR 0123 merged with its D2 as proposed (`summary` the default on the
+  routes too), the same default as this read.
+- [#1445](https://github.com/risu729/kogane/pull/1445) (the reported state's
+  context id v2, merged 2026-11-20) pins more inputs in the reported context ids this
+  comparison's manifest carries (mappings, the account filter, containers
+  without a snapshot). It touches no file of this amendment; since it merged,
+  a summary cursor also expires on a mapping correction that leaves every
+  key's status and reasons as they were, which is the stricter, correct
+  answer.
+
+### Limits
+
+- Headroom: the default page is about 5.6 KB at the realistic SBI shape and
+  6.1 KB at the longest shape measured, with two containers without a
+  capture in `coverage`. `coverage` is repeated on every page and grows with
+  each stale snapshot and missing container (about 110 bytes each), so about
+  eighteen of them on top of the longest lines would pass 8 KB. A page of 25
+  lines at the longest shape is about 13 KB (the caller asked for it).
+- `full` is unchanged and still past 8 KB on any store with more than a few
+  holdings; it is the page's answer and the evidence view.
+- Each page recomputes the comparison (two dated reads and two keyed reads;
+  about 1.2 s at `STATEMENT_SCALE`, decision 7's measurement), so walking ten
+  pages costs ten comparisons. Not measured on workerd or D1.
+- Until #1445 merges, the reported context ids do not pin the containers
+  without a snapshot, so a migration that adds a position container between
+  two pages changes `coverage` under the same cursor.
+
+### Verification
+
+Synthetic data only.
+
+- `packages/domain/test/holdings-change-summary.test.ts`: changed, unchanged
+  (two exact zero changes, one written `3.000`), removed, added and
+  `not_comparable` lines in status order; a missing, unparsed and conflicting
+  quantity on either side listed with its reason and status and no number;
+  no capture at the start and the same capture on both dates listed, never
+  unchanged; one code in two markets and two provider accounts listed as
+  three lines in their own units, with no total; an all-unchanged comparison
+  lists nothing; the account filter's kept set; a 65-line walk at sizes 25,
+  10, 50 and 100 joins into every listed line once in order; a cursor that
+  does not decode, of other filters or dates, of a moved comparison, or
+  forged at offset 0 or past the lines, with a sort key or a read instance,
+  is refused with its code; a size outside the offered list is refused; and
+  the sizes above (every default page at the bound under 8 KB, 25 lines
+  over it). Every page it builds passes the contract.
+- `apps/web/test/reported-holdings-change-contract.test.ts`: the summary of
+  the query's own answers is valid on four ranges; each detail's validator
+  refuses the other's body; a total, a valuation, a listed zero change, a
+  change that is not canonical (`2.50`, `-0`, `1e3`, a number) or not on
+  `compared`, a number for a quantity that is not exact, a missing
+  `quantity_not_exact_*` or side reason, wrong `unchanged`, `reasonCounts`,
+  counts, `listed`, `hasMore`, `nextCursor` or `limit`, a dropped or
+  reordered line, and a container ref that is undefined, unused, out of
+  order or duplicated are refused; the request rule takes `detail`, `limit`
+  and `cursor` and refuses the shapes in decision 1.
+- `services/app/test/reported-holdings-change-api.test.ts`: the default
+  answer is the summary; `detail=full` is the text of
+  `{ apiVersion: 2, …queryHoldingsChange(…) }` byte for byte, with the same
+  `contextId`; the refusals of decision 1 and `invalid_cursor`; the existing
+  full-answer tests ask for `detail=full` and pass unchanged otherwise.
+- `services/app/test/page-read-holdings-change.test.ts` (80 holdings): the
+  route, `/api/agent/v1/*` and `/mcp` give the same answer for the default,
+  `detail=summary`, `limit=25`, a continuation at another size and
+  `detail=full`, and write nothing; the MCP pages are each under 8 KB and
+  join into the 75 listed lines (70 grown, 3 removed, 2 added) with the 5
+  unchanged counted; a line's position ref reads its position through
+  `kogane.observations.get`; `cursor_mismatch`, `invalid_cursor` and
+  `invalid_query` are the same on the route and the tool; a capture recorded
+  after a page expires its cursor (`410 context_expired`) on both; a grant
+  without `records.read` or narrower than the whole store is refused under
+  either detail; the audit records 10 lines truncated and 75 lines not.
+- `services/app/test/ui-mcp-parity.test.ts`: the tool's description is at
+  most 2,048 characters and names `detail`, both details, every status,
+  `unchanged`, `quantityStatus` and the three non-exact value statuses,
+  `reasonCounts`, `containers`, the page sizes, the cursor codes,
+  `contextId` and `not-computed`; `agent-api.test.ts` pins the input schema.
+- `apps/web/test/reported-holdings-change.browser.test.ts`: the page sends
+  `detail=full` with its parameters, and its synthetic server answers only
+  that.

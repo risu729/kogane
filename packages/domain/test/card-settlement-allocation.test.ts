@@ -486,6 +486,29 @@ describe("a refused debit that could pay still competes (as in ADR 0057)", () =>
     ]);
     expect(codesOf(only(result))).toEqual(["candidate_not_unique", "excluded_debit_competes"]);
   });
+  test("a stated limit: a refused debit does not compete across statements", () => {
+    // Statement 1 (3,000) has the one candidate {debit 1}. Statement 2 (4,000)
+    // could be paid by debit 1 and a 1,000 debit. Admitted, that debit puts
+    // debit 1 in both statements' candidates and makes both needs_review;
+    // refused (dateless, or an unresolved duplicate pair), it completes no sum
+    // of statement 1, which stays proposed (docs/card-settlements.md).
+    const statements = [statement(1, 3000), statement(2, 4000)];
+    const status = (debits: AllocationDebitInput[]) =>
+      run(statements, debits).statements.map((item) => [item.outcome.status, codesOf(item)]);
+    const shared = ["candidate_not_unique", "debit_in_other_statement_allocation"];
+    expect(status([debit(1, 3000), debit(2, 1000)])).toEqual([
+      ["needs_review", shared],
+      ["needs_review", shared],
+    ]);
+    for (const refused of [
+      [debit(2, 1000, dateless)],
+      [debit(2, 1000, { alias: "shared-alias" }), debit(3, 1000, { alias: "shared-alias" })],
+    ])
+      expect(status([debit(1, 3000), ...refused])).toEqual([
+        ["proposed", []],
+        ["unsupported", ["no_exact_allocation", "in_window_debits_below_total"]],
+      ]);
+  });
   test("a statement without a candidate stays unsupported", () => {
     expect(only(run([statement(1, 3000)], [debit(1, 3000, dateless)])).outcome).toEqual({
       status: "unsupported",

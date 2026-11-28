@@ -175,6 +175,30 @@ export function reader(
         .sort((a, b) => (a.as_of! < b.as_of! ? 1 : a.as_of! > b.as_of! ? -1 : b.id - a.id))
         .slice(query.offset, query.offset + 501);
     },
+    // Like the SQL reader: rows of the scope whose as_of starts with no calendar date.
+    undatedTransactions: async (query) => {
+      calls.push(`undated:${query.source ?? "*"}/${query.account ?? "*"}`);
+      const counts = new Map<
+        string,
+        { source_id: string; source_account: string; row_count: number }
+      >();
+      for (const row of transactions) {
+        if (query.source !== undefined && row.source_id !== query.source) continue;
+        if (query.account !== undefined && row.source_account !== query.account) continue;
+        const day = row.as_of?.slice(0, 10) ?? "";
+        const time = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
+        if (!Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === day) continue;
+        const key = `${row.source_id}\u0000${row.source_account}`;
+        const count = counts.get(key) ?? {
+          source_id: row.source_id,
+          source_account: row.source_account,
+          row_count: 0,
+        };
+        count.row_count += 1;
+        counts.set(key, count);
+      }
+      return [...counts.values()];
+    },
     listLatestBalances: async (query) => {
       calls.push(`balances:${query.source ?? "*"}/${query.account ?? "*"}`);
       return balances
@@ -237,6 +261,20 @@ export function observationDetail(source: string, account: string): ObservationD
   };
 }
 
-export function explainReader(detail: ObservationDetail | undefined): ExplainReader {
-  return { getObservation: async () => detail };
+/**
+ * A stub reader whose organization is the detail's own `organization`; the
+ * identity modes it was asked for are recorded in `organizationReads`.
+ */
+export function explainReader(
+  detail: ObservationDetail | undefined,
+): ExplainReader & { organizationReads: string[] } {
+  const organizationReads: string[] = [];
+  return {
+    organizationReads,
+    getObservation: async () => detail,
+    getOrganization: async (ref, mode) => {
+      organizationReads.push(`${ref.kind}:${String(ref.id)}@${mode}`);
+      return detail?.organization;
+    },
+  };
 }

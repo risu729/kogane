@@ -106,7 +106,7 @@ export interface ApiCapabilities {
   readonly identityReadModes: readonly IdentityReadMode[];
   /** Pagination of the v1 list routes. */
   readonly paginationVersion: PaginationVersion;
-  /** `/api/v2/balances/latest` and `/api/v2/balances/history` are served. */
+  /** `/api/v2/balances/latest`, `/history` and `/cash` are served. */
   readonly balancesV2: boolean;
   /** Pagination of the v2 balance routes; `none` when they are not served. */
   readonly balancesV2Pagination: PaginationVersion;
@@ -178,9 +178,10 @@ export interface ApiCapabilities {
    */
   readonly reportedStateOnDate?: boolean;
   /**
-   * `GET /api/v2/reconstructed-state` is served: one account's balances
-   * reconstructed from adopted events over a range, beside the reported state
-   * at both ends, at a cut of the economic commit log. Served exactly where
+   * `GET /api/v2/reconstructed-state` is served: the balances of one account,
+   * or of a scope of up to 20 (ADR 0116), reconstructed from adopted events
+   * over a range, beside the reported state at both ends, at a cut of the
+   * economic commit log. Served exactly where
    * `reportedStateOnDate` is; without CORE 0070 it answers `unavailable`.
    */
   readonly reconstructedStateOnDate?: boolean;
@@ -191,6 +192,16 @@ export interface ApiCapabilities {
    * the server reads has `report_artifacts` (CORE 0034).
    */
   readonly reportArtifacts?: boolean;
+  /**
+   * `GET /api/v2/decisions/pending` is served: what waits for the owner's
+   * decision, one line per kind (ADR 0126), the ホーム page's 判断待ち panel.
+   * The App Worker serves it wherever it runs; a store without the route
+   * (the local evidence browser) leaves it off, so the panel discovers the
+   * route instead of probing for it. Not an authorization decision: the
+   * route is the operator's and refuses anyone else.
+   */
+  readonly pendingDecisions?: boolean;
+  readonly changesSince?: boolean;
   /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
@@ -229,6 +240,8 @@ export const LOCAL_STORE_CAPABILITIES = {
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
   reportArtifacts: false,
+  pendingDecisions: false,
+  changesSince: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -266,6 +279,8 @@ export const CENTRAL_STORE_CAPABILITIES = {
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
   reportArtifacts: false,
+  pendingDecisions: false,
+  changesSince: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -279,7 +294,8 @@ export type CapabilityRequirement =
   | "measureViews"
   | "identityReadModes"
   | "balancesV2"
-  | "rewardsV2";
+  | "rewardsV2"
+  | "sharedQuery";
 
 /**
  * The reward routes as this Worker advertises them. `readModel` says whether a
@@ -318,9 +334,16 @@ export function withBalancesV2(
 
 /**
  * Every query parameter a list endpoint understands, keyed by path. Paths
- * absent here (metadata, overview, details, raw bytes) accept no parameters.
+ * absent here (metadata, details, raw bytes) accept no parameters.
  */
 export const LIST_REQUEST_SCHEMA = {
+  // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-19). The
+  // summary is shaped by the shared application service, so a store that
+  // does not advertise `sharedQuery` (the local store) answers the full
+  // overview only and refuses the parameter.
+  "/api/overview": {
+    detail: "sharedQuery",
+  },
   "/api/transactions": {
     source: "collectionFilters",
     account: "collectionFilters",
@@ -339,6 +362,9 @@ export const LIST_REQUEST_SCHEMA = {
     offset: "paginationVersion:offset-v1",
     latestOffset: "paginationVersion:offset-v1",
     identityRead: "identityReadModes",
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-20),
+    // gated as on `/api/overview`: the local store answers its full list only.
+    detail: "sharedQuery",
   },
   "/api/positions": {
     source: "collectionFilters",
@@ -363,6 +389,8 @@ export const LIST_REQUEST_SCHEMA = {
     identityRead: "identityReadModes",
     cursor: "balancesV2",
     limit: "balancesV2",
+    // `summary` (the default) or `full` (ADR 0123).
+    detail: "balancesV2",
   },
   "/api/v2/balances/history": {
     source: "collectionFilters",
@@ -370,6 +398,18 @@ export const LIST_REQUEST_SCHEMA = {
     instrument: "collectionFilters",
     metric: "collectionFilters",
     view: "measureViews",
+    identityRead: "identityReadModes",
+    cursor: "balancesV2",
+    limit: "balancesV2",
+    // `summary` (the default) or `full` (ADR 0123).
+    detail: "balancesV2",
+  },
+  // Cash per account (ADR 0123, amendment 2026-11-20): one detail, its own
+  // lines, so no `metric`, `view` or `detail`.
+  "/api/v2/balances/cash": {
+    source: "collectionFilters",
+    account: "collectionFilters",
+    instrument: "collectionFilters",
     identityRead: "identityReadModes",
     cursor: "balancesV2",
     limit: "balancesV2",
@@ -385,6 +425,7 @@ export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
 export const LIST_PATH_CAPABILITY: Partial<Record<ListPath, CapabilityRequirement>> = {
   "/api/v2/balances/latest": "balancesV2",
   "/api/v2/balances/history": "balancesV2",
+  "/api/v2/balances/cash": "balancesV2",
 };
 
 export function isListPath(path: string): path is ListPath {
@@ -408,6 +449,8 @@ export function capabilityGrants(
       return capabilities.balancesV2;
     case "rewardsV2":
       return capabilities.rewardsV2;
+    case "sharedQuery":
+      return capabilities.sharedQuery;
   }
 }
 
@@ -432,7 +475,10 @@ export const REWARD_REQUEST_SCHEMA = {
   "/api/v2/rewards/holdings": ["program", "offset"],
   // `cursor` and `limit` page a published reward snapshot (U16); `offset`
   // stays for the request-time answer a deployment without one still gives.
-  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+  // `from` (inclusive, default today in Asia/Tokyo) and `before` (exclusive)
+  // window the deadlines; `detail` is `full` (default) or `summary` (ADR 0049,
+  // amendment of 2026-11-19).
+  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit", "from", "before", "detail"],
   // The saved simulations of a published snapshot, with their reproducibility
   // (U16, G2-20). Served only where `rewardsV2ReadModel` is `read-d1`; without
   // a snapshot it is `503`, never an empty success.

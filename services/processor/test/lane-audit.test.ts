@@ -8,18 +8,25 @@
 // writer could add while the lane runs — an operator's decision, an agent's
 // proposal — which the record must not name. The purchase recognition lane's
 // own rows are covered end to end in `card-purchase-lane-audit.test.ts`.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
-import { LANE_AUDIT, RECONCILIATION_RULE_ACTOR, resolveLaneRef } from "../src/lane-audit.ts";
+import {
+  LANE_AUDIT,
+  markLaneAudit,
+  RECONCILIATION_RULE_ACTOR,
+  recordLaneAudit,
+  resolveLaneRef,
+} from "../src/lane-audit.ts";
 import { LANE_TICK_COUNTS } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -233,6 +240,54 @@ test("idle ticks, a lane that wrote nothing, a flag that is off and an unaudited
   expect((await laneRecords()).length).toBe(before);
 });
 
+test("a lane named like a built-in property is an unaudited lane: no mark, no record, no log line and no reference", async () => {
+  const before = (await laneRecords()).length;
+  const lines: string[] = [];
+  const log = (line: string) => lines.push(line);
+  // A mark an audited lane took, then a proposal any writer could add.
+  const mark = await markLaneAudit(env.DB, "reconciliation_sweep", log);
+  expect(mark).not.toBeNull();
+  const id = await proposal("provider_same");
+  const refs = [
+    "decision-revisions:1-2",
+    "commit-seq:synthetic-epoch:1-2",
+    `proposals:reconciliation-provider-same:1-${Number.MAX_SAFE_INTEGER}`,
+    `proposals:card-settlement-candidate:1-${Number.MAX_SAFE_INTEGER}`,
+    `proposals:maintenance-survey-new:1-${Number.MAX_SAFE_INTEGER}`,
+  ];
+  // The audited lane's own reference still resolves: the refusal below is the lane's.
+  expect(await resolveLaneRef(env.DB, "reconciliation_sweep", refs[2]!)).toContain(id);
+  for (const lane of [
+    "constructor",
+    "toString",
+    "__proto__",
+    "hasOwnProperty",
+    "valueOf",
+    "unknown_lane",
+  ]) {
+    expect(await markLaneAudit(env.DB, lane, log)).toBeNull();
+    await recordLaneAudit(
+      env.DB,
+      lane,
+      mark,
+      { outcome: "ran", result: {} },
+      "corr-synthetic",
+      log,
+    );
+    await recordLaneAudit(
+      env.DB,
+      lane,
+      mark,
+      { outcome: "failed", code: "synthetic_code" },
+      "corr-synthetic",
+      log,
+    );
+    for (const ref of refs) expect(await resolveLaneRef(env.DB, lane, ref)).toBeNull();
+  }
+  expect(lines).toEqual([]);
+  expect((await laneRecords()).length).toBe(before);
+});
+
 test("a tick that threw after writing is one failed record with its code; one that wrote nothing is none", async () => {
   const before = (await laneRecords()).length;
   await runScheduled(
@@ -333,4 +388,47 @@ test("a record that cannot be written is logged with a safe code and changes not
   expect(failures).toHaveLength(1);
   expect(failures[0]).toMatchObject({ lane: "reconciliation_sweep" });
   expect(JSON.stringify(failures)).not.toContain("synthetic refusal");
+});
+
+test("a mark that cannot be read names only a closed audit code or a built-in error class", async () => {
+  class Synthetic_private_account_label extends Error {}
+  const refuse = () => {
+    throw new Error("synthetic private trap");
+  };
+  const hostile = new Proxy({}, { get: refuse, getPrototypeOf: refuse, has: refuse });
+  const coded = (code: unknown, error: Error = new Error("synthetic")) =>
+    Object.assign(error, { code });
+  const alternating = () => {
+    let reads = 0;
+    return Object.defineProperty(new Error("synthetic"), "code", {
+      get: () => (reads++ === 0 ? "audit_record_invalid" : "synthetic_private_label"),
+    });
+  };
+  for (const [thrown, code] of [
+    [new Synthetic_private_account_label("synthetic"), "Error"],
+    ["synthetic private text", "unknown"],
+    [hostile, "unknown"],
+    // A lower-case `code` that no audit builder throws is free text too.
+    [coded("synthetic_private_label"), "Error"],
+    [coded("synthetic_private_label", new Synthetic_private_account_label()), "Error"],
+    [coded("audit_record_invalid", new TypeError("synthetic")), "audit_record_invalid"],
+    [coded("audit_diff_invalid"), "audit_diff_invalid"],
+    // A getter that names a closed code once and free text after is read once.
+    [alternating(), "audit_record_invalid"],
+  ] as const) {
+    const lines: string[] = [];
+    const mark = await markLaneAudit(
+      {
+        prepare: () => {
+          throw thrown;
+        },
+      } as unknown as D1Database,
+      "reconciliation_sweep",
+      (line) => lines.push(line),
+    );
+    expect(mark).toBeNull();
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      { event: "lane_audit_record_failed", lane: "reconciliation_sweep", code },
+    ]);
+  }
 });

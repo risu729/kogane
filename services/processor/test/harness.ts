@@ -134,6 +134,9 @@ function assertBindings(value: unknown): asserts value is Env {
   }
 }
 
+/** When a seeded parse run is published unless the caller says otherwise. */
+const PUBLISHED_AT = "2026-09-07T00:00:00.000Z";
+
 /** Publish a successful parse run the way the pipeline writer does
  * (docs/publication-gate.md): move the (artifact, parser) pointer and record
  * the event. A parse run seeded directly with status 'ok' is an unadopted
@@ -143,9 +146,19 @@ function assertBindings(value: unknown): asserts value is Env {
 export async function publishParse(
   db: D1Database,
   parseRunId: number,
-  publishedAt = "2026-09-07T00:00:00.000Z",
+  publishedAt = PUBLISHED_AT,
 ): Promise<void> {
-  await db.batch([
+  await db.batch(publishParseStatements(db, parseRunId, publishedAt));
+}
+
+/** The statements of `publishParse`, in its order, for a caller that seeds
+ * many runs in one batch instead of a batch per run. */
+export function publishParseStatements(
+  db: Pick<D1Database, "prepare">,
+  parseRunId: number,
+  publishedAt = PUBLISHED_AT,
+): D1PreparedStatement[] {
+  return [
     db
       .prepare(
         `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
@@ -164,7 +177,7 @@ export async function publishParse(
           parser_version=excluded.parser_version,published_at=excluded.published_at,publication_kind='normal',release_id=NULL`,
       )
       .bind(parseRunId, publishedAt),
-  ]);
+  ];
 }
 
 /** Seed one synthetic successful run with one artifact. Sealing goes through

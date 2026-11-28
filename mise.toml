@@ -14,20 +14,20 @@ lockfile = true
 [tools]
 bun = "1.4.4"
 node = "26.13.1"
-hk = "2.13.0"
+hk = "2.14.0"
 oxlint = "1.72.0"
 oxfmt = "0.75.0"
 jactionlint = "v2.6.0"
 shellcheck = "0.11.0"
 ghalint = "1.6.0"
 pinact = "5.0.2"
-zizmor = "1.32.0"
+zizmor = "1.33.1"
 tombi = "1.11.3"
 yamlfmt = "0.21.0"
-uv = "0.13.9"
+uv = "0.13.10"
 yamllint = "1.38.0"
 typos = "1.52.2"
-ruff = "0.17.5"
+ruff = "0.17.6"
 
 [settings]
 experimental = true
@@ -122,7 +122,7 @@ description = "Render config/ingest-clients.json to the idempotent CORE bootstra
 run = "bun scripts/config-bootstrap.ts"
 
 [tasks."ledger:deps"]
-description = "Regenerate infra/dependency-resolution.md from the root bun.lock."
+description = "Regenerate infra/dependency-resolution.md from the root bun.lock and each container/package-lock.json."
 run = "bun scripts/dependency-ledger.ts"
 
 [tasks."load-fixture"]

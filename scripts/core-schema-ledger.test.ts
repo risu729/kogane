@@ -21,6 +21,7 @@ import {
   applyMigrations,
   buildSchemaLedger,
   describeSchema,
+  insertTarget,
   renderSchemaMarkdown,
   splitSqlStatements,
 } from "./core-schema-ledger.ts";
@@ -206,6 +207,46 @@ describe("G0-01 CORE schema ledger", () => {
     expect(ledger.summary.migrationsWithInserts).toContain("0024_observation_decimals.sql");
     expect(ledger.summary.migrationsWithInserts).toContain("0029_decision_log.sql");
     expect(ledger.summary.migrationsWithInserts).not.toContain("0001_initial.sql");
+    // 0095 writes its rows through a recursive CTE (`WITH RECURSIVE … INSERT
+    // OR IGNORE INTO`): a statement that does not begin with INSERT still
+    // writes rows, and the inventory must say so.
+    expect(
+      ledger.migrations.find((entry) => entry.file === "0095_sbi_vc_classic_unit_eligibility.sql")
+        ?.insertStatements,
+    ).toEqual([{ table: "dataset_snapshot_policies", kind: "seed-or-backfill" }]);
+  });
+
+  test("an INSERT behind a common table expression, and a REPLACE, are inserts", () => {
+    expect(insertTarget("INSERT INTO a (x) VALUES (1)")).toBe("a");
+    expect(insertTarget("insert or ignore into b SELECT 1")).toBe("b");
+    expect(insertTarget("REPLACE INTO c (x) VALUES (1)")).toBe("c");
+    expect(
+      insertTarget(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3), m AS (SELECT 'INSERT INTO z' AS t)\nINSERT OR IGNORE INTO d (i) SELECT i FROM n",
+      ),
+    ).toBe("d");
+    expect(insertTarget("WITH m AS (SELECT 1) REPLACE INTO e SELECT * FROM m")).toBe("e");
+    // A quoted name that reads like a keyword neither hides nor fakes a write,
+    // and a quoted target table is still counted, as `(unknown)`.
+    expect(insertTarget('WITH "insert" AS (SELECT 1) INSERT INTO k SELECT 1')).toBe("k");
+    expect(insertTarget('WITH "select" AS (SELECT 1) REPLACE INTO l SELECT 1')).toBe("l");
+    expect(insertTarget('INSERT INTO "m" VALUES (1)')).toBe("(unknown)");
+    // A CTE that feeds an UPDATE or a SELECT writes no new rows, text in quotes
+    // or parentheses is not this statement's, and a trigger body's INSERT runs
+    // when the trigger fires, not when the migration does.
+    expect(insertTarget("WITH m AS (SELECT 1) UPDATE f SET x = 1")).toBeUndefined();
+    expect(insertTarget("UPDATE g SET note = 'INSERT INTO h'")).toBeUndefined();
+    expect(
+      insertTarget("CREATE TRIGGER t AFTER UPDATE ON i BEGIN INSERT INTO j VALUES (1); END"),
+    ).toBeUndefined();
+    expect(insertTarget("WITH m AS (SELECT 'INSERT INTO n') SELECT * FROM m")).toBeUndefined();
+    // Comments are gone before the statement is read, apostrophes and
+    // parentheses in them included.
+    expect(
+      splitSqlStatements(
+        "-- don't (INSERT INTO o\nWITH m AS (SELECT 1 /* it's ( */) INSERT INTO p SELECT 1;\n/* INSERT INTO q */ SELECT 1;",
+      ).map(insertTarget),
+    ).toEqual(["p", undefined]);
   });
 });
 

@@ -1,6 +1,6 @@
 # ADR 0109: Isolate SBI supplementary completeness from core publication
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1310](https://github.com/risu729/kogane/pull/1310))
 - Date: 2026-11-11
 
 ## Context
@@ -85,3 +85,37 @@ jobs and the production reader for each refusal trigger. Negative cases retain d
 core refusal. Legacy-to-new income/gains tests cover corrected and empty
 containers, refusal fallback and historical cutoff. Migration tests verify
 exact scope, idempotence and preservation of every nondefault policy field.
+
+## Amendment 2026-11-19: SBI Shinsei's importer partition joins the native one
+
+Status: accepted (merged 2026-11-20 in [#1435](https://github.com/risu729/kogane/pull/1435)).
+
+**Context.** SBI Shinsei's three container-snapshot datasets
+(`top-accounts-balance-and-activity`, `yen-deposit-account`, `exchange-rate`)
+were captured under the unit `primary` by the retired R2 importer until fetch
+run 716 (2026-09-10 21:01 UTC), and with no unit by the native collector since.
+Snapshot ranking partitions by unit, so the importer's last capture stayed a
+current snapshot beside the native one. On 2026-11-19 (read-only, identifiers
+and counts only) each dataset had two rank-1 partitions, runs 716 (`primary`)
+and 1911 (no unit). The reported state on that date listed each of the 16
+provider-local deposit accounts with both the 2026-09-10 and the 2026-11-18
+balances, and collection quality listed 31 accounts as 69 days stale beside
+31 same-day ones.
+
+**Decision.** Ranking maps exactly these three source/parser/dataset
+combinations with unit `primary` to the native partition (no unit), as the
+SBI securities income and gains aliases above do. Selected rows, coverage
+claims and evidence keep their actual unit keys. A newer native capture
+replaces the importer's; a historical cutoff before the first native success
+still selects it. Collection quality keys cells by the stored unit, so the
+importer's `primary` cells remain, with no current capture, and their account
+periods stand as `newest-not-current`. Other sources, parsers, datasets and
+unit names, including
+SBI Shinsei's `balance-summary-and-stage` (not a container snapshot), are
+unchanged.
+
+**Verification.** `packages/parsers/test/snapshot-unit-compatibility.test.ts`
+shows one current partition for each exact combination, two for each changed
+control (source, parser, dataset, legacy unit, a named successor unit), and
+the cutoff fallback. The frozen SQL oracles strip the amended clause through
+`snapshot-partition-compatibility.ts` as before.

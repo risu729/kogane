@@ -3,7 +3,7 @@
 // migration 0032, and the command that turns one candidate into an adopted
 // relation through the decision log. Synthetic rows only; no provider data is
 // used anywhere.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
@@ -41,14 +41,15 @@ import {
   splitSql,
   startPipeline,
 } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 let db: D1Database;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60_000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -653,10 +654,16 @@ test("migration 0032 applies on 0017 through 0035 with seeded rows and keeps its
     const bucket = await local.getR2Bucket("EVIDENCE");
     const localEnv = { DB: store, EVIDENCE: bucket } as unknown as Env;
     await store.exec(LAYER_A_SQL);
+    // One batch per migration file, its statements in file order, as Wrangler
+    // applies a migration: a statement at a time cost a round trip to workerd
+    // each, about 1,060 here and most of this case's time.
     const apply = async (names: string[]) => {
       for (const name of names)
-        for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
-          await store.prepare(sql).run();
+        await store.batch(
+          splitSql(readFileSync(new URL(name, migrationDir), "utf8")).map((sql) =>
+            store.prepare(sql),
+          ),
+        );
     };
     const migrations = layerBMigrations();
     expect(migrations).toContain("0032_economic_events.sql");

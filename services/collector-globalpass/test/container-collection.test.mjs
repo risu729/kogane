@@ -242,6 +242,30 @@ describe("GLOBAL PASS container orchestration", () => {
       expect(result.closed).toEqual(["browser", "relay"]);
     },
   );
+  test.each([
+    ["a custom name", Object.assign(new Error("private-text"), { name: "PrivatePageScriptName" })],
+    [
+      "a throwing name getter",
+      Object.defineProperty(new Error("private-text"), "name", {
+        get() {
+          throw new Error("private-getter");
+        },
+      }),
+    ],
+  ])("an error with %s is sent as UnknownError", async (_label, value) => {
+    const result = await run({ failureStage: "activity-open", failureValue: value });
+    expect(result.records).toEqual([
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "UnknownError",
+        errorCode: "globalpass_activity_open_failed",
+        stage: "activity-open",
+        challengeAttempts: 1,
+      },
+    ]);
+    expect(result.closed).toEqual(["browser", "relay"]);
+  });
   test("a failed provider logout remains an auxiliary flag after complete collection", async () => {
     const result = await run({ logoutFailed: true });
     expect(result.records.map((record) => record.type)).toEqual(["metadata", "artifact", "logout"]);

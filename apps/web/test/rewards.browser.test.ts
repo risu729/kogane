@@ -5,7 +5,7 @@
 // that bound and offers no link that would reopen the same first page; and
 // every panel is told apart from the others by its name. Every value is
 // synthetic.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -23,6 +23,7 @@ import type {
 } from "../../../packages/observation-shared/src/reward-contract.ts";
 import type { RewardProviderExpirySection } from "../../../packages/domain/src/reward-expiry-observations.ts";
 import { auditView } from "./a11y-audit.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -53,7 +54,11 @@ const holding = (id: string): RewardHoldingRow => ({
   buckets: [],
   qualificationMeasures: [],
   membership: [],
-  valueModel: { netAssetEligible: false, cashLikeRedemptionEstimate: null, reasonCode: "none" },
+  valueModel: {
+    netAssetEligible: false,
+    cashLikeRedemptionEstimate: null,
+    reasonCode: "no_offer_named",
+  },
 });
 /** One rule over two holdings: the rule alone does not tell the panels apart. */
 const legacyExpiry = (id: string): RewardExpiryRow => ({
@@ -96,7 +101,7 @@ const providerSection = (account: string): RewardProviderExpirySection => ({
   holdingRef: `holding:${account}`,
   parentBucketRef: `bucket:${account}`,
   unitRef: "points:synthetic",
-  observedAt: { kind: "unknown", reasonCode: "synthetic_time" },
+  observedAt: { kind: "unknown", reasonCode: "observed_at_unparsed" },
   sourceFactRefs: [`balance:${account}`],
   coverage: "unknown",
   reasonCode: "provider_expiry_unavailable",
@@ -129,8 +134,13 @@ const page = <T>(rows: T[], truncated = false): RewardPage<T> => ({
   coverage: { limit: 200, truncated, nextOffset: truncated ? 200 : null },
 });
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("the rewards page", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
@@ -167,7 +177,6 @@ describe.if(runnable)("the rewards page", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -224,6 +233,50 @@ describe.if(runnable)("the rewards page", () => {
         await tab.close();
       }
     }, 30_000);
+
+  test("a holding the page cuts shows its total as unconfirmed, in words, never a sum", async () => {
+    const cut = {
+      unitRef: "points:synthetic",
+      value: { status: "missing" as const, reasonCode: "holding_cut_by_page" },
+    };
+    holdings = page(
+      [
+        {
+          ...holding("a"),
+          consumable: cut,
+          buckets: [
+            {
+              bucketRef: "bucket:a",
+              kind: "regular",
+              restrictionRefs: [],
+              unitRef: "points:synthetic",
+              quantity,
+              observedExpiry: null,
+              observedAt: { kind: "unknown", reasonCode: "observed_at_unparsed" },
+              sourceFactRefs: [],
+            },
+          ],
+        },
+      ],
+      true,
+    );
+    expiry = page([]);
+    expect(validApiResponse("/api/v2/rewards/holdings", holdings)).toBe(true);
+    const tab = await browser.newPage();
+    try {
+      await tab.goto(`${origin}/rewards`);
+      const total = tab.getByRole("row", { name: /利用できる量の合計/u });
+      await total.waitFor();
+      const text = await total.innerText();
+      // The reason is said in words; the bucket's 100 is not given as the total (INV05).
+      expect(text).toContain("未確定");
+      expect(text).toContain("ページの上限で途中までしか読めていない");
+      expect(text).not.toContain("100");
+      expect(text).not.toContain("holding_cut_by_page");
+    } finally {
+      await tab.close();
+    }
+  }, 30_000);
 
   for (const [name, response] of [
     ["published snapshot", readPage],

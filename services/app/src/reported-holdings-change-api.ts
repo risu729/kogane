@@ -7,6 +7,16 @@
 // authority every signed-in subject already has over the other GET routes,
 // and absent where the store lacks the views the two dated reads join. It
 // adds no holdings up, values nothing and carries no review action.
+//
+// `detail=summary` (the default) answers one page of the changed lines only
+// (`summarizeHoldingsChange`, ADR 0075 amendment 2026-11-19); `detail=full`
+// answers the comparison as it was, unpaged. Both are built from one
+// comparison, which every page computes again; a cursor is bound to it.
+import {
+  HOLDINGS_CHANGE_SUMMARY_DEFAULT_LIMIT,
+  summarizeHoldingsChange,
+  type HoldingsChangeCursorRefusal,
+} from "../../../packages/domain/src/holdings-change-summary.ts";
 import {
   HoldingsChangeError,
   queryHoldingsChange,
@@ -18,7 +28,7 @@ import {
   REPORTED_HOLDINGS_CHANGE_PATH,
 } from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
 import { readerGrant } from "./agent-api";
-import { HttpError, json } from "./http";
+import { assertMethod, HttpError, json, READ_METHODS } from "./http";
 import { reportedStateAvailable } from "./reported-state-api";
 
 export { REPORTED_HOLDINGS_CHANGE_PATH };
@@ -34,6 +44,21 @@ const REFUSALS: Record<HoldingsChangeRefusal, { status: number; code: string }> 
   holding_limit_exceeded: { status: 413, code: "result_limit_exceeded" },
   dated_state_limit_exceeded: { status: 413, code: "result_limit_exceeded" },
 };
+
+/** A refused summary cursor: malformed, of another request, or of a comparison that has moved. */
+const CURSOR_REFUSALS: Record<HoldingsChangeCursorRefusal, number> = {
+  invalid_cursor: 400,
+  cursor_mismatch: 400,
+  // The comparison's inputs moved (a capture, mapping, parse or reported
+  // context): its pages are gone, never answered from the new comparison.
+  context_expired: 410,
+};
+
+/**
+ * The argument names a summary cursor is bound to besides its comparison: a
+ * `cursor_mismatch` names them as `mustMatch` (ADR 0123), names only.
+ */
+const HOLDINGS_CHANGE_CURSOR_INPUTS = ["from", "to", "source", "account"] as const;
 
 /** Served exactly where `/api/v2/reported-state` is: both dated reads need its views. */
 export async function reportedHoldingsChangeAvailable(env: Env): Promise<boolean> {
@@ -52,8 +77,7 @@ export async function reportedHoldingsChangeApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== REPORTED_HOLDINGS_CHANGE_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
+  assertMethod(request, READ_METHODS);
   if (!(await reportedHoldingsChangeAvailable(env))) throw new HttpError(404, "not_found");
   // The reader authority: every source and account, summaries and records.
   if (!readerGrant(subject).capabilities.includes("summary.read"))
@@ -64,8 +88,9 @@ export async function reportedHoldingsChangeApi(
 /**
  * The two dated reported states side by side for these query parameters: the
  * answer of the route and of `kogane.reported-holdings-change.read`
- * (ADR 0081), once the caller's authority and the store's views are known.
- * Its refusals are `HttpError`s with the route's closed codes.
+ * (ADR 0081), once the caller's authority and the store's views are known:
+ * one page of the summary, or the full comparison with `detail=full`. Its
+ * refusals are `HttpError`s with the route's closed codes.
  */
 export async function readHoldingsChange(
   env: Env,
@@ -98,5 +123,18 @@ export async function readHoldingsChange(
     }
     throw error;
   }
-  return { apiVersion: 2, ...change };
+  if (params.get("detail") === "full") return { apiVersion: 2, ...change };
+  const limit = params.get("limit");
+  const page = await summarizeHoldingsChange(change, {
+    limit: limit === null ? HOLDINGS_CHANGE_SUMMARY_DEFAULT_LIMIT : Number(limit),
+    cursor: params.get("cursor"),
+  });
+  if (!page.ok)
+    throw new HttpError(
+      CURSOR_REFUSALS[page.code],
+      page.code,
+      [],
+      page.code === "cursor_mismatch" ? { mustMatch: HOLDINGS_CHANGE_CURSOR_INPUTS } : {},
+    );
+  return { apiVersion: 2, ...page.summary };
 }

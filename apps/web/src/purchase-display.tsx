@@ -1,6 +1,7 @@
 // Display pieces for recognised card purchases. Every figure is the server's:
 // nothing here adds, subtracts or compares an amount, and a statement total is
 // only ever shown beside the purchase figures, never against them.
+import { displayLabel } from "./labels.ts";
 import type { ReactNode } from "react";
 import type {
   CardPurchaseSourceId,
@@ -93,13 +94,13 @@ export const EXCLUSION_LABELS: Record<CardUsageExclusion, string> = {
 };
 
 /** Why a current provider row is outside the list: the exclusions, or not yet reached. */
-export const UNRECOGNIZED_REASON_LABELS: Record<CardUsageUnrecognizedReason, string> = {
+const UNRECOGNIZED_REASON_LABELS: Record<CardUsageUnrecognizedReason, string> = {
   ...EXCLUSION_LABELS,
   recognition_pending: "対象の利用だが、まだ処理していない",
 };
 
 function reasonLabel(code: CardUsageUnrecognizedReason): string {
-  return UNRECOGNIZED_REASON_LABELS[code] ?? code;
+  return displayLabel(UNRECOGNIZED_REASON_LABELS, code);
 }
 
 /**
@@ -173,7 +174,10 @@ export function statementCell(view: CardPurchaseView): string {
 }
 
 export function settlementCell(view: CardPurchaseView): string {
-  if (view.settlement === null) return view.statement.status === "linked" ? "未照合" : "—";
+  // Without a linked statement there is no debit to follow; the detail page
+  // says the same in a sentence, and the statement cell gives the reason.
+  if (view.settlement === null)
+    return view.statement.status === "linked" ? "未照合" : "引落をたどれません";
   return view.settlement.bankDebit === null
     ? SETTLEMENT_STATUS[view.settlement.reviewStatus]
     : "引落を確認済み";
@@ -495,12 +499,12 @@ const SIDE_STATES: Partial<Record<EventState, string>> = {
 /** The state word alone, for a transition such as 未確定 → 確定. */
 function sideStateWord(side: CardPurchaseCandidateSide): string {
   if (side.state === null) return "未認識";
-  return side.state === "unknown" ? "状態不明" : (SIDE_STATES[side.state] ?? side.state);
+  return side.state === "unknown" ? "状態不明" : displayLabel(SIDE_STATES, side.state);
 }
 
 function sideStateLabel(side: CardPurchaseCandidateSide): string {
   if (side.state === null) return "カード利用として認識されていません";
-  return SIDE_STATES[side.state] ?? side.state;
+  return displayLabel(SIDE_STATES, side.state);
 }
 
 /** A signed amount as the provider displayed it, or why none is shown. */
@@ -586,7 +590,7 @@ export function CandidateCodes({ candidate }: { candidate: CardPurchaseCandidate
       <h3>候補の根拠</h3>
       <ul className="warning-list">
         {candidate.rationaleCodes.map((code) => (
-          <li key={code}>{RATIONALE_LABELS[code] ?? code}</li>
+          <li key={code}>{displayLabel(RATIONALE_LABELS, code)}</li>
         ))}
       </ul>
       {candidate.rejectionConditions.length === 0 ? null : (
@@ -595,7 +599,7 @@ export function CandidateCodes({ candidate }: { candidate: CardPurchaseCandidate
           <p>次に当てはまる場合は、別の利用の可能性があります。</p>
           <ul className="warning-list">
             {candidate.rejectionConditions.map((code) => (
-              <li key={code}>{REJECTION_LABELS[code] ?? code}</li>
+              <li key={code}>{displayLabel(REJECTION_LABELS, code)}</li>
             ))}
           </ul>
         </>
@@ -611,7 +615,7 @@ export function CandidateCodes({ candidate }: { candidate: CardPurchaseCandidate
           </p>
           <ul className="warning-list">
             {candidate.blockers.map((code) => (
-              <li key={code}>{BLOCKER_LABELS[code] ?? code}</li>
+              <li key={code}>{displayLabel(BLOCKER_LABELS, code)}</li>
             ))}
           </ul>
         </Notice>

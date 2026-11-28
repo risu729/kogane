@@ -1,7 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
+import { closedErrorType } from "../../../packages/collector-diagnostics/src/index";
 import { credentialFromSecrets, inspectCredential, type CredentialStatus } from "./credentials";
 import { persistVPointPayRun } from "./shared-run";
 import type {
+  ApiCollection,
   CollectionFailure,
   CollectionManifest,
   CollectionResult,
@@ -78,8 +80,9 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     const failures: CollectionFailure[] = [];
     let earliestMonth: string | null = null;
     let latestMonth: string | null = null;
-    let transactionMonthCount = 0;
-    let transactionCount = 0;
+    // Unknown until the collection returns: a run that stops earlier reports
+    // no counts rather than zeros (INV05).
+    let counts: Pick<ApiCollection, "transactionMonthCount" | "transactionCount"> | undefined;
     try {
       const credential = await this.credential();
       const collection = await collectVPointPay({
@@ -90,8 +93,10 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       });
       earliestMonth = collection.earliestMonth;
       latestMonth = collection.latestMonth;
-      transactionMonthCount = collection.transactionMonthCount;
-      transactionCount = collection.transactionCount;
+      counts = {
+        transactionMonthCount: collection.transactionMonthCount,
+        transactionCount: collection.transactionCount,
+      };
       {
         // One terminal-last run replaces the per-artifact writes below.
         collected.push(...collection.artifacts);
@@ -112,8 +117,7 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       status,
       earliestMonth,
       latestMonth,
-      transactionMonthCount,
-      transactionCount,
+      ...counts,
       artifacts,
       failures,
     };
@@ -137,8 +141,10 @@ export class VPointPayCredentialState extends DurableObject<Env> {
           status,
           earliestMonth,
           latestMonth,
-          transactionMonthCount,
-          transactionCount,
+          // An unknown count is undefined, so the JSON line leaves it out
+          // instead of writing 0 (INV05).
+          transactionMonthCount: counts?.transactionMonthCount,
+          transactionCount: counts?.transactionCount,
           artifactCount: collected.length,
           failureCount: failures.length,
           terminalOutcome: persisted.outcome,
@@ -155,28 +161,40 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     }
   }
 }
+/** The collector's own error names (`vpoint-pay.ts`, `credentials.ts`). */
+const VPOINT_PAY_ERROR_TYPES = [
+  "VPointPayCredentialConfigurationError",
+  "VPointPayReauthenticationRequiredError",
+  "VPointPayProtocolError",
+  "VPointPayHttpError",
+] as const;
 /**
- * The machine code a terminal may carry. Deliberately not `publicError`: that
- * is a redacted provider message, and a terminal states codes only (12 §6).
+ * The machine code a terminal may carry. Never the error's message: that can
+ * carry provider text, and a terminal states codes only (12 §6).
  */
 function safeFailureCode(error: unknown): string {
-  const name = error instanceof Error ? error.name : "";
-  if (name.includes("CredentialConfiguration")) return "credential_configuration_required";
-  if (name.includes("ReauthenticationRequired")) return "authentication_required";
-  if (name.includes("Protocol")) return "provider_protocol_failed";
-  if (name.includes("Http")) return "provider_http_failed";
-  return "operation_failed";
+  switch (closedErrorType(error, VPOINT_PAY_ERROR_TYPES)) {
+    case "VPointPayCredentialConfigurationError":
+      return "credential_configuration_required";
+    case "VPointPayReauthenticationRequiredError":
+      return "authentication_required";
+    case "VPointPayProtocolError":
+      return "provider_protocol_failed";
+    case "VPointPayHttpError":
+      return "provider_http_failed";
+    default:
+      return "operation_failed";
+  }
 }
+/**
+ * The run result's failure entry: closed codes only. `errorType` is a closed
+ * name (`UnknownError` for any other) and `message` is the failure code, not
+ * the thrown message.
+ */
 function failure(operation: string, error: unknown): CollectionFailure {
   return {
     operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
+    errorType: closedErrorType(error, VPOINT_PAY_ERROR_TYPES),
+    message: safeFailureCode(error),
   };
-}
-function publicError(error: unknown): string {
-  const value = error instanceof Error ? error.message : "Unknown error";
-  return value
-    .replace(/(cookie|session|token|device[-_ ]?id)=?[^\s,;]+/giu, "$1=[redacted]")
-    .slice(0, 300);
 }

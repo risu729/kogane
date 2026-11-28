@@ -27,6 +27,7 @@ import {
   World,
 } from "../../../packages/application/test/instrument-resolution-world.ts";
 import {
+  adoptInstrument,
   EVALUATION_INTERVAL_MS,
   INSTRUMENT_AUTO_ADOPTION_LANE,
   INSTRUMENT_AUTO_ADOPTION_SQL,
@@ -286,34 +287,169 @@ describe("the instrument_auto_adoption lane", () => {
     );
     expect(moved.result.ok).toBe(true);
     const before = w.snapshot();
-    const outcome = await executeIdentityCommand(
-      sqliteD1(w.db),
-      {
-        operationId: "instrument-auto-v1:stale",
-        actorId: INSTRUMENT_AUTO_ADOPTION_ACTOR,
-        actorVerification: "server",
-        action: "assign",
-        kind: "instrument",
-        referenceId: planned!.subjectIdentifierId,
-        expectedRevision: planned!.subjectMappingRevision,
-        targetId: planned!.targetInstrumentId,
-        reason: "synthetic stale adoption",
-      },
-      IDENTITY_POLICY_VERSION,
-      {
-        method: "rule",
-        guard: {
-          sql: INSTRUMENT_AUTO_ADOPTION_SQL.anchorUnchanged,
-          binds: [
-            planned!.anchorIdentifierId,
-            planned!.anchorMappingRevision,
-            planned!.targetInstrumentId,
-          ],
-        },
-      },
-    );
+    const outcome = await adoptInstrument(sqliteD1(w.db) as unknown as D1Database, planned!);
     expect(outcome).toEqual({ ok: false, error: "target_missing" });
     expect(w.snapshot()).toBe(before);
+  });
+
+  /**
+   * The lane over a database that runs `between` once, right before the first
+   * batch: after the lane's read and before its first write, the window in
+   * which a person or an agent may record something about the pair.
+   */
+  function racingLane(w: World, between: () => Promise<void>) {
+    const d1 = sqliteD1(w.db);
+    let ran = false;
+    const racing = {
+      prepare: (sql: string) => d1.prepare(sql),
+      async batch(statements: Parameters<typeof d1.batch>[0]) {
+        if (!ran) {
+          ran = true;
+          await between();
+        }
+        return d1.batch(statements);
+      },
+    };
+    return instrumentAutoAdoptionLane(racing as unknown as D1Database, { now: NOW });
+  }
+
+  test("a keep-apart recorded after the read stops the adoption", async () => {
+    const { w } = await sbiWorld([{ code: "0Z0A" }]);
+    const listing = listingOf(w, "0Z0A");
+    const bare = bareOf(w, "0Z0A");
+    const keepApart = candidateOf(await queryInstrumentResolution(w.sql), listing, bare).commands!
+      .keepApart.payload;
+    let before = "";
+    const result = await racingLane(w, async () => {
+      const kept = await decide(
+        w,
+        OPERATOR,
+        "relation.reject",
+        { ...keepApart, reason: "different issues, checked" },
+        "op-keep-apart-race",
+      );
+      expect(kept.result.ok).toBe(true);
+      before = w.snapshot();
+    });
+    expect(result).toMatchObject({ evaluated: true, eligible: 1, adopted: 0, refused: 1 });
+    // Nothing the rule writes landed: the person's rejection stands.
+    expect(w.snapshot()).toBe(before);
+    const after = await queryInstrumentResolution(w.sql);
+    expect(candidateOf(after, listing, bare).status).toBe("rejected");
+    expect(stateOf(after, bare)).toBe("kept-separate");
+    expect(
+      w.db.query("SELECT count(*) AS n FROM decision_revisions WHERE method='rule'").get(),
+    ).toEqual({ n: 0 });
+  });
+
+  test("a listed_as proposal recorded after the read stops the adoption", async () => {
+    const { w } = await sbiWorld([{ code: "0Z0A" }]);
+    const listing = listingOf(w, "0Z0A");
+    const bare = bareOf(w, "0Z0A");
+    // A proposal from the subject's own instrument to the anchor: the other
+    // orientation, naming the other instrument and identifier.
+    const own = (
+      w.db
+        .query("SELECT instrument_id FROM instrument_mappings WHERE identifier_id=? AND revision=1")
+        .get(bare) as { instrument_id: string }
+    ).instrument_id;
+    let before = "";
+    const result = await racingLane(w, async () => {
+      w.db.run(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES('dr_prop_race','relation','rel_prop_race',1,'propose','ai','mcp-client:synthetic',NULL,'synthetic proposal','[]',NULL,NULL,'2026-11-08T03:00:00.000Z')`,
+      );
+      w.db.run(
+        `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+         VALUES('rel_prop_race','listed_as',?,?,NULL,NULL,'proposed','dr_prop_race','[]','2026-11-08T03:00:00.000Z')`,
+        [`instrument:${own}`, `identifier:${listing}`],
+      );
+      before = w.snapshot();
+    });
+    expect(result).toMatchObject({ evaluated: true, eligible: 1, adopted: 0, refused: 1 });
+    expect(w.snapshot()).toBe(before);
+    expect(
+      (
+        w.db
+          .query("SELECT max(revision) AS n FROM instrument_mappings WHERE identifier_id=?")
+          .get(bare) as { n: number }
+      ).n,
+    ).toBe(1);
+  });
+
+  test("each reference the guard reads stops the write alone, and nothing else does", async () => {
+    // One `listed_as` row per case, recorded after the read, whose other end
+    // is a synthetic identifier or instrument the pair does not involve: the
+    // target instrument, the subject's own instrument, the anchor and the
+    // subject each stop the write on their own; a row naming none of them, or
+    // another relation kind naming the subject, changes nothing.
+    const cases = [
+      { name: "from the target instrument", from: "target", to: "identifier:synthetic-other" },
+      { name: "from the subject's instrument", from: "own", to: "identifier:synthetic-other" },
+      { name: "to the anchor", from: "instrument:synthetic-other", to: "anchor" },
+      { name: "to the subject", from: "instrument:synthetic-other", to: "subject" },
+      { name: "unrelated", from: "instrument:synthetic-other", to: "identifier:synthetic-other" },
+      { name: "another kind", kind: "same_underlying", from: "target", to: "subject" },
+    ] as const;
+    const outcomes: Record<string, unknown> = {};
+    for (const [index, entry] of cases.entries()) {
+      const { w } = await sbiWorld([{ code: "0Z0A" }]);
+      const [planned] = await queryInstrumentAutoAdoptions(w.sql);
+      const own = (
+        w.db
+          .query("SELECT instrument_id FROM current_instrument_mappings WHERE identifier_id=?")
+          .get(planned!.subjectIdentifierId) as { instrument_id: string }
+      ).instrument_id;
+      const ref = (end: string) =>
+        ({
+          target: `instrument:${planned!.targetInstrumentId}`,
+          own: `instrument:${own}`,
+          anchor: `identifier:${planned!.anchorIdentifierId}`,
+          subject: `identifier:${planned!.subjectIdentifierId}`,
+        })[end] ?? end;
+      w.db.run(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES(?,'relation',?,1,'propose','ai','mcp-client:synthetic',NULL,'synthetic proposal','[]',NULL,NULL,'2026-11-08T03:00:00.000Z')`,
+        [`dr_case_${String(index)}`, `rel_case_${String(index)}`],
+      );
+      w.db.run(
+        `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+         VALUES(?,?,?,?,NULL,NULL,'proposed',?,'[]','2026-11-08T03:00:00.000Z')`,
+        [
+          `rel_case_${String(index)}`,
+          "kind" in entry ? entry.kind : "listed_as",
+          ref(entry.from),
+          ref(entry.to),
+          `dr_case_${String(index)}`,
+        ],
+      );
+      const outcome = await adoptInstrument(sqliteD1(w.db) as unknown as D1Database, planned!);
+      outcomes[entry.name] = outcome.ok ? "adopted" : outcome.error;
+    }
+    expect(outcomes).toEqual({
+      "from the target instrument": "target_missing",
+      "from the subject's instrument": "target_missing",
+      "to the anchor": "target_missing",
+      "to the subject": "target_missing",
+      unrelated: "adopted",
+      "another kind": "adopted",
+    });
+  });
+
+  test("the adoption guard reads entity_relations by key only", () => {
+    const w = new World();
+    const plan = (
+      w.db
+        .query(`EXPLAIN QUERY PLAN SELECT 1 WHERE ${INSTRUMENT_AUTO_ADOPTION_SQL.adoptionGuard}`)
+        .all("a", 1, "i", "identifier:a", "identifier:s", "instrument:i", "s") as {
+        detail: string;
+      }[]
+    ).map((step) => step.detail);
+    // Every step is a key search; the only scan is the constant row.
+    expect(plan.filter((step) => step.startsWith("SCAN"))).toEqual(["SCAN CONSTANT ROW"]);
+    const text = plan.join("\n");
+    expect(text).toMatch(/entity_relations_to/u);
+    expect(text).toMatch(/entity_relations_from/u);
   });
 
   test("a rule recording is refused for a non-rule actor or a release", async () => {

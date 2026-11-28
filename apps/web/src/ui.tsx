@@ -2,14 +2,21 @@
 //
 // Two rules are enforced here rather than in each page:
 //
-//   * An amount is only ever rendered by <Amount>, which delegates to
-//     formatAmount/amountSign from src/money.ts. No component multiplies,
-//     divides, sums or parses an amount, and Intl.NumberFormat appears
-//     nowhere in this client — it takes a Number, so every figure would
-//     round-trip through a double on its way to the screen.
+//   * An amount is only ever formatted by src/money.ts: <Amount> delegates to
+//     formatAmount/amountSign, and an exact decimal goes through
+//     formatDecimal (digits grouped in threes, every fraction digit kept).
+//     No component multiplies, divides, sums or parses an amount, and
+//     Intl.NumberFormat and toLocaleString appear nowhere in this client —
+//     they take a Number, so every figure would round-trip through a double
+//     on its way to the screen. Counts are printed as plain digits.
 //   * Timestamps are printed exactly as stored. `as_of` and `observed_at`
 //     mean different things and reformatting either would be a claim the
-//     store does not make.
+//     store does not make. The exceptions show an instant in Japan time,
+//     all through tokyoTime in src/tokyo-time.ts: <Time> in
+//     changes-since.tsx (最近の変化's run and parse times, and the time the
+//     collection quality page read its answer, which only the client holds),
+//     keeping the instant in `<time dateTime>`, and the schedule settings
+//     page.
 //
 // React escapes every string it renders, and dangerouslySetInnerHTML is used
 // nowhere in this client, which is what makes provider-authored text —
@@ -21,9 +28,11 @@ import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { amountSign, formatAmount } from "./money.ts";
 import { Link, type ObservationKind } from "./router.tsx";
+import { BusyButton } from "./busy-button.tsx";
 import { ApiError, rawUrl } from "./api.ts";
 import { CommandError } from "./command-api.ts";
 import { displayLabel } from "./labels.ts";
+import { useRepeatedFailure } from "./repeated-failure.ts";
 
 // ── values ───────────────────────────────────────────────────────────
 
@@ -196,7 +205,8 @@ export function StatusBadge({ status }: { status: string }): ReactNode {
   );
 }
 
-const KIND_LABELS: Record<ObservationKind, string> = {
+/** The observation kinds, as every page names them. */
+export const OBSERVATION_KIND_LABELS: Record<ObservationKind, string> = {
   transaction: "取引",
   balance: "残高",
   position: "保有資産",
@@ -205,8 +215,8 @@ const KIND_LABELS: Record<ObservationKind, string> = {
 
 export function KindBadge({ kind }: { kind: ObservationKind }): ReactNode {
   return (
-    <Badge className="badge-kind" title={`${KIND_LABELS[kind]}の観測記録`}>
-      {KIND_LABELS[kind]}
+    <Badge className="badge-kind" title={`${OBSERVATION_KIND_LABELS[kind]}の観測記録`}>
+      {OBSERVATION_KIND_LABELS[kind]}
     </Badge>
   );
 }
@@ -265,7 +275,7 @@ export function ObservationLink({
   return (
     <Link
       to={`/observations/${kind}/${String(id)}`}
-      title={`${KIND_LABELS[kind]}の観測記録 ${String(id)}`}
+      title={`${OBSERVATION_KIND_LABELS[kind]}の観測記録 ${String(id)}`}
     >
       {children ?? `#${String(id)}`}
     </Link>
@@ -404,9 +414,18 @@ export function ErrorState({
       </span>
       <p>{known ? error.message : "接続先の API が利用できるか確認し、もう一度お試しください。"}</p>
       {onRetry && !(error instanceof CommandError && error.final) ? (
-        <button className="button" onClick={onRetry} disabled={retrying}>
+        // Two failed loads on one page are two alerts: each retry says which
+        // load it repeats (docs/ui-guidelines.md#accessibility), its name
+        // ending in the words it shows.
+        // While the read is in flight the button waits (`BusyButton`):
+        // aria-disabled, a press ignored, the focus kept.
+        <BusyButton
+          busy={retrying}
+          onClick={onRetry}
+          aria-label={`${label}を${retrying ? "再試行中…" : "再試行"}`}
+        >
           {retrying ? "再試行中…" : "再試行"}
-        </button>
+        </BusyButton>
       ) : null}
     </div>
   );
@@ -434,6 +453,7 @@ export function QueryBoundary<T>({
   isEmpty,
   empty,
   coverageNotice = true,
+  nextPageLabel = "次の500件",
   children,
 }: {
   query: UseQueryResult<T, Error>;
@@ -442,17 +462,17 @@ export function QueryBoundary<T>({
   empty?: ReactNode;
   /** Pages that page in memory render their own pager instead of the URL-based notice. */
   coverageNotice?: boolean;
+  /** The URL-based notice's next-window link; the page that renders the boundary names its list. */
+  nextPageLabel?: string;
   children: (data: T) => ReactNode;
 }): ReactNode {
-  const retry = (): void => {
-    void query.refetch();
-  };
+  // The failure a pressed retry repeats stays until that read settles, so the
+  // alert and its waiting button (再試行中…) keep the focus (repeated-failure.ts).
+  const { failure, retry, retrying } = useRepeatedFailure(query);
   // Authorization failures hide cached records; transient failures keep the
   // previous response with a warning. An empty success replaces old rows.
-  if (query.isError && query.error instanceof ApiError && [401, 403].includes(query.error.status)) {
-    return (
-      <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
-    );
+  if (failure instanceof ApiError && [401, 403].includes(failure.status)) {
+    return <ErrorState error={failure} label={label} onRetry={retry} retrying={retrying} />;
   }
   if (query.data === undefined) {
     if (query.fetchStatus === "paused")
@@ -468,10 +488,8 @@ export function QueryBoundary<T>({
           onRetry={retry}
         />
       );
-    if (query.isError)
-      return (
-        <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
-      );
+    if (failure !== null)
+      return <ErrorState error={failure} label={label} onRetry={retry} retrying={retrying} />;
     return <Loading label={label} />;
   }
   const data = query.data;
@@ -504,7 +522,7 @@ export function QueryBoundary<T>({
                 return `${window.location.pathname}?${params}`;
               })()}
             >
-              {window.location.pathname === "/balances" ? "履歴の次の500件" : "次の500件"}
+              {nextPageLabel}
             </Link>
           ) : null}
           {coverage.latestNextOffset != null ? (
@@ -524,9 +542,13 @@ export function QueryBoundary<T>({
       {query.isError ? (
         <div className="query-notice query-warning" role="alert">
           <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>
-          <button className="button" onClick={retry} disabled={query.isFetching}>
+          <BusyButton
+            busy={query.isFetching}
+            onClick={retry}
+            aria-label={`${label}を${query.isFetching ? "再試行中…" : "再試行"}`}
+          >
             {query.isFetching ? "再試行中…" : "再試行"}
-          </button>
+          </BusyButton>
         </div>
       ) : null}
       {query.isFetching ? (

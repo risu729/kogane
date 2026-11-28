@@ -481,7 +481,10 @@ was partial and which unit report allowed it.
            'legacy-warning-compat-v1', 'unit', 0, ?);
    ```
 
-4. Read `/api/overview`. A partial run that rescued units appears in
+4. Read `/api/overview?detail=full` (the default summary collapses
+   `unitUpdates` to the newest run per source and dataset, and lists only
+   the five with the newest runs,
+   [ADR 0123](adr/0123-summary-detail-for-large-reads.md)). A partial run that rescued units appears in
    `unitUpdates` with `updated_units` and `stale_units`; that key is the
    reader's statement that the dataset was refreshed in part. It is absent
    while no dataset is on the `unit` scope. `GET /snapshot-policy/compare` on
@@ -598,6 +601,7 @@ provider's empty row, directly or inside exactly one `div` that carries none
 of the reader's classes) is zero rows, not a failure. Its rows are the fifth observation kind, `scheduled_payment`
 (`scheduled_payment_observations`, migration 0061), declared outside
 `types.ts` so that no other parser's digest changes. They are future
-payments, not purchases, statement rows or balances; no read path reads them
-yet. The ボーナス払い schedule page is not read until it is observed with
+payments, not purchases, statement rows or balances; only the reported state
+on a date reads them, listing them and adding nothing
+([ADR 0019](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)). The ボーナス払い schedule page is not read until it is observed with
 rows.

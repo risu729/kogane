@@ -376,11 +376,16 @@ export async function beginRewardSnapshot(
       // `building` trigger aborts the batch. A reward plan always carries at
       // least the evaluation clock and the calendar, and one without refs is
       // settled by the read-back below.
+      //
+      // Only a repeat of the same `(kind, id)` is skipped; a ref that breaks a
+      // CHECK or NOT NULL fails the batch rather than starting the build
+      // without it (`OR IGNORE` would skip both).
       ...plan.inputRefs.map((ref) =>
         db
           .prepare(
-            `INSERT OR IGNORE INTO reward_snapshot_input_refs(snapshot_id,ref_kind,ref_id,
-              ref_digest,core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)`,
+            `INSERT INTO reward_snapshot_input_refs(snapshot_id,ref_kind,ref_id,
+              ref_digest,core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING`,
           )
           .bind(snapshotId, ref.kind, ref.id, ref.digest, plan.coreEpoch, now),
       ),
@@ -499,20 +504,39 @@ function checkpointStatement(
 
 export type RewardChunkOutcome = "written" | "lease_lost";
 
+/** "The build `?1` names is still building under the lease `param` names." */
+const HELD_BY_LEASE = (param: string): string =>
+  `EXISTS(SELECT 1 FROM reward_expiry_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='building' AND s.writer_lease=${param})`;
+
+// A row is skipped only when its primary key is already written: that is the
+// re-sent chunk of a retried batch, and the `chunk_conflict` trigger (BEFORE
+// INSERT, so it runs before the conflict is resolved) has already refused it
+// unless its digest is the one stored. Every other failure raises and rolls
+// back the chunk with its checkpoint: a CHECK, a NOT NULL, the order index on
+// `row_seq` and the triggers. `INSERT OR IGNORE` is not used here because it
+// also skips a CHECK or NOT NULL failure without an error: the row the schema
+// refused would be missing while the checkpoint moved past it.
+//
+// Each row is written only while the chunk's lease still holds the build, like
+// its checkpoint: a writer whose lease was taken writes no row.
 function insertEstimate(
   db: D1Like,
   snapshotId: string,
   row: RewardExpiryProjectionRow,
   digest: string,
+  lease: string,
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,
+      `INSERT INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,
         holding_ref,bucket_ref,rule_id,rule_version,bucket_kind,state,deadline_basis,expires_on,
         amount_coefficient,amount_scale,amount_status,unit_ref,provider_observed_json,
         policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,row_digest,
         expiry_basis_json)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`,
+       SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23
+       WHERE ${HELD_BY_LEASE("?24")}
+       ON CONFLICT(snapshot_id,row_key) DO NOTHING`,
     )
     .bind(
       snapshotId,
@@ -538,6 +562,7 @@ function insertEstimate(
       JSON.stringify(row.basisRefs),
       digest,
       JSON.stringify(row.expiryBasis),
+      lease,
     );
 }
 
@@ -546,13 +571,16 @@ function insertSimulation(
   snapshotId: string,
   row: RewardSimulationProjectionRow,
   digest: string,
+  lease: string,
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO reward_conversion_simulations(snapshot_id,request_digest,row_seq,
+      `INSERT INTO reward_conversion_simulations(snapshot_id,request_digest,row_seq,
         reproducibility,reason_code,request_json,offer_id,offer_version,result_json,
         search_coverage,evaluated_at,policy_release,row_digest)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`,
+       SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13
+       WHERE ${HELD_BY_LEASE("?14")}
+       ON CONFLICT(snapshot_id,request_digest) DO NOTHING`,
     )
     .bind(
       snapshotId,
@@ -568,13 +596,15 @@ function insertSimulation(
       row.evaluatedAt,
       row.policyRelease,
       digest,
+      lease,
     );
 }
 
 /**
  * One chunk of estimates and the checkpoint that records it, in one batch. A
  * statement error rolls back both; a re-sent chunk with identical content is
- * ignored, and different content for a written row raises the trigger.
+ * ignored, different content for a written row raises the trigger, and a row
+ * the schema refuses raises its constraint.
  */
 export async function writeRewardEstimateChunk(
   db: D1Like,
@@ -585,7 +615,7 @@ export async function writeRewardEstimateChunk(
   if (rows.length === 0) return "written";
   const last = rows[rows.length - 1] as { row: RewardExpiryProjectionRow; digest: string };
   const results = await runBatch(db, [
-    ...rows.map((entry) => insertEstimate(db, snapshotId, entry.row, entry.digest)),
+    ...rows.map((entry) => insertEstimate(db, snapshotId, entry.row, entry.digest, context.lease)),
     checkpointStatement(
       db,
       snapshotId,
@@ -611,7 +641,9 @@ export async function writeRewardSimulationChunk(
   if (rows.length === 0) return "written";
   const last = rows[rows.length - 1] as { row: RewardSimulationProjectionRow; digest: string };
   const results = await runBatch(db, [
-    ...rows.map((entry) => insertSimulation(db, snapshotId, entry.row, entry.digest)),
+    ...rows.map((entry) =>
+      insertSimulation(db, snapshotId, entry.row, entry.digest, context.lease),
+    ),
     checkpointStatement(
       db,
       snapshotId,
@@ -822,7 +854,10 @@ export async function rewardSimulationPage(
 /**
  * Retire builds older than the retained window and delete their rows. A reader
  * on an older cursor gets `context_expired` rather than a silently different
- * list, and the published snapshot is never retired.
+ * list, and the published snapshot is never retired: the retirement restates
+ * it in its own statement, so a build the pointer was switched to after the
+ * selection read it stays `complete` with its rows. Returns the number of
+ * builds this call retired.
  */
 export async function retireOldRewardSnapshots(
   db: D1Like,
@@ -833,36 +868,58 @@ export async function retireOldRewardSnapshots(
     .prepare(RETIREABLE_REWARD_SNAPSHOTS_SQL)
     .bind(keep, Math.max(retained - 1, 0))
     .all<{ snapshot_id: string }>();
-  for (const row of stale.results) await retireRewardSnapshot(db, row.snapshot_id, "retired");
-  return stale.results.length;
+  let retired = 0;
+  for (const row of stale.results)
+    if (
+      await retireRewardSnapshot(
+        db,
+        row.snapshot_id,
+        `status IN ('complete','building')
+          AND snapshot_id<>coalesce((SELECT p.snapshot_id FROM reward_snapshot_pointer p
+            WHERE p.id=1),'')`,
+      )
+    )
+      retired += 1;
+  return retired;
 }
 
-/** Retire one unfinished build and drop what it wrote; the next tick starts a new attempt. */
+/**
+ * Retire one unfinished build and drop what it wrote; the next tick starts a
+ * new attempt. A build another writer sealed in the meantime is left as it is.
+ */
 export async function abandonRewardSnapshot(db: D1Like, snapshotId: string): Promise<void> {
-  await retireRewardSnapshot(db, snapshotId, "building");
+  await retireRewardSnapshot(db, snapshotId, "status='building'");
 }
 
+/**
+ * The retirement and the deletion of the build's rows, in one batch, so a
+ * failure leaves the build either untouched or retired without rows — never
+ * retired with rows no later call selects again. Each delete names only a
+ * retired build, so it removes nothing when the retirement's condition `when`
+ * did not hold. True when this batch retired it.
+ */
 async function retireRewardSnapshot(
   db: D1Like,
   snapshotId: string,
-  from: "building" | "retired",
-): Promise<void> {
-  await db
-    .prepare(
-      from === "building"
-        ? "UPDATE reward_expiry_snapshots SET status='retired' WHERE snapshot_id=?1 AND status='building'"
-        : "UPDATE reward_expiry_snapshots SET status='retired' WHERE snapshot_id=?1",
-    )
-    .bind(snapshotId)
-    .run();
-  await runBatch(db, [
-    db.prepare("DELETE FROM reward_provider_expiry_sections WHERE snapshot_id=?1").bind(snapshotId),
+  when: string,
+): Promise<boolean> {
+  const retired = `snapshot_id=?1 AND EXISTS(SELECT 1 FROM reward_expiry_snapshots s
+    WHERE s.snapshot_id=?1 AND s.status='retired')`;
+  const results = await runBatch(db, [
     db
-      .prepare("DELETE FROM reward_provider_display_checkpoints WHERE snapshot_id=?1")
+      .prepare(
+        `UPDATE reward_expiry_snapshots SET status='retired' WHERE snapshot_id=?1 AND ${when}
+         RETURNING snapshot_id`,
+      )
       .bind(snapshotId),
-    db.prepare("DELETE FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM reward_conversion_simulations WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM reward_snapshot_input_refs WHERE snapshot_id=?1").bind(snapshotId),
-    db.prepare("DELETE FROM reward_build_checkpoints WHERE snapshot_id=?1").bind(snapshotId),
+    ...[
+      "reward_provider_expiry_sections",
+      "reward_provider_display_checkpoints",
+      "reward_expiry_estimates_v2",
+      "reward_conversion_simulations",
+      "reward_snapshot_input_refs",
+      "reward_build_checkpoints",
+    ].map((table) => db.prepare(`DELETE FROM ${table} WHERE ${retired}`).bind(snapshotId)),
   ]);
+  return (results[0]?.results?.length ?? 0) === 1;
 }

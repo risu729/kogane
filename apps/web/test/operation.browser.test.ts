@@ -6,7 +6,7 @@
 // followed to its 取得記録, names every closed code, reads once per opening
 // and again only when asked, tells a non-operator plainly that the trail is
 // the operator's, and refuses a malformed record. Every value is synthetic.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -19,6 +19,7 @@ import {
   type OperationRecordKind,
   type OperationRecordWire,
 } from "../../../packages/observation-shared/src/operation-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -215,7 +216,12 @@ const waiting: OperationRecordWire = {
   },
 };
 
-/** A read-model rebuild: no collector, one stage. */
+/**
+ * A read-model rebuild after dispatch: no collector, one stage. Nothing records
+ * a rebuild's `projected` stage and READ is consulted only for kinds that reach
+ * `adopted`, so the App answers it unreported: `pending`, no code, no attempt
+ * (`stageReports` in packages/application/src/operations/requests.ts).
+ */
 const rebuild: OperationRecordWire = {
   schemaVersion: "kogane-operation-v1",
   operationId: REBUILD,
@@ -224,16 +230,7 @@ const rebuild: OperationRecordWire = {
   source: null,
   targetRef: `projection:${REBUILD}`,
   dispatch: { state: "dispatched", attempts: 1 },
-  stages: [
-    {
-      stage: "projected",
-      state: "retryable",
-      evidenceRef: null,
-      failureCode: "snapshot_incomplete",
-      attempts: 1,
-      updatedAt: "2026-09-11T00:10:00Z",
-    },
-  ],
+  stages: pending("projection"),
   failureCode: null,
   acceptedAt: "2026-09-11T00:00:00Z",
   updatedAt: "2026-09-11T00:10:00Z",
@@ -313,18 +310,26 @@ const RECORDS = new Map(
   ]),
 );
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("the operator's 依頼の経過 page", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let operator = true;
   let malformed = false;
   const reads: string[] = [];
+  /** Reads after the first wait for it and are refused, when set. */
+  let rereadRefused: Promise<void> | null = null;
 
   beforeEach(() => {
     operator = true;
     malformed = false;
     reads.length = 0;
+    rereadRefused = null;
   });
   beforeAll(async () => {
     for (const record of RECORDS.values())
@@ -345,6 +350,14 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
           if (request.method !== "GET")
             return Response.json({ error: "method_not_allowed" }, { status: 405 });
           if (!operator) return Response.json({ error: "approval_required" }, { status: 403 });
+          if (rereadRefused && reads.length > 1) {
+            await rereadRefused;
+            // The App's answer when the deployment's grant lists cannot be read.
+            return Response.json(
+              { error: "grants_misconfigured", requestId: "synthetic-request" },
+              { status: 503 },
+            );
+          }
           const record = RECORDS.get(url.pathname.slice(OPERATION_RECORD_PATH_PREFIX.length));
           if (!record) return Response.json({ error: "not_found" }, { status: 404 });
           return Response.json(malformed ? { ...record, status: "done" } : record);
@@ -356,7 +369,6 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -411,13 +423,13 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
         // Three stages and the published run name the same fetch run.
         expect(await runLinks.count()).toBe(4);
         expect(await runLinks.last().getAttribute("href")).toBe("/runs/r_12");
-        // Back to where operations are found.
+        // Back to where operations are listed.
         expect(
           await page
-            .getByRole("link", { name: "監査ログ", exact: true })
-            .first()
+            .locator(".breadcrumb")
+            .getByRole("link", { name: "依頼の一覧", exact: true })
             .getAttribute("href"),
-        ).toBe("/audit");
+        ).toBe("/operations");
         expect(await noPageOverflow(page)).toBe(true);
         const prefix = process.env["OPERATION_SCREENSHOT_PREFIX"];
         if (prefix)
@@ -492,6 +504,38 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
     }
   }, 60_000);
 
+  test("a refused re-read leaves the focus on 最新の状態を読み直す, and a press while it reads is ignored", async () => {
+    let release!: () => void;
+    rereadRefused = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/operations/${WAITING}`);
+      await page.getByRole("heading", { level: 2, name: "収集の実行" }).waitFor();
+      const button = page.getByRole("button", { name: "最新の状態を読み直す" });
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await button.and(page.locator('[aria-disabled="true"]')).waitFor();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      // Another press while the read is in flight reads nothing more.
+      await page.keyboard.press("Enter");
+      release();
+      await page
+        .getByRole("alert")
+        .filter({ hasText: "更新できませんでした。前回読み込んだ依頼の経過を表示しています。" })
+        .waitFor();
+      // The record read first stays, and the button with it.
+      expect(await text(page)).toContain("受付済み（未実行）");
+      expect(await button.getAttribute("aria-disabled")).toBeNull();
+      expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+      expect(reads).toEqual([WAITING, WAITING]);
+    } finally {
+      release();
+      await page.close();
+    }
+  }, 60_000);
+
   for (const viewport of VIEWPORTS)
     test(`${viewport.name}: late publication keeps the original deadline failure explicit`, async () => {
       const page = await browser.newPage({ viewport });
@@ -525,9 +569,13 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
       await page.getByRole("heading", { level: 2, name: "段階" }).waitFor();
       const shown = await text(page);
       expect(shown).toContain("読み取りモデルの再構築");
-      expect(shown).toContain("再試行待ち");
-      expect(shown).toContain("snapshot_incomplete");
       expect(shown).toContain("指定なし");
+      // The one stage, unreported: 未到達 with no reason, no attempt and no time.
+      const stage = page.getByRole("row").filter({ hasText: "読み取りモデルへの反映" });
+      expect(await stage.count()).toBe(1);
+      expect((await stage.innerText()).replace(/\s+/gu, " ").trim()).toBe(
+        "読み取りモデルへの反映 projected 未到達 なし なし 0 未到達",
+      );
       expect(await page.getByRole("heading", { level: 2, name: "収集の実行" }).count()).toBe(0);
     } finally {
       await page.close();

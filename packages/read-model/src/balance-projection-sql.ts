@@ -10,9 +10,16 @@ import { BALANCE_HISTORY_SQL } from "./sql";
 import { scopePredicates, type CollectionScope, type PageSql, type ScopeKey } from "./scope";
 
 /** Page sizes: one page plus one row, so `hasMore` needs no COUNT. */
-export const PROJECTION_PAGE_LIMITS = [50, 100, 200, 500] as const;
+export const PROJECTION_PAGE_LIMITS = [10, 25, 50, 100, 200, 500] as const;
 export type ProjectionPageLimit = (typeof PROJECTION_PAGE_LIMITS)[number];
+/** The page size of a `full` read (each row with its provenance). */
 export const DEFAULT_PROJECTION_PAGE_LIMIT: ProjectionPageLimit = 100;
+/**
+ * The page size of a `summary` read (ADR 0123): one short line per row. Ten,
+ * so a page whose every line names its own account and metric (about 650
+ * bytes a line with both entries) stays under the 8 KB a client shows.
+ */
+export const DEFAULT_SUMMARY_PAGE_LIMIT: ProjectionPageLimit = 10;
 /** Rows the subtotal may read for one filter scope before it reports itself unavailable. */
 export const SUBTOTAL_ROW_BOUND = 5000;
 
@@ -235,6 +242,51 @@ export function projectionSubtotalSql(
         AND metric_id IN (${placeholders || "NULL"}) AND (${where})${viewPredicate(scope)}
       ORDER BY row_seq LIMIT ${SUBTOTAL_ROW_BOUND + 1}`,
     args: [snapshotId, ...metricIds, ...args],
+  };
+}
+
+/**
+ * One latest measurement of the projection, in the columns the cash read
+ * (`/api/v2/balances/cash`) groups by account: its subject, its metric and
+ * unit, its stored decimal-v1 value, its adoption and freshness, and the
+ * provider coordinates the organization reads. No evidence list, no temporal
+ * record and no amount text: the cash read names the observation instead.
+ */
+export interface ProjectionMeasureRow {
+  subject_scope_key: string;
+  row_seq: number;
+  observation_id: number;
+  source_id: string;
+  source_account: string;
+  metric_id: string;
+  unit_ref: string;
+  value_status: ProjectionPageRow["value_status"];
+  quantity_coefficient: string | null;
+  quantity_scale: number | null;
+  state: string;
+  reason_code: string | null;
+  freshness: string;
+  freshness_reason: string | null;
+  as_of: string | null;
+}
+
+/**
+ * Every latest measurement of the filter scope, in the projection's order,
+ * one row over `SUBTOTAL_ROW_BOUND` so an oversized scope is refused instead
+ * of answered in part (INV05). The same scope and view predicates as the
+ * subtotal, so the cash read and the known-assets subtotal read one set of
+ * rows. Nothing is added up in SQL.
+ */
+export function projectionMeasureSql(snapshotId: string, scope: CollectionScope): PageSql {
+  const { where, args } = projectionPredicates(scope);
+  return {
+    sql: `SELECT subject_scope_key, row_seq, observation_id, source_id, source_account,
+        metric_id, unit_ref, value_status, quantity_coefficient, quantity_scale,
+        state, reason_code, freshness, freshness_reason, as_of
+      FROM current_balance_projection
+      WHERE snapshot_id = ?1 AND (${where})${viewPredicate(scope)}
+      ORDER BY row_seq LIMIT ${SUBTOTAL_ROW_BOUND + 1}`,
+    args: [snapshotId, ...args],
   };
 }
 

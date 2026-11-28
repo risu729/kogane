@@ -40,7 +40,11 @@ function matched(
   debitDate: string | null,
   statements = 1,
 ): MatchedDebitAccount {
-  return { ...account, statements, latest: { proposalId, debitDate, period: "2098-01" } };
+  const date =
+    debitDate === null
+      ? { debitDate: null, debitDateReason: "debit_date_invalid" as const }
+      : { debitDate };
+  return { ...account, statements, latest: { proposalId, ...date, period: "2098-01" } };
 }
 
 test("a source without a reader is absent for that reason, whatever it is given", () => {
@@ -130,6 +134,22 @@ test("without a stated account, the newest accepted settlement answers", () => {
     debitDate: "2098-01-10",
     codes: ["stated_reading_conflicting"],
   });
+});
+
+test("an accepted settlement without a civil debit date answers with that date's reason, never a bare null (INV05)", () => {
+  const vpass = statedDebitAccount(false, []);
+  expect(answerCardDebitAccount(vpass, [matched(SMBC, "p-1", null)], [])).toEqual({
+    basis: "accepted-settlement",
+    account: SMBC,
+    proposalId: "p-1",
+    debitDate: null,
+    debitDateReason: "debit_date_invalid",
+    codes: [],
+  });
+  // A dated answer carries no reason at all.
+  expect(
+    answerCardDebitAccount(vpass, [matched(SMBC, "p-1", "2098-01-10")], []),
+  ).not.toHaveProperty("debitDateReason");
 });
 
 test("undecided candidates never answer; the reason says they are all there is", () => {

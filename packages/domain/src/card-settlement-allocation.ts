@@ -19,7 +19,12 @@
 // of one statement or of two, makes every allocation it is in `needs_review`
 // and none is chosen. A debit refused as an unresolved duplicate or for a
 // missing date still competes (as in ADR 0057): if it could complete an exact
-// allocation, the statement is `needs_review`, so the refusal never picks. Amounts are compared and added with the exact decimal
+// allocation of a statement, that statement is `needs_review`, so the refusal
+// never picks among its payers. It does not compete across statements: one
+// that could complete another statement's sum with a member of this
+// statement's single candidate leaves this one `proposed`, where an admitted
+// debit would have made both `needs_review` (docs/card-settlements.md,
+// Multiple debits and partial payments). Amounts are compared and added with the exact decimal
 // helpers of `values.ts` (INV03); a value that is not exact is a reason,
 // never zero (INV05). The date window and the most debits one allocation may
 // combine come from an explicit, versioned policy without defaults; nothing

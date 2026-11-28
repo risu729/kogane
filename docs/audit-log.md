@@ -75,13 +75,13 @@ authorization and service unchanged and records the outcome:
   before any batch, and the App records it once as `refused` under the
   command's operation.
 
-| Path         | Route or tool                                                                                                                                                              | Operation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Effect record written by                                                                               |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                            | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | the Processor: `createPlan`, `approve` and `commit` batches                                            |
-| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`, `GET …/operations`                                   | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`, `ops.operation.list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
-| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                  | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
-| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `card-settlements.unmatched`, `card-settlements.debit-accounts`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.statements`, `card-settlements.ownership`, `instruments.coverage`, `instruments.history`, `accounts.history`, `reported-state.read`, `reconstructed-state.read`, `identity.read`, `store.read`, `observations.list`, `observations.get`, `balances.read`, `rewards.read`, `reported-holdings-change.read`, `events.read`, `reports.read`, `collection-quality.read`, `evidence.read`, `evidence.raw.read`, `schedules.read`, `audit.search`, `audit.get`, `reconcile.propose`, `schedules.maintenance.read`) | the App: the proposal batch of `packages/application/src/propose-store.ts`                             |
-| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools, which the MCP client applies and reads as itself (ADR 0084) | the same names; `schedules.maintenance.update` and `schedules.survey.decide`, delegated operations (below); `schedules.survey.read`; `schedules.lease.release`, whose tool refuses every call (`operation_not_delegable`, R3); a refusal before any tool is named is `mcp.request`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | as above                                                                                               |
+| Path         | Route or tool                                                                                                                                                              | Operation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Effect record written by                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                            | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | the Processor: `createPlan`, `approve` and `commit` batches                                            |
+| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`, `GET …/operations`                                   | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`, `ops.operation.list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
+| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                  | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
+| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `card-settlements.unmatched`, `card-settlements.debit-accounts`, `decisions.pending`, `changes.since`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.statements`, `card-settlements.ownership`, `instruments.coverage`, `instruments.history`, `accounts.history`, `reported-state.read`, `reconstructed-state.read`, `identity.read`, `store.read`, `observations.list`, `observations.get`, `balances.read`, `rewards.read`, `reported-holdings-change.read`, `events.read`, `reports.read`, `collection-quality.read`, `evidence.read`, `evidence.raw.read`, `schedules.read`, `audit.search`, `audit.get`, `reconcile.propose`, `schedules.maintenance.read`) | the App: the proposal batch of `packages/application/src/propose-store.ts`                             |
+| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools, which the MCP client applies and reads as itself (ADR 0084) | the same names; `schedules.maintenance.update` and `schedules.survey.decide`, delegated operations (below); `schedules.survey.read`; `schedules.lease.release`, whose tool refuses every call (`operation_not_delegable`, R3); a refusal before any tool is named is `mcp.request`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | as above                                                                                               |
 
 The three schedule writers that were not one batch before are one now:
 a maintenance revision, its provenance update and its record (all through the
@@ -101,8 +101,10 @@ subject. A browser session whose verified subject claims the agent-only
 namespace (`403 actor_not_supported`, before any tool) is recorded on
 `agent-http` under that subject. A read records its row count
 (`financial.query`: the result's rows and whether more exist; `explain`:
-nodes; `purchases.explain`: purchases; `instruments.candidates` and
-`accounts.candidates`: items on the page, truncated when the total is larger; `card-settlements.unmatched`: statements on the page, truncated when a next page follows; `card-settlements.debit-accounts`: cards listed, truncated when more cards exist (`cardsTruncated`); `instruments.coverage`: source rows, never truncated; `economic-readiness.read`: the manifest's rows, never truncated; `card-settlements.read`: reviews on the page, truncated when another page follows; `card-settlements.statements`: statements on the grouped page (never their candidates), truncated when another page follows; `card-settlements.ownership`: one candidate, never truncated; `reconstructed-state.read`: one
+nodes; `purchases.explain`: purchases (`view: cards`: cards listed, truncated
+when `cardsTruncated`; `view: lines`: lines listed, truncated while a next
+page exists or is withheld); `instruments.candidates` and
+`accounts.candidates`: items on the page, truncated when the total is larger; `card-settlements.unmatched`: statements on the page, truncated when a next page follows; `card-settlements.debit-accounts`: cards listed, truncated when more cards exist (`cardsTruncated`); `decisions.pending`: one row per line (kind), truncated when a counted line reached its count bound (`complete: false`); `changes.since`: the sources the answer covers (listed and unchanged), truncated when it continues past the byte bound (`next`), a source's count is cut or the events line is incomplete; `instruments.coverage`: source rows, never truncated; `economic-readiness.read`: the manifest's rows, never truncated; `card-settlements.read`: reviews on the page, truncated when another page follows; `card-settlements.statements`: statements on the grouped page (never their candidates), truncated when another page follows; `card-settlements.ownership`: one candidate, never truncated; `reconstructed-state.read`: one
 when the answer carries a reconstruction, else none; `reported-state.read`:
 the answer's accounts plus payables, never truncated; `instruments.history`
 and `accounts.history`: entries; `audit.search`: records on the page, truncated when a cursor
@@ -114,7 +116,8 @@ else its first list (connections, transactions, …; one for `meta`, which has n
 truncated when the page says more follow (`coverage.truncated`,
 `page.hasMore` or a `nextCursor`), except that `collection-quality.read`'s
 account view counts the cells it read (its `cells`), never an account, and is
-never truncated; `reports.read`: the list's items,
+truncated only on a summary page that more lines follow, and its status view counts its job lines (`sources`), never
+truncated; `reports.read`: the list's items,
 truncated when a cursor follows, and one for a report or its explanation;
 `observations.get` and `evidence.raw.read`: one, never the bytes; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
@@ -262,14 +265,25 @@ counts `counters` and `written`.
 the whole store, newest first, 50 records a page:
 
 ```json
-{ "schemaVersion": "kogane-audit-page-v1", "records": [ … ], "cursor": "…" }
+{
+  "schemaVersion": "kogane-audit-page-v1",
+  "records": [ … ],
+  "cursor": "…",
+  "next": { "arguments": { "cursor": "…" } },
+  "paging": { "limit": 50, "returned": 50, "hasMore": true, "stoppedBy": "limit" }
+}
 ```
 
 Query parameters, each at most once: `operation`, `path`, `principalKind`,
 `result`, `from` and `to` (UTC days, inclusive) and `cursor`; anything else is
 `400 invalid_query`. The filters are in the SQL `WHERE` before the `LIMIT`, no
-total is computed, and the cursor binds the filters it was issued under (a
-cursor presented with other filters is `409 stale_context`). Reading the log is
+total is computed, and the cursor binds the filters it was issued under: a
+cursor presented with other filters is `400 cursor_mismatch` with `mustMatch`
+naming the six filter parameters, and a cursor this read did not issue is
+`400 invalid_cursor` ([ADR 0128](adr/0128-one-paging-contract.md)). `next` and
+`paging` carry the paging contract; the result's `cursor` is the same value,
+deprecated for one release. `kogane.audit.search` answers the same codes, with
+`mustMatch: ["filters"]`. Reading the log is
 a page load and is not recorded. Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
 `kogane.audit.search` and `kogane.audit.get`, require `audit.read` and whole
 account scope. Their source predicates precede the page window and cursor,
@@ -310,7 +324,8 @@ provider text or body.
 - **Paging** follows the server's cursor: next, previous (the cursors already
   read) and a restart from the newest record. The page shows its page number
   and the records on that page, never a total. A cursor the server refuses
-  (`409 stale_context`) is reported, with the restart offered.
+  (`400 cursor_mismatch` or `400 invalid_cursor`) is reported, with the
+  restart offered.
 - **Validation.** The browser checks every page before rendering it
   (`packages/observation-shared/src/audit-contract.ts`, through
   `validApiResponse`): the schema version, at most 50 records newest first,
@@ -325,16 +340,21 @@ provider text or body.
   stores them sorted). A page outside them is an error, never a partial
   table. The shared package may not import the application layer, so the
   lists are restated there and a test pins them to the builder's.
-- **Refusals.** A non-operator (`403 operator_required`) is told that the log
-  is shown to the operator only, and no record is shown; a deployment
-  without the route (`404`) says the log is not provided.
+- **Refusals.** A non-operator (`403 operator_required`) and a caller Access
+  did not verify (`401 authentication_required`, answered before any route)
+  are told that the log is shown to the operator only, as the 依頼の一覧 and
+  依頼の経過 pages tell them, and no record is shown; a deployment without the
+  route (`404`) says the log is not provided; a cursor the route no longer
+  honours (`409`) says this page's continuation cannot be read
+  (このページの続きを読み込めません, the 依頼の一覧 page's words for its own
+  stale cursor) and offers to read again from the newest record.
 
 A record whose target is an operations request (`op_<id>`) links to that
 request's read-only 依頼の経過 page (`/operations/op_<id>`,
-[operations API](ops-api.md#collector-execution-adr-0048)). No page lists
-operations (the list route of
-[ADR 0086](adr/0086-operator-operations-list.md) has none), so this log is
-where the operator finds an operation id on screen.
+[operations API](ops-api.md#collector-execution-adr-0048)). The requests
+themselves are listed on the 依頼の一覧 page (`/operations`, the list route of
+[ADR 0086](adr/0086-operator-operations-list.md)); this log is where the
+operator sees who made one, which the list does not show.
 
 The page reads no capability from `/api/meta`: like the schedule settings
 page it is always listed, and the server's operator check is the only gate.
@@ -410,10 +430,16 @@ occurrence of that job.
   recorded.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
-  not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
-  messages (`initialize`, `tools/list`, `ping`, an accepted notification) —
+  not serve (`404 not_found`, MCP `unknown_tool`; under `/api/ops/v1` that
+  includes a percent-encoded spelling of a route's fixed segments, which is
+  never served, so no operations request is accepted unrecorded), and the MCP
+  protocol's own messages (`initialize`, `tools/list`, `ping`, an accepted
+  notification) —
   including a JSON-RPC error `/mcp` answers inside a `200` (an unknown method,
-  `-32601`). Everything `/mcp` refuses with an HTTP status before a message
+  `-32601`), and the same `-32601` the 2026-07-28 revision answers under
+  `404` for a method the server does not serve (`ping` among them: that
+  revision has no `ping`); no other `/mcp` answer is a `404`.
+  Everything `/mcp` refuses with an HTTP status before a message
   reaches a tool is recorded once as `mcp.request`: the App's own refusals (a
   method other than POST, a query string, a cross-origin request, no grant)
   and the MCP SDK's (`400 invalid_body` for a body that is not JSON, not a
@@ -431,9 +457,11 @@ occurrence of that job.
   not applied either, and the caller gets the writer's failure (the
   schedules' `503 scheduling_unavailable`, the survey's
   `503 decision_record_failed`, a command's 5xx, and the proposal tool's
-  existing `409 idempotency_conflict`, which it answers for every failed
-  append). The command, operations and schedule writers act only for a
-  principal whose subject the actor shape admitted (`principalFor`); the
+  `500 internal_error`; its `409 idempotency_conflict` is only for a
+  proposal whose decision is already recorded,
+  [agent API](agent-api.md#proposals-are-not-adoptions)). The command,
+  operations and schedule writers act only for a principal whose subject the
+  actor shape admitted (`principalFor`); the
   proposal tool acts for any proved caller (ADR 0084: every one holds the
   whole-store grant), so a subject outside the actor shape can read but
   cannot propose.
@@ -467,7 +495,8 @@ rolled back with its record), `services/processor/test/schedule-dispatch-marker.
 `retry_claimed` line names the revision the retry was fenced on, and a lost
 fence logs none), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
-idle, off and unaudited lanes, a failed tick, a record that cannot be written),
+idle, off and unaudited lanes, a lane named like a built-in property such as
+`constructor` taken as unaudited, a failed tick, a record that cannot be written),
 `services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a
 key range without table statistics; the proposal reads equal the shipped text),
 `services/processor/test/card-purchase-lane-audit.test.ts` (the deployed

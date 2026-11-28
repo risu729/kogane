@@ -66,6 +66,7 @@ import {
   type TemporalBasis,
   type TemporalValue,
 } from "./time.ts";
+import { validZoneOffsetInstantText } from "./zone-offset.ts";
 import {
   compareDecimals,
   decimalEquals,
@@ -399,14 +400,22 @@ export interface SelectionBound {
   knowledge: KnowledgeMode;
 }
 
+/** The last second SQLite's `julianday` reads: 9999-12-31T23:59:59Z. */
+const LAST_JULIANDAY_SECOND = 253_402_300_799;
+
 /**
  * A known-at instant the candidate read can compare exactly: an RFC 3339
- * instant with at most three fractional digits. SQLite's `julianday` works in
- * milliseconds, so a finer K would be rounded there; the domain then
- * re-checks every candidate's `recordedAt` against K exactly.
+ * instant with at most three fractional digits, an offset a zone uses
+ * (-12:00 to +14:00), and no later than the end of year 9999 in UTC.
+ * SQLite's `julianday` works in milliseconds, so a finer K would be rounded
+ * there; it reads no offset of 15 hours or more and no instant after
+ * 9999-12-31T23:59:59.999Z, returning NULL, so such a K would match no row
+ * and every key would read `missing`. The domain then re-checks every
+ * candidate's `recordedAt` against K exactly.
  */
 export function validKnownAtInstant(value: unknown): value is string {
-  if (!validInstantText(value)) return false;
+  if (!validZoneOffsetInstantText(value)) return false;
+  if (parseInstant(value)!.epochSeconds > LAST_JULIANDAY_SECOND) return false;
   const fraction = /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/u.exec(value);
   return fraction === null || fraction[1]!.length <= 3;
 }

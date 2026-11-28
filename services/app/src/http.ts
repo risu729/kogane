@@ -8,9 +8,72 @@ export class HttpError extends Error {
      * amount or an exception message (addendum 10 §9, G3-08).
      */
     readonly refs: readonly string[] = [],
+    /**
+     * Closed hints that travel beside the code, such as `mustMatch` on a
+     * `cursor_mismatch` (ADR 0123): input names only, never a value.
+     */
+    readonly hints: HttpErrorHints = {},
   ) {
     super(code);
   }
+}
+
+/**
+ * The methods a read route serves: GET, and HEAD, which is the GET's answer
+ * — status and headers — without its body (`secureResponse` drops it).
+ */
+export const READ_METHODS = ["GET", "HEAD"] as const;
+/** The one method of every state-changing route of this Worker, `/mcp` included. */
+export const WRITE_METHODS = ["POST"] as const;
+
+/**
+ * `405 method_not_allowed`, carrying the methods the target route serves.
+ * The Worker's one error formatter (`errorResponse`) turns them into the
+ * `Allow` header RFC 9110 §15.5.6 requires on every 405, so no route sets the
+ * header itself and none can leave it out.
+ */
+export class MethodNotAllowed extends HttpError {
+  constructor(readonly allow: readonly string[]) {
+    super(405, "method_not_allowed");
+  }
+}
+
+/** Refuses a request whose method is not one of `allow`, naming them (`MethodNotAllowed`). */
+export function assertMethod(request: Request, allow: readonly string[]): void {
+  if (!allow.includes(request.method)) throw new MethodNotAllowed(allow);
+}
+
+/**
+ * The Worker's answer to a thrown error: the closed code, the request id and
+ * the error's safe refs and hints, with `Allow` on a 405. Anything that is not
+ * an `HttpError` is `500 internal_error`, its text never sent.
+ */
+export function errorResponse(error: unknown, requestId: string): Response {
+  if (!(error instanceof HttpError)) return json({ error: "internal_error", requestId }, 500);
+  const refs = error.refs.length > 0 ? { refs: error.refs } : {};
+  return Response.json(
+    { error: error.code, requestId, ...refs, ...error.hints },
+    {
+      status: error.status,
+      ...(error instanceof MethodNotAllowed ? { headers: { allow: error.allow.join(", ") } } : {}),
+    },
+  );
+}
+
+/**
+ * The hints an `HttpError` may carry beside its code. The keys are closed, so
+ * a hint can never replace the body's `error`, `requestId` or `refs`.
+ */
+export interface HttpErrorHints {
+  /** The argument names a continuation must repeat as they were (ADR 0123). */
+  readonly mustMatch?: readonly string[];
+  /**
+   * The argument a refused read answers under instead: an overview summary
+   * whose status lines alone pass its byte budget, or a balance list summary
+   * whose first line alone passes its byte budget, names `detail: "full"`
+   * (ADR 0123, amendments of 2026-11-20).
+   */
+  readonly retryWith?: { readonly detail: "full" };
 }
 
 /**
@@ -106,6 +169,12 @@ export function secureResponse(response: Response, request: Request, requestId: 
   // across origins keeps a handle on this one.
   headers.set("cross-origin-resource-policy", "same-origin");
   headers.set("cross-origin-opener-policy", "same-origin");
+  // Once a browser has one answer over HTTPS it uses only HTTPS for this host
+  // for a year, so a typed hostname or an `http://` link is never sent in
+  // clear text first (ADR 0131). This host only, and not preloaded: those
+  // reach other names or outlive a rollback. A browser ignores the header on
+  // a plain-HTTP answer, so a local `http://` run is unaffected.
+  headers.set("strict-transport-security", "max-age=31536000");
   headers.set("x-request-id", requestId);
   if (!headers.has("content-security-policy")) {
     headers.set(
@@ -113,6 +182,9 @@ export function secureResponse(response: Response, request: Request, requestId: 
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
     );
   }
+  // A HEAD answer has no body: the GET's is cancelled, never read, so a relayed
+  // stream (the schedules snapshot in full) is released at once.
+  if (request.method === "HEAD") response.body?.cancel().catch(() => undefined);
   return new Response(request.method === "HEAD" ? null : response.body, {
     status: response.status,
     headers,

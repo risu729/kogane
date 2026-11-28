@@ -3,8 +3,9 @@
 // (packages/application/test/instrument-resolution-world.ts). A decision is a
 // plan of the payload the server named, sent to the change lifecycle; the
 // page never builds one of its own and never approves.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { ERROR_STATUS } from "../../../packages/application/src/errors.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -23,6 +24,9 @@ import {
   type World,
 } from "../../../packages/application/test/instrument-resolution-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { validInstrumentCandidateReview } from "../../../packages/observation-shared/src/instrument-candidates-contract.ts";
+import { offsetPagedFields } from "../../../packages/observation-shared/src/paging-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -37,16 +41,25 @@ const GRANT = {
   budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
 } as const;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("instrument candidate review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let main: World;
   let store: World;
   let commands = true;
   let stale = false;
+  /** The history route answers 503 `catalogue_read_failed` while set, as a failed store read would. */
+  let historyDown = false;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
+  /** Rewrites the served page, when a test needs a shape the world does not hold. */
+  let reshape: ((review: Awaited<ReturnType<typeof page>>) => unknown) | null = null;
 
   async function page(
     view: InstrumentCandidateView,
@@ -66,8 +79,10 @@ describe.if(runnable)("instrument candidate review", () => {
     store = main;
     commands = true;
     stale = false;
+    historyDown = false;
     posted.length = 0;
     read.length = 0;
+    reshape = null;
   });
   beforeAll(async () => {
     main = await world();
@@ -98,16 +113,19 @@ describe.if(runnable)("instrument candidate review", () => {
           });
         if (url.pathname === "/api/identity/instrument-candidates") {
           read.push(url);
-          return Response.json(
-            await page(
-              (url.searchParams.get("view") ?? "open") as InstrumentCandidateView,
-              Number(url.searchParams.get("offset") ?? "0"),
-              url.searchParams.get("identifierId"),
-            ),
+          const review = await page(
+            (url.searchParams.get("view") ?? "open") as InstrumentCandidateView,
+            Number(url.searchParams.get("offset") ?? "0"),
+            url.searchParams.get("identifierId"),
           );
+          return Response.json(reshape === null ? review : reshape(review));
         }
         if (url.pathname === "/api/identity/instrument-history") {
           read.push(url);
+          // As the App answers a read whose store failed (the route runs in
+          // `catalogue`).
+          if (historyDown)
+            return Response.json({ error: "catalogue_read_failed" }, { status: 503 });
           const outcome = await readInstrumentHistoryForGrant({
             grant: GRANT,
             sql: store.sql,
@@ -115,7 +133,7 @@ describe.if(runnable)("instrument candidate review", () => {
           });
           return outcome.ok
             ? Response.json(outcome.history)
-            : Response.json(outcome.error, { status: 403 });
+            : Response.json(outcome.error, { status: ERROR_STATUS[outcome.error.code] });
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
@@ -173,7 +191,6 @@ describe.if(runnable)("instrument candidate review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -199,6 +216,83 @@ describe.if(runnable)("instrument candidate review", () => {
     // Every request is a GET of the read: nothing was planned by opening the page.
     expect(posted).toEqual([]);
     expect(read.every((url) => url.searchParams.get("view") === "open")).toBe(true);
+    await tab.close();
+  });
+
+  test("a next page the reader's row budget withholds is said, never shown as the end", async () => {
+    // As the route answers a page past which its grant (`readerGrant`,
+    // 1,000 rows) may not read: items follow, no `next` and no
+    // `nextOffset`, and `paging.stoppedBy: "budget"`, built by the same
+    // `offsetPagedFields` the service uses. The world holds one page, so its
+    // first page is served as that stop, with one item counted after it.
+    reshape = (review) => {
+      const returned = review.items.length;
+      return {
+        ...review,
+        total: review.query.offset + returned + 1,
+        nextOffset: null,
+        ...offsetPagedFields({
+          limit: 50,
+          offset: review.query.offset,
+          returned,
+          hasMore: true,
+          withheld: true,
+        }),
+      };
+    };
+    const served = reshape(await page("open", 0)) as Record<string, any>;
+    expect(served["paging"]).toEqual({
+      limit: 50,
+      returned: served["items"].length,
+      hasMore: true,
+      stoppedBy: "budget",
+    });
+    expect(served["next"]).toBeNull();
+    expect(validInstrumentCandidateReview(served)).toBe(true);
+    const tab = await open();
+    const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
+    const note = panel.getByRole("note");
+    await note.waitFor();
+    expect(await note.textContent()).toBe(
+      "「確認待ち」の候補はこの先にもありますが、一度に先頭から読める件数の上限に達したため、ここより先は表示できません。続きがないという意味ではありません。",
+    );
+    expect(await panel.getByRole("button", { name: "次の候補", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    expect(await auditView(tab)).toEqual([]);
+    await tab.close();
+  });
+
+  test("a later page the open list no longer reaches never says no candidate is waiting", async () => {
+    // A decided candidate leaves the open view, so a later page can come back
+    // empty while the first still lists candidates. The world holds one page;
+    // its first page is served as if a second followed, by `nextOffset` alone
+    // as a server before ADR 0128 S6 answered it: the page reads only
+    // `nextOffset`, and a `next` or `paging` that disagreed with it would be
+    // refused by the shared validator (a short page cannot honestly continue).
+    reshape = (review) => {
+      if (review.query.offset !== 0) return review;
+      const { next: _next, paging: _paging, ...older } = review;
+      return { ...older, nextOffset: 50 };
+    };
+    const first = await page("open", 0);
+    const tab = await open();
+    const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
+    await panel.getByRole("button", { name: "次の候補", exact: true }).click();
+    // The cards leave as soon as the next page starts loading; the pager
+    // returns only with that page's answer, so the panel is read after it.
+    await tab.locator(".identity-card").first().waitFor({ state: "detached" });
+    await panel.getByRole("navigation", { name: "候補のページ", exact: true }).waitFor();
+    const text = await panel.innerText();
+    expect(text).not.toContain("確認待ちの候補はありません。");
+    expect(text).toContain("このページに表示する項目はありません。");
+    expect(text).toContain(`表示なし / ${String(first.total)} 件`);
+    expect(text).not.toContain("51–50");
+    const back = panel.getByRole("button", { name: "先頭に戻る", exact: true });
+    expect(await back.isDisabled()).toBe(false);
+    await back.click();
+    await tab.locator(".identity-card").first().waitFor();
+    expect(await auditView(tab)).toEqual([]);
     await tab.close();
   });
 
@@ -262,10 +356,15 @@ describe.if(runnable)("instrument candidate review", () => {
     );
     const card = tab.locator(".identity-card").nth(expected.items.indexOf(candidate));
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await card
-      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
-      .click();
+    const button = card.getByRole("button", {
+      name: "同じ銘柄として採用する内容を確認",
+      exact: true,
+    });
+    await button.focus();
+    await tab.keyboard.press("Enter");
     await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    // The refusal leaves a keyboard user on the button they pressed.
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
     // The candidate was read again before planning, and no plan was created.
     expect(read.some((url) => url.searchParams.get("identifierId") === id.broker9001)).toBe(true);
     expect(posted).toEqual([]);
@@ -284,6 +383,34 @@ describe.if(runnable)("instrument candidate review", () => {
     expect(posted).toEqual([]);
     await tab.close();
   });
+
+  test("a history read again that fails keeps the earlier entries only under the warning", async () => {
+    const tab = await open();
+    const card = tab.locator(".identity-card").first();
+    const toggle = card.getByRole("button", { name: "訂正履歴を見る", exact: true }).first();
+    await toggle.click();
+    await card
+      .getByText("記録順の履歴です。有効期間ごとの対応付けは未対応です。", { exact: true })
+      .waitFor();
+    const entries = await card.locator("ol.warning-list li").count();
+    expect(entries).toBeGreaterThan(0);
+    const warning = "更新できませんでした。前回読み込んだ訂正履歴を表示しています。";
+    expect(await card.getByText(warning, { exact: true }).count()).toBe(0);
+    // Closing and reopening reads the history again; that read fails.
+    await card.getByRole("button", { name: "訂正履歴を閉じる", exact: true }).click();
+    historyDown = true;
+    await card.getByRole("button", { name: "訂正履歴を見る", exact: true }).first().click();
+    await card.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+    expect(await card.locator("ol.warning-list li").count()).toBe(entries);
+    expect(await auditView(tab)).toEqual([]);
+    // The read recovers on retry, and the warning goes.
+    historyDown = false;
+    await card.getByRole("button", { name: "訂正履歴を再試行", exact: true }).click();
+    await card.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+    expect(await card.locator("ol.warning-list li").count()).toBe(entries);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
 
   test("history renders persisted delegated origin without an actor or an approval request", async () => {
     store = await world();
@@ -445,4 +572,66 @@ describe.if(runnable)("instrument candidate review", () => {
     expect(await auditView(tab)).toEqual([]);
     await tab.close();
   }, 60_000);
+
+  test("a plan the server refuses as stale reads the list again and keeps the refusal on the card", async () => {
+    const tab = await open();
+    const first = (await page("open", 0)).items[0] as ReviewCandidate;
+    // As the server answers a candidate whose pins moved after the read before planning.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status: 409,
+        json: { error: "stale_context", refs: [first.candidateId] },
+      }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    const reread = tab.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/identity/instrument-candidates" &&
+        !url.searchParams.has("identifierId")
+      );
+    });
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "対象が変更されました" }).waitFor();
+    await reread;
+    // The candidate is still listed: its refusal stays on its card, and focus
+    // stays on the card (on the pressed button, or on the refusal when the
+    // button had let it go while the plan was in flight).
+    await card.getByRole("alert").filter({ hasText: "対象が変更されました" }).waitFor();
+    await tab.waitForFunction(() =>
+      document.querySelector(".identity-card")?.contains(document.activeElement),
+    );
+    expect(await tab.getByRole("alert").count()).toBe(1);
+    expect(tab.url()).toContain("/identities/instrument-candidates");
+    await tab.close();
+  });
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const tab = await open();
+    const lists: string[] = [];
+    tab.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === "/api/identity/instrument-candidates" &&
+        !url.searchParams.has("identifierId")
+      )
+        lists.push(url.search);
+    });
+    // As the App answers a subject this deployment grants nothing.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({ status: 403, json: { error: "subject_not_granted" } }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "権限が付与されていません" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(lists).toEqual([]);
+    await tab.close();
+  });
 });

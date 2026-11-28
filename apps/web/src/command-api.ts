@@ -6,6 +6,7 @@
 // The buttons are enabled by the advertised `commands` capability only. That
 // is a display decision: the server still authenticates, checks the grant, and
 // refuses an agent's approval whatever the client sends.
+import { ownEntry } from "./labels.ts";
 import type { OwnershipSelfDeclaration } from "../../../packages/domain/src/ownership-declaration.ts";
 
 export const COMMAND_PREFIX = "/api/command/v1";
@@ -110,6 +111,35 @@ export class CommandError extends Error {
   }
 }
 
+/**
+ * A plan the page refused itself because what it showed has changed since it
+ * was read: the candidate read again before planning differs, or the plan
+ * pinned another revision than the one on screen.
+ */
+export class StalePlanError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StalePlanError";
+  }
+}
+
+/**
+ * The plan refusals that mean "the item changed since the page read it", so
+ * the page reads it again (`PlanRefreshScope`): `stale_context` (the item is
+ * no longer in the state the plan needs, or a pin moved) and `target_missing`
+ * (the item is gone), the two codes the plan route answers about its target,
+ * and the page's own `StalePlanError`. No other refusal (a missing grant, an
+ * invalid payload, evidence or scope that is not ready, a budget) says the
+ * page is behind.
+ */
+export function planRefusedAsStale(error: unknown): boolean {
+  return (
+    error instanceof StalePlanError ||
+    (error instanceof CommandError &&
+      (error.code === "stale_context" || error.code === "target_missing"))
+  );
+}
+
 function refusalIsFinal(status: number, code: string): boolean {
   return (
     code === "budget_exceeded" ||
@@ -138,7 +168,6 @@ const MESSAGES: Record<string, string> = {
   budget_exceeded:
     "処理できる件数の上限を超えているため、この変更は受け付けられません。再試行しても結果は変わりません。",
   evidence_restricted: "この根拠を使う権限がないため、この操作は受け付けられません。",
-  invalid_payload: "入力した識別名、理由、根拠を確認してください。",
   invalid_command:
     "送信した内容の形式を受け付けられませんでした。表示を更新して、内容を確認し直してください。",
   commands_disabled: "この接続先では確認操作が有効になっていません。",
@@ -156,6 +185,8 @@ const MESSAGES: Record<string, string> = {
   approval_scope_mismatch: "承認の範囲がこの対象を含んでいません。",
   approval_not_found: "承認が見つかりません。もう一度承認してください。",
   receipt_not_found: "この操作の記録は見つかりません。",
+  // A list cursor the operations list did not issue (ADR 0128).
+  invalid_cursor: "一覧の続きを読み込めません。最新の一覧から読み直してください。",
   target_missing: "対象の記録が見つかりません。表示を更新して、対象を選び直してください。",
   target_ambiguous: "対象を一つに特定できません。表示を更新して、対象を選び直してください。",
   commit_failed: "変更は保存されませんでした。表示を更新して、対象と計画を確認し直してください。",
@@ -164,7 +195,7 @@ const MESSAGES: Record<string, string> = {
 
 function messageFor(status: number, code: string): string {
   return (
-    MESSAGES[code] ??
+    ownEntry(MESSAGES, code) ??
     (status === 401
       ? "認証が必要です。ログイン状態を確認して、再読み込みしてください。"
       : status === 403

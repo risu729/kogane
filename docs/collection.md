@@ -335,6 +335,45 @@ underscores, and codes outside the display grammar become `unclassified`.
 This read adds no provider call or automatic retry. See
 [collection quality](read-model.md#collection-quality).
 
+### Is anything stuck? (the collection status view)
+
+`GET /api/collection-quality?view=status` and `kogane.collection-quality.read`
+with `{ view: "status" }` answer, one line per configured job, whether its
+collection works
+([ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job);
+the collection quality page shows it as a table at its top). The rules, as
+the code applies them:
+
+- A receipt that `failed`, was `uncertain` or `not_dispatched` is
+  **recovered** when a visible successful fetch run (`success` with no
+  failure, the predicate the summary's V Point recovery reads) of the job's
+  CORE source completed strictly after the receipt finished (its start when
+  it has none) and strictly before the job's next receipt started. V Point's
+  daily `reauthentication_pending`, which its email follow-up run repairs
+  about 20 seconds later, is such a receipt: its code stays under `lastRun`
+  and the job reads `ok`, also before that run's parses publish on a later
+  Processor tick. A re-authentication request stores nothing and fails, so it
+  does not recover it; a failed or partial run does not either.
+- `failuresSinceSuccess` counts the receipts after the newest one that
+  completed or was recovered, from the newest 101 (a running newest receipt
+  is skipped, so the edge receipt can still end an exact count), and says
+  `"100+"` (at least 100) when none of them is a success and the job holds
+  more than 100. `failureCode` is the newest counted receipt's code.
+- `state` is the first of `disabled` (not enabled), `needs-owner` (the newest
+  counted code is `human_required…`, `manual_agreement_required`, or an
+  unrecovered V Point session code; or a dataset's cells say
+  `user_action_required`), `failing` (any counted receipt), `degraded` (a
+  dataset's newest parsed capture is more than 3 Asia/Tokyo days old while
+  newer captures are not published) and `ok`. A maintenance window defers a
+  job's next receipt; it writes no failed receipt, so it is none of these.
+- `notPublishing` lists, per dataset some parser reads, the cells whose newest
+  capture has no published parse, with their stored reasons (`unit_failed`,
+  `run_not_successful`, `not_parse_eligible`, `parse_pending`, ...). A
+  published parse with no observation (#450) is published and not listed.
+
+Limits: a recovery is seen only within the source's newest 100 runs; a
+keepalive is reported on its own line; a disabled job's datasets are not read.
+
 ### Artifact datasets at registration (ADR 0022)
 
 A terminal names no parser dataset, and no collector adds one: the Processor
@@ -380,14 +419,41 @@ expected total, already checked against every walked JSON page. A zero total
 skips CSV; a positive total requires a CSV whose logical data-row count,
 excluding the header and blank lines, equals that total. The collector uses
 the shared CSV reader so quoted multiline cells and quote recovery count as
-in parsing. This check runs before collection returns artifacts, so failures
-end the shared run as `failed`, with no JSON transaction fallback:
+in parsing. This check runs before the history step returns any artifact, so a
+refusal stops the core run with no JSON transaction fallback:
 `history_csv_missing_with_transactions` (empty/missing body or failed CSV
 HTTP request), `history_csv_count_mismatch` (short or long CSV), or
 `history_csv_invalid` (invalid encoding/header). The allowlisted code is
 stored at terminal, report and account-unit scope, without provider text or
-amounts. Transport failures likewise fail the run. Existing failed-run
-artifact retention is unchanged. See [ADR 0092](adr/0092-sony-history-csv-only.md).
+amounts. Transport failures likewise stop the run. See
+[ADR 0092](adr/0092-sony-history-csv-only.md).
+
+The core steps run in order: `login`, `gross-balance`, `monthly-history`,
+`retained-history`, `wallet` (`CORE_STEPS`, `src/sony-bank.ts`). Each step is
+all-or-nothing across the eleven currencies. When one throws, the run keeps
+the artifacts of the steps that finished, under the names a complete run gives
+them (the month window stays `monthly-*`; a canonical history name appears only
+once the retained step finished), and keeps nothing of the step that threw. It
+is then `partial` (`failed` with no artifact when nothing finished that stores
+one, which is a stop at `login` or `gross-balance`). A stopped run writes no
+`collection-summary.json` and, WALLET being last, no WALLET page or
+`wallet-months` range. Its `manifest.json` adds `coreSteps` (`completed`,
+`failed`, `notAttempted`), names the stopped step as the failure's
+`operation`, and has a null `transactionCount` unless the retained step
+finished. The terminal's code is the allowlisted history reason above when
+there is one, else `core_monthly_history_failed`,
+`core_retained_history_failed` or `core_wallet_failed`; the account unit's
+`coverageStatus` is `partial` and it carries that code (so its registered unit
+report is `failed`). `sonyBankRunPlan` refuses a stopped run carrying an
+artifact no finished step produced, or one stored under any name other than
+the one its dataset is stored under (`core_partial_scope_invalid`); a refused
+plan writes no terminal, the Worker logs
+`sony-bank-shared-persistence-refused` with the closed code, and the
+occurrence fails with `collection_failed`. A partial core run is never parsed: every Sony core dataset has run-scoped eligibility,
+so it is evidence only, and the scheduler records it `completed` like any
+persisted `partial` run
+([ADR 0099, amendment 2026-11-18](adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)).
+The realised-gains and documents runs are read only after a complete core.
 
 Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
 statements), the same pass the retired legacy path applied before the importer
@@ -415,14 +481,18 @@ has a null start and yesterday as its end, and `requestedScope.scopeKind` is
 `full_snapshot` over the same bounds, so a later successful run recovers a day
 an earlier missed run did not read, as long as the provider still retains it
 and each currency's retained history fits the 1,000-page walk (beyond it the
-run fails with `history_page_limit_exceeded`). `coverageStatus` is `complete`
-for a successful run and `unknown` for a failure; the core run is never
-`partial`, because a core failure keeps no artifact. The null start names the
+retained step stops the core run, `partial`, with
+`history_page_limit_exceeded`). `coverageStatus` is `complete` for a successful
+run, `partial` for a core run that stopped after a step that stores an
+artifact, and `unknown` for a failure. The null start names the
 provider's retention, not proved account-opening coverage.
 
 The realised-gains and documents runs, read only after the core steps succeed,
-share the core run's ID as `acquisitionSessionRef`. The realised-gains run has
-no `request-window` (`full_snapshot` with null bounds); its units are
+share the core run's ID as `acquisitionSessionRef` and as `attemptId`, since
+the same attempt writes all three runs. Supplementary runs stored before this
+was fixed name their own run ID as `attemptId`, an attempt no other run
+carries, and stay as stored. The realised-gains run has no `request-window`
+(`full_snapshot` with null bounds); its units are
 `realised-evidence` and `realised-year-YYYY` for what it stored. The documents
 run requests the five-year `date_range` ending yesterday, and each stored PDF
 has its own complete `document` unit (`delivered-document-NNNN`) with a unit
@@ -470,7 +540,9 @@ bounds is not declared captured. These manifest-based ranges do not prove the
 aggregator's underlying provider data is fresh or its full history is retained;
 one `terminal` report carries the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
-aggregator currently shows) listing the accounts as `unitKeys`.
+aggregator currently shows) listing the accounts as `unitKeys`. Every account
+is asked for the same 12 JST calendar months, computed once from the run's
+`startedAt` ([source notes](sources/moneyforward.md#collection-surfaces-and-run-boundaries)).
 
 The unit key is the account identity the parser requires,
 `moneyforward-account-v2-<64 hex>`
@@ -488,6 +560,21 @@ carries `identity: derived` or one closed code (`identity_tuple_absent`,
 themselves. The parsers also accept the importer's `moneyforward-account-v1-`
 identities, which are a different account from the v2 identity of the same
 service ([identity operations](identity-operations.md#moneyforward-collector-runs-carry-the-account-identity)).
+
+Run result: `runSharedCollection` returns the run's id, status, artifact and
+failure counts, persistence outcome and terminal key. `accountDetailCount` and
+`monthlyFragmentCount` are in that result and in the collector's
+`manifest.json` only when the collection finished; a finished run with no
+account reports a known 0 for both. A run that stopped earlier (no credential,
+a refused sign-in, a refused account or month page) never learned them, so
+they are absent, not 0 (INV05); its failure code is the reason. Such a run is
+`failed` and keeps no artifact, so it writes no `manifest.json` at all. A
+`success` input that carries no `accountDetailCount` cannot be checked against
+its identities, so its units stay positional (`identity_incomplete`;
+[ADR 0027, amendment 2026-11-21](adr/0027-moneyforward-collector-account-identity.md#amendment-2026-11-21-a-successful-input-without-its-account-count-fails-closed)). Until
+2026-11-21 a stopped run reported both counts as 0 in its result. Verified
+with a synthetic passkey provider behind a mocked `fetch` in
+`services/collector-moneyforward/test/diagnostics.test.ts`.
 
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
@@ -687,8 +774,12 @@ Daily reported credit snapshots (ADR 0105) are independent
 card selection and durable binding. Alongside sanitized card inventory,
 selection and statement discovery, they store `credit/authori.json` and
 `credit/revo.json` in the existing `card-NNN` unit, plus the existing
-binding unit when derivable. The new credit sanitizer explicitly keeps
-observed Authori financial keys while removing authentication/card references;
+binding unit when derivable. A card whose credit snapshot fails persists a
+`failed` terminal with no artifact under the same run id; like the success, it
+names the session run id as `acquisitionSessionRef` and `attemptId`. Failed
+credit runs stored before this was fixed name `<session>-credit` there, a
+session no other run of the collection carries, and stay as stored. The new
+credit sanitizer explicitly keeps observed Authori financial keys while removing authentication/card references;
 statement sanitizer v1 output remains unchanged. Registration v8 maps only
 these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
 old meaning.
@@ -758,18 +849,30 @@ months that were captured, one `terminal` report,
 `requestedScope.scopeKind = full_snapshot`. The run's `coverageStatus` is
 `partial` even on success: a card exposes a rolling window of statement months,
 so a finished run is not a claim about the card's whole history. The card unit
-is `complete` only when every month's captured rows (the pages' `meisaiList`
-entries) equal the total the provider states for it (`webMeisaiTopK3Vo.allCnt`
-on a finalized statement page, a string on the live site, `total` on a
-customized one, a number; both read by `providerCount` as a non-negative safe
-integer or a string of ASCII digits only); otherwise it is
+is `complete` only when every month's counted rows equal the total the
+provider states for it (`webMeisaiTopK3Vo.allCnt` on a finalized statement
+page, a string on the live site, `total` on a customized one, a number; both
+read by `providerCount` as a non-negative safe integer or a string of ASCII
+digits only). The counted rows are the pages' `meisaiList` entries, except
+that on a finalized page the two header kinds `45` (5 data cells) and `4C`
+(4 data cells, empty `data[1]`) are left out, because `allCnt` does not count
+them (the owner's counts-only read of 30 finalized months, decision D1;
+[ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted)).
+The classifier is `src/statement-rows.ts`, shared with the counts-only
+diagnostic; every other entry is counted, a row of an unknown shape included,
+and the statement parser refuses an unknown kind. A customized page's rows are
+all counted. Otherwise the unit is
 `partial`, which makes registration record the whole fetch run as `partial`,
 which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
-[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
-and closed `coverage` code (`complete`, `stated_total_unverified`,
-`stated_total_mismatch`) and the card's code, which the persist diagnostic
-also logs (`statement_months_absent` when no month was walked). The month
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each
+month's `countedRows`, `excludedHeaderRows` (0 for a customized month),
+`statedTotal` and closed `coverage` code (`complete`,
+`stated_total_unverified`, `stated_total_mismatch`) and the card's code, which
+the persist diagnostic also logs (`statement_months_absent` when no month was
+walked). Manifests written before this rule name the count `capturedRows`
+and counted every entry; nothing but a reader of the stored object reads
+either field. The month
 walk (`src/statement-walk.ts`) stops a finalized month after a page whose
 `allCnt` is below its `nextPageRow` or on an empty page after the first, and a
 customized month once its rows reach `total` with `pageFlg` `1` or `3` or on
@@ -777,8 +880,9 @@ an empty answer page; it does not read `pageNo` or `lastPage`, whose meaning
 is unobserved
 ([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
-storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
-the summary central storage held for one.
+storage recorded for a card-scoped Vpass run, and `manifest.json` holds the
+summary central storage held for one plus the per-month counts and codes
+above.
 
 A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
@@ -859,6 +963,20 @@ page stops the collection (`premature-end`) instead of ending the walk: an
 early end of history has not been observed. Only the first V Money page may
 answer with an empty `results`, read as an empty history.
 
+`results.total` is read as a count only when the page states one: a
+non-negative safe integer number, or a string of at most 16 ASCII digits whose
+value is a safe integer. Anything else (`null`, an empty or blank string, a
+boolean, an array, an exponent or hex string, a fraction) stops the collection
+as `invalid-total`. Until 2026-11-21 `Number()` read most of these as 0, so a
+page of rows under a missing total ended the walk as a complete history of zero
+rows (INV05). A page whose rows carry the walk past the stated total stops it as
+`rows-exceed-total`: the walk ends only on a page whose rows reach the total
+exactly. Both are synthetic cases in
+`services/collector-vpoint/test/vpoint.test.ts`; neither shape has been
+observed. Like every other stopped walk, these keep no page: `collectVPoint`
+returns no artifacts, so the run's terminal is `failed` with no artifact, not
+a `partial` run of its finished pages.
+
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the
 bytes are `Response.text()` encoded again as UTF-8, the same content but not
@@ -883,6 +1001,18 @@ stored artifact count, `providerOutcome` from the run status, `coverageStatus`
 `safeErrorCode` from the run's first safe failure code (`collector_failed` when
 a failure carried none). `ranges` and `reports` are empty; `transformations`
 holds the `reencoded` steps above.
+
+Run outcome and log: `runCollection` returns the run's manifest, and the
+`vpoint-collection-persisted` log line carries its status, counts and closed
+codes (artifact, failure and object counts, terminal outcome, key and digest,
+and `reasonCode` when the terminal was not written). `historyTotal`,
+`historyPageCount`, `vMoneyHistoryTotal` and `vMoneyHistoryPageCount` are in
+both only when both history walks finished. A run that stopped earlier (no
+session, a refused read, a stopped walk) never learned them, so they are
+absent, not 0 (INV05); its failure codes are the reason. Until 2026-11-21
+such a run reported all four as 0. Verified with mocked `fetch` responses and
+a session stub with no session in
+`services/collector-vpoint/test/diagnostics.test.ts`.
 
 Not carried over: the V Point Pay email reconciliation report. It was built by
 listing the legacy `raw/v-point-pay-email/` prefix, and those notifications
@@ -958,9 +1088,30 @@ current JST month, one matching `requested-months` range with basis `source`,
 both stated as `YYYY-MM` (the collector's `yyyyMM` was refused by the ingest
 range contract, `invalid_start_value`, until ADR 0021),
 one unit (`account`/`collection`), and `providerOutcome` from the run status.
-When the month window is unknown — a run that failed before the balance
-response — the scope is `unspecified` and no range is stated rather than a
-guessed one.
+The window is stated only for a run whose collection finished: a run that
+stopped before `collectVPointPay` returned, including one that stopped at a
+month request after the balance response named its first month, states the
+scope `unspecified` and no range rather than a guessed one.
+
+Run outcome and log: the Durable Object's `runCollection` returns the run's
+manifest. Its failure entry is `{operation, errorType, message}` in closed
+codes only: `errorType` is one of the collector's own error names
+(`VPointPayHttpError`, `VPointPayProtocolError`,
+`VPointPayReauthenticationRequiredError`,
+`VPointPayCredentialConfigurationError`) or of the shared set of
+`closedErrorType` (`packages/collector-diagnostics`), else `UnknownError`,
+and `message` is the failure's machine code above. Until 2026-11-22 the entry
+kept the thrown `name` as it was and a redacted provider message. The
+`vpoint-pay-collection-persisted` log line carries its
+status, month bounds, counts and closed codes (artifact and failure counts,
+terminal outcome, key and digest). `transactionMonthCount` and
+`transactionCount` are in both only when the collection finished; a finished
+run whose months hold no transaction reports a known 0. A run that stopped
+earlier (no credential, a refused token, balance or month request) never
+learned them, so they are absent, not 0 (INV05); its failure codes are the
+reason. Until 2026-11-21 such a run reported both as 0. Verified with a mocked
+`fetch` and a stub Durable Object storage in
+`services/collector-vpoint-pay/test/state.test.ts`.
 
 This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
 answer 410, there is no cron, and the notification mail this source is actually
@@ -1004,6 +1155,20 @@ collector proved it reached the end of the history; an unproven boundary is
 The media type in the terminal is `text/html`: `terminal-v1` media types carry
 no parameters, and `text/html` is what the central descriptor already declares
 for this artifact, with the CP932 charset a constant of the source.
+
+Run log: the `mobile-suica-collection-persisted` line carries the run's
+status, counts and closed codes (artifact and failure counts, terminal
+outcome, key and digest, and `reasonCode` when the terminal was not written).
+`transactionCount` and `pageCount` are in it, and in the run's returned
+manifest, only when the history walk finished; a finished walk over an empty
+history reports a known 0 transactions on its one page. A run that stopped
+earlier (no credential, a failed browser bootstrap, a refused or invalid
+history page) never learned them, so they are absent, not 0 (INV05); its
+failure code is the reason. The pages a stopped walk kept are counted in
+`artifactCount`, not as its `pageCount`. Until 2026-11-21 a stopped run
+reported a transaction count of 0 and its kept pages as its page count.
+Verified with a stubbed browser bootstrap and a mocked `fetch` in
+`services/collector-mobile-suica/test/run-counts.test.ts`.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
@@ -1087,8 +1252,8 @@ the production reader chooses one revision per logical id across overlapping
 runs. Both statements use the domestic main-site session; their units are
 `cash-history-yen` and `cash-history-foreign`. Registration
 v7 adds only the new USD derivative; raw pages stay unmapped and earlier
-mappings stay frozen. Catalogue status remains partial under #1226 pending
-unobserved semantics and scheduled proof
+mappings stay frozen. Catalogue status remains partial under #446 pending
+unobserved semantics (a USD statement longer than one page is refused)
 ([ADR 0102](adr/0102-sbi-retained-cash-history.md)).
 
 Except for the exact weekly/cash-history source bytes above, the bytes are
@@ -1231,6 +1396,9 @@ source `sbi-shinsei-bank`).
 | Artifact                                  | Role                         | Bytes                                                             |
 | ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
 | `raw-<dataset>.json` (four CORE datasets) | `sanitized_provider_capture` | the provider response with `header.newToken` removed              |
+| `raw-period-activity-NNNN.json`           | `sanitized_provider_capture` | one savings account's selected-period response, token removed     |
+| `savings-activity-NNNN.json`              | `collector_derived`          | that response bound to its requested account, currency and range  |
+| `monthly-report-YYYY-MM-<sha256>.pdf`     | `provider_document`          | a monthly report's PDF bytes, decoded from the download response  |
 | `normalized.json`                         | `collector_derived`          | the collector's own normalized snapshot                           |
 | `manifest.json`                           | `collector_manifest`         | the collector manifest with failures reduced to allowlisted codes |
 
@@ -1260,22 +1428,45 @@ the collector's own record, so it is `collector_manifest` now.
   manifest describes the bytes DATA holds") checks every entry against the
   object at its digest in a fake `DATA` bucket.
 
-- `requestedScope`: `full_snapshot` — this source is a current snapshot and the
-  trigger accepts no date range. No units, ranges or reports.
+- `requestedScope`: `full_snapshot` with null bounds and no unit keys — the
+  core captures are a current snapshot and the trigger accepts no date range.
+  The four core captures, `normalized.json` and `manifest.json` name no unit.
+- Units, ranges and reports (`buildSharedRunPlan`, `src/shared-collection.ts`;
+  until 2026-11-23 this section said there were none, which stopped being true
+  when the savings history and the monthly reports were added, ADR 0095 and
+  ADR 0097):
+  - each savings account read is an `account` unit
+    `savings-<first 32 hex digits of the account number's SHA-256>`. A
+    supported response gives it its two artifacts (`artifactCount: 2`,
+    `complete`), a `requested` (`basis: manifest`) and a `declared_coverage`
+    (`basis: source`) `date` range over the requested dates, and a unit
+    `terminal` report `success`. An account whose read failed or whose response
+    was refused keeps no artifact: the unit is `partial` with the closed code
+    `provider_read_failed` (also for `history_budget_exceeded`) or
+    `provider_response_invalid`, with only the `requested` range and a
+    `partial` unit report carrying the same code;
+  - each stored monthly report is a `document` unit `monthly-report-YYYY-MM`
+    (`artifactCount: 1`, `complete`) with a `declared_coverage` `month` range
+    over that month and a unit `terminal` report `success`.
 - `transformations`: one `redacted` step per provider capture
   (`sbi-shinsei-token-sanitizer` v3: the rotating CSRF token stripped, the
   balance summary's name fields kept as sent; v2 runs replaced those with
   `[redacted:name]`, which
   [ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence) withdrew),
   one `extracted` step for `normalized.json`
-  (`sbi-shinsei-normalizer`), matching the central descriptors.
+  (`sbi-shinsei-normalizer`), matching the central descriptors; one
+  `extracted` step per `savings-activity-NNNN.json`
+  (`sbi-shinsei-period-scope` v1) naming its raw period capture and the
+  top-balances capture as inputs; one `extracted` step per report PDF
+  (`sbi-shinsei-report-pdf-extractor` v1) with no retained input.
 - `acquisitionSessionRef`: none. The container authenticates once per run and no
   session survives it, so there is no generation to reference (12 §4).
 - Human-required: a rejected credential or refused login (`credential-shape`,
   `credential-validation`, `login-rejected`, `login-failed`) ends the run
   `failed` with `human_required_credentials`.
-- Staging: **none**. The four provider responses and the normalized snapshot
-  are held in memory until the terminal is written; the `r2:<dataset>` failure
+- Staging: **none**. The four core responses, the savings history, the report
+  PDFs and the normalized snapshot are held in memory until the terminal is
+  written; the `r2:<dataset>` failure
   operation means "not admitted to the run" (validation), not a staging put.
   The Worker admits each artifact with `describeArtifact` (dataset, filename and
   media-type checks); `test/storage.test.ts` proves that record equals the one
@@ -1286,7 +1477,8 @@ the collector's own record, so it is `collector_manifest` now.
   with the importer ([legacy-retirement.md](legacy-retirement.md)).
 - Verified with synthetic fixtures only:
   `test/shared-collection.test.ts` (decisions, sanitization, outcomes, an
-  end-to-end DATA-only run with a mocked container) and
+  end-to-end DATA-only run with a mocked container, the report document unit),
+  `test/savings-activity.test.ts` (the savings account units) and
   `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2 `DATA` bucket).
   No provider was contacted and no production bucket was read or written.
 
@@ -1348,7 +1540,18 @@ Processor maps it to the CORE source `global-pass`), producer
   the month or any text. A page the sanitizer refuses still counts in its
   month's decision.
 - Failure entries have the keys `operation`, `errorType`, `errorCode`,
-  `artifactKey`, and on a sanitizer refusal also `expectationCode`. A page
+  `artifactKey`, and on a sanitizer refusal also `expectationCode`.
+  `errorType` is a closed code, never a thrown `name` as such: a name is
+  whatever its thrower chose, a page script's included. The Worker keeps a
+  name only when it is in the shared set of `closedErrorType`
+  (`packages/collector-diagnostics`) or is its own `CollectionContractError`
+  or `PaginationError`; the container sends `Error`, `TypeError`,
+  `SyntaxError`, `TimeoutError` or `AbortError` (`closedErrorType` in
+  `container/diagnostics.mjs`), and the Worker checks a received name against
+  the same shared set. Any other name, a thrown value that is not an `Error`
+  and a `name` getter that throws are `UnknownError` (until 2026-11-22 any
+  identifier-shaped name was kept; `test/worker-collection.test.ts`,
+  `test/container-collection.test.mjs`). A page
   the sanitizer refuses is `sanitization` / `GlobalPassSanitizerError` with
   the check's closed code: `globalpass_html_contract_invalid`,
   `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed` or
@@ -1476,6 +1679,28 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   still excludes that whole account unit. Neither another run's successful
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
+- Failure codes: a thrown error becomes a code through `classifyError`
+  (`src/error-code.ts`) for the manifest's failure of the session load and
+  list reads and its `account` and `full-cashflows` units, and for the
+  `reports` failure and `report-year-range` unit when the report step throws
+  as a whole (so the terminal's `safeErrorCode`); for the session health
+  record's
+  `lastErrorCode` (prefixed with the keepalive stage) and
+  `lastReauthErrorCode`; and for the `sbi_vc_keepalive` and `sbi_vc_reauth`
+  log lines. The per-report and leverage units keep their own closed sets,
+  else `report_collection_failed` / `leverage_execution_collection_failed`.
+  `classifyError` keeps a message only when it is one of the collector's own
+  codes (`SBI_VC_ERROR_CODES`, hyphens folded to underscores) or
+  `collector_http_<status>` / `passkey_http_<status>` with a three-digit
+  status from 100 to 599; any other message, however code-shaped, gives
+  `json_parse_failed`, a `crypto_*` code, `type_error` or `unexpected_error`
+  by the error's class. It never throws: a `message` or `name` getter or a
+  prototype read that throws only takes that step away.
+  `test/error-code.test.ts` checks that every error the collector's sources
+  construct takes a whole literal in the set, one of the reviewed message
+  templates the set covers, or the classified crypto code. Until 2026-11-22
+  any lowercase code-shaped message was kept as it was; records written
+  before then are not rewritten.
 - `transformations`: one `redacted` step per JSON dataset
   (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
   is not retained. Each PDF/ZIP document states an `extracted` step instead.

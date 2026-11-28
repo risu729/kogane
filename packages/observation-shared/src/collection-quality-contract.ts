@@ -19,6 +19,7 @@
 // already pins), strict objects throughout, and the TypeScript types are
 // inferred from them, so the shape is stated once.
 import * as z from "zod/mini";
+import { PAGE_READ_SCHEMA_VERSION } from "./api-contract.ts";
 import {
   COLLECTION_FRESHNESS_POLICY,
   COLLECTION_FRESHNESS_STATES,
@@ -26,6 +27,7 @@ import {
   consistentFreshness,
   tokyoDate,
 } from "../../domain/src/collection-freshness.ts";
+import { READ_DETAILS } from "../../domain/src/read-detail.ts";
 import { validInstantText } from "../../domain/src/time.ts";
 
 export const COLLECTION_QUALITY_PATH = "/api/collection-quality";
@@ -214,10 +216,7 @@ export type PeriodKind = (typeof PERIOD_KINDS)[number];
 export type CellState = (typeof CELL_STATES)[number];
 export type SourceReason = (typeof SOURCE_REASONS)[number];
 export type CellReason = (typeof CELL_REASONS)[number];
-export type {
-  CollectionFreshness,
-  CollectionFreshnessState,
-} from "../../domain/src/collection-freshness.ts";
+export type { CollectionFreshness } from "../../domain/src/collection-freshness.ts";
 
 const CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
@@ -411,6 +410,142 @@ const summary = z
       ),
     ),
   );
+
+// ── status view (ADR 0045, amendment 2026-11-19) ─────────────────────────
+
+/** `GET /api/collection-quality?view=status`: one line per configured job. */
+export const COLLECTION_STATUS_VIEW = "status";
+export const COLLECTION_STATUS_API_VERSION = 1;
+/** A `failuresSinceSuccess` past the receipts the view reads per job. */
+export const FAILURES_BEYOND_WINDOW = "100+";
+/** A dataset whose newest parsed capture is older than this many Tokyo days is `degraded`. */
+export const STATUS_DEGRADED_AFTER_DAYS = 3;
+/**
+ * A job's state, most urgent first after `disabled`: `disabled` (the job is
+ * not enabled), `needs-owner` (its newest unrecovered failure, or a dataset
+ * it captures, waits on the owner: the `user_action_required` rule),
+ * `failing` (failures since its newest success), `degraded` (its attempts
+ * succeed, but a dataset's newest parsed capture is more than
+ * STATUS_DEGRADED_AFTER_DAYS old) and `ok`.
+ */
+const COLLECTION_STATUS_STATES = ["disabled", "needs-owner", "failing", "degraded", "ok"] as const;
+/** Cell reasons a not-publishing dataset does not repeat: on every cell, or about identity. */
+export const NOT_PUBLISHING_OMITTED_REASONS: readonly CellReason[] = [
+  "retention_not_assessed",
+  "identity_unresolved",
+  "identity_not_recorded",
+  "published_without_observations",
+];
+const FAILED_STATUSES: readonly OccurrenceStatus[] = ["failed", "uncertain", "not_dispatched"];
+export type CollectionStatusState = (typeof COLLECTION_STATUS_STATES)[number];
+
+const jobRun = z
+  .strictObject({
+    at: instant,
+    status: z.enum(OCCURRENCE_STATUSES),
+    failureCode: z.optional(code),
+    /** A successful fetch run of the job's source after the failure and before the next receipt. */
+    recovered: z.optional(z.strictObject({ at: instant, by: z.literal("fetch_run") })),
+  })
+  .check(
+    z.refine(
+      (value) =>
+        value.recovered === undefined ||
+        (FAILED_STATUSES.includes(value.status) &&
+          Date.parse(value.recovered.at) > Date.parse(value.at)),
+    ),
+  );
+
+const notPublishing = z.strictObject({
+  dataset: text,
+  /** Distinct fetch units among the dataset's cells that do not publish (0 when it has none). */
+  units: count,
+  newestParsedCapture: z.nullable(instant),
+  ageDays: count,
+  reasons: distinct(z.enum(CELL_REASONS)).check(
+    z.refine(
+      (values) =>
+        values.every((value) => !NOT_PUBLISHING_OMITTED_REASONS.includes(value)) &&
+        values.every(
+          (value, index) =>
+            index === 0 || CELL_REASONS.indexOf(values[index - 1]!) < CELL_REASONS.indexOf(value),
+        ),
+    ),
+  ),
+});
+
+const statusRow = z
+  .strictObject({
+    job: sourceId,
+    /** The job's source, in the job vocabulary of `config/alarm-jobs.json`; null for the Processor tick. */
+    source: z.nullable(sourceId),
+    enabled: z.boolean(),
+    lastRun: z.nullable(jobRun),
+    lastSuccessAt: z.nullable(instant),
+    failuresSinceSuccess: z.union([count, z.literal(FAILURES_BEYOND_WINDOW)]),
+    failureCode: z.nullable(code),
+    state: z.enum(COLLECTION_STATUS_STATES),
+    notPublishing: z.array(notPublishing).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) =>
+        values.every((value, index) => index === 0 || values[index - 1]!.dataset < value.dataset),
+      ),
+    ),
+  })
+  .check(
+    z.refine((value) => {
+      const failing = value.failuresSinceSuccess !== 0;
+      if (failing !== (value.failureCode !== null)) return false;
+      if ((value.state === "disabled") === value.enabled) return false;
+      if (value.state === "failing" && !failing) return false;
+      if ((value.state === "ok" || value.state === "degraded") && failing) return false;
+      const stale = value.notPublishing.some((entry) => entry.ageDays > STATUS_DEGRADED_AFTER_DAYS);
+      const owner = value.notPublishing.some((entry) =>
+        entry.reasons.includes("user_action_required"),
+      );
+      if (value.state === "degraded" && !stale) return false;
+      if (value.state === "ok" && (stale || owner)) return false;
+      return true;
+    }),
+  );
+
+const collectionStatus = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_STATUS_API_VERSION),
+    view: z.literal(COLLECTION_STATUS_VIEW),
+    asOf: instant,
+    sources: z.array(statusRow).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) =>
+        values.every((value, index) => index === 0 || values[index - 1]!.job < value.job),
+      ),
+    ),
+  })
+  .check(
+    z.refine((value) => {
+      const date = tokyoDate(value.asOf);
+      return (
+        date !== null &&
+        value.sources.every((row) =>
+          row.notPublishing.every(
+            (entry) =>
+              entry.newestParsedCapture === null ||
+              ageOf(entry.newestParsedCapture, date, entry.ageDays),
+          ),
+        )
+      );
+    }),
+  );
+
+export type CollectionStatusRun = z.output<typeof jobRun>;
+export type CollectionStatusNotPublishing = z.output<typeof notPublishing>;
+export type CollectionStatusRow = z.output<typeof statusRow>;
+export type CollectionStatus = z.output<typeof collectionStatus>;
+
+/** `GET /api/collection-quality?view=status`. */
+export function validCollectionStatus(value: unknown): value is CollectionStatus {
+  return collectionStatus.safeParse(value).success;
+}
 
 const period = z
   .strictObject({
@@ -776,11 +911,465 @@ export function validAccountCoverage(value: unknown): value is AccountCoverage {
   return accountCoverage.safeParse(value).success;
 }
 
-/** The three routes, by path; any other path under the prefix is not this contract. */
-export function validCollectionQualityResponse(path: string, value: unknown): boolean {
-  if (path === COLLECTION_QUALITY_PATH) return validCollectionQualitySummary(value);
+/**
+ * The three routes, by path; any other path under the prefix is not this
+ * contract. The summary, cell and account routes answer either detail
+ * (ADR 0123 and its amendment of 2026-11-20): `detail`, when the caller names
+ * the one it asked for, accepts that shape only, so a page that asked for
+ * `full` never takes a summary for it. The status view (`?view=status`,
+ * ADR 0045 amendment 2026-11-19) shares the summary's path and takes no
+ * `detail`, so only a request naming none may receive it.
+ */
+export function validCollectionQualityResponse(
+  path: string,
+  value: unknown,
+  detail?: CollectionQualityDetail,
+): boolean {
+  const full = detail !== "summary";
+  const summary = detail !== "full";
+  if (path === COLLECTION_QUALITY_PATH)
+    return (
+      (full && validCollectionQualitySummary(value)) ||
+      (summary && summaryLines.safeParse(value).success) ||
+      (detail === undefined && validCollectionStatus(value))
+    );
   const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
-  if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
+  if (accounts !== null) {
+    if (full && validAccountCoverage(value)) return value.sourceId === accounts[1];
+    const parsed = accountSummary.safeParse(value);
+    return summary && parsed.success && parsed.data.sourceId === accounts[1];
+  }
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
-  return match !== null && validCollectionQualityCells(value) && value.sourceId === match[1];
+  if (match === null) return false;
+  if (full && validCollectionQualityCells(value)) return value.sourceId === match[1];
+  const parsed = cellSummary.safeParse(value);
+  return summary && parsed.success && parsed.data.sourceId === match[1];
 }
+
+/**
+ * The `summary` detail of the collection quality reads (ADR 0123), the
+ * default of the summary and cell routes and of
+ * `kogane.collection-quality.read`; `full` is the answer above. A summary is
+ * derived from the full answer alone: it adds no state, keeps every closed
+ * code and count it collapses, and says how much it collapsed. The account
+ * view (ADR 0088) takes the same two details (ADR 0123, amendment
+ * 2026-11-20); the status view has one, its own answer.
+ */
+export const COLLECTION_QUALITY_DETAILS = READ_DETAILS;
+export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number];
+/** Summary lines per page: of the sources, and of one source's cells. */
+export const COLLECTION_QUALITY_LINE_PAGE = 20;
+/**
+ * The bytes every summary page is held to (ADR 0123, amendments of
+ * 2026-11-20 and 2026-11-21): the UTF-8 bytes of the tool's answer,
+ * `{ schemaVersion, data }` serialized as the MCP adapter writes it
+ * (`pageReadAnswerBytes`), which is what an MCP client shows (issue 1414). A
+ * page ends before the line that would pass it, and a page that cannot hold
+ * its first line is refused (413), never cut.
+ */
+export const COLLECTION_QUALITY_SUMMARY_BYTES = 8_192;
+/** More cells than this in one source's summary is refused (413), never cut. */
+export const COLLECTION_QUALITY_SUMMARY_CELL_BOUND = 2_000;
+
+type Freshness = z.output<typeof freshness>;
+
+/**
+ * One line of the summary: a source's freshness, newest fetch run, reasons,
+ * jobs and data type counts. Sources whose lines are otherwise the same
+ * share one, and `sourceIds` names each of them.
+ */
+export interface CollectionQualitySourceLine {
+  sourceIds: string[];
+  freshness: Freshness;
+  latestFetchRun: CollectionQualityFetchRun | null;
+  reasons: CollectionQualitySource["reasons"];
+  /** Each job with its newest receipt's nominal time, status and closed failure code. */
+  schedules: CollectionQualityScheduleLine[];
+  /** How many collectors registered runs under no CORE source. */
+  unregistered: number;
+  /** Their distinct closed blocked and failure codes. */
+  unregisteredCodes: string[];
+  /** The provider data types by status; null where the catalogue does not describe the source. */
+  dataTypes: { collected: number; partial: number; notCollected: number } | null;
+}
+
+export interface CollectionQualityScheduleLine {
+  id: string;
+  enabled: boolean;
+  latest:
+    | (Pick<CollectionQualityOccurrence, "nominalAt" | "status" | "failureCode"> & {
+        /** The distinct closed blocked and failure codes of the receipt's terminals. */
+        terminalCodes: string[];
+      })
+    | null;
+}
+
+export interface CollectionQualitySummaryLines {
+  apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
+  detail: "summary";
+  freshnessAsOf: CollectionQualitySummary["freshnessAsOf"];
+  /** This page's source lines, from `coverage.offset` in the summary's order. */
+  sources: CollectionQualitySourceLine[];
+  /** The jobs under no CORE source, on every page. */
+  otherSchedules: CollectionQualityScheduleLine[];
+  /**
+   * The whole answer's source and line counts and where the next page starts
+   * (ADR 0123, amendment 2026-11-21): up to `limit` lines a page, fewer when
+   * the next would carry the tool's answer past
+   * `COLLECTION_QUALITY_SUMMARY_BYTES`.
+   */
+  coverage: {
+    sources: number;
+    lines: number;
+    limit: typeof COLLECTION_QUALITY_LINE_PAGE;
+    offset: number;
+    truncated: boolean;
+    nextOffset: number | null;
+  };
+}
+
+/**
+ * One dataset, parser and fetch unit of a source, collapsed over its periods:
+ * how many cells (periods) it has and in which state, the named periods it
+ * spans, its newest capture, the freshness of its newest current capture,
+ * and the union of its cells' reasons.
+ */
+export interface CollectionQualityCellLine {
+  dataset: string | null;
+  parser: string | null;
+  unitKey: string | null;
+  cells: number;
+  /** The smallest and largest named period value; both null when no cell names one. */
+  periods: { first: string | null; last: string | null };
+  current: number;
+  olderCurrent: number;
+  noCurrent: number;
+  newestCapturedAt: string;
+  /** That of the cell whose current capture is newest; with none, that of its first cell. */
+  freshness: Freshness;
+  reasons: CollectionQualityCell["reasons"];
+  /** The distinct unit and parse failure codes of the cells' newest captures. */
+  failureCodes: string[];
+  /** The distinct coverage causes of the cells' newest captures. */
+  coverageCauses: string[];
+}
+
+export interface CollectionQualityCellSummary {
+  apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
+  detail: "summary";
+  freshnessAsOf: CollectionQualityCells["freshnessAsOf"];
+  sourceId: string;
+  latestFetchRun: CollectionQualityCells["latestFetchRun"];
+  lines: CollectionQualityCellLine[];
+  /**
+   * Every cell of the source was read; `offset` pages the lines, up to
+   * `limit` a page and fewer when the next would carry the tool's answer past
+   * `COLLECTION_QUALITY_SUMMARY_BYTES` (ADR 0123, amendment 2026-11-21).
+   */
+  coverage: {
+    cells: number;
+    lines: number;
+    limit: typeof COLLECTION_QUALITY_LINE_PAGE;
+    truncated: boolean;
+    nextOffset: number | null;
+  };
+}
+
+const scheduleLine = z.strictObject({
+  id: sourceId,
+  enabled: z.boolean(),
+  latest: z.nullable(
+    z.strictObject({
+      nominalAt: instant,
+      status: z.enum(OCCURRENCE_STATUSES),
+      failureCode: z.nullable(code),
+      terminalCodes: distinct(code),
+    }),
+  ),
+});
+const summaryLines = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    sources: z
+      .array(
+        z.strictObject({
+          sourceIds: z.array(sourceId).check(z.minLength(1), z.maxLength(COLLECTION_QUALITY_BOUND)),
+          freshness,
+          latestFetchRun: fetchRun,
+          reasons: distinct(z.enum(SOURCE_REASONS)),
+          schedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+          unregistered: count,
+          unregisteredCodes: distinct(code),
+          dataTypes: z.nullable(
+            z.strictObject({ collected: count, partial: count, notCollected: count }),
+          ),
+        }),
+      )
+      .check(z.maxLength(COLLECTION_QUALITY_LINE_PAGE)),
+    otherSchedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+    coverage: z.strictObject({
+      /** Sources in the whole answer, each on exactly one line. */
+      sources: count,
+      /** Lines in the whole answer. */
+      lines: count,
+      limit: z.literal(COLLECTION_QUALITY_LINE_PAGE),
+      offset: count,
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
+    }),
+  })
+  .check(
+    z.refine((value) => {
+      const { coverage } = value;
+      const listed = value.sources.length;
+      const end = coverage.offset + listed;
+      const named = value.sources.flatMap((line) => line.sourceIds);
+      return (
+        new Set(named).size === named.length &&
+        named.length <= coverage.sources &&
+        coverage.lines <= coverage.sources &&
+        // A page ends where the next one starts, or at the last line; an
+        // empty page lies past the last line.
+        (listed === 0
+          ? !coverage.truncated && coverage.nextOffset === null && coverage.offset >= coverage.lines
+          : coverage.truncated
+            ? coverage.nextOffset === end && end < coverage.lines
+            : coverage.nextOffset === null && end === coverage.lines)
+      );
+    }),
+    // What a client shows: the page fits it by construction.
+    z.refine((value) => pageReadAnswerBytes(value) <= COLLECTION_QUALITY_SUMMARY_BYTES),
+  );
+const cellSummary = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    sourceId,
+    latestFetchRun: fetchRun,
+    lines: z
+      .array(
+        z
+          .strictObject({
+            dataset: z.nullable(text),
+            parser: z.nullable(text),
+            unitKey: z.nullable(text),
+            cells: id,
+            periods: z.strictObject({ first: z.nullable(text), last: z.nullable(text) }),
+            current: count,
+            olderCurrent: count,
+            noCurrent: count,
+            newestCapturedAt: instant,
+            freshness,
+            reasons: distinct(z.enum(CELL_REASONS)),
+            failureCodes: distinct(code),
+            coverageCauses: distinct(code),
+          })
+          .check(
+            // Every collapsed cell is counted once, under its state.
+            z.refine(
+              (value) => value.current + value.olderCurrent + value.noCurrent === value.cells,
+            ),
+          ),
+      )
+      .check(z.maxLength(COLLECTION_QUALITY_LINE_PAGE)),
+    coverage: z.strictObject({
+      cells: count,
+      lines: count,
+      limit: z.literal(COLLECTION_QUALITY_LINE_PAGE),
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
+    }),
+  })
+  .check(
+    z.refine((value) => (value.coverage.nextOffset === null) === !value.coverage.truncated),
+    z.refine((value) => value.coverage.lines <= value.coverage.cells),
+    // A page that says more follow lists at least one line.
+    z.refine((value) => !value.coverage.truncated || value.lines.length > 0),
+    // What a client shows: the page fits it by construction.
+    z.refine((value) => pageReadAnswerBytes(value) <= COLLECTION_QUALITY_SUMMARY_BYTES),
+  );
+
+/**
+ * The `summary` detail of the account view (ADR 0123, amendment 2026-11-20):
+ * one line per account the full answer lists (in its order, by id), then one
+ * line per dataset, parser and fetch unit of its unattributed cells (in order
+ * of first appearance), paged by line. A page holds at most this many lines,
+ * and fewer when the next would carry the tool's answer past
+ * `ACCOUNT_SUMMARY_BYTES`.
+ */
+export const ACCOUNT_SUMMARY_LINE_PAGE = 20;
+/**
+ * The bytes a page of the account summary is held to: the UTF-8 bytes of the
+ * tool's answer, `{ schemaVersion, data }` serialized as the MCP adapter
+ * writes it, which is what an MCP client shows (issue 1414).
+ */
+export const ACCOUNT_SUMMARY_BYTES = COLLECTION_QUALITY_SUMMARY_BYTES;
+/** The bytes of `data` as a page read tool answers it (`{ schemaVersion, data }`, serialized). */
+export function pageReadAnswerBytes(data: unknown): number {
+  return new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))
+    .length;
+}
+
+/**
+ * One account, collapsed over its data types and periods: what the full
+ * answer lists for it, counted. Its id reads it further (`detail: "full"`,
+ * the identity pages); its label is the stored label the full answer shows.
+ */
+const accountLine = z
+  .strictObject({
+    accountId: text,
+    label: z.string().check(z.maxLength(512)),
+    statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
+    /** The account's freshness: that of its newest named capture, as in `full`. */
+    freshness,
+    /** The distinct observation kinds of its data types. */
+    kinds: distinct(z.enum(OBSERVATION_KINDS)).check(z.minLength(1)),
+    /** How many data types (dataset, parser, observation kind) name it. */
+    dataTypes: id,
+    /** The distinct provider data types of those data types (`provider-data-types-v1`). */
+    providerTypes: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+    /** How many periods (cells under one kind) name it, and the smallest and largest named one. */
+    periods: z.strictObject({ count: id, first: z.nullable(text), last: z.nullable(text) }),
+    /** Its periods counted by standing. */
+    standings: z.strictObject({
+      current: count,
+      olderCurrent: count,
+      newestNotCurrent: count,
+    }),
+    /** The same periods counted by their cell's state. */
+    cellStates: z.strictObject({ current: count, olderCurrent: count, noCurrent: count }),
+    /** The newest capture that names it. */
+    newestCapturedAt: instant,
+    /** The union of its periods' cell reasons. */
+    reasons: distinct(z.enum(CELL_REASONS)),
+  })
+  .check(
+    // Every collapsed period is counted once by standing and once by cell state.
+    z.refine(
+      (value) =>
+        value.standings.current +
+          value.standings.olderCurrent +
+          value.standings.newestNotCurrent ===
+          value.periods.count &&
+        value.cellStates.current + value.cellStates.olderCurrent + value.cellStates.noCurrent ===
+          value.periods.count,
+    ),
+    // A `current` or `older-current` standing is its cell's state.
+    z.refine(
+      (value) =>
+        value.standings.current <= value.cellStates.current &&
+        value.standings.olderCurrent <= value.cellStates.olderCurrent,
+    ),
+    z.refine(
+      (value) => value.kinds.length <= value.dataTypes && value.dataTypes <= value.periods.count,
+    ),
+    z.refine(
+      (value) =>
+        (value.periods.first === null) === (value.periods.last === null) &&
+        (value.periods.first === null || value.periods.first <= value.periods.last!),
+    ),
+    // A named capture always has an age.
+    z.refine((value) => value.freshness.ageDays !== null),
+  );
+
+/** Unattributed cells of one dataset, parser and fetch unit, collapsed over periods. */
+const unattributedLine = z
+  .strictObject({
+    dataset: z.nullable(text),
+    parser: z.nullable(text),
+    unitKey: z.nullable(text),
+    cells: id,
+    periods: z.strictObject({ first: z.nullable(text), last: z.nullable(text) }),
+    current: count,
+    olderCurrent: count,
+    noCurrent: count,
+    reasons: distinct(z.enum(CELL_REASONS)),
+  })
+  .check(z.refine((value) => value.current + value.olderCurrent + value.noCurrent === value.cells));
+
+const accountSummary = z
+  .strictObject({
+    apiVersion: z.literal(ACCOUNT_COVERAGE_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    dataTypesVersion: z.literal(PROVIDER_DATA_TYPES_VERSION),
+    /** The source's catalogue: each data type under its status; null as in `full`. */
+    dataTypes: z.nullable(
+      z
+        .strictObject({
+          collected: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+          partial: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+          notCollected: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+        })
+        .check(
+          z.refine((value) => {
+            const all = [...value.collected, ...value.partial, ...value.notCollected];
+            return all.length > 0 && new Set(all).size === all.length;
+          }),
+        ),
+    ),
+    sourceId,
+    latestFetchRun: fetchRun,
+    /** Every cell of the source was read, as in `full`. */
+    cells: count,
+    accounts: z.array(accountLine).check(
+      z.maxLength(ACCOUNT_SUMMARY_LINE_PAGE),
+      z.refine((values) =>
+        values.every(
+          (value, index) => index === 0 || values[index - 1]!.accountId < value.accountId,
+        ),
+      ),
+    ),
+    unattributed: z.array(unattributedLine).check(z.maxLength(ACCOUNT_SUMMARY_LINE_PAGE)),
+    coverage: z.strictObject({
+      /** Accounts in the whole answer: the first lines. */
+      accounts: count,
+      /** Cells listed apart in the whole answer. */
+      unattributedCells: count,
+      /** Lines in the whole answer: its accounts, then its unattributed lines. */
+      lines: count,
+      limit: z.literal(ACCOUNT_SUMMARY_LINE_PAGE),
+      offset: count,
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
+    }),
+  })
+  .check(
+    z.refine((value) => value.cells <= ACCOUNT_COVERAGE_CELL_BOUND),
+    z.refine((value) => {
+      const { coverage } = value;
+      const listed = value.accounts.length + value.unattributed.length;
+      const end = coverage.offset + listed;
+      return (
+        listed <= ACCOUNT_SUMMARY_LINE_PAGE &&
+        coverage.accounts <= coverage.lines &&
+        coverage.lines - coverage.accounts <= coverage.unattributedCells &&
+        coverage.unattributedCells <= value.cells &&
+        // The accounts come first: a page lists those its range holds, then unattributed lines.
+        value.accounts.length === Math.max(0, Math.min(end, coverage.accounts) - coverage.offset) &&
+        value.unattributed.reduce((sum, line) => sum + line.cells, 0) <=
+          coverage.unattributedCells &&
+        // A page ends where the next one starts, or at the last line; an
+        // empty page lies past the last line.
+        (listed === 0
+          ? !coverage.truncated && coverage.nextOffset === null && coverage.offset >= coverage.lines
+          : coverage.truncated
+            ? coverage.nextOffset === end && end < coverage.lines
+            : coverage.nextOffset === null && end === coverage.lines)
+      );
+    }),
+    // An account's age is that of its newest named capture, to the answer's date.
+    z.refine((value) =>
+      value.accounts.every((line) =>
+        ageOf(line.newestCapturedAt, value.freshnessAsOf.date, line.freshness.ageDays),
+      ),
+    ),
+    // What a client shows: the page fits it by construction.
+    z.refine((value) => pageReadAnswerBytes(value) <= ACCOUNT_SUMMARY_BYTES),
+  );
+export type AccountCoverageAccountLine = z.output<typeof accountLine>;
+export type AccountCoverageUnattributedLine = z.output<typeof unattributedLine>;
+export type AccountCoverageSummary = z.output<typeof accountSummary>;

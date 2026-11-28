@@ -44,8 +44,13 @@ import {
   readIdentityObservationCount,
 } from "../../../read-model/src/instrument-resolution.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
-import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import {
+  offsetPagedFields,
+  type PagedFields,
+  type PagedWireFields,
+} from "../../../observation-shared/src/paging-contract.ts";
+import { financialError, unknownKeyRefs } from "../errors.ts";
+import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 import {
   type InstrumentResolution,
   InstrumentResolutionLimitError,
@@ -137,7 +142,13 @@ export interface InstrumentCandidatesManifest {
   commands: { adopt: "identity.assign"; keepApart: "relation.reject" };
 }
 
-export interface InstrumentCandidateReview {
+/**
+ * The answer as a client reads it: `next` and `paging` (ADR 0128) beside the
+ * deprecated `nextOffset`; the service always sends both
+ * (`InstrumentCandidateReviewPage`), a client validator accepts an answer
+ * without them until slice S9.
+ */
+export interface InstrumentCandidateReview extends PagedWireFields {
   schemaVersion: "kogane-instrument-candidates-v1";
   /** The request as the server resolved it. */
   query: InstrumentCandidatesRequest;
@@ -153,7 +164,9 @@ export interface InstrumentCandidateReview {
    * Items in this view (after the identifier filter), of which `items` is one
    * page. `nextOffset` is null past the last page and past the grant's
    * `maxRows`, so `total` may name more items than this grant can page to;
-   * `identifierId` narrows the view.
+   * `identifierId` narrows the view. `next` and `paging` (ADR 0128) tell the
+   * two apart (`stoppedBy: "budget"`); `nextOffset` is deprecated in their
+   * favour and kept for one release.
    */
   total: number;
   items: ReviewItem[];
@@ -162,8 +175,11 @@ export interface InstrumentCandidateReview {
   identifiers: ResolutionIdentifier[];
 }
 
+/** One page as the service answers it: always with `next` and `paging`. */
+type InstrumentCandidateReviewPage = InstrumentCandidateReview & PagedFields;
+
 export type InstrumentCandidatesOutcome =
-  | { ok: true; review: InstrumentCandidateReview }
+  | { ok: true; review: InstrumentCandidateReviewPage }
   | { ok: false; error: FinancialError };
 
 type Rejection = { ok: false; code: FinancialErrorCode; refs: string[] };
@@ -209,7 +225,7 @@ export function parseInstrumentCandidatesRequest(
     return {
       ok: false,
       code: "unsupported_semantics",
-      refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
+      refs: unknownKeyRefs(unknown),
     };
   const { view, offset, identifierId } = value;
   if (view !== undefined) {
@@ -240,7 +256,15 @@ export function parseInstrumentCandidatesRequest(
 
 const refs = (ids: readonly string[]): string[] => ids.map((id) => `identifier:${id}`);
 
-function viewItems(resolution: InstrumentResolution, view: InstrumentCandidateView): ReviewItem[] {
+/**
+ * The items of one view, in the review's order. The page pages them; the
+ * pending-decisions summary (pending-decisions.ts) counts the `open` and
+ * `held` views through this same function, so the two cannot disagree.
+ */
+export function instrumentCandidateView(
+  resolution: InstrumentResolution,
+  view: InstrumentCandidateView,
+): ReviewItem[] {
   const candidates = (keep: (candidate: ResolutionCandidate) => boolean): ReviewCandidate[] =>
     resolution.candidates.filter(keep).map((candidate) => ({
       ...candidate,
@@ -260,6 +284,31 @@ function viewItems(resolution: InstrumentResolution, view: InstrumentCandidateVi
       }));
     case "hints":
       return resolution.hints.map((hint) => ({ ...hint, evidenceRefs: refs(hint.identifierIds) }));
+  }
+}
+
+/**
+ * The whole candidate read, or the bound it is refused at (`budget:<bound>`).
+ * Shared by the review and the pending-decisions summary, so both refuse the
+ * same store the same way.
+ */
+export async function boundedInstrumentResolution(
+  sql: SqlExecutor,
+): Promise<{ ok: true; resolution: InstrumentResolution } | { ok: false; bound: string }> {
+  // A count of one row per published parse, not a walk (read-model
+  // `IDENTITY_OBSERVATION_COUNT_SQL`); an upper bound, so the refusal fails closed.
+  if ((await readIdentityObservationCount(sql)) > CURRENT_IDENTITY_OBSERVATION_BOUND)
+    return {
+      ok: false,
+      bound: `budget:identityObservations=${String(CURRENT_IDENTITY_OBSERVATION_BOUND)}`,
+    };
+  try {
+    return { ok: true, resolution: await queryInstrumentResolution(sql) };
+  } catch (error) {
+    // A store past the read's bounds is refused whole, never answered in part.
+    if (error instanceof InstrumentResolutionLimitError)
+      return { ok: false, bound: "budget:instrumentResolution" };
+    throw error;
   }
 }
 
@@ -285,31 +334,14 @@ export async function reviewInstrumentCandidates(input: {
     ok: false,
     error: financialError(code, REQUEST_ID, failureRefs),
   });
-  if (!grantAllows(grant, INSTRUMENT_CANDIDATES_CAPABILITY))
-    return fail("unauthorized", [`capability:${INSTRUMENT_CANDIDATES_CAPABILITY}`]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, INSTRUMENT_CANDIDATES_CAPABILITY, REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows)
     return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 
-  // A count of one row per published parse, not a walk (read-model
-  // `IDENTITY_OBSERVATION_COUNT_SQL`); an upper bound, so the refusal fails closed.
-  if ((await readIdentityObservationCount(sql)) > CURRENT_IDENTITY_OBSERVATION_BOUND)
-    return fail("budget_exceeded", [
-      `budget:identityObservations=${String(CURRENT_IDENTITY_OBSERVATION_BOUND)}`,
-    ]);
-  let resolution: InstrumentResolution;
-  try {
-    resolution = await queryInstrumentResolution(sql);
-  } catch (error) {
-    // A store past the read's bounds is refused whole, never answered in part.
-    if (error instanceof InstrumentResolutionLimitError)
-      return fail("budget_exceeded", ["budget:instrumentResolution"]);
-    throw error;
-  }
+  const read = await boundedInstrumentResolution(sql);
+  if (!read.ok) return fail("budget_exceeded", [read.bound]);
+  const { resolution } = read;
   const { identifierId } = request;
   if (
     identifierId !== null &&
@@ -317,18 +349,18 @@ export async function reviewInstrumentCandidates(input: {
   )
     return fail("evidence_restricted", ["identifierId"]);
 
-  const all = viewItems(resolution, request.view).filter(
+  const all = instrumentCandidateView(resolution, request.view).filter(
     (item) => identifierId === null || namedIdentifiers(item).includes(identifierId),
   );
   const items = all.slice(request.offset, request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE);
   const named = new Set(items.flatMap(namedIdentifiers));
   // The next page only while there is one and the grant may read it: a
-  // cursor the same caller would be refused is not offered.
+  // cursor the same caller would be refused is not offered, and the page says
+  // it is withheld (`stoppedBy: "budget"`), never that it is the last (ADR 0128).
   const following = request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE;
-  const nextOffset =
-    following < all.length && following + INSTRUMENT_CANDIDATES_PAGE_SIZE <= grant.budget.maxRows
-      ? following
-      : null;
+  const hasMore = following < all.length;
+  const withheld = hasMore && following + INSTRUMENT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows;
+  const nextOffset = hasMore && !withheld ? following : null;
   return {
     ok: true,
     review: {
@@ -350,6 +382,13 @@ export async function reviewInstrumentCandidates(input: {
         .sort((a, b) =>
           a.identifierId < b.identifierId ? -1 : a.identifierId > b.identifierId ? 1 : 0,
         ),
+      ...offsetPagedFields({
+        limit: INSTRUMENT_CANDIDATES_PAGE_SIZE,
+        offset: request.offset,
+        returned: items.length,
+        hasMore,
+        withheld,
+      }),
     },
   };
 }

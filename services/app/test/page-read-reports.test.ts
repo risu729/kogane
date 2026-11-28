@@ -9,6 +9,10 @@ import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
+  ACCOUNT_SUMMARY_BYTES,
+  pageReadAnswerBytes,
+} from "../../../packages/observation-shared/src/collection-quality-contract";
+import {
   PAGE_READ_ROUTES,
   pageReadMcpTools,
   pageReadServed,
@@ -20,9 +24,17 @@ import { pageReadHarness, RECORDS_GRANT, tableCounts, withoutTables } from "./pa
 const REPORTS = "kogane.reports.read";
 const QUALITY = "kogane.collection-quality.read";
 const NOW = "2026-08-31T15:00:00.000Z";
+/**
+ * The synthetic account's stored label: multi-byte characters, a four-byte
+ * one and characters JSON escapes, so an answer's bytes differ from its
+ * characters (ADR 0123, amendment 2026-11-20).
+ */
+const QUALITY_LABEL = `合成口座「テスト」😀"\\\u0001${"長".repeat(40)}`;
 /** Records and evidence over the whole store: the collection quality page needs evidence.read. */
 const EVIDENCE_GRANT = { ...RECORDS_GRANT, capabilities: ["records.read", "evidence.read"] };
 const page = pageReadHarness("report-read");
+/** Text in a cached explanation node that does not parse; no answer may carry it. */
+const UNPARSED_TEXT = "synthetic-unparsed-explanation-text";
 
 const bare = pageReadHarness("report-read-bare", { DB: withoutTables(env.DB) });
 /** The open report's body key: under `racing`, it leaves R2 between the reader's `head` and `get`. */
@@ -39,8 +51,17 @@ const racing = pageReadHarness("report-read-racing", {
   }),
 });
 
-/** One stored report of `context`, its run complete, its body and explanation in R2. */
-async function storeReport(reportId: string, context: string): Promise<string> {
+/**
+ * One stored report of `context`, its run complete, its body and explanation in
+ * R2. `truncatedComplete` stores the body the report job wrote before ADR 0072's
+ * amendment of 2026-11-18: `complete` although its positions were cut at the
+ * row bound.
+ */
+async function storeReport(
+  reportId: string,
+  context: string,
+  truncatedComplete = false,
+): Promise<string> {
   const body: ReportBody = {
     schemaVersion: "report-holdings-v1",
     purpose: "holdings-view",
@@ -48,7 +69,7 @@ async function storeReport(reportId: string, context: string): Promise<string> {
     calculationRunId: `run-${reportId}`,
     policyRefs: ["decimal-v1", "instrument-valuation-v1"],
     unitRef: "JPY",
-    partition: "partial-verified-scope",
+    partition: truncatedComplete ? "complete" : "partial-verified-scope",
     subtotal: { coefficient: "10000", scale: 0 },
     rows: [
       {
@@ -60,7 +81,11 @@ async function storeReport(reportId: string, context: string): Promise<string> {
         value: { coefficient: "10000", scale: 0 },
       },
     ],
-    coverage: { scopeRef: "perimeter:test", coveredRef: "positions:1", truncated: false },
+    coverage: {
+      scopeRef: "perimeter:test",
+      coveredRef: "positions:1",
+      truncated: truncatedComplete,
+    },
   };
   const bytes = new TextEncoder().encode(canonicalJson(body));
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
@@ -94,6 +119,12 @@ beforeAll(async () => {
   await seedRegistry();
   vanishing = await storeReport("rpt:synthetic-open", "ctx-open");
   await storeReport("rpt:synthetic-restricted", "ctx-restricted");
+  await storeReport("rpt:synthetic-truncated", "ctx-truncated", true);
+  // Its cached explanation node is not JSON; its body is intact.
+  await env.EVIDENCE.put(
+    `${await storeReport("rpt:synthetic-bad-explanation", "ctx-bad-explanation")}.explanation`,
+    new TextEncoder().encode(`{"schemaVersion":"report-explanation-v1",${UNPARSED_TEXT}`),
+  );
   // Its run is complete, but its body has left R2.
   await env.EVIDENCE.delete(await storeReport("rpt:synthetic-gone", "ctx-gone"));
   await env.DB.prepare(
@@ -117,8 +148,8 @@ beforeAll(async () => {
       "INSERT INTO source_accounts VALUES('synthetic-quality-ref','sony-bank','evidence-test','[\"synthetic-quality-ref\"]')",
     ),
     env.DB.prepare(
-      "INSERT INTO accounts VALUES('synthetic-quality-account','Synthetic quality account','synthetic-role','identified')",
-    ),
+      "INSERT INTO accounts VALUES('synthetic-quality-account',?,'synthetic-role','identified')",
+    ).bind(QUALITY_LABEL),
     env.DB.prepare(
       "INSERT INTO account_mappings VALUES('synthetic-quality-map','synthetic-quality-ref',1,'synthetic-quality-account','rule','synthetic_reason',1,'2026-09-11','Synthetic quality account','identified')",
     ),
@@ -170,11 +201,38 @@ describe("report page reads", () => {
     }
     const list = await page.mcp(REPORTS, {});
     expect(list.body.data.items.map((item: { reportId: string }) => item.reportId).sort()).toEqual([
+      "rpt:synthetic-bad-explanation",
       "rpt:synthetic-gone",
       "rpt:synthetic-open",
       "rpt:synthetic-restricted",
+      "rpt:synthetic-truncated",
     ]);
     expect(await tableCounts()).toEqual(before);
+  });
+
+  it("state a body stored complete but cut at its row bound as partial, as the page does", async () => {
+    // The stored body is shown as stored; the partition the reader states
+    // beside it is the one the page shows, over HTTP and MCP alike (INV05;
+    // ADR 0072, amendment of 2026-11-18).
+    const served = await page.expectSameAnswer(
+      `/api/v2/reports/${encodeURIComponent("rpt:synthetic-truncated")}`,
+      REPORTS,
+      { reportId: "rpt:synthetic-truncated" },
+    );
+    expect(served.status).toBe(200);
+    expect(served.body.body).toMatchObject({
+      partition: "complete",
+      coverage: { truncated: true },
+    });
+    expect(served.body.partition).toBe("partial-verified-scope");
+    expect(
+      validApiResponse(
+        `/api/v2/reports/${encodeURIComponent("rpt:synthetic-truncated")}`,
+        served.body,
+      ),
+    ).toBe(true);
+    const open = await page.mcp(REPORTS, { reportId: "rpt:synthetic-open" });
+    expect(open.body.data.partition).toBe("partial-verified-scope");
   });
 
   it("refuse a restricted report on every view, where the operator page still shows its body", async () => {
@@ -218,6 +276,54 @@ describe("report page reads", () => {
       isError: true,
       body: overHttp.body,
     });
+  });
+
+  it("refuse a cached explanation that is not JSON with a closed code, as a stored body is", async () => {
+    // 503 report_explanation_invalid on the route and both agent paths, not
+    // the store's 503 catalogue_read_failed (the Worker's wrap of an exception
+    // the reader did not refuse), and nothing of the stored text crosses the
+    // boundary.
+    const reportId = "rpt:synthetic-bad-explanation";
+    const path = `/api/v2/reports/${encodeURIComponent(reportId)}`;
+    const logged = vi.spyOn(console, "log");
+    onTestFinished(() => {
+      logged.mockRestore();
+    });
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const operator = await page.route(`${path}/explanation`);
+    expect(operator.status).toBe(503);
+    expect(operator.body).toEqual({
+      error: "report_explanation_invalid",
+      requestId: expect.any(String),
+    });
+    const refused = await page.expectSameAnswer(`${path}/explanation`, REPORTS, {
+      reportId,
+      view: "explanation",
+    });
+    expect(refused.status).toBe(503);
+    const overMcp = await page.mcp(REPORTS, { reportId, view: "explanation" });
+    expect(overMcp).toEqual({ isError: true, body: { error: "report_explanation_invalid" } });
+    // The request log and the audit record carry the closed code only.
+    const lines = logged.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => line.includes('"errorCode":"report_explanation_invalid"'))).toBe(
+      true,
+    );
+    expect(lines.filter((line) => line.includes(UNPARSED_TEXT))).toEqual([]);
+    const audited = (
+      await env.DB.prepare(
+        "SELECT path,result,result_code FROM audit_records WHERE rowid>? AND operation='reports.read' ORDER BY rowid",
+      )
+        .bind(last)
+        .all<{ path: string; result: string; result_code: string }>()
+    ).results;
+    expect(audited.length).toBeGreaterThan(0);
+    for (const row of audited)
+      expect(row).toMatchObject({ result: "failed", result_code: "report_explanation_invalid" });
+    expect(JSON.stringify(audited)).not.toContain(UNPARSED_TEXT);
+    // The body beside it is untouched and still served.
+    expect((await page.route(path)).status).toBe(200);
   });
 
   it("refuse what the routes refuse, and what the schema does not take", async () => {
@@ -289,6 +395,9 @@ describe("collection quality page reads", () => {
     const before = await tableCounts();
     for (const [query, args] of [
       ["/api/collection-quality", {}],
+      // The summary's source lines are paged too (ADR 0123, amendment 2026-11-21).
+      ["/api/collection-quality?offset=0", { offset: 0 }],
+      ["/api/collection-quality?detail=summary&offset=1", { detail: "summary", offset: 1 }],
       ["/api/collection-quality/sony-bank", { source: "sony-bank" }],
       ["/api/collection-quality/sony-bank", { source: "sony-bank", view: "cells" }],
       ["/api/collection-quality/sony-bank?offset=0", { source: "sony-bank", offset: 0 }],
@@ -297,11 +406,59 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
+      // The account view's summary pages its lines (ADR 0123, amendment 2026-11-20).
+      [
+        "/api/collection-quality/sony-bank/accounts?offset=0",
+        { source: "sony-bank", view: "accounts", offset: 0 },
+      ],
+      [
+        "/api/collection-quality/sony-bank/accounts?detail=summary&offset=1",
+        { source: "sony-bank", view: "accounts", detail: "summary", offset: 1 },
+      ],
+      [
+        "/api/collection-quality/sony-bank/accounts?detail=full",
+        { source: "sony-bank", view: "accounts", detail: "full" },
+      ],
+      // The full answers the summaries are shaped from (ADR 0123).
+      ["/api/collection-quality?detail=full", { detail: "full" }],
+      ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
+      [
+        "/api/collection-quality/sony-bank?offset=0&detail=full",
+        { source: "sony-bank", offset: 0, detail: "full" },
+      ],
+      // The status view (ADR 0045, amendment 2026-11-19): its one query, which takes no `detail`.
+      ["/api/collection-quality?view=status", { view: "status" }],
     ] as const) {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
       expect(validApiResponse(query.split("?")[0]!, route.body), query).toBe(true);
-      if ("view" in args && args.view === "accounts") {
+      if (
+        "view" in args &&
+        args.view === "accounts" &&
+        !("detail" in args && args.detail === "full")
+      )
+        expect(route.body).toMatchObject({
+          apiVersion: 3,
+          detail: "summary",
+          dataTypesVersion: "provider-data-types-v1",
+          dataTypes: { collected: expect.arrayContaining(["cash_movement"]) },
+          accounts:
+            "offset" in args && args.offset === 1
+              ? []
+              : [
+                  expect.objectContaining({
+                    accountId: "synthetic-quality-account",
+                    providerTypes: ["cash_movement"],
+                    freshness: expect.objectContaining({ ageDays: expect.any(Number) }),
+                  }),
+                ],
+        });
+      if (
+        "view" in args &&
+        args.view === "accounts" &&
+        "detail" in args &&
+        args.detail === "full"
+      ) {
         expect(route.body).toMatchObject({
           apiVersion: 3,
           dataTypesVersion: "provider-data-types-v1",
@@ -341,9 +498,32 @@ describe("collection quality page reads", () => {
     expect(await tableCounts()).toEqual(before);
   });
 
-  it("refuse a summary with an offset, an unknown source, and a grant without evidence.read", async () => {
+  it("hold the account summary to the bytes /mcp writes as its text, multi-byte labels included (ADR 0123, amendment 2026-11-20)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const label = QUALITY_LABEL;
+    const args = { source: "sony-bank", view: "accounts" };
+    const route = await page.route("/api/collection-quality/sony-bank/accounts");
+    expect(route.body).toMatchObject({ accounts: [expect.objectContaining({ label })] });
+    const message = await page.mcpMessage({
+      method: "tools/call",
+      params: { name: QUALITY, arguments: args },
+    });
+    const text: string = message["result"].content[0].text;
+    const overHttp = await page.http(QUALITY, args);
+    expect(overHttp.body).toEqual({ schemaVersion: "kogane-page-read-v1", data: route.body });
+    expect(JSON.parse(text)).toEqual(overHttp.body);
+    // The measure the page is cut by is the text an MCP client receives.
+    expect(new TextEncoder().encode(text).length).toBe(pageReadAnswerBytes(route.body));
+    expect(pageReadAnswerBytes(route.body)).toBeLessThanOrEqual(ACCOUNT_SUMMARY_BYTES);
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(text.length);
+  });
+
+  it("refuse a full summary with an offset, an unknown source, and a grant without evidence.read", async () => {
     for (const [query, args, status] of [
-      ["/api/collection-quality?offset=0", { offset: 0 }, 400],
       ["/api/collection-quality/absent-source", { source: "absent-source" }, 404],
       [
         "/api/collection-quality/absent-source/accounts",
@@ -358,17 +538,39 @@ describe("collection quality page reads", () => {
       expect(overHttp, query).toEqual({ status, body: refusal });
       expect((await page.mcp(QUALITY, args)).body).toEqual(refusal);
     }
-    // The account view takes no query on its route; a tool argument outside
-    // its closed shape is refused before any read, as for every page read.
-    expect((await page.route("/api/collection-quality/sony-bank/accounts?offset=0")).status).toBe(
-      400,
-    );
+    // The account view's full answer is unpaged (ADR 0123, amendment
+    // 2026-11-20); a tool argument outside its closed shape is refused before
+    // any read, as for every page read.
+    for (const query of [
+      // So is the full summary's (ADR 0123, amendment 2026-11-21).
+      "/api/collection-quality?detail=full&offset=0",
+      "/api/collection-quality?offset=0&offset=1",
+      "/api/collection-quality?limit=10",
+      "/api/collection-quality/sony-bank/accounts?detail=full&offset=0",
+      "/api/collection-quality/sony-bank/accounts?detail=compact",
+      "/api/collection-quality/sony-bank/accounts?limit=10",
+      "/api/collection-quality/sony-bank/accounts?offset=0&offset=1",
+    ])
+      expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_query" });
+    for (const query of [
+      "/api/collection-quality?offset=-1",
+      "/api/collection-quality/sony-bank/accounts?offset=-1",
+    ])
+      expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_offset" });
     for (const args of [
+      { detail: "full", offset: 0 },
       { view: "accounts" },
       { view: "cells" },
-      { source: "sony-bank", view: "accounts", offset: 0 },
+      { source: "sony-bank", view: "accounts", detail: "full", offset: 0 },
+      { source: "sony-bank", view: "accounts", detail: "compact" },
       { source: "sony-bank", view: "unknown" },
       { source: "sony-bank/accounts" },
+      // The status view is the summary's: it names no source and no page.
+      { view: "status", source: "sony-bank" },
+      { view: "status", offset: 0 },
+      // It is compact already, so it takes no `detail` (ADR 0123).
+      { view: "status", detail: "full" },
+      { view: "status", detail: "summary" },
     ]) {
       const overHttp = await page.http(QUALITY, args);
       expect(overHttp.status, JSON.stringify(args)).toBe(400);
@@ -435,11 +637,14 @@ describe("the audit rows of the report and collection quality reads", () => {
     expect(
       (await page.mcp(REPORTS, { reportId: "rpt:synthetic-open", view: "explanation" })).isError,
     ).toBe(false);
-    const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
+    const cells = await page.http(QUALITY, { source: "sony-bank", detail: "full" }, EVIDENCE_GRANT);
     expect(cells.status).toBe(200);
     const accounts = await page.mcp(QUALITY, { source: "sony-bank", view: "accounts" });
     expect(accounts.isError).toBe(false);
     expect(accounts.body.data.cells).toBe(cells.body.data.cells.length);
+    const status = await page.mcp(QUALITY, { view: "status" });
+    expect(status.isError).toBe(false);
+    expect(status.body.data.sources.length).toBeGreaterThan(0);
     const rows = (
       await env.DB.prepare(
         "SELECT path,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
@@ -456,7 +661,7 @@ describe("the audit rows of the report and collection quality reads", () => {
     });
     expect(rows).toEqual([
       read("mcp", "reports.read", 50, true),
-      read("agent-http", "reports.read", 3),
+      read("agent-http", "reports.read", 5),
       // One report, not its events.
       read("agent-http", "reports.read", 1),
       read("mcp", "reports.read", 1),
@@ -468,6 +673,8 @@ describe("the audit rows of the report and collection quality reads", () => {
       ),
       // The cells the account view read, never its accounts.
       read("mcp", "collection-quality.read", cells.body.data.cells.length),
+      // The status view counts its job lines.
+      read("mcp", "collection-quality.read", status.body.data.sources.length),
     ]);
   });
 });

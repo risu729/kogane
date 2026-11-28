@@ -67,6 +67,32 @@ export function reportedStateWorld(): DatedStore {
     minor: 1_000,
     fetchedAt: "2026-09-03T01:00:00Z",
   });
+  // Older statements the payable window leaves out on these dates: counted,
+  // never listed.
+  store.statement({
+    card: "card-a",
+    period: "2026-06",
+    paymentDate: "2026-06-26",
+    minor: 20_000,
+    fetchedAt: "2026-06-05T01:00:00Z",
+  });
+  store.statement({
+    card: "card-c",
+    period: "2026-06",
+    paymentDate: null,
+    minor: 700,
+    fetchedAt: "2026-06-03T01:00:00Z",
+  });
+  // A skip-payment page with two scheduled payments, one of them a refund,
+  // and another connection's page that listed none.
+  store.scheduledPage({
+    fetchedAt: "2026-09-07T12:00:00Z",
+    payments: [
+      { usageDate: "2026-08-03", dueDate: "2026-10-10", amount: "4500", asOf: "2026-09-07" },
+      { usageDate: "2026-08-20", dueDate: "2026-09-10", amount: "-300", asOf: "2026-09-07" },
+    ],
+  });
+  store.scheduledPage({ fetchedAt: "2026-09-07T12:00:00Z", connection: "conn-2" });
   return store;
 }
 

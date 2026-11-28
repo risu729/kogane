@@ -28,7 +28,9 @@
 //   offers a next page past it (`nextPage`, ./page-budget.ts).
 import {
   cardSettlementCandidate,
+  statementDueDate,
   type CardBankDebitFact,
+  type StatementDueDateReason,
 } from "../../../domain/src/card-settlement.ts";
 import {
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
@@ -68,10 +70,14 @@ import {
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type Grant, grantAllows } from "../grants.ts";
-import { pageBeyondBudget, withinBudget } from "./page-budget.ts";
+import { type Grant, wholeStoreReadRefusal } from "../grants.ts";
+import { statementTotal } from "./card-statement-total.ts";
+import { budgetPagedFields, pageBeyondBudget, withinBudget } from "./page-budget.ts";
+import type { PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 
 const REQUEST_ID = "card-settlements.unmatched";
+/** A statement total CORE 0024's CHECK never stores fails the read, never an answer. */
+const invalid = () => new Error("card_statements_unmatched_row_invalid");
 /** Statements one page holds. */
 export const UNMATCHED_PAGE_SIZE = 50;
 /** The largest offset a request may name. */
@@ -129,10 +135,20 @@ export interface UnmatchedCardStatement {
     sourceId: string;
     sourceAccount: string;
     accountId: string | null;
-    /** The provider's total; null when it is not exact (INV05). */
-    amount: Quantity | null;
+    /**
+     * The provider's total. One that is not exact keeps its status and a
+     * closed reason (`stored:<status>`, or `decimal_not_projected` when no
+     * decimal-v1 value was recorded), never zero and never null (INV05).
+     */
+    amount: Quantity;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
+    /**
+     * Why `paymentDate` is null, present exactly then (INV05):
+     * `payment_date_absent` or `payment_date_invalid`
+     * (`STATEMENT_DUE_DATE_REASONS`).
+     */
+    paymentDateReason?: StatementDueDateReason;
     period: string | null;
   };
   code: UnmatchedStatementCode;
@@ -143,7 +159,8 @@ export interface UnmatchedCardStatement {
   acceptable: false;
 }
 
-export interface UnmatchedCardStatementsReview {
+/** `next` and `paging` (ADR 0128) beside the deprecated `nextOffset` and `nextPage`. */
+export interface UnmatchedCardStatementsReview extends PagedFields {
   schemaVersion: "kogane-card-statements-unmatched-v1";
   query: UnmatchedCardStatementsRequest;
   manifest: {
@@ -450,17 +467,8 @@ export async function reviewUnmatchedCardStatements(input: {
   request: UnmatchedCardStatementsRequest;
 }): Promise<UnmatchedCardStatementsOutcome> {
   const { grant, sql, request } = input;
-  if (!grantAllows(grant, "records.read"))
-    return {
-      ok: false,
-      error: financialError("unauthorized", REQUEST_ID, ["capability:records.read"]),
-    };
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0)
-    return { ok: false, error: financialError("evidence_restricted", REQUEST_ID, narrowed) };
+  const refused = wholeStoreReadRefusal(grant, "records.read", REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   // The grant's row budget bounds how deep a caller pages.
   if (pageBeyondBudget(request.offset, UNMATCHED_PAGE_SIZE, grant))
     return {
@@ -479,11 +487,13 @@ export async function reviewUnmatchedCardStatements(input: {
   const items = new Map<number, UnmatchedCardStatement>();
   const pending: Pending[] = [];
   for (const row of page) {
+    // The sweep's own reading decides the code: an exact total, or none.
     const total = sweepRowAmount(row);
-    const date =
-      row.payment_date !== null && parseLocalDate(row.payment_date) !== null
-        ? row.payment_date
-        : null;
+    // The answer shows every total, with its status and reason when not exact.
+    const amount = statementTotal(row);
+    if (amount === null) throw invalid();
+    const due = statementDueDate(row.payment_date);
+    const date = due.paymentDate;
     const item: UnmatchedCardStatement = {
       statement: {
         ref: {
@@ -494,11 +504,17 @@ export async function reviewUnmatchedCardStatements(input: {
         sourceId: row.source_id,
         sourceAccount: row.source_account,
         accountId: row.account_id ?? null,
-        amount: total,
-        paymentDate:
-          date === null
-            ? null
-            : { kind: "local-date", value: date, zone: "Asia/Tokyo", basis: "provider" },
+        amount,
+        ...(due.paymentDate === null
+          ? { paymentDate: null, paymentDateReason: due.paymentDateReason }
+          : {
+              paymentDate: {
+                kind: "local-date",
+                value: due.paymentDate,
+                zone: "Asia/Tokyo",
+                basis: "provider",
+              },
+            }),
         period: row.period ?? null,
       },
       code: unmatchedStatementCode(total, false, null),
@@ -572,6 +588,7 @@ export async function reviewUnmatchedCardStatements(input: {
       items: page.map((row) => items.get(row.id)!),
       nextOffset: next.nextOffset,
       nextPage: next.nextPage,
+      ...budgetPagedFields(next, UNMATCHED_PAGE_SIZE, page.length),
     },
   };
 }

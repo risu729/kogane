@@ -124,6 +124,35 @@ describe("knowledge: current and known-at", () => {
     );
   });
 
+  test("a known-at K SQLite cannot read, or whose offset no zone uses, is refused, never an empty read", async () => {
+    const store = history();
+    // 2026-09-08T12:00:00Z written at both ends of the span zones use is read as itself.
+    for (const at of ["2026-09-09T02:00:00+14:00", "2026-09-08T00:00:00-12:00"])
+      expect(chosen(await select(store, { knowledge: knownAt(at) }))).toBe("p-first");
+    // The domain reads offsets up to ±18:59 and years up to 9999 in any
+    // offset, but SQLite's julianday reads no offset of 15 hours or more and
+    // nothing after 9999-12-31T23:59:59.999Z: the read would match nothing and
+    // every key would read `missing`, as if no price had been known.
+    const unreadable = [
+      "2026-09-09T03:00:00+15:00",
+      "2026-09-09T06:00:00+18:00",
+      "9999-12-31T12:00:00-12:00",
+    ];
+    for (const at of unreadable)
+      expect(store.db.query("SELECT julianday(?) AS day").get(at)).toEqual({ day: null });
+    // julianday reads -13:00 and +14:59, but no zone uses them.
+    const zoneless = ["2026-09-07T23:00:00-13:00", "2026-09-09T02:59:00+14:59"];
+    for (const at of zoneless)
+      expect(store.db.query("SELECT julianday(?) AS day").get(at)).not.toEqual({ day: null });
+    // Every such K is refused instead.
+    for (const at of [...unreadable, ...zoneless])
+      await expect(select(store, { knowledge: knownAt(at) })).rejects.toThrow("knowledge_invalid");
+    // The last instant julianday reads is read as itself.
+    expect(chosen(await select(store, { knowledge: knownAt("9999-12-31T23:59:59.999Z") }))).toBe(
+      "p-reparse",
+    );
+  });
+
   test("a rollback moves both modes back, and history before it stays as it was", async () => {
     const store = history().publish(1, 1, T3, "rollback");
     expect(chosen(await select(store))).toBe("p-first");

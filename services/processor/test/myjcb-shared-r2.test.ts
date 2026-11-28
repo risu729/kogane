@@ -11,7 +11,7 @@ import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // datasets) and ADR 0026 (a whole connection's unit claims complete
 // coverage, so the run is eligible for parse jobs). Everything is synthetic: no amount, merchant, account label or
 // date here is a production value.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -23,7 +23,14 @@ import { persistRun } from "../../../packages/collection/src/writer.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { MYJCB_LEDGER_SNAPSHOT_CTES } from "../../../packages/read-model/src/sql.ts";
 import { currentCardUsageSql } from "../../../packages/read-model/src/card-usage.ts";
-import { createD1ObservationReader } from "../../../packages/read-model/src/d1.ts";
+import { createD1ObservationReader, d1Executor } from "../../../packages/read-model/src/d1.ts";
+import {
+  DATED_SCHEDULED_PAYMENTS_SQL,
+  type DatedScheduledPaymentRow,
+} from "../../../packages/read-model/src/dated-state.ts";
+import { queryDatedState } from "../../../packages/application/src/query/dated-state.ts";
+import { reportedStateCutoff } from "../../../packages/domain/src/reported-state.ts";
+import { validReportedState } from "../../../packages/observation-shared/src/reported-state-contract.ts";
 import { myJcbRunPlan, PRODUCER } from "../../collector-myjcb/src/shared-collection.ts";
 import type { RawArtifact } from "../../collector-myjcb/src/types.ts";
 import { collectDebit, collectDebitOther } from "../../collector-myjcb/src/debit.ts";
@@ -31,20 +38,24 @@ import { registerCollectionRun } from "../src/collection/index.ts";
 import { cardPurchaseSweep } from "../src/card-purchase-job.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { scheduledPaymentRows, sweep } from "../src/worker.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
@@ -808,7 +819,7 @@ test("ADR 0005 amendment (e): only the ショッピングスキップ払い page
     {
       artifact_key: `${connectionId}/credit-skip-payment-08.html`,
       parser_name: "myjcb-skip-payment-schedule",
-      parser_version: "0.1.3",
+      parser_version: "0.1.4",
       status: "done",
     },
   ]);
@@ -871,6 +882,67 @@ test("ADR 0005 amendment (e): only the ショッピングスキップ払い page
   await expect(
     env.DB.prepare("UPDATE scheduled_payment_observations SET amount_text='0'").run(),
   ).rejects.toThrow(/append-only/u);
+
+  // The reported state on a date lists the page from what the pipeline wrote
+  // (ADR 0019, scheduled payments amendment), on D1 itself: the run's page of
+  // this connection with both rows as stored, through the wire contract. D1
+  // is never analyzed: its own plan reaches the rows by their parse run and
+  // the artifact by key, and scans no stored table whole but the publication
+  // pointers, filtered by parser name, so its `rows_read` is the pointers
+  // plus a few rows per page.
+  const skipArtifact = await env.DB.prepare(
+    "SELECT id FROM fetch_artifacts WHERE fetch_run_id=? AND artifact_key=?",
+  )
+    .bind(fetchRunId, `${connectionId}/credit-skip-payment-08.html`)
+    .first<number>("id");
+  const cutoff = reportedStateCutoff("2026-09-24");
+  const listed = await env.DB.prepare(DATED_SCHEDULED_PAYMENTS_SQL)
+    .bind(cutoff)
+    .all<DatedScheduledPaymentRow>();
+  expect(
+    listed.results
+      .filter((row) => row.artifact_id === skipArtifact)
+      .map((row) => [row.usage_date, row.due_date, row.amount_text, row.counterparty]),
+  ).toEqual([
+    ["2026-03-02", "2026-05-11", "12000", "架空スキップ店"],
+    ["2026-03-05", "2026-06-10", "3400", "架空スキップ商会"],
+  ]);
+  const publications = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM published_parse_runs",
+  ).first<number>("n");
+  const pages = new Set(listed.results.map((row) => row.artifact_id)).size;
+  console.info("scheduled payments: D1 rows_read", {
+    rowsRead: listed.meta.rows_read,
+    publications,
+    pages,
+  });
+  expect(listed.meta.rows_read).toBeLessThanOrEqual(publications! + 40 * pages + 40);
+  const queryPlan = (
+    await env.DB.prepare(`EXPLAIN QUERY PLAN ${DATED_SCHEDULED_PAYMENTS_SQL}`)
+      .bind(cutoff)
+      .all<{ detail: string }>()
+  ).results.map((row) => row.detail);
+  expect(queryPlan.some((detail) => detail.includes("idx_sched_pay_obs_parse_run"))).toBe(true);
+  expect(queryPlan.some((detail) => /^SEARCH a USING INTEGER PRIMARY KEY/u.test(detail))).toBe(
+    true,
+  );
+  expect(
+    queryPlan
+      .filter((detail) => detail.startsWith("SCAN "))
+      .map((detail) => detail.slice(5).split(" ")[0]!)
+      .filter((target) => !target.startsWith("dated_") && !target.startsWith("(subquery-")),
+  ).toEqual(["pub", "r"]);
+  const state = await queryDatedState(d1Executor(env.DB), { date: "2026-09-24" });
+  expect(validReportedState({ apiVersion: 2, ...state })).toBe(true);
+  expect(state.coverage.scheduledPayments).toBe("listed");
+  expect(
+    state.scheduledPayments
+      .find((capture) => capture.ref === `artifact:${skipArtifact}`)
+      ?.payments.map((payment) => [payment.dueDate, payment.providerText, payment.dueStatus]),
+  ).toEqual([
+    ["2026-05-11", "12000", "due_on_or_before_date"],
+    ["2026-06-10", "3400", "due_on_or_before_date"],
+  ]);
 }, 60000);
 
 test("ADR 0005 amendment (e): a scheduled payment is checked at the persist boundary, since the type system does not check it", () => {

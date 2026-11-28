@@ -81,12 +81,12 @@ into `needs-rule-verification`.
 
 `family='none'` means that the terms have been verified to impose no expiry; it is distinct from unknown expiry. An unverified rule never returns "no expiry". Buckets without an established expiry stay in the deadline-sorted list as `deadline.kind='unknown'` rows.
 
-| state                     | Condition (ADR 0049)                                                                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `needs-rule-verification` | The rule version itself is unusable: unverified, no calculation family, evaluation day outside validity, or unresolved qualifying-activity definition |
-| `conflict`                | A bucket's displayed and computed expiry disagree                                                                                                     |
-| `partial`                 | Expiry is unestablished for a covered bucket kind (excluding verified no-expiry), or a consumed input is incomplete                                   |
-| `computed`                | None of the above                                                                                                                                     |
+| state                     | Condition (ADR 0049)                                                                                                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `needs-rule-verification` | The rule version itself is unusable: unverified, no calculation family, evaluation day outside validity, unresolved qualifying-activity definition, or unreadable deadline calendar |
+| `conflict`                | A bucket's displayed and computed expiry disagree                                                                                                                                   |
+| `partial`                 | Expiry is unestablished for a covered bucket kind (excluding verified no-expiry), or a consumed input is incomplete                                                                 |
+| `computed`                | None of the above                                                                                                                                                                   |
 
 <a id="21-表示期限と算定期限"></a>
 
@@ -95,15 +95,17 @@ into `needs-rule-verification`.
 Each bucket's `expiryBasis` has the following 3 parts. `validBucketExpiryBasis` validates exact keys.
 
 - `displayed` — The expiry the provider displayed (observed). It retains the promoted claim value unchanged; unreadable text remains `unknown` (such as `provider_expiry_unparsed`). It includes the claim's `observedAt` and source-fact references. With no display it is `null`.
-- `computed` — A derivation under 1 rule version, carrying `EXPIRY_DERIVATION_RELEASE` (`reward-expiry-v2`).
+- `computed` — A derivation under 1 rule version, carrying `EXPIRY_DERIVATION_RELEASE` (`reward-expiry-v3`).
   - `status`: `date` (a civil date on the rule's deadline calendar), `no-expiry` (only for verified, unbounded `family='none'`; for a tier-dependent rule, only with a required-tier claim covering the evaluation day), or `unavailable` (exactly 1 reason code).
-  - `rule`: rule reference, version, family, verification state, version validity `validPeriod`, terms evidence (`evidenceRefs`, records in `docs/sources`), qualifying-activity policy reference and deadline calendar.
+  - `rule`: rule reference, version, family, verification state, version validity `validPeriod`, terms evidence (`evidenceRefs`, records in `docs/sources`), qualifying-activity policy reference and deadline calendar (`null` when the stored calendar reference could not be read; see §3).
   - `activity`: the history window, completeness, oldest observed day and starting activity (reference/date) consumed by an inactivity rule.
   - `membership`: the required tier and this holding's applicable claims consumed by a tier-dependent rule. Claims are ordered by tier code points (the same order as `MEMBERSHIP_SQL`'s `ORDER BY tier`), then by canonical claim JSON within a tier, independent of input order.
   - `uncertaintyCodes`: qualifications that limit rather than prevent derivation: assumed time zone, missing older history or a self-reported tier.
 - `agreement` — `agree` / `disagree` / `not-comparable`. Only civil dates are comparable. Unreadable displays, unavailable derivations and zone mismatches are `not-comparable`. Verified no-expiry alongside a displayed deadline is `disagree`. Any `disagree` makes the estimate `conflict` and returns both.
 
-A computed expiry is a date only when the rule is verified, has a supported calculation family and applies on the evaluation day; the bucket kind is covered; an inactivity rule has no qualifying activity with an unknown date, at least 1 observed qualifying activity and history completeness other than `unknown` (`partial` lacks only older history, so derivation proceeds with `history_incomplete`); a tier-dependent rule has a tier claim covering the starting day; and both the starting day and derived deadline lie within that version's validity. No treatment across rule versions is inferred where the terms do not record it. Otherwise the result is `unavailable` with exactly 1 reason from the closed `COMPUTED_EXPIRY_REASONS` list.
+A computed expiry is a date only when the rule is verified, has a supported calculation family and a readable deadline calendar (§3), and applies on the evaluation day; the bucket kind is covered; an inactivity rule has no qualifying activity with an unknown date, at least 1 observed qualifying activity and history completeness other than `unknown` (`partial` lacks only older history, so derivation proceeds with `history_incomplete`); a tier-dependent rule has a tier claim covering the starting day; and both the starting day and derived deadline lie within that version's validity. No treatment across rule versions is inferred where the terms do not record it. Otherwise the result is `unavailable` with exactly 1 reason from the closed `COMPUTED_EXPIRY_REASONS` list.
+
+The evaluation day and each activity's date are calendar days on the rule's deadline calendar. A plain date is its own day (its zone is not compared with the rule's, a limit). An instant counts on the deadline zone's day (`civilDateOfInstant`, [ADR 0056](adr/0056-as-of-price-fx-selection.md)), never by the date its offset was written in: `2026-09-30T20:00:00Z` anchors an `Asia/Tokyo` rule on 2026-10-01, whatever zone the instant is stamped with. A zone the runtime does not know gives no day, so such an activity is `activity_date_unknown`. A clock in a zone the runtime does not know establishes no evaluation day: a version with a validity period is `rule_out_of_force` and no deadline is `deadline_passed`. A rule without a readable calendar computes no date; it reads an instant clock in the clock's own zone, which still decides `rule_out_of_force` (checked before `deadline_calendar_unreadable`) and `deadline_passed` on a provider display. The READ projection gives only a `local-date` clock and no activities (`evaluationClock` and `UNCLASSIFIED_REWARD_HISTORY` in `packages/read-model/src/reward-projection.ts`), so no stored snapshot changes ([ADR 0049 amendment of 2026-11-23](adr/0049-reward-expiry-basis.md#amendment-an-instant-counts-on-the-rules-deadline-calendar)).
 
 | reasonCode                           | Meaning                                                                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -115,6 +117,7 @@ A computed expiry is a date only when the rule is verified, has a supported calc
 | `bucket_kind_unclassified`           | The provider quantity is retained, but its bucket kind is unconfirmed                                                     |
 | `fixed_deadline_not_derivable`       | Each lot has its own deadline, with no evidence beyond the provider display                                               |
 | `qualifying_activity_policy_missing` | The inactivity rule's qualifying-activity definition cannot be resolved                                                   |
+| `deadline_calendar_unreadable`       | The rule's stored deadline calendar reference cannot be read (§3); no family's answer, a date or "no expiry", is derived  |
 | `membership_out_of_scope`            | This holding lacks the tier claim required by a tier-dependent rule                                                       |
 | `membership_not_retroactive`         | The required-tier claim does not cover the starting day (the evaluation day for `family='none'`)                          |
 | `activity_date_unknown`              | A qualifying activity has an unreadable date (including a missing usage date under `member-used`) and could be the newest |
@@ -139,6 +142,8 @@ Migration 0033 seeds these rules:
 | `rule:mobile-suica-sf:validity`     | `unsupported` | needs-rule-verification | `docs/sources/mobile-suica.md` records balance/history capture paths but quotes no expiry terms                                                                                                                                                                        |
 
 **The time zone is separate.** The quoted terms do not state the deadline's reference time zone, so `deadline_calendar_ref` is `Asia/Tokyo:end-of-day:assumed`, and every derivation carries `deadline_zone_assumed`. The UI display zone is separate from the program's deadline zone (addendum 06 §2).
+
+`deadline_calendar_ref` is read strictly as `zone:dayBoundary:zoneBasis` (`deadlineCalendar` in `packages/read-model/src/rewards.ts`): exactly 3 parts, a zone the runtime's time-zone data knows (`canonicalZone`; the stored spelling is kept), a day boundary of `end-of-day` or `start-of-day`, and a zone basis of `documented` or `assumed`. Any other reference (empty, a missing zone, an unknown zone, day boundary or basis, or extra parts) gives the rule a `null` calendar, never a UTC, `end-of-day` or `assumed` default (ADR 0004). Such a rule computes nothing for any bucket: the computed side is `unavailable` / `deadline_calendar_unreadable`, the estimate is `needs-rule-verification` with `rule_family_unsupported` (as for an unresolved qualifying-activity definition), and `deadline_zone_assumed` is not raised for a zone that was never given. A provider display is still returned as an observation. The day boundary is recorded and checked but not yet consumed: a computed deadline is a civil date, not an instant (a limit). Every seeded reference reads as before.
 
 No `conversion_offers` rows are seeded. The candidate named by the review (a JRE POINT-to-Suica top-up) has search-excerpt evidence only [W13], can only be stored as `needs-rule-verification`, and cannot be simulation input. ANA, JAL and `楽天` (Rakuten) mileage/point rules are likewise not created until `docs/sources` records a terms quotation [W09] [W10] [W11] [W12] [W14].
 
@@ -229,8 +234,13 @@ As addendum 08 §7 states, **points are not converted to yen and added to asset 
   - V Point `displayed_point_balance` (points earned last month): `qualification`, because it is not a holding.
   - V Point Pay `prepaid_balance_after_event` and Mobile Suica `sf_balance_after_transaction`: each is `regular` in its separate program. Both use JPY; `holding_kind` records their prepaid nature.
 - **Observed expiry is retained unchanged.** Unreadable text is not discarded: it remains `{"kind":"unknown","reasonCode":"provider_expiry_unparsed"}`. No prediction is written.
-- Idempotency uses UNIQUE `claim_digest = sha256(source fact reference + promotion release)` with `INSERT OR IGNORE`. Running a sweep twice adds nothing. Bumping the release promotes every row again under the new mapping.
+- Idempotency uses UNIQUE `claim_digest = sha256(source fact reference + promotion release)` with `INSERT … ON CONFLICT(claim_digest) DO NOTHING`. Running a sweep twice adds nothing. Bumping the release promotes every row again under the new mapping. Only a `claim_digest` conflict is skipped: the table has no other unique key the job can hit (`id` is never supplied), and a claim that fails a CHECK, NOT NULL, foreign key or trigger raises.
 - No extra cursor table is added; it reads `MAX(source_fact_id)` per release.
+- The log line and tick record count each candidate once: `promoted` is the claims the inserts wrote (their own `changes`, not the attempts), `known` the claims another sweep wrote between this sweep's read and its write, `skipped` the rows no rule maps or whose instrument disagrees with the rule's unit, and `quantity_incomplete` the rows whose decimal row says `exact` without a coefficient and scale.
+- The candidate read applies each rule's own source, parser, measure, account and unit filters before its `LIMIT`, because a row it selects that no rule maps is never claimed and would head every later page and hold READ capture at `reward_promotion_incomplete`. For J-POINT the SQL account filter checks what the rule checks: a connection of 1 to 64 characters from `a-z`, `0-9` and `-` that does not start with `-`, followed by `:j-point:total` or by `:j-point:acquired:` and a date of ASCII digits in the `YYYY-MM-DD` shape (digits only, not a calendar check), and nothing else: SQLite's `length`, `substr` and GLOB stop at a NUL character, so both filters also require the account's byte length to equal its character length. The parsers write only such accounts, so this guards against a row written some other way.
+- A candidate the claim's quantity CHECK would refuse is decided before the write and counted as `quantity_incomplete`; the rest of the page is promoted. This follows the lanes that count a refused input by a closed reason and pass on (`price_promotion`, `purchase_recognition`) rather than fail the tick, because a failing batch would roll back every other candidate in it and the same candidate would head every later page. Limit: nothing durable records the refusal, so the candidate stays one (the anti-join re-reads it), it is counted on every sweep, and READ capture stays at `reward_promotion_incomplete` until it is claimed. CORE's decimal CHECK forbids such a decimal row, so a migrated store does not produce one.
+- Any other refusal at the write (a published parse run unpublished between the read and the write, a missing programme) rolls back its batch of up to 50 claims and fails the tick with the closed code `RewardClaimWriteRefused`; the SQLite text is never logged. Batches written before it stay written, and the next sweep reads the remaining candidates again. Limit: a refusal that persists (a missing programme) fails every sweep at the same batch, so no candidate after it is promoted and READ capture stays at `reward_promotion_incomplete` until the cause is fixed; each such tick is recorded as `failed` with that code and no counts.
+- The scheduled lane waits for a change (ADR 0129, migration 0110): a tick whose candidate read returns no row marks the CORE revision it started at clean in `processor_sweep_passes`, and later ticks read only that gate row until the revision or the gate's policy moves. The policy carries the release, a digest of the candidate statement's text and bound values (which carry the rules) and a digest of the views the job's code reads, so a deploy that changes any of them reads again. A read that returns a candidate, even one the rules skip, closes nothing, so such a tick reads everything again on the next tick as before. A gated tick reports `scanned: 0` and does not read the cursor (`cursor: 0` in its log line).
 
 <a id="8-読み取りapi"></a>
 
@@ -248,6 +258,17 @@ All are GET routes, with no writes or external communications. `Page<T>` = `{row
 `/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` traverses bucket rows. Reads see only claims linked to published parse runs, so rolling back a publication pointer also removes them from reward presentation.
+A holding's `membership` lists the newest claim per tier of its own programme and holding
+reference (`MEMBERSHIP_SQL`), the key `estimateExpiry` also matches claims by; another
+programme's claim that names the same holding reference is not listed. `MEMBERSHIP_SQL`
+does not check publication: the published-parse-run filter above covers bucket claims, and
+rolling back a publication pointer does not remove a membership claim.
+A holding whose buckets a page cuts is listed on each page that holds some of them, with
+those buckets, but its `consumable` and every `byKind` quantity are `missing` with
+`holding_cut_by_page`, never the sum of the buckets on that page (INV05; 2026-11-18). The
+reader marks the last holding of a page cut when the row past the page is that holding's,
+and the first holding of a page whose `offset` is not 0 cut always, since it cannot see the
+row before the page.
 The holdings and expiry pages are also the MCP page read `kogane.rewards.read`,
 answered by the routes' own reader `readRewardRoute`
 ([agent API](agent-api.md#ui-read-pages)); no agent tool runs `/offers/simulate`.
@@ -265,7 +286,10 @@ answered by the routes' own reader `readRewardRoute`
   connection does not offer rewards and sends no reward request.
 - The page reads only the first page of each route (`offset=0`). When the server's
   page bound cuts a list, that block says how many rows it shows and that it did not
-  read the rest; it offers no link to a next page.
+  read the rest; it offers no link to a next page. A holding the bound cuts shows its
+  total as `未確定` with the reason in words (the code is the badge's title), never the
+  sum of the buckets shown. Every missing quantity's reason is shown through the same
+  labels as the other reason codes, and a code without a label is shown verbatim.
 - Each expiry panel is named by what tells it apart: a published-snapshot row by its
   programme, bucket kind, bucket reference and rule (the snapshot holds one row per
   bucket for every rule version of the programme); a provider display section by its
@@ -305,7 +329,8 @@ Current rollback:
 Verification used synthetic data only. No real account or actual exchange was used.
 
 - `packages/domain/test/rewards.test.ts` — Loads SC11–SC14 from `packages/domain/fixtures/v3` and runs the minimum AT43–AT54 input variations: lots/expiry-only buckets/unknown acquisition date, excluded transfers and missing history, tier changes without retroactive evidence, multiple campaign/member-only offers, completion across a deadline, cancellations with different return buckets/expiry, and rejection of cycles/shared quotas/depth bounds/reuse before credit; also month ends, leap days, date-only inputs and assumed time zones.
-- `services/processor/test/reward-claims.test.ts` — Migration 0033 with existing rows, seed contents, append-only constraints, promotion idempotency, unpublished parse-run invisibility, unreadable expiry, and no lane execution or writes when the flag is off.
+- `services/processor/test/reward-claims-query-differential.test.ts` — The candidate read against frozen copies of earlier shipped texts on full CORE stores without table statistics: the J-POINT additions against the read before J-POINT, and the J-POINT history and total account filters against the read e8f455ed9 shipped (`reward-claims-account-legacy-query.ts`, pinned by its SHA-256), on scaled and random stores. The narrowed read returns the same rows, order and pages for every account the rule admits and drops only accounts the rule refuses (for the total, one with text after a NUL); its query plan is the shipped one; a refused history account built by hand is no candidate, so promotion leaves nothing pending.
+- `services/processor/test/reward-claims.test.ts` — Migration 0033 with existing rows, seed contents, append-only constraints, promotion idempotency, unpublished parse-run invisibility, unreadable expiry, and no lane execution or writes when the flag is off. The claim insert skips a `claim_digest` retry and raises on a CHECK or NOT NULL failure; a candidate with an `exact` status and no coefficient (injected at the candidate read, since CORE cannot store one) is counted as `quantity_incomplete` while the rest of its page is promoted; `promoted` and `known` follow the inserts' `changes` when another sweep wrote the same claims first; a refusal at the write fails the tick as `RewardClaimWriteRefused`.
 - `services/app/test/rewards-api.test.ts` — The retired App flag does not make routes 404; authentication, write refusal, holdings/expiry/simulation contents, 503 for expiry without a snapshot, and no simulation writes.
 - `services/app/test/conformance.test.ts` — Capability/route correspondence.
 
@@ -340,9 +365,11 @@ Evaluation time is **the start of the UTC day containing the capture time (`YYYY
 
 Canonical fixed-input bytes use the same `projection-inputs/<digest>/input.json` (DATA R2) as balances, referenced by CORE `projection_input_records`. No table, prefix or recording mechanism is added.
 
-Every captured set is bounded and **refused rather than truncated** beyond its bound (`rule_set_too_large`, `claim_set_too_large`, `offer_set_too_large`). Fresh captures read no saved
+The rules, the bucket claims and the offers are each bounded and **refused rather than truncated** beyond their bound of 200 (`rule_set_too_large`, `claim_set_too_large`, `offer_set_too_large`). The provider display sections follow the bucket claims they belong to, so the claim bound also bounds them. Fresh captures read no saved
 simulations (`captureRewardInput` in `services/processor/src/reward-read-projection.ts`
-captures an empty set), so there is no simulation bound.
+captures an empty set), so there is no simulation bound. Limit: the membership claims have no
+bound. The capture reads every row `MEMBERSHIP_SQL` returns, the newest claim per programme,
+holding and tier, and no code refuses a large set. No code writes membership claims today.
 
 CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to the 0038 dependency ledger; `0077_reward_bucket_claims_v2.sql` adds the current claim table and revision trigger. Without these, r0/r1 capture cannot detect rule/claim changes. Projection outputs `expiry_estimates` / `conversion_simulations` remain **excluded** from the ledger, so outputs do not invalidate themselves. As a side effect, reward-claim promotion also marks balance-projection input as potentially changed. This over-detects rather than misses a change; balances recapture and settle on the same content digest.
 
@@ -360,6 +387,8 @@ CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to
 | `reward_build_checkpoints`      | Resume position per stage (estimates / simulations), written in the same batch as its chunk                                                                                                                                                 |
 
 All are STRICT, without FKs to CORE. `building` rows are invisible to readers through the pointer.
+
+Writing rows: the writer inserts estimates, simulations, provider display sections (READ 0005) and input refs with `INSERT … ON CONFLICT(<primary key>) DO NOTHING` (`packages/storage-d1/src/read/rewards.ts`, `reward-provider-expiry.ts`). Only a row whose primary key is already written is skipped, which is the resent chunk of a retried batch; the table's `BEFORE INSERT` chunk-conflict trigger runs first, so a resent row with a different `row_digest` still raises `reward estimate chunk conflict` / `reward simulation chunk conflict` / `provider display chunk conflict`. A row that fails a CHECK or NOT NULL constraint, or a new key at a `row_seq` already written, raises its constraint: the chunk and its checkpoint roll back together, the `reward_read_projection` tick is recorded as failed, and the build stays `building` and unpublished. An input ref that fails a constraint fails the batch that starts the build, so no build starts. Input refs have no digest-conflict trigger: a `(kind, id)` the plan lists twice keeps its first row. The projection builds no row the schema refuses today.
 
 <a id="保存済みsimulationの扱いg2-20"></a>
 
@@ -388,9 +417,54 @@ There are currently no such rows. CORE `conversion_simulations` was deleted in 0
 | `GET /api/v2/rewards/holdings`        | CORE claims; independent of READ    | Same as left                                                                               |
 | `GET /api/v2/rewards/offers/simulate` | Pure query, no writes               | Same as left                                                                               |
 
+Each row's `quantity` is the amount at risk: `exact` with its decimal-v1 value, or `missing` / `unparsed` / `conflict` with the reason `decimal-v1:<status>`. READ migrations 0002 and 0004 CHECK that the status is one of these four and that a row is `exact` exactly when both decimal-v1 columns are set. A pairing that CHECK refuses (`exact` without both columns, a status that is not exact with both, or another status) is a store the schema never admits; the read refuses it (`reward_estimate_amount_invalid`, like a provider display section that fails validation) rather than serving a value nobody stored or an `exact` status with a reason. The route and `kogane.rewards.read` both run the read inside `catalogue`, so both answer `503 catalogue_read_failed` (a tool result with `isError: true` on `/mcp`). The CHECK admits a status that is not exact with one of the two columns set, which the writer never stores; such a row keeps its status and reason, and the stray column is not shown.
+
 `expiryBasis` is returned only when stored evidence satisfies `validRewardExpiryBasis`; otherwise it is `null`. `null` means either that evidence was not recorded by a build before `reward-projection-v2` or that the stored value fails validation, not that no computed expiry exists. Evidence is not reconstructed from other columns. Validation also rejects `date` / `no-expiry` for unverified rule versions, `no-expiry` for bounded rules or families other than `none`, and `agree`/`disagree` with an unreadable displayed expiry. If CORE rule `applicability_json` has unreadable `tiers` / `validPeriod`, they are treated as a tier no claim meets and a period containing no day, not all tiers or always valid. The shared response validator (`api-validation.ts`) checks `RewardReadExpiryRow.expiryBasis` with `optional(nullable(validRewardExpiryBasis))`. Responses containing damaged evidence are rejected; `null` and an absent field (an App predating it) are accepted. The screen performs the same validation before rendering.
 
-No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query is 400 `cursor_mismatch`; another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset.
+No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query (another route, `program` or window) is 400 `cursor_mismatch`, with `mustMatch` naming the inputs that must repeat (`["collection", "program", "from", "before"]` on expiry, absent included, `["collection"]` on simulations; [ADR 0123](adr/0123-summary-detail-for-large-reads.md)); another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset. The page size is not part of the query: a cursor read at one offered `limit` (25, 50, 100, 200) continues at another from where its page ended, and the next cursor is issued at the size asked now ([ADR 0119](adr/0119-cursor-page-size.md)).
+
+#### Deadline window and summary
+
+[ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read).
+`GET /api/v2/rewards/expiry` takes `from` and `before` (calendar dates, `YYYY-MM-DD`), compared
+with each row's `expiresOn` as text: `from` is inclusive, `before` exclusive. Without `from` it is today's
+Asia/Tokyo date (`tokyoToday` in `packages/application/src/query/reward-expiry-window.ts`, the goal search's
+day); without `before` the window has no end. A malformed date is `400 invalid_date`; a window with no day
+(`from` on or after `before`) is `400 invalid_date_range`. With neither parameter the page is exactly the page
+above.
+
+- **Windowed page** (`detail` absent or `full`): the rows whose `expiresOn` lies inside the window, in snapshot
+  order, paged by `limit` and `cursor` as above, plus `window` (the window, `fromBasis` `request` or `today`,
+  `today`, `calendar`) with `rows`: how many rows of the read lay inside, before and after it, and how many
+  were left out with no date (`deadline_unknown`). Rows are counted as the page lists them, one per bucket and
+  rule. The window is part of the cursor's query: a cursor read under one window is `400 cursor_mismatch`
+  under another, without one, or the other way round. `providerDisplaySections` stays the snapshot's complete
+  set.
+- **Summary** (`detail=summary`, unpaged: `limit` or `cursor` is `400 invalid_query`): per programme and unit,
+  the buckets inside the window, their total and the earliest lines (20 across programmes); the
+  provider-displayed portions inside it (3); and `counts` of buckets and displays inside, before and after the
+  window and left out, by closed reason. A bucket is one bucket, not one row per rule: its rows are grouped by
+  programme, holding and bucket, and one whose rows carry different deadlines (or a date beside none) is left
+  out as `deadline_differs_by_rule`, never given one of them. Totals are `sumQuantities` per programme and unit,
+  so two units are never added; a total over an amount that is not exact is `not-exact` with the statuses
+  that prevented it, never a partial sum or a zero, and a stored "exact" value that is not a decimal-v1
+  decimal is read as `unparsed` (`decimal-v1:invalid`). A provider-displayed portion (ADR 0068) is listed,
+  never added to a total. A display with no readable date is `display_date_unknown`; a section that displayed
+  nothing is `provider_expiry_not_displayed` or `provider_expiry_unavailable`. Without a window every dated
+  bucket counts as inside.
+
+`detail` here is opt-in: absent is `full`, the page as it was, unlike the balance, schedule and collection
+quality reads whose absent `detail` is `summary` ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)).
+Another value is `400 invalid_query`, as on the schedule and collection quality routes (`invalid_request` on
+the tool's closed schema). A page's `detail` is not bound to its cursor; the summary takes none.
+
+Both read every estimate row of the snapshot (narrowed to `program`) through the shipped page query with a
+bound of 1,000 rows, and filter in the App; the query text is unchanged. A larger snapshot is
+`413 result_limit_exceeded`, never cut. Today's build writes at most 400 rows (200 buckets, at most two seeded
+rules a programme). Limits: `from` defaulted to today is resolved per request, so a windowed walk that
+crosses Tokyo midnight without an explicit `from` is `cursor_mismatch` on its next page; a summary lists at
+most 20 bucket lines and 3 displays, and its totals and counts cover the rest; `deadline_differs_by_rule`
+needs a rule that computes a date, which no stored holding receives today (§2.1).
 
 Retained snapshots: a cursor that still names an older, retained snapshot is refused with the same
 503 code as the published one when the CORE epoch or visibility revision that snapshot was captured
@@ -414,15 +488,16 @@ To stop the writer, deploy processor `REWARD_READ_PROJECTION_ENABLED=false`. No 
 
 ### Synthetic verification (U16)
 
-- `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss and forward-only pointers are covered.
+- `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss (a displaced writer's chunk writes no estimate or simulation row) and forward-only pointers are covered. An estimate, simulation or input ref that fails a CHECK, and a new estimate or replay key at a written `row_seq`, fail their batch and leave the checkpoint where it was; `reward-provider-expiry.test.ts` shows the same for a provider display section.
 - `services/processor/test/reward-read-projection.test.ts` — The lane on actual D1: flag-off prevents execution; lane ordering; builds lacking budget stay unpublished and resume with their own time; unstable capture becomes `pending`; dropping all READ reward tables does not change even 1 CORE claim/rule/offer/stored-input row and expires old cursors (G0-09).
 - `services/app/test/rewards-v2-read.test.ts` — Route 503/cursors/reproducibility, `/api/meta` advertisement and 503 without READ.
+- `services/app/test/rewards-read-amount.test.ts` — An expiry row's `quantity` is exact with its value or non-exact with `decimal-v1:<status>`, also when a non-exact row keeps one stray column; every pairing the READ CHECK refuses (an `exact` status without both columns, a non-exact one with both, an unknown status) fails the read instead of being served; over all 20 pairings of five statuses and the two columns set or null, the read serves exactly what the CHECK admits. `services/app/test/page-read-rewards.test.ts` shows the route, `/api/agent/v1/rewards.read` and `/mcp` answer such a row with the same `503 catalogue_read_failed`. `packages/storage-d1/test/reward-read-writer.test.ts` shows the table never stores such a row: a plain insert fails the CHECK, and so does the writer's own chunk, which stores nothing and leaves the checkpoint where it was (see the writing rows paragraph above).
 
 <a id="合成データで確認したことadr-0049"></a>
 
 ### Synthetic verification (ADR 0049)
 
-- `packages/domain/test/reward-expiry-basis.test.ts` — Agreement/disagreement between displayed and computed expiry, unreadable displays, fixed-expiry lots, verified no-expiry, tier-claim records, deterministic same-day starting activity, each of the 13 reason codes (no date, 0 or "expired" is returned; cases match the closed list), 2 rule versions across validity boundaries (v1's last day/v2's first day, a starting day before v2, a deadline after v1, unreadable periods), every rule × history × kind × quantity × display combination retaining all buckets and unchanged quantities, `deadline_passed` only on evidenced civil dates, and validator refusals.
+- `packages/domain/test/reward-expiry-basis.test.ts` — Agreement/disagreement between displayed and computed expiry, unreadable displays, fixed-expiry lots, verified no-expiry, tier-claim records, deterministic same-day starting activity, each of the 13 reason codes (no date, 0 or "expired" is returned; cases match the closed list), 2 rule versions across validity boundaries (v1's last day/v2's first day, a starting day before v2, a deadline after v1, unreadable periods), every rule × history × kind × quantity × display combination retaining all buckets and unchanged quantities, `deadline_passed` only on evidenced civil dates, instant clocks and activity dates read on the rule's deadline calendar (an unknown zone dates nothing), and validator refusals.
 - `packages/read-model/test/reward-projection.test.ts` — Reads migration-seeded rules unchanged and applies them to synthetic V Point/V Point Pay/Mobile Suica buckets with the §3 results. A program without even 1 rule gets no expiry rows or dates.
 - `apps/web/test/rewards-contract.test.tsx` — Responses with `expiryBasis` pass the shared validator; damaged evidence is rejected; `null` and an absent field pass. The screen separates observation from derivation and labels missing/damaged evidence `記録がありません` ("no record").
 
@@ -457,7 +532,7 @@ Stopped flags, unapplied migrations, candidates the promoter keeps skipping, inc
 
 ## Provider expiry subsets (ADR 0068)
 
-J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
+J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. A section belongs only to a selected total: `captureProviderExpirySections` (`packages/read-model/src/reward-provider-expiry.ts`) attaches one to a J-POINT balance claim whose own fact is a `displayed_jpoint_total`, or whose fact cannot be read (its coverage is then `unknown`). When the reader selects a connection's complete acquisition history instead of its total ([ADR 0107](adr/0107-myjcb-point-history-and-document-boundary.md)), the lots carry their own observed expiry months and get no section, so no lot is listed as an unconfirmed provider expiry or counted as `provider_expiry_unavailable` by the summary; the total they replace is not selected, so that capture has no J-POINT section for the connection. The lots' months show in the holdings read, as each bucket's `observedExpiry`; J-POINT has no expiry rule, so the expiry read and its summary carry no estimate row for them either. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
 
 Not-displayed and unknown sections are stored even with zero display rows, and the UI calls the expiry unconfirmed. They never become zero or no expiry. READ 0005 adds provider display sections/checkpoints and immutable snapshot section counts. projection-input-v3 / projection-v4 fixed inputs and output digests include the bounded provider stream; publication waits for verification of every stream. Existing rule-derived estimates retain their rule-reference guards and pagination. Provider sections in the expiry response are a complete bounded companion set from the same resolved sealed snapshot.
 

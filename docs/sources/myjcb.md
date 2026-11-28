@@ -686,7 +686,7 @@ Round 4 found position 8 had h1 `ショッピングスキップ払いご利用�
 - **Registration.** Only `credit-skip-payment-NN.html` gets dataset `credit-schedule`. `credit-schedule-NN.html` has no dataset and creates no parse job.
 - **Parser.** `myjcb-skip-payment-schedule@0.1.2` (amendments (f)/(k), same observations as 0.1.0) reads only the observed shape: h1; an as-of heading when rows exist (one, valid calendar date/month); at most one ledger with rows; head with the observed 3 cells; ledger children consisting only of head followed by `content` rows (reject other nested rows rather than reading them as an empty ledger); each row with one 3-cell `item-cell`, the middle cell having exactly 2 lines (first merchant etc., second payment date); dates `YYYY/MM/DD`; exact-yen amounts. Body layout was not recorded, so only the head's layout is read. Reject other shapes with closed codes (`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`); messages contain only the code. A ledger without rows means 0 rows, not failure. An empty ledger must have exactly one `content` row matching the observed empty row: one `item-cell` containing one `div.cell.w-100per`, with whitespace-stripped text `ご利用明細はございません。`; or that `item-cell` wrapped in one `div` lacking reader classes. Both shapes use `div` at every level, whitespace-stripped text consists solely of that wording, and the cell has no children (amendment (k)). An empty row alongside other rows rejects as the unobserved combination `schedule_row_shape_unobserved`. Because the kind is declared outside `types.ts`, the processor checks `scheduled_payment` rows before writing (`scheduledPaymentRows`: rows from other parsers, undeclared keys, invalid calendar dates, noncanonical integer amounts, etc. become `parse_contract_invalid`).
 - **Observations.** Each row enters `scheduled_payment_observations` (migration 0061, append-only) as a `scheduled_payment` observation: usage date, payment date (`due_date`), future payment amount (exact integer decimal string, displayed sign), merchant etc. (`counterparty`), page as-of date, and in `extra_json` the displayed cells and month of `YYYY年M月以降のお支払い分` ("payments from year YYYY, month M onward"). External IDs use displayed-cell fingerprints and occurrence order, excluding as-of date.
-- **Readers.** These are neither transactions nor balances; read paths, card purchase recognition, settlement candidates, and identity do not read this table. No double counting (INV06).
+- **Readers.** These are neither transactions nor balances; transaction and balance reads, card purchase recognition, settlement candidates, and identity do not read this table. No double counting (INV06). Only the reported state on a date reads it, listing the newest published page's rows and adding nothing ([ADR 0019](../adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)).
 
 Limitations: what row amounts represent (one payment or remaining balance), and whether payments appear in later statement months, are unconfirmed; do not match them against statements/payments. Read models, APIs, and UI do not display them yet. Skip pages saved before this change remain unread `credit-schedule-NN.html`. Different body layouts (per-row expanded lists, 4 cells, payment date in a separate cell, etc.) make the first production parse fail with `schedule_row_shape_unobserved`; issue a new release after structural-only investigation. Do not read position 7 (bonus payments) until observed with rows (ADR 0004).
 
@@ -889,7 +889,11 @@ its captured evidence.
 
 Current reward holdings select complete acquisition membership only when its
 total and the newest total revision belong to the same capture and every
-bucket has been promoted. A newer total with missing/failed history selects
+bucket has been promoted. Complete means the published history parse carries
+a `complete-container` coverage claim with proven membership; a history
+capture without one never enters the cohort, so it is neither promoted, nor
+current, nor the capture whose time and source fact a stale gap reports.
+A newer total with missing/failed history selects
 that current total and reports a stale/unavailable history gap. Older history
 remains dated evidence. The total and acquisition buckets are never added.
 See [ADR 0107](../adr/0107-myjcb-point-history-and-document-boundary.md).
@@ -1056,3 +1060,53 @@ month positions), or `unclassified` for any other error. It carries counts,
 `detailMonth` positions and type names only, never the response, an error id
 or a label. The checks themselves are unchanged; the fix follows
 once a run names the reason.
+
+### First reason: `month_out_of_range` on the ninth item (2026-11-19)
+
+The requested run of 2026-11-19 03:11 UTC and the scheduled run of
+2026-11-19 21:00 UTC both logged `reason` `month_out_of_range` with
+`itemCount` 9, item position 9 and a string `detailMonth`. Items 1 to 8 passed
+every item check. The last stored past-month response (2026-11-10 to
+2026-11-14, one digest) held nine items whose `detailMonth` strings were `9`
+to `17` in order. So the ninth item's `detailMonth` is now a string the check
+refuses; the log did not say what it names. A window shifted to `10..18`
+(the menu gaining a position) fits, but is not observed.
+
+Every refusal line now also carries the menu's own `menuMonthPositions` and
+`schedulePositions`, and `menuLinksBeyondRange`: the number of menu detail
+links naming a position above 17, which the menu reader has always skipped
+without a trace. `month_out_of_range` adds `monthLength` (for a string) and
+`monthPosition` (the position named, when the value is one to three ASCII
+digits or an integer `0..999`). A position is an index into the statement
+list, not an amount or a date. The `0..17` bound (the read allowlist in
+`policy.ts`, the client, both parsers and the shared parsers) changes only
+once a run shows the position; the run below did.
+
+### The position: the window moved to `10..18` (2026-11-20)
+
+The scheduled run of 2026-11-20 21:00 UTC logged `menuMonthPositions`
+`[0..7]`, `schedulePositions` `[8, 9]`, `menuLinksBeyondRange` 0, and for the
+ninth past-month item `monthPosition` 18. Before 2026-11-15 the menu held
+months `0..6` and schedule pages `7, 8`, and the past-month API offered
+`9..17`. The menu gained one month and kept both schedule pages, so every
+later position moved up by one: the past-month window is now `10..18`. The
+provider's 17-month horizon counts statement months; positions also count the
+schedule pages, so 17 months and two schedule pages reach position 18.
+
+**Fix.** One collector bound, `MAX_DETAIL_POSITION` = 18, the highest position
+a run has shown, replaces every `0..17` check: the read allowlist
+(`policy.ts`, all four `detailMonth` routes), the past-month JSON-RPC referer
+check, the menu reader, the past-month availability check and the manifest
+position check. The shared parsers accept the same positions in
+`credit-ledger-NN.json`, `credit-detail-NN.html`,
+`credit-skip-payment-NN.html` and the past-month items, and the relative
+period label reads `detailMonth-0` to `detailMonth-18`. A position above 18 is
+still refused, and the bound moves again only once a run shows a higher one.
+
+**Release.** The four parsers in `packages/parsers/src/parsers/myjcb.ts` move
+together: `myjcb-credit-ledger@1.2.5`, `myjcb-credit-past-month-balances@1.1.8`,
+`myjcb-credit-statement-total@1.4.3`, `myjcb-canonical-evidence-boundary@1.1.8`;
+and `myjcb-skip-payment-schedule@0.1.4`. None of the five is pinned by a
+snapshot policy (`required_parser_version` is `NULL` for the MyJCB credit
+datasets), so no migration is needed. Observations of positions up to 17 are
+unchanged.

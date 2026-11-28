@@ -1,5 +1,6 @@
 // Public scheduling contract. No credentials, bank values or provider response text.
 import type { MaintenanceSurveyView } from "./maintenance-survey-model";
+import { pagedFields, type PagedFields } from "../../observation-shared/src/paging-contract";
 export type SchedulePattern =
   | { kind: "daily"; time: string; weekdays: number[] }
   | { kind: "interval"; minutes: number };
@@ -109,6 +110,287 @@ export interface ScheduleSnapshot {
   leases: { source: string; leaseRef: string; startedAt: string }[];
   /** The official-site re-survey (ADR 0050); absent from a Processor that predates it. */
   survey?: MaintenanceSurveyView;
+}
+/**
+ * The schedules page in one line per job (ADR 0123): the `summary` detail of
+ * `GET /api/ops/v1/schedules` and `kogane.schedules.read`. Each job keeps its
+ * closed states (kind, enabled, supported, reservation, and whether a
+ * collection request for it would be dispatched, absent where the snapshot
+ * has none) and its newest occurrence (its status and closed failure code),
+ * each source its maintenance reference status and how many maintenance
+ * rules it has, and every held lease is listed. The occurrence list, the
+ * rules' patterns and the re-survey are in the `full` detail only.
+ */
+export interface ScheduleSummary {
+  detail: "summary";
+  schedules: {
+    id: string;
+    source: string | null;
+    kind: ScheduleView["kind"];
+    enabled: boolean;
+    supported: boolean;
+    nextRunAt: string | null;
+    reservation: ScheduleView["reservation"];
+    /**
+     * `collectionRequest.dispatch`: null when no collector serves a request
+     * for the job, absent when the snapshot does not say (an older Processor).
+     */
+    dispatch?: ScheduleCollectionRequest["dispatch"] | null;
+    latest: Pick<ScheduleOccurrence, "nominalAt" | "status" | "failureCode"> | null;
+  }[];
+  maintenance: { source: string; status: ScheduleView["maintenance"]["status"]; rules: number }[];
+  leases: ScheduleSnapshot["leases"];
+}
+/** The summary of one schedules snapshot; derived from it alone, so it says nothing the snapshot does not. */
+export function scheduleSnapshotSummary(snapshot: ScheduleSnapshot): ScheduleSummary {
+  const maintenance = new Map<string, ScheduleSummary["maintenance"][number]>();
+  for (const schedule of snapshot.schedules)
+    if (schedule.source !== null && !maintenance.has(schedule.source))
+      maintenance.set(schedule.source, {
+        source: schedule.source,
+        status: schedule.maintenance.status,
+        rules: snapshot.maintenance.filter((rule) => rule.source === schedule.source).length,
+      });
+  return {
+    detail: "summary",
+    schedules: snapshot.schedules.map((schedule) => ({
+      id: schedule.id,
+      source: schedule.source,
+      kind: schedule.kind,
+      enabled: schedule.enabled,
+      supported: schedule.supported,
+      nextRunAt: schedule.nextRunAt,
+      reservation: schedule.reservation,
+      ...(schedule.collectionRequest === undefined
+        ? {}
+        : { dispatch: schedule.collectionRequest?.dispatch ?? null }),
+      latest:
+        schedule.latest === null
+          ? null
+          : {
+              nominalAt: schedule.latest.nominalAt,
+              status: schedule.latest.status,
+              failureCode: schedule.latest.failureCode,
+            },
+    })),
+    maintenance: [...maintenance.values()],
+    leases: snapshot.leases,
+  };
+}
+/**
+ * `kogane.schedules.maintenance.read` in full (ADR 0046): the Processor's
+ * agent read of the granted sources, each with its registered maintenance
+ * reference, its jobs and its rules' newest revisions (at most 20 a rule,
+ * newest first), and the writer's limits on a delegated principal.
+ */
+export interface MaintenanceRead {
+  sources: MaintenanceReadSource[];
+  limits: { maxDeferralHours: number; writesPerDay: number; writesUsedToday: number };
+}
+export interface MaintenanceReadSource {
+  source: string;
+  reference: {
+    status: ScheduleView["maintenance"]["status"];
+    referenceUrl: string;
+    verifiedAt: string;
+  } | null;
+  schedules: (Pick<
+    ScheduleView,
+    | "id"
+    | "source"
+    | "kind"
+    | "enabled"
+    | "supported"
+    | "timezone"
+    | "pattern"
+    | "revision"
+    | "nextNominalAt"
+    | "nextRunAt"
+    | "actualAlarmAt"
+    | "reservation"
+  > & {
+    latest: Pick<
+      ScheduleOccurrence,
+      "nominalAt" | "startedAt" | "finishedAt" | "status" | "failureCode"
+    > | null;
+  })[];
+  rules: { id: string; revisions: MaintenanceReadRevision[] }[];
+}
+export interface MaintenanceReadRevision {
+  revision: number;
+  timezone: string;
+  pattern: MaintenancePattern;
+  enabled: boolean;
+  scope: MaintenanceRule["scope"];
+  referenceUrl: string;
+  verifiedAt: string;
+  createdAt: string;
+  /** `null` for revisions written before CORE 0078 recorded it. */
+  actorKind: "operator" | "delegated" | null;
+  /** A closed code (`MAINTENANCE_CHANGE_REASONS`), or `null` before CORE 0078. */
+  changeReason: MaintenanceChangeReason | null;
+  /** Whether the reading principal wrote it as a delegated principal. */
+  byCaller: boolean;
+}
+/**
+ * How many lines one page of the maintenance summary holds: each job and
+ * each rule is a line, and so is a source with neither.
+ */
+export const MAINTENANCE_SUMMARY_LINES = 16;
+/**
+ * The maintenance read in short (ADR 0123, amendment 2026-11-19): the
+ * `summary` detail of `kogane.schedules.maintenance.read`. Per source its
+ * maintenance reference status and how many jobs and rules it has; per job
+ * its closed states, revision, next nominal and maintenance-adjusted run
+ * times, and its newest receipt's status and failure code; per rule its
+ * current revision in full (timezone, pattern, enabled, scope) with how many
+ * revisions the full read lists, the distinct actor kinds and change reasons
+ * among them, and how many the reader wrote. Paged by line (`offset` counts
+ * lines, in the read's order: a source's jobs, then its rules): a source
+ * whose lines continue on the next page is listed on both, each with the
+ * lines that page holds, and its `scheduleCount` and `ruleCount` say how
+ * many it has in all.
+ */
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `coverage.nextOffset`. */
+export interface MaintenanceSummary extends PagedFields {
+  detail: "summary";
+  sources: {
+    source: string;
+    reference: ScheduleView["maintenance"]["status"] | null;
+    /** The source's jobs and rules in the whole read, on this page or another. */
+    scheduleCount: number;
+    ruleCount: number;
+    schedules: (Pick<
+      ScheduleView,
+      | "id"
+      | "kind"
+      | "enabled"
+      | "supported"
+      | "revision"
+      | "nextNominalAt"
+      | "nextRunAt"
+      | "reservation"
+    > & { latest: Pick<ScheduleOccurrence, "nominalAt" | "status" | "failureCode"> | null })[];
+    rules: {
+      id: string;
+      revision: number;
+      timezone: string;
+      pattern: MaintenancePattern;
+      enabled: boolean;
+      scope: MaintenanceRule["scope"];
+      /** How many revisions the full read lists for the rule (at most 20, the current one included). */
+      revisions: number;
+      /** The distinct actor kinds of those revisions, newest first; `null` is one recorded before CORE 0078. */
+      actorKinds: MaintenanceReadRevision["actorKind"][];
+      /** The distinct change reasons of those revisions, newest first; `null` is one recorded before CORE 0078. */
+      changeReasons: MaintenanceReadRevision["changeReason"][];
+      /** How many of those revisions the reading principal wrote. */
+      byCaller: number;
+    }[];
+  }[];
+  limits: MaintenanceRead["limits"];
+  coverage: {
+    /** Every source the read answers, and every job and rule line of them. */
+    sources: number;
+    lines: number;
+    limit: number;
+    offset: number;
+    /** The offset of the next page's first line, or null on the last page. */
+    nextOffset: number | null;
+  };
+}
+type MaintenanceSummarySource = MaintenanceSummary["sources"][number];
+function distinctValues<T>(values: readonly T[]): T[] {
+  const out: T[] = [];
+  for (const value of values) if (!out.includes(value)) out.push(value);
+  return out;
+}
+/** One source in short, all its lines; a page keeps the slice of them it holds. */
+function maintenanceSourceSummary(source: MaintenanceReadSource): MaintenanceSummarySource {
+  return {
+    source: source.source,
+    reference: source.reference?.status ?? null,
+    scheduleCount: source.schedules.length,
+    ruleCount: source.rules.length,
+    schedules: source.schedules.map((schedule) => ({
+      id: schedule.id,
+      kind: schedule.kind,
+      enabled: schedule.enabled,
+      supported: schedule.supported,
+      revision: schedule.revision,
+      nextNominalAt: schedule.nextNominalAt,
+      nextRunAt: schedule.nextRunAt,
+      reservation: schedule.reservation,
+      latest:
+        schedule.latest === null
+          ? null
+          : {
+              nominalAt: schedule.latest.nominalAt,
+              status: schedule.latest.status,
+              failureCode: schedule.latest.failureCode,
+            },
+    })),
+    rules: source.rules.map((rule) => {
+      const current = rule.revisions[0];
+      // The read lists a rule only with a revision; one without is not a rule to summarize.
+      if (current === undefined) throw new Error("maintenance_rule_without_revision");
+      return {
+        id: rule.id,
+        revision: current.revision,
+        timezone: current.timezone,
+        pattern: current.pattern,
+        enabled: current.enabled,
+        scope: current.scope,
+        revisions: rule.revisions.length,
+        actorKinds: distinctValues(rule.revisions.map((revision) => revision.actorKind)),
+        changeReasons: distinctValues(rule.revisions.map((revision) => revision.changeReason)),
+        byCaller: rule.revisions.filter((revision) => revision.byCaller).length,
+      };
+    }),
+  };
+}
+/**
+ * One page of the maintenance summary from the full read; derived from it
+ * alone, so it says nothing the read does not. `offset` counts lines; an
+ * offset past the last line answers a page with no source.
+ */
+export function maintenanceReadSummary(read: MaintenanceRead, offset = 0): MaintenanceSummary {
+  const end = offset + MAINTENANCE_SUMMARY_LINES;
+  const page: MaintenanceSummarySource[] = [];
+  let first = 0;
+  for (const source of read.sources) {
+    const whole = maintenanceSourceSummary(source);
+    // A source with neither a job nor a rule is still one line, never left out.
+    const count = Math.max(1, whole.schedules.length + whole.rules.length);
+    const from = Math.max(offset, first) - first;
+    const to = Math.min(end, first + count) - first;
+    first += count;
+    if (from >= to) continue;
+    const schedules = whole.schedules.length;
+    page.push({
+      ...whole,
+      schedules: whole.schedules.slice(from, to),
+      rules: whole.rules.slice(Math.max(0, from - schedules), Math.max(0, to - schedules)),
+    });
+  }
+  const nextOffset = end < first ? end : null;
+  return {
+    detail: "summary",
+    sources: page,
+    limits: read.limits,
+    coverage: {
+      sources: read.sources.length,
+      lines: first,
+      limit: MAINTENANCE_SUMMARY_LINES,
+      offset,
+      nextOffset,
+    },
+    ...pagedFields({
+      limit: MAINTENANCE_SUMMARY_LINES,
+      returned: Math.max(0, Math.min(end, first) - offset),
+      next: nextOffset === null ? null : { offset: nextOffset },
+    }),
+  };
 }
 export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
 export const ZONES = ["Asia/Tokyo", "UTC", "Australia/Sydney"] as const;
@@ -225,6 +507,50 @@ function at(date: number, time: string, timezone: string): number | null {
   // A missing DST wall time is skipped; the earlier repeated wall time is used once.
   return candidates.length ? Math.min(...candidates) : null;
 }
+/** The wall time an instant shows in `timezone`, as a UTC instant, to the minute. */
+function wallClock(ms: number, timezone: string): number {
+  const [y, mo, d, hh, mm] = parts(ms, timezone);
+  return Date.UTC(y!, mo! - 1, d!, hh!, mm!);
+}
+/**
+ * A recurring maintenance window's start or end: `at`, except that a wall
+ * time the zone skips (the hour clocks move forward over) is never dropped,
+ * because a window dropped there would let collection run inside it. A
+ * skipped start opens the window at the first minute whose wall time reaches
+ * it, the clock change itself for a whole-hour change; a skipped end is read
+ * on the clock before the change (02:30 in a skipped 02:00–03:00 is 03:30
+ * summer time). Either way the window covers every minute whose wall time
+ * lies within it, and from a start that exists it keeps its stated length. A
+ * repeated wall time keeps `at`'s first occurrence. A scheduled run's nominal
+ * time keeps `at`, which skips such a day.
+ */
+function windowAt(
+  date: number,
+  time: string,
+  timezone: string,
+  edge: "start" | "end",
+): number | null {
+  const exact = at(date, time, timezone);
+  if (exact !== null) return exact;
+  const [h, m] = time.split(":").map(Number);
+  const target = date + h! * 3_600_000 + m! * 60_000;
+  // The offsets a day before and a day after are those either side of the change.
+  const before = wallClock(target - DAY, timezone) - (target - DAY),
+    after = wallClock(target + DAY, timezone) - (target + DAY);
+  // `late` shows a wall time past `target` (the target read on the earlier
+  // clock); `early` shows one before it (read on the later clock).
+  let early = target - after,
+    late = target - before;
+  if (!(early < late) || wallClock(early, timezone) >= target || wallClock(late, timezone) < target)
+    return null;
+  if (edge === "end") return late;
+  while (late - early > 60_000) {
+    const mid = early + Math.floor((late - early) / 120_000) * 60_000;
+    if (wallClock(mid, timezone) >= target) late = mid;
+    else early = mid;
+  }
+  return late;
+}
 /** The local date of an instant in `timezone`, as the UTC midnight of that date. */
 export function localCalendarDate(ms: number, timezone: string): number {
   return localDate(ms, timezone);
@@ -274,8 +600,8 @@ function windowEnd(t: number, rule: MaintenanceRule): number | null {
   for (let back = 0; back <= 7; back++) {
     const startDate = date - back * DAY;
     if (!startsOn(p, startDate)) continue;
-    const start = at(startDate, p.start, rule.timezone),
-      end = at(startDate + (p.end < p.start ? DAY : 0), p.end, rule.timezone);
+    const start = windowAt(startDate, p.start, rule.timezone, "start"),
+      end = windowAt(startDate + (p.end < p.start ? DAY : 0), p.end, rule.timezone, "end");
     if (start !== null && end !== null && t >= start && t < end) return end;
   }
   return null;
@@ -323,9 +649,12 @@ function* joinedDeferrals(
       continue;
     }
     // One day before `from` covers a window that starts on the previous local date.
-    for (let date = localDate(from, rule.timezone) - DAY; date <= from + horizon; date += DAY) {
+    // The last date is the horizon's end in the rule's zone: ahead of UTC, that
+    // local date begins before the instant, and a window on it can start in time.
+    const last = localDate(from + horizon, rule.timezone);
+    for (let date = localDate(from, rule.timezone) - DAY; date <= last; date += DAY) {
       if (!startsOn(p, date)) continue;
-      const start = at(date, p.start, rule.timezone);
+      const start = windowAt(date, p.start, rule.timezone, "start");
       if (start !== null && start > from && start < from + horizon) starts.add(start);
     }
   }

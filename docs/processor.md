@@ -75,7 +75,8 @@ Only new work does: a registration, a pending run the listing reaches, a
 first verdict, a retry that is due, a missing terminal. A registration that
 threw spends none (amendment of 2026-11-06, below). The continuations that run before the listing have their own bound of
 five and spend none of these; a continuation whose terminal is not found
-spends none of that five either (§3.3, amendment of 2026-11-08). A terminal
+spends none of that five either (§3.3, amendment of 2026-11-08), nor does one
+answered from its `collection_runs` row (§3.3, amendment of 2026-11-19). A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
@@ -92,7 +93,7 @@ nothing:
 
 Such an answer costs three operations of the invocation's budget (the
 terminal read, the conditional insert and the row read) for a registered or
-blocked run, four for an unreadable terminal already recorded (it reads the
+blocked run, four for a corrupt terminal already recorded (it reads the
 bytes twice), and five for a retryable run within its interval (two stage
 reads more); it writes nothing. A page of 25 such terminals costs at most 125
 of the 500, plus the scan's own four (the list, the pending read, the state
@@ -155,21 +156,22 @@ earlier version registered whose descriptors the new version does not change
 is **carried over** instead: the new version's row is linked to the fetch run
 the terminal already is, so one capture is never parsed twice (§3.4).
 
-| Situation                                                                                                                | Outcome                                            | Recorded                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| First sighting of a valid terminal                                                                                       | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
-| Same terminal again                                                                                                      | no-op                                              | nothing new                                                                                       |
-| Different manifest, same run id (under any contract version)                                                             | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
-| Source not in the collector mapping (§3.1)                                                                               | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
-| Source maps to an id CORE has no active row for                                                                          | blocked `source_undeclared`, no port call          | as above                                                                                          |
-| `providerOutcome: failed` with no provider artifact                                                                      | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
-| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage) | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
-| Referenced object missing or resized                                                                                     | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
-| Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)            | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
-| Terminal unreadable or not canonical                                                                                     | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
-| Processor's ingest client or route absent                                                                                | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
-| Operation budget spent (§3.3)                                                                                            | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
-| Registered under an earlier contract version, descriptors unchanged (§3.4)                                               | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
+| Situation                                                                                                                       | Outcome                                            | Recorded                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| First sighting of a valid terminal                                                                                              | registered                                         | `persisted` completed, `registered` completed, run linked to `fetch_runs`                         |
+| Same terminal again                                                                                                             | no-op                                              | nothing new                                                                                       |
+| Different manifest, same run id (under any contract version)                                                                    | blocked `terminal_digest_conflict`                 | the _new_ sighting is blocked; the earlier rows are untouched (G1-06)                             |
+| Source not in the collector mapping (§3.1)                                                                                      | blocked `unknown_source`, **no port call**         | `persisted` completed, `registered` blocked                                                       |
+| Source maps to an id CORE has no active row for                                                                                 | blocked `source_undeclared`, no port call          | as above                                                                                          |
+| `providerOutcome: failed` with no provider artifact                                                                             | blocked `provider_run_failed`, **no seal**         | `persisted` completed, `registered` blocked; the run and its outcome stay on record (§3.2)        |
+| Manifest CORE would refuse at the seal (a sanitized capture with no `redacted` step, a derived artifact with no lineage)        | blocked with the derivation's safe code, no seal   | `registered` blocked; the derivation checks CORE's rules before any port call                     |
+| Referenced object missing or resized                                                                                            | blocked with the object's reason code, **no seal** | `registered` blocked (G1-14)                                                                      |
+| Seal refused by CORE's completeness trigger (a unit or the run declares another artifact count than it holds)                   | blocked `run_inventory_incomplete`, **unsealed**   | `registered` blocked naming the fetch run left unsealed (ADR 0024, amendment of 2026-09-26)       |
+| Terminal too large, not JSON, not a valid manifest, of another identity, not canonical, or not the digest its metadata declares | blocked with the reader's reason code              | a run row under the digest of the stored bytes, `persisted` blocked; the scan continues (G1-13)   |
+| Terminal whose bytes R2 failed to return (`terminal_unreadable` from the reader)                                                | not judged: the call throws, like an R2 failure    | nothing; the scan counts it in `failed` and the next attempt reads it again (§2)                  |
+| Processor's ingest client or route absent                                                                                       | **retryable**, not blocked                         | `registered` retryable, one row per change of state or per attempt 24 h after the last (ADR 0024) |
+| Operation budget spent (§3.3)                                                                                                   | pending, **unsealed**                              | `registered` pending naming the fetch run; the next call does only what is missing (G1-10)        |
+| Registered under an earlier contract version, descriptors unchanged (§3.4)                                                      | already registered, **carried over**               | this version's row linked to the existing fetch run, `registered` completed naming it             |
 
 The derivation does not re-check every seal rule. A manifest whose units'
 `artifactCount` disagrees with the artifacts that name them, or that puts a
@@ -202,6 +204,30 @@ each — and skips it, so the budget is spent on new work and a run of any size
 the manifest schema allows converges over as many invocations as it needs.
 Every port operation is idempotent on its own key, so a call that re-runs one
 anyway is a no-op rather than a conflict.
+
+A terminal the reader refuses is recorded under the SHA-256 of its stored
+bytes. The reader does not hand those bytes back, so registration reads the
+object a second time and hashes its body as it streams (`sha256HexOfStream`
+in `packages/collection/src/stream-digest.ts`: Cloudflare's
+`crypto.DigestStream` in Workers, `Bun.CryptoHasher` under Bun). The body is
+never buffered. A terminal refused as `terminal_too_large` (over 8 MiB) can be
+any size R2 stores, larger than the Worker's memory, and buffering it would end
+the invocation at `collection_scan` on every tick, skip every later lane and
+leave the cursor where it was. The streamed digest is the value the earlier
+buffered read computed for the same bytes, so a run recorded before keeps its
+identity (`services/processor/test/collection-oversized-terminal.test.ts`, and
+the Workers path against real R2 in
+`packages/collection/worker-test/r2-terminal.test.ts`). The reader itself
+cancels the body of a terminal it refuses for its size, unread.
+
+Streaming bounds the memory, not the time, and this is an open limit. The hash
+reads every byte, so its CPU and wall time grow with the object's size, with no
+byte cap. The digest is computed before the conditional insert, so every walk
+of the `runs/` prefix that reaches the terminal hashes it again, even when its
+block is already recorded. An object large enough to pass the invocation's CPU
+limit (`limits.cpu_ms`, 300 s) or its wall-clock limit would still end the
+invocation at `collection_scan`. Whether to cap that work, and under what
+identity a capped terminal is recorded, is an owner decision not yet made.
 
 ### 3.1 Collector ids, CORE source ids and producers
 
@@ -270,8 +296,10 @@ the manifest validator.
 
 A block is write-once, which is why a missing ingest route is retryable
 instead: the block would outlive the operator's fix. A retryable stage row is
-appended only when the state or the code changes, so an append-only table does
-not fill with one row per tick.
+appended when the state or the code changes, and otherwise at most once per
+retry interval (`RETRYABLE_RETRY_INTERVAL_MS`, 24 hours, measured from the
+newest row), so an append-only table does not fill with one row per tick or per
+queue redelivery.
 
 ### 3.3 Operation budget and staged registration (issue #87)
 
@@ -322,16 +350,17 @@ step outgrows its reserve:
 | Step                                                               | Measured                              | Reserve              |
 | ------------------------------------------------------------------ | ------------------------------------- | -------------------- |
 | Preamble: terminal read, run row, conflict and refusal checks      | 8                                     | 16                   |
-| The run, a unit, a range, the inventory declaration, a unit report | 5-6                                   | 16                   |
-| An artifact: its R2 head, adoption and catalogue row               | 19, +1 per transform, +2 per relation | 32, +1 each, +2 each |
-| An inventory chunk (at most 30 items, the contract's maximum)      | 7 + 3 per item (97 full)              | 16 + 4 per item      |
-| Final: run report, seal (direct of ≤ 50, or staged), link          | 32 direct, 16 staged                  | 64                   |
+| The run, a unit, a range, the inventory declaration, a unit report | 4-6                                   | 16                   |
+| An artifact: its R2 head, adoption and catalogue row               | 17, +1 per transform, +2 per relation | 32, +1 each, +2 each |
+| An inventory chunk (at most 30 items, the contract's maximum)      | 6 + 3 per item (96 full)              | 16 + 4 per item      |
+| Final: run report, seal (direct of ≤ 50, or staged), link          | 30 direct, 14 staged                  | 64                   |
 | Audit: a `pending` row for a yield, or a stage row and the block   | 1-2                                   | 4, always kept back  |
 
 So no invocation spends more than 500 operations on registration, and a
 failure at the edge of the budget still records its audit. A Vpass card of
 about twenty statement pages registers in one invocation; a 34-artifact card
-takes two (467 and 292 operations); the schema's largest structure converges
+takes two (a synthetic 34-artifact run of one unit measures 469 and 186
+operations); the schema's largest structure converges
 over as many as it needs. No step can be too large for every invocation: the
 descriptor contract accepts at most 100 transformation steps and 100 relations
 per artifact, and that artifact's reserve (332) still fits what a fresh
@@ -340,13 +369,27 @@ descriptor the contract refuses — a transformation with more inputs than 100
 relations, which the manifest schema allows — is blocked with the contract's
 code (`invalid_relations`, say) instead of failing on every tick.
 
+Within one registration call the fetch run is read once. `registerTerminal`
+builds its port over an env made by `rememberingRunLookups`
+(`packages/application/src/ingest/access.ts`), and every later operation on
+that run answers its id, producer and source from the call's memory instead
+of reading `fetch_runs` again: one statement fewer per port operation, two
+per artifact. Those columns never change, because CORE refuses every
+update and delete of `fetch_runs`. Nothing is remembered across calls, so the
+next invocation reads the run again. The client and route checks are not
+remembered: they still run before every port operation, so a revocation takes
+effect at the next one. `services/processor/test/registration-round-trips.test.ts`
+pins the statement count of a synthetic registration and registers the same
+captures with and without the memory: every CORE table ends identical and
+every verdict is the same, including a route or client revoked half-way through.
+
 **The continuation.** A registration that reaches the budget yields `pending`:
 the `registered` stage says `pending` and names the fetch run, and everything
 written so far stays in CORE, unsealed and invisible to normal readers. The
 next call reads what exists and does only what is missing. The
 `collection_scan` lane continues up to five pending runs, oldest first, before
-it lists anything (one whose terminal is not found spends none of the five;
-see below), so a large run finishes over consecutive ticks instead of
+it lists anything (one whose terminal is not found, or that is answered from
+its row, spends none of the five; see below), so a large run finishes over consecutive ticks instead of
 waiting for the walk to come round to it. A registration that could not start
 because the invocation's budget was already spent is `deferred`: nothing was
 registered, the queue retries the message, the scan leaves its cursor, and an
@@ -362,7 +405,8 @@ terminal write then failed, would break that. Its continuation answers
 `missing`, which records nothing, so the run stays the oldest pending one.
 Such a continuation spends none of the five: the lane reads up to 25 pending
 runs (`DEFAULT_SCAN_CONTINUATION_READS`), oldest first, and stops once five
-continuations found their terminal. A missing terminal costs one R2 read of
+continuations found their terminal and were not answered from a row (below).
+A missing terminal costs one R2 read of
 the 500 operations and is tried again on every tick, so the run registers
 from the progress CORE holds as soon as its terminal is found again (or when
 the queue delivers its notification, or the walk lists it). Each tick's
@@ -372,11 +416,32 @@ and oldest pending age (§13) keep counting them. **Open limit:** when more
 than 20 of the 25 oldest pending runs have no terminal, fewer than five
 continuations find one on a tick and a pending run after those 25 is not
 continued at all; the walk still continues it when it lists its terminal, as
-before this amendment. It does not cover a pending run whose terminal key now
-holds other bytes: the new digest's row is blocked
-`terminal_digest_conflict`, the pending row stays pending, and it spends one
-of the five on every tick. Nor does it cover a pending run whose continuation
-throws on every tick: that records nothing either, and still spends one.
+before this amendment.
+
+**A pending run whose terminal key now holds other bytes**
+([ADR 0024, amendment of 2026-11-19](adr/0024-collection-scan-judged-terminals.md#amendment-2026-11-19-a-continuation-answered-from-its-row-spends-no-continuation)).
+Its continuation reads a new digest, so it inserts a row for that digest,
+which is blocked `terminal_digest_conflict`; the pending row stays pending and
+the oldest, so the run is continued on every tick. The first verdict is new
+work and spends one of the five. Every later tick answers it from the blocked
+row (`alreadyJudged`), as the listing answers a judged terminal: three
+operations (the terminal read, the conditional insert and the row read),
+nothing written, and none of the five spent, so the runs after it are
+continued in its place. The same holds for any continuation CORE answers from
+its row (`already_registered`, for a run the queue registered between the
+pending read and the continuation). Such runs share the 25 pending runs read
+with the missing ones above. An answer from a row costs at most five
+operations (§2: four for a corrupt terminal already recorded, five
+for a retryable refusal within its interval), so the continuations answered
+from rows cost at most 125 of the 500 per tick, as a listed page of 25 judged
+terminals does; 25 digest conflicts measure 75 (50 D1 statements, 25 R2
+reads). Every registration still starts only while its reserve fits the
+budget, so the registrations of the five continuations that spend one and of
+the listing stay within the 500. **Open limit:** the pending row of such a run
+is never closed; it stays in `registration.pending` and is read on every tick.
+A pending run whose continuation throws on every tick records nothing either,
+and still spends one (the amendment of 2026-11-08 keeps it bounded by the
+five, because a throw can come after any number of operations).
 
 The final step is never split by a yield, but an invocation can still end
 inside it. The next call then re-enters it: the run report is found under its
@@ -578,7 +643,10 @@ A gate over `instrument_identifiers` and the current mappings ends the tick
 when no pair of the shape is on two instruments; otherwise the full candidate
 read runs at most once an hour (its own tick row with `evaluated: true`
 decides), refuses past 500,000 current identity observations, and at most 50
-adoptions are written a tick.
+adoptions are written a tick. Each write re-checks, in its own batch, that the
+anchor's mapping is still the one read and that no `listed_as` relation about
+either identifier or either instrument was recorded since; otherwise it is
+counted `refused` and writes nothing.
 
 `audit_overflow` has no flag. It turns each `audit_overflow_counters` row of a
 UTC day that has ended into one `overflow` audit record and deletes the row in
@@ -644,6 +712,16 @@ published it unless the sweep's 200-observation cap or an older backlog defers
 it to the next ticks; the repair budget sets how fast a parser version bump drains
 ([observation-lanes.md](observation-lanes.md#repair-budget-and-drain-rate)).
 
+The scheduled `identity_sweep` and `reward_claims_sweep` each read their whole
+candidate set in one statement, so they wait for a change like the card sweeps
+(`services/processor/src/sweep-pass.ts`, migration 0110): a tick whose candidate
+read found nothing marks the CORE revision it started at clean, and later ticks
+read only their gate row in `processor_sweep_passes` until the revision or the
+sweep's policy moves (the policy carries a digest of the candidate statement
+and of the views the code reads). A tick that found candidates closes nothing,
+so the next tick reads again. The private `POST /identity-sweep` route calls
+the sweep directly and is not gated.
+
 `collection_scan` sits after the parse sweep and before identity so a run
 found this tick can reach identity and parsing on the same tick.
 `operation_dispatch` sits before `decision_outbox`, which stays after every
@@ -669,6 +747,76 @@ Unknown `first`/`raw` metadata stays unknown; interpretation and limits are
 in [operations.md §1.1](operations.md#11-invocation-budget-probe-issue-87)
 and [ADR 0036](adr/0036-lane-cost-observability.md).
 
+### 6.0 Daily read budget (ADR 0129)
+
+Every metered invocation, scheduled tick or queue batch, adds the D1 rows it
+read (the `invocation_budget` line's `d1RowsRead.reported`) to its starting
+hour's row in `processor_read_budget_hours` (migration 0107), in one batch that
+also drops rows older than 48 hours (`src/read-budget.ts`). Before its lanes,
+the scheduled tick sums the current hour and the 23 before it, then counts
+itself in its hour (`claimScheduledTick`); a queue batch is counted with its
+rows. Above
+`D1_ROWS_READ_DAILY_BUDGET` (300 million rows, about a third of the 25 billion
+the plan includes per month):
+
+- the first scheduled tick that counts itself in each hour runs every lane
+  and logs one
+  `{"event":"d1_read_budget_exceeded","rowsRead24h":…,"budget":…}` line at error
+  level, which Workers Issues reports;
+- the later ticks of that hour skip the lanes that recompute from stored state
+  (`identity_sweep`, `instrument_auto_adoption`, `balance_projection`,
+  `reconciliation_sweep`, `card_debit_account_sweep`, `card_settlement_sweep`,
+  `purchase_recognition`, `reward_claims_sweep`, `reward_read_projection`,
+  `price_promotion`, `report_job`, `decision_outbox`), each with a
+  `{"event":<lane>,"skipped":"read_budget"}` line and no tick record. Collection,
+  parsing, operation dispatch, the maintenance survey and the audit overflow
+  keep their cadence;
+- the identity sweep is the exception while it drains a backlog: when its
+  latest tick record is from the last 15 minutes, ran, made progress (sealed a
+  run or identified an observation) and took a full page
+  (`IDENTITY_RUNS_PER_TICK` parse runs, or `IDENTITY_SWEEP_OBSERVATIONS`), it
+  runs on every tick (`identityBacklogDraining`). Each identity run moves the
+  CORE revision, and the card sweeps read their whole input again on the next
+  hourly tick after any move; at one page an hour, the 4,262 parse runs left
+  unidentified after the parse backlog of 2026-11-24 would have taken about
+  six days, each hour rereading about 2M card rows. A short page, a failed
+  sweep, a page without progress (runs selected again but never sealed at
+  their required policy) and a lost record (within about two ticks the latest
+  is too old) each end the exemption, so a sweep that keeps failing goes back
+  to once an hour.
+
+The sum is what D1 reports: a statement read with `first()` returns no
+metadata and is not counted (`d1RowsRead.missing`). A failed budget read
+throttles nothing. A tick is counted before its lanes, not when it ends: on
+2026-11-25 the identity sweep left D1 answering every later statement of the
+tick as overloaded, the end-of-tick record failed, and every tick of the hour
+ran as its first (about 9.5M rows each). The tick counts itself even when the
+budget read failed. A count that fails logs
+`{"event":"read_budget_claim_failed","over":…}` at error level, which Workers
+Issues reports; over the budget the tick then runs as throttled, and under it
+(or when the budget could not be read) it runs every lane. A count that was
+stored but whose answer was lost therefore leaves the hour with no derived
+run. The count answers how many ticks the hour has, so of two ticks that
+overlap at the start of an hour only the first counted runs the derived lanes.
+A failed rows-read record at the end loses that invocation's rows and logs
+`read_budget_record_failed`. While throttled, an accepted
+decision's projection rebuild (`decision_outbox`) waits up to an hour, and the
+throttled lanes leave gaps of up to an hour in `processor_lane_ticks`.
+
+### 6.0.1 Snapshot memo (ADR 0129)
+
+The balance capture (`captureFixedInput`), the reward capture
+(`captureRewardInput`) and the report job's position cut take the current
+snapshot set from the memo, not from the shipped selection
+(`src/snapshot-memo-step.ts`, [read model](read-model.md#snapshot-memo)).
+`withSnapshotSelection` first runs `ensureSnapshotMemo`: one read of a few rows
+when this build's memo exists for the current snapshot-input revision, and
+otherwise one batch that replaces it (about 1,000 rows read on the harness's
+stores, once per revision). A memo-backed statement that finds the revision
+moved since fails instead of reading an empty set; the lane stores the memo
+again and repeats the read, and after two attempts reads the shipped selection
+inline. The lanes' revision checks and outcomes are unchanged.
+
 ### 6.1 Tick records
 
 Most lanes keep no state of their own, so until migration 0049 the only trace
@@ -685,7 +833,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
 | `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`, `unmatched` (statements with no candidate, per closed code; [card-settlements.md](card-settlements.md#unmatched-statements))                                              |
 | `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
-| `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
+| `reward_claims_sweep`      | `scanned`, `promoted` (claims written), `known`, `skipped`, `quantity_incomplete` ([rewards.md](rewards.md#7-promotion-job); not the cursor or the release name)                                                                    |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
 | `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed` (including imports whose registration threw, §7), `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                |
@@ -704,9 +852,19 @@ an `error_code` and `counts_json`:
 - `skipped-by-flag` — the lane's flag is off, so the stage was not called
   (or, for the always-wired `operation_dispatch`, it reported
   `enabled: false`); the log still gets no line, and `counts_json` is `{}`.
-- `failed` — the stage threw; `error_code` is the same safe code the
-  `<lane>_failed` log line carries (a pipeline code or the error's constructor
-  name, `unknown` for anything that is not a code) and `counts_json` is `{}`.
+- `failed` — the stage threw; `error_code` is the same closed code the
+  `<lane>_failed` log line carries, and `counts_json` is `{}`. The code is one
+  of the pipeline's own codes (`raw_object_missing`, `parse_contract_invalid`,
+  …), one of the two Processor lane errors whose class is their documented
+  code (`RewardClaimWriteRefused`, [rewards.md](rewards.md#7-promotion-job);
+  `IdentityObservationBoundExceeded`,
+  [ADR 0055](adr/0055-instrument-candidates.md)), matched by identity rather
+  than by name, or else the error's built-in class as `safeFailureCode`
+  classifies it (§7: `TypeError`, `RangeError`, …, `Error` for any other
+  Error, a custom class included) and `unknown` for a throw that is not an
+  Error or cannot be inspected. A class name or message the thrower chose is
+  never copied. The `collection_notification_failed` line of the queue
+  consumer carries a code from the same set.
 
 A lane whose stage is not wired at all records nothing. Only counts, flags and
 the closed code maps above (`purchase_recognition`'s exclusion codes,
@@ -721,8 +879,9 @@ The table is bounded: each insert deletes that lane's rows beyond the latest
 updated. It is `operational-mutable` in the CORE ledger and outside the
 source-revision ledger, so recording a tick never makes a projection stale. A
 row that cannot be written is logged as
-`{"event":"lane_tick_record_failed","lane":…,"code":…}` and changes nothing
-the lane did. `GET /status` (`mise run //services/processor:ops status`) and
+`{"event":"lane_tick_record_failed","lane":…,"code":…}`, the code being the
+error's built-in class or `unknown` (`safeFailureCode`, §7), and changes
+nothing the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 `GET /internal/health` (§13) report the latest tick of each lane as
 `laneTicks`; reading them is in [operations.md](operations.md#lane-tick-records).
 
@@ -747,7 +906,9 @@ counts. An idle tick, a lane whose flag is off and every other lane write no
 record. The mark and the record are read and written outside the lane's
 metered scope, and a failure to read or write them is logged as
 `{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
-the lane did.
+the lane did. The code is the audit builder's own `audit_record_invalid` or
+`audit_diff_invalid`, else the error's built-in class or `unknown`
+(`safeFailureCode`, §7); any other `code` an error carries is not copied.
 
 ## 7. Operations dispatch
 

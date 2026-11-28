@@ -6,7 +6,7 @@ import { transactionsSql } from "../../../packages/read-model/src/sql.ts";
 // the deployed `sbi-shinsei-top-balances-and-activity` parser. The statement is
 // a synthetic MyJCB total, as in card-settlement.test.ts. Every value is
 // synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -25,6 +25,7 @@ import {
 import { cardSettlementDebitIdentity } from "../../../packages/application/src/operations/card-settlement-target.ts";
 import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
+import { settledTest } from "./support/settle.ts";
 
 const FIXTURE = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity.json",
@@ -42,10 +43,10 @@ const actor: Principal = {
 };
 const now = "2098-01-01T00:00:00.000Z";
 let sequence = 0;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -537,25 +538,92 @@ test("an SBI Shinsei acceptance made before G1b still reserves every candidate o
 }, 60000);
 
 test("another allocation of the SBI Shinsei provider id blocks its review", async () => {
-  const [sbi] = (
-    await candidates("json_extract(facts_json,'$.ownership')='established-same'")
-  ).filter((row) => bankSource(row) === "sbi-shinsei-bank");
-  expect(await readiness(sbi!.id)).toMatchObject({ allocation_available: 1 });
+  // This test needs the earlier tests, in file order, and asserts what it takes
+  // from them: the statement and both owners (the fourth test), and no live
+  // holder of the provider id (the fifth test withdrew its acceptance). That
+  // withdrawn review can no longer be accepted, so a refusal of it would say
+  // nothing about allocations. A fresh capture of the same provider id gives a
+  // proposed review whose only possible blocker is the allocation added below.
+  const before = new Set((await candidates()).map((row) => row.id));
+  const reobserved = await capture(1106, jpyActivity(), Date.parse("2026-09-09T00:10:00Z"));
+  await cardSettlementSweep(db);
+  const fresh = (await candidates()).filter(
+    (row) => !before.has(row.id) && bankSource(row) === "sbi-shinsei-bank",
+  );
+  expect(fresh).toHaveLength(1);
+  const sbi = fresh[0]!;
+  const subjectRef = `card-settlement:${sbi.id}`;
+  expect(JSON.parse(sbi.facts_json)).toMatchObject({ ownership: "established-same" });
+  const review = () =>
+    db
+      .prepare("SELECT status,revision,bank_parse_run_id FROM card_settlement_reviews WHERE id=?")
+      .bind(sbi.id)
+      .first<Record<string, unknown>>();
+  expect(await review()).toEqual({
+    status: "proposed",
+    revision: 0,
+    bank_parse_run_id: reobserved,
+  });
+  // claim_available, which the commit guard reads beside the four view flags.
+  const claim = async () =>
+    (await db
+      .prepare(
+        `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()} SELECT claim_available FROM readiness`,
+      )
+      .bind(sbi.id)
+      .first<{ claim_available: number }>())!.claim_available;
+  expect(await readiness(sbi.id)).toEqual({
+    statement_current: 1,
+    bank_current: 1,
+    ownership_current: 1,
+    allocation_available: 1,
+  });
+  expect(await claim()).toBe(1);
+  // Planned and approved while every flag holds; the allocation lands before
+  // the commit, so the commit guard is what meets it.
+  const accept = await preparedCommand("card-settlement.accept", {
+    proposalId: sbi.id,
+    reason: "already allocated",
+  });
+  const allocations = await count("SELECT count(*) AS n FROM current_allocations");
   await db
     .prepare(`INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,reason,evidence_refs_json,created_at)
      VALUES('sbi-generic-decision','relation','allocation:sbi-generic-allocation',1,'accept','manual','synthetic-human','Existing separate allocation','[]','2098')`)
     .run();
-  // Against the older observation of the same provider id: the key, not the row, is reserved.
+  // Against the oldest observation of the same provider id: the key, not the row, is reserved.
   await db
     .prepare(`INSERT INTO allocations(id,source_component_ref,target_effect_ref,role,unit_ref,coefficient,scale,decision_revision_id,created_at)
      SELECT 'sbi-generic-allocation','transaction:'||id,'event:other-effect','transfer','JPY','1',0,'sbi-generic-decision','2098'
      FROM transaction_observations WHERE parse_run_id=? AND external_id='SYNTHETIC-TXN-001'`)
     .bind(jpyParse)
     .run();
-  expect(await readiness(sbi!.id)).toMatchObject({ allocation_available: 0 });
-  await expect(
-    command("card-settlement.accept", { proposalId: sbi!.id, reason: "already allocated" }),
-  ).rejects.toThrow();
+  expect(await count("SELECT count(*) AS n FROM current_allocations")).toBe(allocations + 1);
+  // Only the allocation flag moved.
+  expect(await readiness(sbi.id)).toEqual({
+    statement_current: 1,
+    bank_current: 1,
+    ownership_current: 1,
+    allocation_available: 0,
+  });
+  expect(await claim()).toBe(1);
+  // The commit guard refuses the batch; the commit names the blocker by
+  // planning again, which refuses the review as not ready.
+  expect(await accept()).toEqual({ ok: false, error: "stale_context", refs: [subjectRef] });
+  expect(await review()).toEqual({
+    status: "proposed",
+    revision: 0,
+    bank_parse_run_id: reobserved,
+  });
+  expect(await count("SELECT count(*) AS n FROM current_allocations")).toBe(allocations + 1);
+  // A new plan is refused with the same answer.
+  expect(
+    await createPlan(
+      "card-settlement.accept",
+      { proposalId: sbi.id, reason: "already allocated" },
+      { actor, baseContextId: "identity-current-v1", now, ttlSeconds: 600 },
+      d1CommandStore(db),
+    ),
+  ).toEqual({ ok: false, error: "stale_context", refs: [subjectRef] });
 }, 60000);
 
 test("period history and latest-ten publish one current transaction per provider reference and preserve bank-debit eligibility", async () => {

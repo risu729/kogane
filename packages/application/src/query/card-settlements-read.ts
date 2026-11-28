@@ -18,10 +18,10 @@ import type {
   CardSettlementReviewPage,
   CardSettlementStatementPage,
 } from "../../../domain/src/card-settlement-review.ts";
-import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
+import type { FinancialError } from "../../../domain/src/result.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { grantAllows, type Grant } from "../grants.ts";
+import { wholeStoreReadRefusal, type Grant } from "../grants.ts";
 import { queryCardOwnership } from "./card-ownership.ts";
 import {
   CARD_SETTLEMENT_PAGE_SIZE,
@@ -30,7 +30,8 @@ import {
   queryCardSettlements,
   queryRelatedCardSettlements,
 } from "./card-settlements.ts";
-import { pageBeyondBudget, withinBudget } from "./page-budget.ts";
+import { pageBeyondBudget, pagedWithinBudget } from "./page-budget.ts";
+import type { PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 
 /** A proposal id, as the pages and the tools name a candidate. */
 export const CARD_SETTLEMENT_PROPOSAL_ID = /^[A-Za-z0-9_-]{1,128}$/u;
@@ -51,16 +52,8 @@ function refusal(
   grant: Grant,
   operation: CardSettlementsReadOperation,
 ): { status: "refused"; error: FinancialError } | null {
-  const fail = (code: FinancialErrorCode, refs: string[]) => ({
-    status: "refused" as const,
-    error: financialError(code, operation, refs),
-  });
-  if (!grantAllows(grant, "records.read")) return fail("unauthorized", ["capability:records.read"]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  return narrowed.length ? fail("evidence_restricted", narrowed) : null;
+  const refused = wholeStoreReadRefusal(grant, "records.read", operation);
+  return refused ? { status: "refused", error: refused } : null;
 }
 
 /**
@@ -82,7 +75,7 @@ export async function readCardSettlementsForGrant(input: {
   grant: Grant;
   sql: SqlExecutor;
   request: unknown;
-}): Promise<CardSettlementsReadOutcome<CardSettlementReviewPage>> {
+}): Promise<CardSettlementsReadOutcome<CardSettlementReviewPage & PagedFields>> {
   const refused = refusal(input.grant, "card-settlements.read");
   if (refused) return refused;
   const request = input.request ?? {};
@@ -139,7 +132,15 @@ export async function readCardSettlementsForGrant(input: {
       offset: offset ?? 0,
     });
     return related
-      ? { status: "ok", answer: withinBudget(related, CARD_SETTLEMENT_PAGE_SIZE, input.grant) }
+      ? {
+          status: "ok",
+          answer: pagedWithinBudget(
+            related,
+            CARD_SETTLEMENT_PAGE_SIZE,
+            input.grant,
+            related.items.length,
+          ),
+        }
       : { status: "not_found" };
   }
   const page = await queryCardSettlements(input.sql, {
@@ -148,7 +149,10 @@ export async function readCardSettlementsForGrant(input: {
     ...(statementKey === undefined ? {} : { statementKey }),
   });
   if (proposalId !== undefined && page.items.length === 0) return { status: "not_found" };
-  return { status: "ok", answer: withinBudget(page, CARD_SETTLEMENT_PAGE_SIZE, input.grant) };
+  return {
+    status: "ok",
+    answer: pagedWithinBudget(page, CARD_SETTLEMENT_PAGE_SIZE, input.grant, page.items.length),
+  };
 }
 
 /**
@@ -165,7 +169,7 @@ export async function readCardSettlementStatementsForGrant(input: {
   grant: Grant;
   sql: SqlExecutor;
   request: unknown;
-}): Promise<CardSettlementsReadOutcome<CardSettlementStatementPage>> {
+}): Promise<CardSettlementsReadOutcome<CardSettlementStatementPage & PagedFields>> {
   const refused = refusal(input.grant, "card-settlements.statements");
   if (refused) return refused;
   const request = input.request ?? {};
@@ -193,12 +197,14 @@ export async function readCardSettlementStatementsForGrant(input: {
         `budget:maxRows=${String(input.grant.budget.maxRows)}`,
       ]),
     };
+  const page = await queryCardSettlementStatements(input.sql, { offset });
   return {
     status: "ok",
-    answer: withinBudget(
-      await queryCardSettlementStatements(input.sql, { offset }),
+    answer: pagedWithinBudget(
+      page,
       CARD_SETTLEMENT_STATEMENT_PAGE_SIZE,
       input.grant,
+      page.statements.length,
     ),
   };
 }

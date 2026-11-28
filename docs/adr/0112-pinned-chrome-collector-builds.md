@@ -1,6 +1,6 @@
 # ADR 0112: Pin the branded Stable Chrome payload in collector images
 
-- Status: accepted
+- Status: accepted (merged 2026-11-13 in [#1327](https://github.com/risu729/kogane/pull/1327))
 - Date: 2026-11-12
 - Tracking: [issue 1326](https://github.com/risu729/kogane/issues/1326)
 
@@ -150,6 +150,8 @@ The smoke entrypoint remains usable on stdin and can be imported without startin
 an image test, so the tests exercise the same proxy implementation.
 
 ## Amendment: Stable 158 payload update (2026-11-19 UTC)
+
+Status: accepted (merged 2026-11-19 in [#1429](https://github.com/risu729/kogane/pull/1429)).
 
 The pin moved to `158.0.8127.36-1` through the maintenance procedure. Google's
 signed `Release` (dated 2026-11-18 18:08:05 UTC) verified under the same primary

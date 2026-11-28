@@ -4,18 +4,18 @@
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
-    "hono": "4.13.19",
-    "jose": "6.2.17",
+    "hono": "4.13.23",
+    "jose": "6.2.18",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.8.3",
+    "@cloudflare/vitest-plugin": "1.9.2",
     "@modelcontextprotocol/client": "2.4.0",
-    "@types/node": "26.6.6",
-    "@vitest/coverage-istanbul": "5.1.1",
-    "cf": "1.0.0-rc.0",
+    "@types/node": "26.6.11",
+    "@vitest/coverage-istanbul": "5.1.2",
+    "cf": "1.0.0-rc.6",
     "typescript": "7.0.2",
-    "vitest": "5.1.1",
-    "wrangler": "4.163.0"
+    "vitest": "5.1.2",
+    "wrangler": "4.168.0"
   }
 }

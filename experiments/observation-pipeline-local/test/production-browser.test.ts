@@ -1,5 +1,5 @@
 // Local, synthetic integration only: the production bundle and both API families.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -7,6 +7,7 @@ import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { auditPage, openDisclosures, tabWalk } from "../../../apps/web/test/a11y-audit.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -15,6 +16,12 @@ if (!runnable) {
   console.log("production browser: build:production and Chromium required");
   if (!existsSync(join(client, "index.html")) || process.env["CI"] === "true") process.exitCode = 1;
 }
+
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
 
 describe.if(runnable)("combined production client", () => {
   const fixture = buildFixture();
@@ -27,7 +34,6 @@ describe.if(runnable)("combined production client", () => {
   // Advertised only by the accessibility audit, which visits the rewards page.
   let rewardsAdvertised = false;
   let server: ReturnType<typeof Bun.serve>;
-  let browser: Browser;
   let origin: string;
   beforeAll(async () => {
     const api = createApi(fixture.store);
@@ -222,7 +228,6 @@ describe.if(runnable)("combined production client", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();
@@ -249,7 +254,7 @@ describe.if(runnable)("combined production client", () => {
       page.waitForResponse(
         (response) => {
           const url = new URL(response.url());
-          return url.pathname === "/api/balances" && url.search === "?view=summaries";
+          return url.pathname === "/api/balances" && url.search === "?view=summaries&detail=full";
         },
         { timeout: 10_000 },
       ),
@@ -319,7 +324,7 @@ describe.if(runnable)("combined production client", () => {
         if (path === "/summaries") {
           expect(
             requests.slice(before).filter((request) => request.startsWith("/api/balances")),
-          ).toEqual(["/api/balances?view=summaries"]);
+          ).toEqual(["/api/balances?view=summaries&detail=full"]);
         }
       } finally {
         await page
@@ -611,7 +616,7 @@ describe.if(runnable)("combined production client", () => {
     try {
       const central = await observe("central-store");
       const renamed = await observe("archive-store");
-      expect(central.requests).toEqual(["/api/balances?view=summaries"]);
+      expect(central.requests).toEqual(["/api/balances?view=summaries&detail=full"]);
       expect({ ...renamed, status: "" }).toEqual({ ...central, status: "" });
       expect(central.serverControls).toBe(1);
       expect(central.clientControls).toBe(0);
@@ -640,16 +645,18 @@ describe.if(runnable)("combined production client", () => {
     // Page idleness can precede metadata delivery and the query it enables.
     // Arm the exact response waiter before releasing metadata, then keep the
     // original count, parameters and ordering assertions over server requests.
-    const balancesResponse = page.waitForResponse(origin + "/api/balances?view=balances");
+    const balancesResponse = page.waitForResponse(
+      origin + "/api/balances?view=balances&detail=full",
+    );
     release();
     await balancesResponse;
     await page.waitForLoadState("networkidle");
     const observed = requests.slice(before);
     expect(observed.filter((path) => path.startsWith("/api/balances"))).toEqual([
-      "/api/balances?view=balances",
+      "/api/balances?view=balances&detail=full",
     ]);
     expect(observed.indexOf("/api/meta")).toBeLessThan(
-      observed.indexOf("/api/balances?view=balances"),
+      observed.indexOf("/api/balances?view=balances&detail=full"),
     );
     await page.close();
   });

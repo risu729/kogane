@@ -20,12 +20,18 @@ import {
   balanceProjectionOutboxProcessor,
   runBalanceProjection,
 } from "./balance-projection-job.ts";
-import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
+import {
+  IDENTITY_POLICY_VERSION,
+  IDENTITY_SWEEP_OBSERVATIONS,
+  identitySweep,
+} from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { identitySweepLane } from "./identity-sweep-lane.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import {
+  IdentityObservationBoundExceeded,
   INSTRUMENT_AUTO_ADOPTION_LANE,
   instrumentAutoAdoptionLane,
 } from "./instrument-auto-adoption.ts";
@@ -81,6 +87,7 @@ import {
 import {
   collectionScan,
   handleTerminalNotification,
+  safeFailureCode,
   type ScanSummary,
 } from "./collection/index.ts";
 import {
@@ -94,13 +101,25 @@ import {
 import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
 import { collectorBinding } from "./collector-binding.ts";
 import { dispatchOperations, type CollectorRpc, type DispatchEnv } from "./operations/dispatch.ts";
-import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
+import {
+  RewardClaimWriteRefused,
+  rewardClaimsEnabled,
+  rewardClaimsStage,
+} from "./reward-claims-job.ts";
 import {
   rewardReadProjectionEnabled,
   rewardReadProjectionStage,
 } from "./reward-read-projection.ts";
 import { pricePromotionSweep } from "./price-promotion-job.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
+import {
+  D1_ROWS_READ_DAILY_BUDGET,
+  READ_BUDGET_THROTTLED_LANES,
+  claimScheduledTick,
+  identityBacklogDraining,
+  readBudgetState,
+  recordRowsRead,
+} from "./read-budget.ts";
 import {
   IDENTITY_RUNS_PER_TICK,
   LANE_BUDGETS,
@@ -131,7 +150,60 @@ const LEASE_MS = 10 * 60 * 1000;
 const MAX_ISSUES = 10_000;
 const ISSUE_CHUNK = 500;
 const MAX_COVERAGE_CLAIMS = 100;
-class PipelineError extends Error {}
+/** The closed codes the pipeline throws; a failed lane may be logged and recorded with one. */
+const PIPELINE_CODES = [
+  "artifact_not_eligible",
+  "artifact_too_large",
+  "metadata_release_unknown",
+  "observation_limit_exceeded",
+  "observation_payload_too_large",
+  "observation_row_too_large",
+  "parse_contract_invalid",
+  "parse_lease_expired",
+  "parse_run_insert_failed",
+  "parser_no_longer_accepts",
+  "parser_release_conflict",
+  "parser_version_invalid",
+  "raw_checksum_mismatch",
+  "raw_object_missing",
+  "raw_size_mismatch",
+  "release_manifest_mismatch",
+] as const;
+type PipelineCode = (typeof PIPELINE_CODES)[number];
+class PipelineError extends Error {
+  readonly code: PipelineCode;
+  constructor(code: PipelineCode) {
+    super(code);
+    this.code = code;
+  }
+}
+/**
+ * The Processor's own lane errors whose class is their documented code
+ * (docs/rewards.md, ADR 0055), matched by identity, never by name.
+ */
+const LANE_ERROR_CLASSES = [
+  [RewardClaimWriteRefused, "RewardClaimWriteRefused"],
+  [IdentityObservationBoundExceeded, "IdentityObservationBoundExceeded"],
+] as const;
+/**
+ * The code a failed lane or queue message is logged with, and a failed lane
+ * tick stored with (docs/processor.md §6.1): a pipeline code, one of the
+ * lane error classes above, else the error's built-in class
+ * (`safeFailureCode`: `TypeError`, `Error`, …, or `unknown`). Never a class
+ * name or message the thrower chose, and it never throws, whatever the value.
+ */
+function laneFailureCode(error: unknown): string {
+  try {
+    if (error instanceof PipelineError) {
+      const code: unknown = error.code;
+      if ((PIPELINE_CODES as readonly unknown[]).includes(code)) return code as PipelineCode;
+    }
+    for (const [type, code] of LANE_ERROR_CLASSES) if (error instanceof type) return code;
+  } catch {
+    // A hostile proxy may throw while instanceof walks its prototype chain.
+  }
+  return safeFailureCode(error);
+}
 interface ArtifactRow {
   id: number;
   fetch_run_id: number;
@@ -623,8 +695,13 @@ async function executeParseJob(
     parseId = inserted.id;
     // The input identity of this attempt, recorded whatever the outcome:
     // H(raw digest, parser-visible metadata, transform manifest digest).
+    // A plain INSERT: its key is the parse run inserted just above, and
+    // parse runs are never deleted, so no earlier row can hold it. A reference
+    // the schema refuses (a NOT NULL or CHECK failure, or a key already taken)
+    // raises and fails the attempt as `persistence_failed`; `OR IGNORE` would
+    // skip it and publish a parse with no input reference.
     await env.DB.prepare(
-      "INSERT OR IGNORE INTO parse_input_references(parse_run_id,metadata_projection_id,parser_release_id,input_fingerprint) VALUES(?,?,?,?)",
+      "INSERT INTO parse_input_references(parse_run_id,metadata_projection_id,parser_release_id,input_fingerprint) VALUES(?,?,?,?)",
     )
       .bind(
         parseId,
@@ -793,6 +870,11 @@ function jobInsert(
 ): D1PreparedStatement {
   // Explicit replay may claim untouched repair work without resetting retries,
   // stealing a lease, or changing the normal/candidate publication target.
+  // Every other lane skips only a job that exists (its primary key, the only
+  // key of the table): a re-issued page after an interrupted sweep. A job the
+  // schema refuses (a CHECK or NOT NULL failure) raises and fails the sweep
+  // before the cursor moves; `OR IGNORE` would skip it and move the cursor
+  // past an artifact that then has no job.
   const replay = lane === "replay" && plan !== undefined;
   const conflict = replay
     ? `ON CONFLICT(fetch_artifact_id,parser_name,parser_version) DO UPDATE
@@ -805,9 +887,9 @@ function jobInsert(
          WHERE p.fetch_artifact_id=observation_parse_jobs.fetch_artifact_id
           AND p.parser_name=observation_parse_jobs.parser_name
           AND p.parser_version=observation_parse_jobs.parser_version AND p.status='ok')`
-    : "";
+    : "ON CONFLICT(fetch_artifact_id,parser_name,parser_version) DO NOTHING";
   return env.DB.prepare(
-    `${replay ? "INSERT" : "INSERT OR IGNORE"} INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release)
+    `INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release)
      VALUES(?,?,?,'pending',?,?,?,?) ${conflict}`,
   ).bind(
     artifactId,
@@ -865,6 +947,8 @@ function laneParsers(
   });
 }
 
+// `changes` is the jobs each statement wrote: 0 for a skipped existing job,
+// and `observation_parse_jobs` has no trigger that would add to it.
 async function insertJobs(env: Env, inserts: D1PreparedStatement[]): Promise<number> {
   let created = 0;
   for (let offset = 0; offset < inserts.length; offset += 50)
@@ -1242,7 +1326,7 @@ async function inspectPlan(env: Env, id: number): Promise<Response> {
     .all<{ status: string; count: number }>();
   const jobs = { pending: 0, running: 0, done: 0, failed: 0 };
   for (const row of counts.results)
-    if (row.status in jobs) jobs[row.status as keyof typeof jobs] = row.count;
+    if (Object.hasOwn(jobs, row.status)) jobs[row.status as keyof typeof jobs] = row.count;
   // The plan owns only its attached jobs. Show matching work left in other
   // lanes too, so zero created jobs cannot be mistaken for completed parsing.
   const scopeJobs = await env.DB.prepare(`SELECT j.lane,j.status,
@@ -1409,26 +1493,31 @@ async function replayCommand(env: Env, action: string, request: Request): Promis
   return refused ?? inspectPlan(env, id);
 }
 
-async function status(env: Env): Promise<Response> {
-  const now = Date.now();
-  const jobs = await env.DB.prepare(
-    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
-  ).all();
-  const laneRows = await env.DB.prepare(
-    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
-  ).all<{ lane: Lane; status: string; count: number; oldest: number | null }>();
-  const lanes: Record<
-    Lane,
-    Record<"pending" | "running" | "done" | "failed", number> & {
-      oldestPendingAgeMs: number | null;
-    }
-  > = {
+interface LaneJobRow {
+  lane: string;
+  status: string;
+  count: number;
+  oldest: number | null;
+}
+
+type LaneJobCounts = Record<"pending" | "running" | "done" | "failed", number> & {
+  oldestPendingAgeMs: number | null;
+};
+
+/** The `lanes` block of `/status`: parse-job counts per lane the 0035 CHECK
+ * allows. A stored lane outside them is skipped; the own-key lookup keeps a
+ * name such as `__proto__` or `constructor` from reaching an inherited member. */
+export function laneJobCounts(
+  rows: readonly LaneJobRow[],
+  now: number,
+): Record<Lane, LaneJobCounts> {
+  const lanes: Record<Lane, LaneJobCounts> = {
     incremental: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
     repair: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
     replay: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
   };
-  for (const row of laneRows.results) {
-    const lane = lanes[row.lane];
+  for (const row of rows) {
+    const lane = Object.hasOwn(lanes, row.lane) ? lanes[row.lane as Lane] : undefined;
     if (!lane) continue;
     if (
       row.status === "pending" ||
@@ -1439,6 +1528,18 @@ async function status(env: Env): Promise<Response> {
       lane[row.status] = row.count;
     if (row.oldest !== null) lane.oldestPendingAgeMs = now - row.oldest;
   }
+  return lanes;
+}
+
+async function status(env: Env): Promise<Response> {
+  const now = Date.now();
+  const jobs = await env.DB.prepare(
+    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
+  ).all();
+  const laneRows = await env.DB.prepare(
+    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
+  ).all<LaneJobRow>();
+  const lanes = laneJobCounts(laneRows.results, now);
   const workItems = await env.DB.prepare(
     "SELECT count(*) AS unprocessed,min(enqueued_at_ms) AS oldest FROM observation_work_items WHERE processed_at_ms IS NULL",
   ).first<{ unprocessed: number; oldest: number | null }>();
@@ -1830,7 +1931,9 @@ const defaultStages: ScheduledStages = {
   // Sized to what the incremental and repair lanes publish per tick, so a
   // re-parse is identified on the tick that published it unless the sweep's
   // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
-  identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
+  // Reads only its gate row while nothing it reads has moved since a tick
+  // found no candidate (src/identity-sweep-lane.ts, migration 0110).
+  identity: (env) => identitySweepLane(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   instrumentAutoAdoption: (env) => instrumentAutoAdoptionLane(env.DB),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
@@ -1914,6 +2017,13 @@ function collectionEnv(env: Env): DispatchEnv {
   return env as unknown as DispatchEnv;
 }
 
+/** The read budget's clock, threshold and error line, injectable for tests. */
+export interface ReadBudgetGuard {
+  now?: () => number;
+  budget?: number;
+  alert?: (line: string) => void;
+}
+
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
  * codes only, never provider values or exception text. The stages of one
@@ -1930,8 +2040,33 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
   context: InvocationContext = invocationContext(),
+  guard: ReadBudgetGuard = {},
 ): Promise<void> {
   const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
+  // ADR 0129: above the daily read budget, the derived lanes run on the first
+  // scheduled tick of each hour only, and that tick logs the error once. The
+  // tick counts itself before any lane runs, even when the budget could not be
+  // read. A count that fails is logged at error level; over the budget the
+  // tick then runs as throttled, since D1 is likely unable to record the
+  // hour's first tick at all (src/read-budget.ts).
+  const alert = guard.alert ?? ((line: string) => console.error(line));
+  const nowMs = (guard.now ?? Date.now)();
+  const budget = await readBudgetState(env.DB, nowMs, guard.budget);
+  let throttled = budget?.throttled ?? false;
+  try {
+    if ((await claimScheduledTick(env.DB, nowMs)) > 1 && budget?.over) throttled = true;
+  } catch {
+    alert(JSON.stringify({ event: "read_budget_claim_failed", over: budget?.over ?? null }));
+    if (budget?.over) throttled = true;
+  }
+  if (budget?.over && !throttled)
+    alert(
+      JSON.stringify({
+        event: "d1_read_budget_exceeded",
+        rowsRead24h: budget.rowsRead24h,
+        budget: guard.budget ?? D1_ROWS_READ_DAILY_BUDGET,
+      }),
+    );
   // [event, stage, whether its flag lets it run this tick]
   const lanes: [
     string,
@@ -2005,10 +2140,31 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // While throttled, the identity sweep still runs on every tick if its last
+  // run took a full page, so a backlog drains in hours (src/read-budget.ts).
+  const identityDraining =
+    throttled &&
+    (await identityBacklogDraining(
+      env.DB,
+      // The lane tick records' own clock (the loop below), not the guard's.
+      Date.now(),
+      IDENTITY_RUNS_PER_TICK,
+      IDENTITY_SWEEP_OBSERVATIONS,
+    ));
   // One correlation id for the lane audit records of this invocation.
   const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
+    if (
+      throttled &&
+      enabled &&
+      READ_BUDGET_THROTTLED_LANES.has(event) &&
+      !(event === "identity_sweep" && identityDraining)
+    ) {
+      // Not a tick of the lane: it did not run, and its flag is not off.
+      log(JSON.stringify({ event, skipped: "read_budget" }));
+      continue;
+    }
     const startedAtMs = Date.now();
     const observation = observeLane(env, context, event);
     if (!enabled) {
@@ -2027,12 +2183,7 @@ export async function runScheduled(
       log(JSON.stringify({ event, ...result }));
       tick = { outcome: "ran", result };
     } catch (error) {
-      const code =
-        error instanceof PipelineError
-          ? error.message
-          : error instanceof Error
-            ? error.constructor.name
-            : "unknown";
+      const code = laneFailureCode(error);
       // Whether the platform refused the invocation at a documented limit is
       // the one thing the probe keeps from the error; the text is dropped.
       const limit = platformLimitError(error);
@@ -2056,12 +2207,27 @@ export async function meteredInvocation(
   env: Env,
   work: (env: Env, context: InvocationContext) => Promise<void>,
   log: (line: string) => void = (line) => console.log(line),
+  now: () => number = Date.now,
 ): Promise<void> {
   const meter = new OperationMeter();
   const context = invocationContext();
+  const startedAtMs = now();
   try {
     await work(meteredEnv(env, meter), context);
   } finally {
+    // ADR 0129: the hour's rows read, outside the meter. A failed write only
+    // loses this invocation's count; it never fails the invocation.
+    if (typeof env.DB === "object" && env.DB !== null)
+      try {
+        await recordRowsRead(
+          env.DB,
+          startedAtMs,
+          meter.summary().d1RowsRead.reported ?? 0,
+          trigger,
+        );
+      } catch {
+        console.log(JSON.stringify({ event: "read_budget_record_failed" }));
+      }
     log(JSON.stringify(invocationProbe(trigger, meter, context)));
   }
 }
@@ -2097,13 +2263,8 @@ export async function consumeTerminalNotifications(
       }
       observation.finish("ran", result);
     } catch (error) {
-      // Safe codes only: never the exception text, never a key or a value.
-      const code =
-        error instanceof PipelineError
-          ? error.message
-          : error instanceof Error
-            ? error.constructor.name
-            : "unknown";
+      // Closed codes only: never the exception text, a class name, a key or a value.
+      const code = laneFailureCode(error);
       const limit = platformLimitError(error);
       if (limit) context.limitErrors += 1;
       event = { event: "collection_notification_failed", code, ...(limit ? { limit: true } : {}) };

@@ -54,6 +54,10 @@ export interface ClientFeatures {
   readonly reconstructedStateOnDate: boolean;
   /** The stored fixed report artifacts are listed and re-displayed. */
   readonly reportArtifacts: boolean;
+  /** What waits for the owner's decision is served (the ホーム page's 判断待ち). */
+  readonly pendingDecisions: boolean;
+  /** What was recorded since a time is served (the ホーム page's 最近の変化). */
+  readonly changesSince: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -72,6 +76,8 @@ export const NO_FEATURES: ClientFeatures = {
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
   reportArtifacts: false,
+  pendingDecisions: false,
+  changesSince: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -95,5 +101,7 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     reportedStateOnDate: capabilities.reportedStateOnDate === true,
     reconstructedStateOnDate: capabilities.reconstructedStateOnDate === true,
     reportArtifacts: capabilities.reportArtifacts === true,
+    pendingDecisions: capabilities.pendingDecisions === true,
+    changesSince: capabilities.changesSince === true,
   };
 }

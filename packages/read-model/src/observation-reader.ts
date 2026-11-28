@@ -43,12 +43,14 @@ import {
 import {
   type ObservationReader,
   type ParsingHealth,
+  type PublicationMarks,
   type RawDownload,
   type ReaderOptions,
   ResultLimitExceededError,
   type SourceFetchRunCount,
   type SourceParseRun,
   type SqlExecutor,
+  type UndatedTransactionCount,
 } from "./reader";
 import { CANDIDATE_LIMIT, GLOBAL_PASS_NOTICE_LIMIT, RESULT_BOUND } from "./scope";
 import { sbiIncomeHistorySql, type SbiIncomeHistoryRow } from "./sbi-income-history";
@@ -76,13 +78,16 @@ import {
   PARSING_HEALTH_SQL,
   UNIT_UPDATES_SQL,
   parseRunObservationsSql,
-  POSITION_VALUATIONS_SQL,
+  positionValuationsSql,
   positionsSql,
   PROVENANCE_SQL,
+  PUBLICATION_MARKS_SQL,
   RAW_DOWNLOAD_SQL,
   SOURCE_FETCH_RUN_COUNTS_SQL,
   SOURCE_PARSE_RUNS_SQL,
+  SOURCE_PUBLICATION_MARKS_SQL,
   transactionsSql,
+  undatedTransactionsSql,
   VISIBLE_EVIDENCE_PROBE_SQL,
 } from "./sql";
 
@@ -169,6 +174,28 @@ export function createObservationReader(
       return list<SourceParseRun>(SOURCE_PARSE_RUNS_SQL, [JSON.stringify(listed)]);
     },
 
+    async publicationMarks(sources): Promise<PublicationMarks> {
+      const listed = sources === null ? null : [...new Set(sources)].sort();
+      if (listed !== null && listed.length === 0)
+        return { publicationEvent: 0, exclusions: 0, snapshotPolicies: "[]" };
+      const row = await one<{
+        publication_event: number;
+        exclusions: number;
+        snapshot_policies: string | null;
+      }>(
+        listed === null ? PUBLICATION_MARKS_SQL : SOURCE_PUBLICATION_MARKS_SQL,
+        listed === null ? [] : [JSON.stringify(listed)],
+      );
+      const policies = (JSON.parse(row?.snapshot_policies ?? "[]") as unknown[])
+        .map((policy) => JSON.stringify(policy))
+        .sort();
+      return {
+        publicationEvent: Number(row?.publication_event ?? 0),
+        exclusions: Number(row?.exclusions ?? 0),
+        snapshotPolicies: `[${policies.join(",")}]`,
+      };
+    },
+
     unitUpdates: readUnitUpdates,
 
     async parsingHealth(): Promise<ParsingHealth> {
@@ -207,6 +234,11 @@ export function createObservationReader(
       return (await list<TransactionSqlRow>(page.sql, page.args)).map(transactionRow);
     },
 
+    async undatedTransactions(scope) {
+      const read = undatedTransactionsSql(scope);
+      return list<UndatedTransactionCount>(read.sql, read.args);
+    },
+
     async listLatestBalances({ offset, limit, ...scope }) {
       const page = latestBalancesSql(scope, offset, limit);
       return (await list<BalanceSqlRow>(page.sql, page.args)).map(balanceRow);
@@ -227,14 +259,15 @@ export function createObservationReader(
     },
 
     async listPositions({ offset, ...scope }): Promise<PositionWithValuations[]> {
-      const page = positionsSql(scope, offset);
+      const page = positionsSql(scope, offset, options.snapshotSource);
       const positions = (await list<PositionSqlRow>(page.sql, page.args)).map(positionRow);
       if (positions.length === 0) return [];
       // Only the 500 positions the caller can return need valuations; the
       // 501st row exists to report truncation.
-      const pairs = await list<ValuationSqlRow & { position_id: number }>(POSITION_VALUATIONS_SQL, [
-        JSON.stringify(positions.slice(0, 500).map((row) => row.id)),
-      ]);
+      const pairs = await list<ValuationSqlRow & { position_id: number }>(
+        positionValuationsSql(options.snapshotSource),
+        [JSON.stringify(positions.slice(0, 500).map((row) => row.id))],
+      );
       const byPosition = new Map<number, ReturnType<typeof valuationRow>[]>();
       for (const pair of pairs) {
         const bucket = byPosition.get(pair.position_id) ?? [];

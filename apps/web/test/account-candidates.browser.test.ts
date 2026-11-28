@@ -3,7 +3,7 @@
 // world (packages/application/test/account-candidates-world.ts). A decision
 // is a plan of the payload the server named, sent to the change lifecycle;
 // the page never builds one of its own and never approves.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -16,7 +16,10 @@ import { ERROR_STATUS } from "../../../packages/application/src/errors.ts";
 import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
 import { world, type Store } from "../../../packages/application/test/account-candidates-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { validAccountCandidateReview } from "../../../packages/observation-shared/src/account-candidates-contract.ts";
+import { offsetPagedFields } from "../../../packages/observation-shared/src/paging-contract.ts";
 import { auditView } from "./a11y-audit.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -31,13 +34,20 @@ const GRANT = {
   budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
 } as const;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("account candidate review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let store: Store;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
+  /** Rewrites the served page, when a test needs a shape the world does not hold. */
+  let reshape: ((review: Awaited<ReturnType<typeof page>>) => unknown) | null = null;
   /** The history route's row budget; a test lowers it to see a refusal. */
   let historyRows: number = GRANT.budget.maxRows;
 
@@ -55,6 +65,7 @@ describe.if(runnable)("account candidate review", () => {
     store = world();
     posted.length = 0;
     read.length = 0;
+    reshape = null;
     historyRows = GRANT.budget.maxRows;
   });
   beforeAll(async () => {
@@ -72,13 +83,12 @@ describe.if(runnable)("account candidate review", () => {
           });
         if (url.pathname === "/api/identity/account-candidates") {
           read.push(url);
-          return Response.json(
-            await page(
-              (url.searchParams.get("view") ?? "open") as AccountCandidateView,
-              Number(url.searchParams.get("offset") ?? "0"),
-              url.searchParams.get("sourceAccountId"),
-            ),
+          const review = await page(
+            (url.searchParams.get("view") ?? "open") as AccountCandidateView,
+            Number(url.searchParams.get("offset") ?? "0"),
+            url.searchParams.get("sourceAccountId"),
           );
+          return Response.json(reshape === null ? review : reshape(review));
         }
         if (url.pathname === "/api/identity/account-history") {
           read.push(url);
@@ -142,7 +152,6 @@ describe.if(runnable)("account candidate review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -167,6 +176,83 @@ describe.if(runnable)("account candidate review", () => {
     expect(text).toContain("aggregator-account-connection-scoped");
     expect(text).toContain("several-direct-accounts");
     expect(posted).toEqual([]);
+    await tab.close();
+  });
+
+  test("a next page the reader's row budget withholds is said, never shown as the end", async () => {
+    // As the route answers a page past which its grant (`readerGrant`,
+    // 1,000 rows) may not read: items follow, no `next` and no
+    // `nextOffset`, and `paging.stoppedBy: "budget"`, built by the same
+    // `offsetPagedFields` the service uses. The world holds one page, so its
+    // first page is served as that stop, with one item counted after it.
+    reshape = (review) => {
+      const returned = review.items.length;
+      return {
+        ...review,
+        total: review.query.offset + returned + 1,
+        nextOffset: null,
+        ...offsetPagedFields({
+          limit: 50,
+          offset: review.query.offset,
+          returned,
+          hasMore: true,
+          withheld: true,
+        }),
+      };
+    };
+    const served = reshape(await page("open", 0, null)) as Record<string, any>;
+    expect(served["paging"]).toEqual({
+      limit: 50,
+      returned: served["items"].length,
+      hasMore: true,
+      stoppedBy: "budget",
+    });
+    expect(served["next"]).toBeNull();
+    expect(validAccountCandidateReview(served)).toBe(true);
+    const tab = await open();
+    const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
+    const note = panel.getByRole("note");
+    await note.waitFor();
+    expect(await note.textContent()).toBe(
+      "「確認待ち」の候補はこの先にもありますが、一度に先頭から読める件数の上限に達したため、ここより先は表示できません。続きがないという意味ではありません。",
+    );
+    expect(await panel.getByRole("button", { name: "次の候補", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    expect(await auditView(tab)).toEqual([]);
+    await tab.close();
+  });
+
+  test("a later page the open list no longer reaches never says no candidate is waiting", async () => {
+    // A decided candidate leaves the open view, so a later page can come back
+    // empty while the first still lists candidates. The world holds one page;
+    // its first page is served as if a second followed, by `nextOffset` alone
+    // as a server before ADR 0128 S6 answered it: the page reads only
+    // `nextOffset`, and a `next` or `paging` that disagreed with it would be
+    // refused by the shared validator (a short page cannot honestly continue).
+    reshape = (review) => {
+      if (review.query.offset !== 0) return review;
+      const { next: _next, paging: _paging, ...older } = review;
+      return { ...older, nextOffset: 50 };
+    };
+    const first = await page("open", 0, null);
+    const tab = await open();
+    const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
+    await panel.getByRole("button", { name: "次の候補", exact: true }).click();
+    // The cards leave as soon as the next page starts loading; the pager
+    // returns only with that page's answer, so the panel is read after it.
+    await tab.locator(".identity-card").first().waitFor({ state: "detached" });
+    await panel.getByRole("navigation", { name: "候補のページ", exact: true }).waitFor();
+    const text = await panel.innerText();
+    expect(text).not.toContain("確認待ちの候補はありません。");
+    expect(text).toContain("このページに表示する項目はありません。");
+    expect(text).toContain(`表示なし / ${String(first.total)} 件`);
+    expect(text).not.toContain("51–50");
+    const back = panel.getByRole("button", { name: "先頭に戻る", exact: true });
+    expect(await back.isDisabled()).toBe(false);
+    await back.click();
+    await tab.locator(".identity-card").first().waitFor();
+    expect(await auditView(tab)).toEqual([]);
     await tab.close();
   });
 
@@ -234,15 +320,33 @@ describe.if(runnable)("account candidate review", () => {
     );
     const card = tab.locator(".identity-card").first();
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
-    await card
-      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
-      .click();
-    await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    const button = card.getByRole("button", {
+      name: "この連携に含まれる口座として採用する内容を確認",
+      exact: true,
+    });
+    await button.focus();
+    await tab.keyboard.press("Enter");
+    // The pair left 確認待ち: the list is read again without it, and the
+    // refusal its card can no longer show is shown, and focused, at the top.
+    const notice = tab.getByRole("alert").filter({ hasText: "読み直した表示には" });
+    await notice.waitFor();
+    expect(await notice.innerText()).toContain("候補が更新されています");
+    expect(await notice.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(await tab.locator(".identity-card").count()).toBe(
+      (await page("open", 0, null)).items.length,
+    );
     expect(
       read.some(
         (url) => url.searchParams.get("sourceAccountId") === candidate!.directSourceAccountId,
       ),
     ).toBe(true);
+    expect(
+      read.filter(
+        (url) =>
+          url.pathname === "/api/identity/account-candidates" &&
+          !url.searchParams.has("sourceAccountId"),
+      ),
+    ).toHaveLength(2);
     expect(posted).toEqual([]);
     await tab.close();
   });
@@ -308,6 +412,32 @@ describe.if(runnable)("account candidate review", () => {
     await tab.close();
   }, 60_000);
 
+  test("a history read again that fails keeps the earlier entries only under the warning", async () => {
+    const tab = await open();
+    const card = tab.locator(".identity-card").first();
+    const toggle = card.getByRole("button", { name: "取得元の口座の訂正履歴を見る", exact: true });
+    await toggle.click();
+    await card.getByText("記録順の履歴です。", { exact: false }).waitFor();
+    const entries = await card.locator("ol li").count();
+    expect(entries).toBeGreaterThan(0);
+    const warning = "更新できませんでした。前回読み込んだ取得元の口座の訂正履歴を表示しています。";
+    expect(await card.getByText(warning, { exact: true }).count()).toBe(0);
+    // Closing and reopening reads the history again; that read is refused.
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を閉じる", exact: true }).click();
+    historyRows = 0;
+    await toggle.click();
+    await card.getByRole("alert").getByText(warning, { exact: true }).waitFor();
+    expect(await card.locator("ol li").count()).toBe(entries);
+    expect(await auditView(tab)).toEqual([]);
+    // The read recovers on retry, and the warning goes.
+    historyRows = GRANT.budget.maxRows;
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を再試行", exact: true }).click();
+    await card.getByText(warning, { exact: true }).waitFor({ state: "detached" });
+    expect(await card.locator("ol li").count()).toBe(entries);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
+
   test("a refused history shows the refusal alone, never an empty or partial list", async () => {
     // The direct account has at least its mapping revision; a budget of zero refuses it whole.
     historyRows = 0;
@@ -346,4 +476,31 @@ describe.if(runnable)("account candidate review", () => {
     expect(await auditView(confirm)).toEqual([]);
     await confirm.close();
   }, 60_000);
+
+  test("a refusal that is not about the candidate changing reads nothing again", async () => {
+    const tab = await open();
+    const lists: string[] = [];
+    tab.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === "/api/identity/account-candidates" &&
+        !url.searchParams.has("sourceAccountId")
+      )
+        lists.push(url.search);
+    });
+    // As the server answers a malformed command: 400 invalid_command.
+    await tab.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({ status: 400, json: { error: "invalid_command" } }),
+    );
+    const card = tab.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "送信した内容の形式" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(lists).toEqual([]);
+    expect(await tab.getByRole("alert").count()).toBe(1);
+    await tab.close();
+  });
 });

@@ -88,7 +88,11 @@ it, and no rule proposes one:
   amount (one deferred payment or the rest of it), which is not confirmed
   (ADR 0004).
 
-This is a limit, not a design: upcoming obligations have no read path yet.
+The one read path is the [reported state on a date](reported-state.md#scheduled-payments),
+which lists the rows of the newest published page before the date beside
+the card statements, with their due dates, never added, matched or counted
+as a liability ([ADR 0019, scheduled payments amendment](adr/0019-dated-reported-state.md#scheduled-payments-amendment--2026-11-21)).
+Upcoming obligations as adopted state remain a limit, not a design.
 
 ## Non-card families: unsupported today
 
@@ -581,7 +585,11 @@ released`). The DB CHECK is unchanged.
   rejection condition for the reviewer, and equal-amount pairs come first. More
   than one heuristic candidate for one pending row, or for one posted row (two
   same-amount purchases on one day, one of them posted so far), marks all of
-  them `multiple_candidates` / `candidate_not_unique`. A pair the provider itself
+  them `multiple_candidates`, among the facts one pass pairs (a pair stored
+  before a second candidate appeared keeps its codes; see
+  [pending-to-posted links](#pending-to-posted-links)). Every heuristic pair,
+  marked or not, carries `candidate_not_unique` as a rejection condition for
+  the reviewer; a provider-linked pair carries neither. A pair the provider itself
   linked is proposed whatever its days. The window only removes pairs:
   `proposalIdentity` (kind, stage, method, policy release, targets) is
   unchanged, so every pair still proposed keeps its stored digest and a
@@ -894,7 +902,7 @@ re-fetch that shows the same row is not a revision. Per key the lane writes:
 | `recognize` | No live event holds the key                                                                                                         |
 | `revise`    | The content changed: the account mapping, the amount or the date, or a retired row reappeared (`unknown → captured`, same event)    |
 | `reanchor`  | Same content, but a parse run the live evidence cites is no longer published (a published replay): the key moves to the current row |
-| `retire`    | A live `authorized` or `captured` event none of whose keys is current any more (`staleCardPurchaseKeysSql`)                         |
+| `retire`    | A live `authorized` or `captured` event none of whose deciding keys is current any more (`staleCardPurchaseKeysSql`)                |
 | `merge`     | A pending-to-posted link accepted by review, or linked by the provider ([below](#pending-to-posted-links))                          |
 | `split`     | An accepted link withdrawn: the posted event's restored revision ([below](#pending-to-posted-links))                                |
 
@@ -922,13 +930,25 @@ ids (retire and recreate: churn, never a double count). The retire pass runs
 before recognition in every tick, and when it fills its page and retires every
 event on it, recognition waits a tick (bounded: see [Bounds](#bounds)), so the old
 events of a changed key are retired before their replacements are recognised
-and the captured total never counts one purchase twice. An event that still
-holds one current key is not stale. A merged event (one posted key and its
-pending key) is treated like any other: it is revised from its posted row when
-that row's content changes, keeping its pending key; its pending row adds
-nothing to it; and it is retired, keeping both keys, once none of its rows is
-current. A row that stays current but can no longer be recognised (its binding
-lost, say) keeps its last revision: the provider still shows it.
+and the captured total never counts one purchase twice. An event's deciding
+keys are its posted keys when it holds one, else all its keys, and an event
+that still holds one current deciding key is not stale. A merged event (one
+posted key and its pending key) follows its posted row: it is revised from
+that row when its content changes, keeping its pending key; its pending row
+adds nothing to it; and it is retired, keeping both keys, once its posted row
+is not current, even while its pending row still is
+([ADR 0002, amendment 2026-11-21](adr/0002-card-purchase-recognition.md#amendment-2026-11-21-a-merged-event-is-retired-by-its-posted-row)).
+A MyJCB pending capture stays current beside the confirmed one until its
+position is captured again, so a reviewed merge can hold a current pending
+key; kept captured after its posted row is replaced under another key, it
+would count the purchase a second time beside the replacement's event. Its
+pending row stays held by the retired event, so it is not recognised again:
+when the posted row leaves with no replacement the writer recognises, the
+purchase is in neither the captured nor the authorized total, only an
+unresolved `unknown` event, until the posted row returns or a review withdraws
+the link (the pending row's own event is then authorized again). A
+row that stays current but can no longer be recognised (its binding lost, say)
+keeps its last revision: the provider still shows it.
 
 Accepting a [card settlement](card-settlements.md) adds a cash-movement leg and
 an unresolved obligation-change leg and never a `purchase-recognition` leg, so
@@ -968,8 +988,17 @@ whichever lane saw it first: kind `pending_to_posted`, stage `B`, method
 as `transaction:<id>` pinned to `parse_run:<id>`, inserted only
 `WHERE NOT EXISTS` a row with that digest (the 0032 no-replace trigger would
 abort a second insert of an id). A pair already stored, proposed or decided, is
-never written again and never takes the write budget, and the ambiguity codes
-(`multiple_candidates`, `candidate_not_unique`) are kept. The recognition cursor cycles through every
+never written again and never takes the write budget. Its ambiguity mark
+(the rationale `multiple_candidates`) is that of the tick that proposed it:
+ambiguity is judged among the events one tick pairs, and a stored pair is never
+rewritten. An open limit: a pair proposed while it was alone in its window
+stays without `multiple_candidates` once a second candidate for either row is
+recognised in a later tick (it still carries the rejection condition
+`candidate_not_unique`, as every heuristic pair does), and only the later pair
+is marked
+(`card-purchase-merge.test.ts`, "a stored candidate keeps the ambiguity codes
+of the tick that proposed it"). The codes are a rationale for the reviewer;
+neither kind of pair is ever merged without a decision. The recognition cursor cycles through every
 current row, so a pair is reached however many rows a source has. This pass
 is the only producer of Vpass and MyJCB pending-to-posted candidates: the
 reconciliation lane runs stage A only for them
@@ -1088,9 +1117,37 @@ runs twice per tick (stale keys, then the page): about 0.5 s and 0.4 s on the
 scaled store of [the read model's cost measurement](read-model.md#cost), since
 both start from the current captures rather than the whole store and the stale
 read looks up the revisions holding a current key once, not per live key.
-Nothing in the tick is skipped when no evidence changed: every tick that writes
-moves the CORE source revision itself (its decision revisions), and the cursor
-still has to page through the current rows.
+A pass that reaches the last row does not start again until something may
+have changed (ADR 0129, slice 3; migration `0109_processor_sweep_passes.sql`;
+`services/processor/src/sweep-pass.ts`). A pass from the first row records
+the CORE revision (source revision, visibility revision, core epoch) and
+`CARD_PURCHASE_SWEEP_POLICY` it starts at; a pass that reaches the end marks
+that start clean. While both still equal the clean ones, a tick at cursor 0
+reads one gate row instead of the page (beside the identity epoch and the
+retirement check it reads first), and its candidate pass has no group to
+read. The captures, their publications and the recognitions' decision
+revisions are on the CORE dependency ledger. The proposals the candidate pass
+looks up are only ever added (by this pass, or under other digests by the
+reconciliation sweep) or moved to a decision, which writes a decision
+revision. The policy carries the recognition writer release, the matcher's
+release and options, a digest of the views the code reads (pinned against
+the migrated schema by `test/sweep-pass.test.ts`) and the pass's own
+version. A tick that writes events moves the revision itself, so the next
+pass runs once more and writes nothing. A pass in which a tick left work for
+later marks nothing clean, since a later page would not come back to that
+work: the candidate write budget full, more linked events than one merge
+takes, or any failure in the tick (a failed write, a retirement's included,
+or a candidate or merge step that threw, each counted in `failed`). The next
+pass then runs from the first row. So a failure that repeats on every tick
+keeps the pass from ever closing, and the lane reads every row each tick as it
+did before the gate. The cursor leaves a page only once its candidates and
+merges are done, so a tick cut off before then reads the page again
+(recognition writes nothing twice). A tick reads its cursor and the recorded
+pass in one statement and a pass's end names the token its start recorded, so
+a pass started by an overlapping tick is never marked clean by another's end.
+A change to the code that a version string does not carry (a statement's text,
+a domain rule) runs no pass by itself; the pass after the next CORE write
+applies it, or a bump of the pass's version.
 
 The candidate pass then reads the recognised events of the groups the page
 touched, at most 2,000 in all (`CANDIDATE_READ_LIMIT`; a
@@ -1109,7 +1166,10 @@ pass follows the page.
 
 Before the retire pass materializes current usage, it reads the operational
 clean proof from migration 0064. An unchanged revision under the same read
-contract skips only retirement; recognition and candidates continue. Only an
+contract (`card-purchase-retirement-v2` since
+[ADR 0002's 2026-11-21 amendment](adr/0002-card-purchase-recognition.md#amendment-2026-11-21-a-merged-event-is-retired-by-its-posted-row)
+changed the selection; a proof of another release is read again) skips only
+retirement; recognition and candidates continue. Only an
 empty stale-key read can establish that proof, and its write checks that no
 input mutation overlapped the read. Publication, identity, decimal, decisions,
 restrictions, CORE epoch and live-recognition changes invalidate it. Failed,
@@ -1247,7 +1307,13 @@ event already retired keeps the period it had.
   reaches the verdict of its first text (frozen in
   `test/reviewed-pair-guard-legacy-sql.ts`) wherever a review wrote its triple.
   `test/reconciliation.test.ts` checks the canonical relation ends and
-  proposal evidence.
+  proposal evidence. `test/card-purchase-merged-posted-gone.test.ts`: a MyJCB
+  purchase on both ledgers, merged through a reviewed accept, whose confirmed
+  row is then captured under another key while the pending capture stays
+  current, is retired holding both keys and the replacement is the one
+  captured event (the captured total counted the purchase twice before ADR
+  0002's 2026-11-21 amendment); with no replacement it is in neither total
+  until the link is withdrawn.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split
   batches on the full CORE: order, cross-id supersession, replay and stale
   batches writing nothing, a key held elsewhere, the one-live-holder trigger
@@ -1279,7 +1345,8 @@ event already retired keeps the period it had.
   is, every table and the source revision unchanged).
 - `packages/read-model`: `test/card-purchase-keys.test.ts` (stale keys and the
   unrecognised count against current usage; a revision still holding one
-  current key is not stale) and `test/events.test.ts` (a purchase-recognition
+  current deciding key is not stale; a merged revision whose posted row is
+  gone is stale while its pending row is current) and `test/events.test.ts` (a purchase-recognition
   leg does not move the derived balance).
 
 ## Read side
@@ -1344,11 +1411,33 @@ which `GET /api/v2/reconstructed-state` and the agent tool
 gate and the GET-only boundary:
 
 - `GET /api/v2/activity?basis=cash-movement|purchase-recognition&offset=N`
+- `GET /api/v2/activity?basis=…[&since=…][&before=…][&account=…][&source=…][&cursor=…]`
 - `GET /api/v2/obligations?offset=N`
 
 Both return the `Page<T>` envelope (`items`, `nextCursor`, `dataCoverage`) plus
 `apiVersion: 2`, and activity also echoes the `basis` it was read on. Values are
 `Quantity`-shaped (`unitRef` plus a decimal-v1 value state).
+
+Activity takes filters
+([ADR 0081, amendment of 2026-11-20](adr/0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20);
+the inputs and refusals are in the [agent API](agent-api.md#ui-read-pages)):
+when the revision was recorded (`since` inclusive, `before` exclusive), an
+account a leg names (`account:<id>` or the bare id), and the source of a
+capture a parse run of its evidence was read from. Without one the list is
+the shipped `activityEventsSql`, unchanged, paged by `offset`. With one,
+`filteredActivityEventsSql` lists the same revisions in the same order,
+narrowed, and pages by a keyset `cursor` bound to the basis and the filters.
+Cost: a call walks at most 5,000 live revisions (`ACTIVITY_FILTER_WALK`) from
+its key through `economic_event_revisions_current`, reading each walked
+revision's legs, parse runs and captures by primary key, so it reads a fixed
+number of rows whatever the store holds (15,005 to 35,005 rows by filter on
+workerd's D1 with one evidence reference a revision; `source` reads a parse
+run and a capture per reference it tests); a page may be short or empty and
+still continue. The pages are not a snapshot: each call walks the revisions
+live when it runs, after its key. The proof that
+it equals the shipped text narrowed in memory (frozen text, random and scaled
+stores, plans without table statistics) is listed in the amendment's
+verification.
 
 The routes are served only when the `eventsV2` capability is true, which is
 true when `economic_event_revisions` is present (`present === 1`) in the store
@@ -1365,7 +1454,27 @@ An agent reads both routes through `kogane.events.read`
 only:
 
 - `GET /api/v2/card-purchases?offset=N&period=YYYY-MM`, or
-  `?eventId=<purchase_…|refund_…>` alone for one event.
+  `?eventId=<purchase_…|refund_…>` alone for one event;
+- `GET /api/v2/card-purchases?view=cards&period=YYYY-MM` or
+  `?view=cards&usageMonth=YYYY-MM`: the same whole-filter figures grouped by
+  card, with each card's statements and settlement status and no per-event
+  explanation (`queryCardPurchaseCards`,
+  [ADR 0125](adr/0125-card-purchases-per-card-view.md),
+  [agent API](agent-api.md#per-card-view-adr-0125)). `view=events` is the
+  default; `usageMonth` outside `view=cards` and `view=lines`, an `offset` or `eventId` inside
+  it, or not exactly one month is `400 invalid_query`, and a malformed month
+  `400 invalid_period`;
+- `GET /api/v2/card-purchases?view=lines&period=YYYY-MM` or
+  `?view=lines&usageMonth=YYYY-MM`, optionally with `account`,
+  `sort=date|amount` and the previous page's `cursor`: the same month's events
+  as compact lines (date, amount, kind, state, counterparty, event id), at
+  most 25 a page and within 7,168 bytes, sorted by date or by exact amount in
+  the domain and paged by keyset (`queryCardPurchaseLines`,
+  [ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19),
+  [agent API](agent-api.md#purchase-lines-adr-0125-amendment)). `account`,
+  `sort` or `cursor` outside `view=lines`, an `offset` or `eventId` inside it,
+  not exactly one month, a malformed value or another request's cursor is
+  `400 invalid_query`.
 
 It explains recognised card purchases
 (`packages/application/src/query/card-purchases.ts`): per event, its state and
@@ -1469,7 +1578,8 @@ to `false`. It writes nothing.
 An agent reads the same page through the agent API instead:
 `POST /api/agent/v1/purchases.explain`, or the MCP tool
 `kogane.purchases.explain`, with `{period?, eventId?, offset?}`
-([agent API](agent-api.md#card-purchase-explanation)). It is served exactly
+([agent API](agent-api.md#card-purchase-explanation); `view: cards` and
+`view: lines` are the per-card and line answers above). It is served exactly
 while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
 returns its page as `data`, figures, coverage, chain and `explanationRefs`
 unchanged, with each candidate's `actions` and `relation` removed: an agent

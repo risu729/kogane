@@ -32,6 +32,15 @@ export interface TransactionQuery {
   offset: number;
 }
 
+/** The scope of `undatedTransactions`: a transaction query without a window or page. */
+export type UndatedTransactionQuery = Pick<TransactionQuery, "source" | "account" | "q">;
+/** Current transactions of one source account whose `as_of` starts with no calendar date. */
+export interface UndatedTransactionCount {
+  source_id: string;
+  source_account: string;
+  row_count: number;
+}
+
 export interface LatestBalanceQuery {
   source?: string;
   account?: string;
@@ -104,6 +113,27 @@ export interface SourceParseRun {
   parser_version: string;
 }
 
+/**
+ * Marks of what the publication gate, the run exclusions and the dataset
+ * policies have done: the newest `publication_events` id, the number of
+ * `exclude_from_financial_views` annotations, and the policy columns the
+ * current lists read. An activation or a rollback moves an artifact's
+ * published run without recording a newer parse run, an exclusion hides a run
+ * without one, and an operator's policy update (a dataset named for the `unit`
+ * eligibility scope, another snapshot policy) changes which published runs are
+ * current without one; each still moves these marks.
+ */
+export interface PublicationMarks {
+  publicationEvent: number;
+  exclusions: number;
+  /**
+   * The policy rows of the read sources as canonical text: one JSON array per
+   * row, sorted, so equal policies give equal text whatever order the store
+   * returns them in. `"[]"` when no row names those sources.
+   */
+  snapshotPolicies: string;
+}
+
 /** One source's visible fetch runs, counted over its whole history. */
 export interface SourceFetchRunCount {
   source_id: string;
@@ -127,6 +157,12 @@ export interface ObservationReader {
    */
   sourceParseRuns(sources: readonly string[]): Promise<SourceParseRun[]>;
   /**
+   * `PublicationMarks` of the listed sources, or of every source for `null`.
+   * A listed source's marks never move with another source's events; an
+   * empty list reads nothing and is zero.
+   */
+  publicationMarks(sources: readonly string[] | null): Promise<PublicationMarks>;
+  /**
    * D13 partial-update signal: partial fetch runs that refreshed some units of
    * a dataset on the `unit` eligibility scope. Empty for every dataset on the
    * seeded `run` scope, which is why `overview()` omits the key entirely then.
@@ -141,6 +177,13 @@ export interface ObservationReader {
    */
   globalPassEmptyMonths(): Promise<GlobalPassEmptyMonths>;
   listTransactions(query: TransactionQuery): Promise<TransactionRow[]>;
+  /**
+   * Per source account, how many current transactions in scope a `from`/`to`
+   * window of `listTransactions` leaves out because their `as_of` starts with
+   * no calendar date (null, a year-month, an impossible day or other text).
+   * Only accounts with such rows are listed.
+   */
+  undatedTransactions(query: UndatedTransactionQuery): Promise<UndatedTransactionCount[]>;
   listLatestBalances(query: LatestBalanceQuery): Promise<BalanceRow[]>;
   listBalanceHistory(query: BalanceHistoryQuery): Promise<BalanceHistoryRow[]>;
   /** Latest complete full-retention provider payment/sale facts; no economic adoption. */
@@ -174,4 +217,9 @@ export interface SqlExecutor {
 export interface ReaderOptions {
   /** Build the error thrown when a list exceeds the bound (an HTTP layer maps it to 413). */
   limitExceeded?: () => Error;
+  /**
+   * Where `listPositions` takes the current snapshot set from (`SnapshotSource`
+   * in sql.ts). Only the Processor's scheduled lanes pass `memo`.
+   */
+  snapshotSource?: "inline" | "memo";
 }

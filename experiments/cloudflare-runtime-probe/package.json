@@ -7,8 +7,8 @@
     "impit": "0.14.9"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "typescript": "7.0.2",
-    "wrangler": "4.163.0"
+    "wrangler": "4.168.0"
   }
 }

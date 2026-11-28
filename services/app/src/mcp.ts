@@ -28,6 +28,8 @@ import {
 } from "@modelcontextprotocol/server";
 import {
   PURCHASES_EXPLAIN_MAX_OFFSET,
+  PURCHASES_EXPLAIN_VIEWS,
+  RECONSTRUCTION_ACCOUNTS_MAX,
   RECONSTRUCTED_STATE_ACCOUNT,
   RECONSTRUCTED_STATE_DATE,
   RECONSTRUCTED_STATE_EPOCH,
@@ -36,9 +38,12 @@ import {
   SUPPORTED_QUERY_INTENTS,
 } from "../../../packages/application/src/index";
 import {
+  CARD_PURCHASE_ACCOUNT,
   CARD_PURCHASE_EVENT_ID,
+  CARD_PURCHASE_LINES_CURSOR_MAX,
   CARD_PURCHASE_PERIOD,
 } from "../../../packages/application/src/query/card-purchases.ts";
+import { CARD_PURCHASE_LINE_SORTS } from "../../../packages/domain/src/card-purchase-view.ts";
 import {
   INSTRUMENT_CANDIDATE_VIEWS,
   INSTRUMENT_CANDIDATES_MAX_OFFSET,
@@ -109,7 +114,7 @@ export const MCP_TOOLS = [
     name: "kogane.financial.query",
     title: "Run one typed question inside the granted scope",
     description:
-      "Server-side aggregation and paging. Returns a financial-result-v1 object: data, coverage inside the granted scope, five quality dimensions, warnings and a cursor bound to this context.",
+      "Server-side aggregation and paging. Returns a financial-result-v1 object: data, coverage inside the granted scope, five quality dimensions, warnings and a cursor bound to this context. Paging (ADR 0128): an activity or reported-state answer carries `next` and `paging` beside `result`; merge `next.arguments` into the same call until `next` is null; `result.nextCursor` names the same cursor.",
     inputSchema: querySpecSchema(),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
@@ -171,7 +176,7 @@ export const MCP_TOOLS = [
     name: "kogane.instruments.candidates",
     title: "Instrument identity candidates across identifiers",
     description:
-      "One page of the ADR 0055 candidate read: which stored instrument identifiers may denote the same instrument, on which evidence, which pairs are kept apart and why, with closed status, hold, conflict and gap codes. Read-only. A proposed candidate names the identity.assign or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+      'One page of the ADR 0055 candidate read: which stored instrument identifiers may denote the same instrument, on which evidence, which pairs are kept apart and why, with closed status, hold, conflict and gap codes. Read-only. A proposed candidate names the identity.assign or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended, `stoppedBy: "budget"` when the grant\'s maxRows withholds the next page; `nextOffset` is deprecated.',
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -190,22 +195,32 @@ export const MCP_TOOLS = [
  * card purchase recognition (`cardPurchaseRecognition`): with it off, the tool
  * is neither listed nor callable, exactly as the operator route is absent.
  * The patterns are the service's own, so the advertised and the enforced
- * contract cannot drift; that an event id stands alone is checked by the
- * service, which refuses it beside a period or an offset.
+ * contract cannot drift; that an event id stands alone, and which keys each
+ * `view` takes (ADR 0125), are checked by the service, which refuses the
+ * rest with `invalid_query`.
  */
 export const PURCHASES_MCP_TOOLS = [
   {
     name: "kogane.purchases.explain",
     title: "Explain recognised card purchases",
     description:
-      "Recognised card purchases and refunds: each one's provider rows, statement, reviewed settlement and bank debit, its pending-to-posted candidates, and figures that keep captured, authorized, refunds and unresolved apart. Read-only; a candidate carries no action or plan payload, because every decision about it is the operator's.",
+      "Recognised card purchases and refunds. `view: events` (default): one page of 50 events, each with its provider rows, statement, reviewed settlement and bank debit and its pending-to-posted candidates, beside figures over the whole filter that keep captured, authorized, refunds and unresolved apart; `period` (statement month), `eventId` or `offset`. `view: cards`: the same whole-filter figures per card in one compact answer, for 'how much did I spend on each card': per card (account id, source, stored label) its event and unresolved counts, figures per unit as decimal text (captured, authorized, capturedRefunds, authorizedRefunds; never one combined total), events without a statement figure by closed reason, and the provider statements its posted events belong to with their total, payment date and settlement review; exactly one of `period` (statement month) and `usageMonth` (YYYY-MM of the provider usage date, so purchases not yet on a statement count too); no `eventId` or `offset`. `view: lines`: the same month's events as compact lines, for 'what did I buy on card X' and 'my largest purchases': per line the usage date, amount as decimal text (or, without one, `missing` with its reason and the last known amount), kind, state, the provider counterparty (at most 64 characters, `counterpartyCut` when cut) and event id, plus the figures of the listed events; exactly one of `period` and `usageMonth`, optionally `account` (an account id from `view: cards`; without it every card's lines, each with its `accountId`), `sort` `date` (default, newest first) or `amount` (largest first per unit, lines without an exact amount last), and `cursor` (the previous answer's `data.nextCursor`, with the same filter and sort); at most 25 lines and about 7 KB per answer; no `eventId` or `offset`. Read-only; a candidate carries no action or plan payload, because every decision about it is the operator's. Paging (ADR 0128): merge `next.arguments` into the same call until `next` is null; `paging` says how the page ended.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
+        view: { type: "string", enum: [...PURCHASES_EXPLAIN_VIEWS] },
         period: { type: "string", pattern: CARD_PURCHASE_PERIOD.source },
+        usageMonth: { type: "string", pattern: CARD_PURCHASE_PERIOD.source },
         eventId: { type: "string", pattern: CARD_PURCHASE_EVENT_ID.source },
         offset: { type: "integer", minimum: 0, maximum: PURCHASES_EXPLAIN_MAX_OFFSET },
+        account: { type: "string", pattern: CARD_PURCHASE_ACCOUNT.source },
+        sort: { type: "string", enum: [...CARD_PURCHASE_LINE_SORTS] },
+        cursor: {
+          type: "string",
+          pattern: "^[A-Za-z0-9_-]+$",
+          maxLength: CARD_PURCHASE_LINES_CURSOR_MAX,
+        },
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -217,20 +232,29 @@ export const PURCHASES_MCP_TOOLS = [
  * serves the reconstructed state (`reconstructedStateOnDate`), as its GET
  * route is. The patterns are the service's own; the range bound, today's
  * date and the grant are checked by the service, which answers the route's
- * closed refusal codes (as the first ref, `refusal:<code>`).
+ * closed refusal codes (as the first ref, `refusal:<code>`). Exactly one of
+ * `account` and `accounts` names the scope (ADR 0116); a root combinator
+ * cannot say so (mcp-input-schema.ts), so the description does and the
+ * service refuses anything else.
  */
 export const RECONSTRUCTED_STATE_MCP_TOOLS = [
   {
     name: "kogane.reconstructed-state.read",
-    title: "Reconstructed balances of one account beside the reported ones",
-    description:
-      "One account's balances reconstructed from adopted events over a range (at most 366 days, not after today in Tokyo, cash basis), beside what its provider reported at both ends, at one cut of the economic commit log (default: the latest commit). Returns the status, closed reason codes, each cell's reported and reconstructed figures and their difference with its explanation, the knowledge used (cut, standing, set version, identity epoch) and the manifest. Read-only: it adopts nothing, and an unexplained difference stays unexplained.",
+    title: "Reconstructed balances of one or several accounts beside the reported ones",
+    description: `The balances of one account (\`account\`) or of a scope of up to ${String(RECONSTRUCTION_ACCOUNTS_MAX)} distinct accounts (\`accounts\`; give exactly one of the two) reconstructed from adopted events over a range (at most 366 days, not after today in Tokyo, cash basis), beside what their providers reported at both ends, at one cut of the economic commit log (default: the latest commit). Returns the status and closed reason codes of the whole scope, each (account, unit) cell's reported and reconstructed figures and their difference with its explanation, the knowledge used (cut, standing, set version, identity epoch) and the manifest. Nothing is added across accounts. Read-only: it adopts nothing, and an unexplained difference stays unexplained.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      required: ["account", "from", "to"],
+      required: ["from", "to"],
       properties: {
         account: { type: "string", pattern: RECONSTRUCTED_STATE_ACCOUNT.source },
+        accounts: {
+          type: "array",
+          minItems: 1,
+          maxItems: RECONSTRUCTION_ACCOUNTS_MAX,
+          uniqueItems: true,
+          items: { type: "string", pattern: RECONSTRUCTED_STATE_ACCOUNT.source },
+        },
         from: { type: "string", pattern: RECONSTRUCTED_STATE_DATE.source },
         to: { type: "string", pattern: RECONSTRUCTED_STATE_DATE.source },
         basis: { type: "string", enum: ["cash"] },

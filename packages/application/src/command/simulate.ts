@@ -101,7 +101,7 @@ export async function simulate(
 }
 
 /** Marks a plan stale so the UI stops offering it; never deletes it. */
-export function markStaleWrite(planId: string): { sql: string; binds: readonly unknown[] } {
+function markStaleWrite(planId: string): { sql: string; binds: readonly unknown[] } {
   return {
     sql: "UPDATE change_plans SET status='stale' WHERE plan_id=?1 AND status IN ('planned','approved')",
     binds: [planId],
@@ -110,8 +110,4 @@ export function markStaleWrite(planId: string): { sql: string; binds: readonly u
 
 export async function markStale(store: CommandStore, planId: string): Promise<void> {
   await store.batch([markStaleWrite(planId)]);
-}
-
-export function staleError(planId: string): ReturnType<typeof commandError> {
-  return commandError("stale_context", [planId]);
 }

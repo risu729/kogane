@@ -24,6 +24,7 @@ import {
   MISSING_ID,
   PARTIAL_ID,
   partialDetail,
+  truncatedCompleteDetail,
 } from "./report-fixture.ts";
 
 const LIST = "/api/v2/reports";
@@ -162,6 +163,33 @@ describe("report detail contract", () => {
     ).toBe(false);
   });
 
+  test("the stated partition is the one the body implies, and a truncated body is never complete", () => {
+    const truncated = truncatedCompleteDetail();
+    const truncatedPath = detailPath(truncated.report.reportId);
+    // Stored `complete` with `truncated: true`: the reader states it partial.
+    expect(truncated.body.partition).toBe("complete");
+    expect(validApiResponse(truncatedPath, truncated)).toBe(true);
+    expect(
+      validApiResponse(
+        truncatedPath,
+        mutated(truncated, (copy) => (copy.partition = "complete")),
+      ),
+    ).toBe(false);
+    // An untruncated body states its own partition, and only that one.
+    expect(
+      validApiResponse(
+        path,
+        mutated(detail, (copy) => (copy.partition = "complete")),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(detail, (copy) => delete copy.partition),
+      ),
+    ).toBe(false);
+  });
+
   test("the summary, the body and the events agree", () => {
     expect(
       validApiResponse(
@@ -281,6 +309,74 @@ describe("report explanation contract", () => {
       validApiResponse(
         path,
         mutated(explanation, (copy) => (copy.explanation.schemaVersion = "report-explanation-v2")),
+      ),
+    ).toBe(false);
+  });
+
+  test("a v2 manifest names the code releases and the cut; a stored v1 manifest stays readable", () => {
+    // The fixture is a v1 node, as stored before the releases were recorded.
+    expect(explanation.explanation.inputManifest.schemaVersion).toBe("report-inputs-v1");
+    const added = {
+      priceSelectionRelease: "report-snapshot-price-v1",
+      priceRuleIds: ["rule-a-v1", "rule-b-v1"],
+      valuationRelease: "holding-valuation-v1",
+      reportBuildRelease: "report-holdings-v1:build-v1",
+      truncated: false,
+    };
+    const v2 = mutated(explanation, (copy) =>
+      Object.assign(copy.explanation.inputManifest, {
+        schemaVersion: "report-inputs-v2",
+        ...added,
+      }),
+    );
+    expect(validApiResponse(path, v2)).toBe(true);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.truncated = true)),
+      ),
+    ).toBe(true);
+    // A v2 manifest without one of its added fields, with an unsorted rule
+    // list, a cut that is not a boolean or an extra field is refused; so is a
+    // v1 manifest carrying v2 fields.
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.truncated = "false")),
+      ),
+    ).toBe(false);
+    for (const key of Object.keys(added))
+      expect(
+        validApiResponse(
+          path,
+          mutated(v2, (copy) => delete copy.explanation.inputManifest[key]),
+        ),
+      ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(
+          v2,
+          (copy) => (copy.explanation.inputManifest.priceRuleIds = ["rule-b-v1", "rule-a-v1"]),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.total = "1500")),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.schemaVersion = "report-inputs-v1")),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.schemaVersion = "report-inputs-v3")),
       ),
     ).toBe(false);
   });

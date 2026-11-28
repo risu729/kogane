@@ -22,6 +22,7 @@ export {
   visibleEvidence,
 } from "./concepts";
 export {
+  CALENDAR_DATED_AS_OF,
   CANDIDATE_LIMIT,
   type CollectionScope,
   type MeasureView,
@@ -49,6 +50,7 @@ export {
   type ObservationReference,
   type ParsingHealth,
   type PositionQuery,
+  type PublicationMarks,
   type RawDownload,
   type RawDownloadReference,
   type ReaderOptions,
@@ -57,6 +59,8 @@ export {
   type SourceParseRun,
   type SqlExecutor,
   type TransactionQuery,
+  type UndatedTransactionCount,
+  type UndatedTransactionQuery,
 } from "./reader";
 export { createObservationReader } from "./observation-reader";
 export {
@@ -79,6 +83,22 @@ export {
   selectPrices,
 } from "./price-selection";
 export { createD1ObservationReader, d1Executor, type D1Like } from "./d1";
+export {
+  type LatestBalanceCandidateRow,
+  type LatestBalanceCandidateSets,
+  latestBalanceCandidateSets,
+  readLatestBalanceCandidates,
+} from "./latest-balance-candidates";
+export {
+  SNAPSHOT_MEMBERS_SQL,
+  SNAPSHOT_MEMO_KEY_SQL,
+  SNAPSHOT_MEMO_STALE_ERROR,
+  SNAPSHOT_SELECTION_DIGEST,
+  STORE_SNAPSHOT_MEMO_SQL,
+  snapshotSelectionDigest,
+  type SnapshotMemberRow,
+} from "./snapshot-memo";
+export { type SnapshotSource } from "./sql";
 export {
   DECIMAL_POLICY_RELEASE,
   DEFAULT_IDENTITY_READ_MODE,
@@ -133,15 +153,19 @@ export {
   PROJECTION_INPUT_CONTRACT_VERSION,
   REVISION_EXCLUDED_TABLES,
   revisionTriggerNames,
+  SNAPSHOT_INPUT_REVISION_LEDGER,
+  snapshotInputTriggerNames,
   snapshotIdentity,
   SOURCE_REVISION_LEDGER,
   VISIBILITY_REVISION_LEDGER,
 } from "./source-revision";
 export {
   DEFAULT_PROJECTION_PAGE_LIMIT,
+  DEFAULT_SUMMARY_PAGE_LIMIT,
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
   type ProjectionInputsRow,
+  type ProjectionMeasureRow,
   type ProjectionPageRow,
   PROJECTION_INPUTS_SQL,
   projectionRelationsSql,
@@ -149,6 +173,7 @@ export {
   balanceHistoryKeysetSql,
   projectionCoverageSql,
   projectionLegacyPageSql,
+  projectionMeasureSql,
   projectionPageSql,
   projectionSubtotalSql,
 } from "./balance-projection-sql";
@@ -170,8 +195,10 @@ export {
   CONVERSION_OFFERS_SQL,
   createRewardReader,
   CURRENT_REWARD_BUCKETS_SQL,
+  currentRewardBucketsSql,
   expiryRule,
   EXPIRY_RULES_SQL,
+  HOLDING_CUT_BY_PAGE,
   membershipState,
   MEMBERSHIP_SQL,
   observedAtValue,
@@ -228,8 +255,13 @@ export {
 } from "./card-purchase-keys";
 export {
   ACTIVITY_BASES,
+  ACTIVITY_FILTER_WALK,
   type ActivityBasis,
   activityEventsSql,
+  type ActivityFilters,
+  type ActivityKey,
+  type FilteredActivityPage,
+  filteredActivityEventsSql,
   type AllocationView,
   type BasisTotal,
   basisTotals,

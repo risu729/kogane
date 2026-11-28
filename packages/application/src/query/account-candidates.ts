@@ -54,8 +54,13 @@ import {
   type AccountSourceFactsRow,
 } from "../../../read-model/src/account-candidates.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
-import { financialError } from "../errors.ts";
-import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
+import {
+  offsetPagedFields,
+  type PagedFields,
+  type PagedWireFields,
+} from "../../../observation-shared/src/paging-contract.ts";
+import { financialError, unknownKeyRefs } from "../errors.ts";
+import { type AgentCapability, type Grant, wholeStoreReadRefusal } from "../grants.ts";
 
 export type { AccountCandidate, AccountConnectionEntry, UnreviewedAggregatorAccount };
 export type AccountSourceFacts = AccountSourceFactsRow;
@@ -126,7 +131,13 @@ interface AccountCandidatesManifest {
   };
 }
 
-export interface AccountCandidateReview {
+/**
+ * The answer as a client reads it: `next` and `paging` (ADR 0128) beside the
+ * deprecated `nextOffset`; the service always sends both
+ * (`AccountCandidateReviewPage`), a client validator accepts an answer
+ * without them until slice S9.
+ */
+export interface AccountCandidateReview extends PagedWireFields {
   schemaVersion: "kogane-account-candidates-v1";
   query: AccountCandidatesRequest;
   manifest: AccountCandidatesManifest;
@@ -137,13 +148,21 @@ export interface AccountCandidateReview {
   /** Items in this view (after the source account filter), of which `items` is one page. */
   total: number;
   items: AccountCandidateItem[];
+  /**
+   * The next page's offset; null past the last page and where the grant's
+   * `maxRows` withholds the next page. Deprecated in favour of `next` and
+   * `paging` (ADR 0128), which tell the two apart; kept for one release.
+   */
   nextOffset: number | null;
   /** Every source account the page's items name, with its current mapping, sorted by id. */
   sourceAccounts: AccountSourceFacts[];
 }
 
+/** One page as the service answers it: always with `next` and `paging`. */
+type AccountCandidateReviewPage = AccountCandidateReview & PagedFields;
+
 export type AccountCandidatesOutcome =
-  | { ok: true; review: AccountCandidateReview }
+  | { ok: true; review: AccountCandidateReviewPage }
   | { ok: false; error: FinancialError };
 
 type Rejection = { ok: false; code: FinancialErrorCode; refs: string[] };
@@ -266,7 +285,7 @@ export function parseAccountCandidatesRequest(
     return {
       ok: false,
       code: "unsupported_semantics",
-      refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
+      refs: unknownKeyRefs(unknown),
     };
   const { view, offset, sourceAccountId } = value;
   if (view !== undefined) {
@@ -292,7 +311,15 @@ export function parseAccountCandidatesRequest(
   return { ok: true, value: request };
 }
 
-function viewItems(set: AccountCandidateSet, view: AccountCandidateView): AccountCandidateItem[] {
+/**
+ * The items of one view, in the review's order. The page pages them; the
+ * pending-decisions summary (pending-decisions.ts) counts the `open` and
+ * `held` views through this same function, so the two cannot disagree.
+ */
+export function accountCandidateView(
+  set: AccountCandidateSet,
+  view: AccountCandidateView,
+): AccountCandidateItem[] {
   switch (view) {
     case "open":
       return set.candidates.filter((item) => item.status === "proposed" && item.hold === null);
@@ -331,13 +358,8 @@ export async function reviewAccountCandidates(input: {
     ok: false,
     error: financialError(code, REQUEST_ID, refs),
   });
-  if (!grantAllows(grant, ACCOUNT_CANDIDATES_CAPABILITY))
-    return fail("unauthorized", [`capability:${ACCOUNT_CANDIDATES_CAPABILITY}`]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = wholeStoreReadRefusal(grant, ACCOUNT_CANDIDATES_CAPABILITY, REQUEST_ID);
+  if (refused) return { ok: false, error: refused };
   if (request.offset + ACCOUNT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows)
     return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 
@@ -350,7 +372,7 @@ export async function reviewAccountCandidates(input: {
     throw error;
   }
   const { sourceAccountId } = request;
-  const all = viewItems(set, request.view);
+  const all = accountCandidateView(set, request.view);
   if (
     sourceAccountId !== null &&
     ![...set.candidates, ...set.connections, ...set.unreviewed].some((item) =>
@@ -363,11 +385,13 @@ export async function reviewAccountCandidates(input: {
   );
   const items = filtered.slice(request.offset, request.offset + ACCOUNT_CANDIDATES_PAGE_SIZE);
   const named = [...new Set(items.flatMap(namedSourceAccounts))].sort();
+  // The next page only while there is one and the grant may read it; a page
+  // the grant would refuse is withheld (`stoppedBy: "budget"`), never offered
+  // and never shown as the end (ADR 0128).
   const following = request.offset + ACCOUNT_CANDIDATES_PAGE_SIZE;
-  const nextOffset =
-    following < filtered.length && following + ACCOUNT_CANDIDATES_PAGE_SIZE <= grant.budget.maxRows
-      ? following
-      : null;
+  const hasMore = following < filtered.length;
+  const withheld = hasMore && following + ACCOUNT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows;
+  const nextOffset = hasMore && !withheld ? following : null;
   return {
     ok: true,
     review: {
@@ -380,6 +404,13 @@ export async function reviewAccountCandidates(input: {
       items,
       nextOffset,
       sourceAccounts: await readAccountSourceFacts(sql, named),
+      ...offsetPagedFields({
+        limit: ACCOUNT_CANDIDATES_PAGE_SIZE,
+        offset: request.offset,
+        returned: items.length,
+        hasMore,
+        withheld,
+      }),
     },
   };
 }

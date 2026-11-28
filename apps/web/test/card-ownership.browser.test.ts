@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { ownershipReview } from "../../../packages/application/test/card-ownership-fixture.ts";
@@ -9,13 +9,19 @@ import {
   readOwnershipDeclaration,
   type OwnershipDeclarationReading,
 } from "../../../packages/domain/src/ownership-declaration.ts";
+import { settledTest } from "./settle.ts";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable && process.env["CI"] === "true") process.exitCode = 1;
 const PLAN = "c".repeat(64);
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("explicit card ownership review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let review = ownershipReview();
@@ -151,7 +157,6 @@ describe.if(runnable)("explicit card ownership review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60000);
   afterAll(async () => {
     await browser?.close();
@@ -206,6 +211,27 @@ describe.if(runnable)("explicit card ownership review", () => {
     expect(await page.locator("main").innerText()).toContain("カード決済は採用されません");
     await page.close();
   });
+  test("a plan pinned to other revisions than shown is refused with focus left on the pressed button", async () => {
+    stale = true;
+    const page = await open();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await form.getByLabel("保有者の識別名", { exact: true }).fill("本人A");
+    await form
+      .getByLabel("判断の理由・原本で確認した箇所", { exact: true })
+      .fill("原本の名義と口座の対応を確認した");
+    await form.getByRole("checkbox").check();
+    const button = form.getByRole("button", { name: "この保有者の関係を確認", exact: true });
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await form
+      .getByRole("alert")
+      .filter({ hasText: "口座または保有者の記録が更新されています" })
+      .waitFor();
+    expect(await button.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(new URL(page.url()).pathname).toBe(`/reconciliation/${review.proposalId}/ownership`);
+    await page.close();
+  });
+
   test("a competing ownership claim blocks approval even when the candidate revision is unchanged", async () => {
     stale = true;
     const page = await open(`/confirm/${PLAN}`);
@@ -518,4 +544,65 @@ describe.if(runnable)("explicit card ownership review", () => {
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);
+
+  async function fillAndPlan(page: Page): Promise<void> {
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await form.getByLabel("保有者の識別名", { exact: true }).fill("本人A");
+    await form
+      .getByLabel("判断の理由・原本で確認した箇所", { exact: true })
+      .fill("原本の名義と口座の対応を確認した");
+    await form.getByRole("checkbox").check();
+    await form.getByRole("button", { name: "この保有者の関係を確認", exact: true }).click();
+  }
+
+  test("a plan refused as stale reads the review again, and a form that starts over shows the refusal at the top", async () => {
+    const page = await open();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    // After the page was shown, the card account's ownership got a new
+    // revision; the server refuses the plan as the ownership planner does.
+    stale = true;
+    await page.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status: 409,
+        json: { error: "stale_context", refs: [`card-settlement:${review.proposalId}`] },
+      }),
+    );
+    const reread = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith("/card-settlements/ownership"),
+    );
+    await fillAndPlan(page);
+    await reread;
+    // The form of the newer revision starts empty, without the refusal: the
+    // page shows it, and focus moves to it from the button that went away.
+    const notice = page.getByRole("alert").filter({ hasText: "読み直した表示には" });
+    await notice.waitFor();
+    expect(await notice.innerText()).toContain("対象が変更されました");
+    expect(await notice.evaluate((element) => element === document.activeElement)).toBe(true);
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    expect(await form.getByLabel("保有者の識別名", { exact: true }).inputValue()).toBe("");
+    expect(new URL(page.url()).pathname).toBe(`/reconciliation/${review.proposalId}/ownership`);
+    await page.close();
+  });
+
+  test("a refusal that is not about the review changing reads nothing again", async () => {
+    const page = await open();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    const reads: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/card-settlements/ownership"))
+        reads.push(request.url());
+    });
+    // As the planner answers evidence that does not match the side's.
+    await page.route("**/api/command/v1/plan", (route) =>
+      route.fulfill({
+        status: 400,
+        json: { error: "incomplete_evidence", refs: [`card-settlement:${review.proposalId}`] },
+      }),
+    );
+    await fillAndPlan(page);
+    await page.getByRole("alert").filter({ hasText: "根拠が不足しています" }).waitFor();
+    // A read again would have been sent before the refusal was shown.
+    expect(reads).toEqual([]);
+    await page.close();
+  });
 });

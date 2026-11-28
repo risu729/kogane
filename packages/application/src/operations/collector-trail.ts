@@ -95,7 +95,7 @@ export interface CollectorRunTrail {
 }
 
 /** Current CORE publication only; never a replacement for the recorded receipt. */
-export interface CollectorCurrentResult {
+interface CollectorCurrentResult {
   schemaVersion: "kogane-collector-current-result-v1";
   state: "published" | "publication_not_observed";
   /** The bounded trail proves publication pointers, not their original publication instant. */

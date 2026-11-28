@@ -23,6 +23,19 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   accepted by the owner on 2026-11-09 (order at 20:21 UTC); P0 → P3, one issue
   and pull request per item, before any new collector.
 
+- [2026-11 everyday questions over MCP, in one or two calls](2026-11-mcp-everyday-questions.md):
+  proposed on 2026-11-19 for #1414; an audit of 22 everyday questions against the
+  published tools, which gaps the in-flight units A–F close, and the remaining gaps
+  ranked. Gaps G1 (per-card spending, ADR 0125), G2 (compact purchase lines, its
+  amendment), G3 (without an event-date filter), G4, G5, G6 and G9 are merged; G7 and G8 remain proposals.
+
+- [2026-11 one paging contract and consistent arguments across the MCP tools](2026-11-mcp-consistency.md):
+  proposed on 2026-11-20 at the owner's request; an inventory of how every published tool pages,
+  refuses and names its arguments, with file and line references, and the slices of
+  [ADR 0128](../adr/0128-one-paging-contract.md). Slice S1 is implemented with the plan; S6 and
+  the part of S7 that needs no decision are implemented on a branch stacked on it, and S7's
+  `financial-error-v1` refusals wait for the owner's decision.
+
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production
   verification pending. The seeded schedule remains disabled.
@@ -54,7 +67,9 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   implemented, merged in #658.
 
 - [2026-10 collector admin bearer retirement](2026-10-collector-admin-retirement.md):
-  in progress; the first slice (13 of 15 registrations) is merged (#665).
+  done in code; the first slice (13 of 15 registrations) merged in #665 and the last
+  two on 2026-11-08. Removing the two remaining secret registrations from the deployed
+  Workers is the only open step.
 
 - [2026-10 SBI Shinsei first history acquisition slice](2026-10-sbi-shinsei-history-first-slice.md):
   in progress; offline validation and evidence adapters merged, acquisition

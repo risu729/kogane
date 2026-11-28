@@ -19,8 +19,10 @@
 // row is not a purchase" stay reviewed decisions.
 //
 // One tick:
-//   1. the retire pass: every live recognised event none of whose provider
-//      rows is current any more gets a revision in state `unknown` with no leg
+//   1. the retire pass: every live recognised event none of whose deciding
+//      provider rows is current any more (its posted rows when it holds one,
+//      else its rows: a merged event follows its posted row, ADR 0002's
+//      2026-11-21 amendment) gets a revision in state `unknown` with no leg
 //      (`provider_status_absent`), a merged event (several keys) included. It
 //      runs first so that a key change (a card ordinal change, a parser
 //      fingerprint change, a month's customized capture replaced by its web
@@ -66,6 +68,7 @@ import {
   classifyCardUsage,
   CARD_PURCHASE_ACTOR,
   CARD_PURCHASE_POLICY,
+  CARD_PURCHASE_WRITER_RELEASE,
   nextCardPurchaseAction,
   recognitionKey,
   validCardPurchaseFacts,
@@ -81,6 +84,7 @@ import {
 } from "../../../packages/domain/src/pending-posted-review.ts";
 import {
   DEFAULT_MATCH_OPTIONS,
+  RECONCILIATION_POLICY_RELEASE,
   proposalIdentity,
   stageBProposals,
   type MatchFact,
@@ -112,6 +116,7 @@ import {
 } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { cardUsageFactOf } from "../../../packages/application/src/card-usage-fact.ts";
+import { abandonSweepPass, finishSweepPass, openSweepTick } from "./sweep-pass.ts";
 
 /** Current usage rows one tick reads after the cursor. */
 export const SCAN_LIMIT = 500;
@@ -201,7 +206,26 @@ export { cardUsageFactOf };
 
 // Bump when the retirement read's selection semantics change. A deployment
 // must not reuse an empty-result proof produced under a different contract.
-const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v1";
+// v2: a revision is decided by its posted keys when it holds one (ADR 0002,
+// amendment 2026-11-21). A v1 proof was certified while a merged event whose
+// posted row had left still counted as held by its current pending key, so
+// reusing it would keep that event captured beside its replacement until an
+// unrelated input mutation dirtied the proof.
+const RETIREMENT_CHECK_POLICY = "card-purchase-retirement-v2";
+/**
+ * The definitions of the views the recognition pass and its candidate pass
+ * read, as a digest that `test/sweep-pass.test.ts` checks against the
+ * migrated schema: a migration that redefines one moves no revision, so it
+ * changes this value, and with it the pass's policy, to run a pass again.
+ */
+export const CARD_PURCHASE_SWEEP_VIEWS = "965c621cd38dddbd";
+/**
+ * What a complete recognition pass decides, for its gate (src/sweep-pass.ts):
+ * the recognition writer release, the matcher's release and options, the
+ * views it reads and the pass's own version. A change to any of them runs a
+ * pass again although no input moved.
+ */
+export const CARD_PURCHASE_SWEEP_POLICY = `${CARD_PURCHASE_WRITER_RELEASE}+${RECONCILIATION_POLICY_RELEASE}+match:${JSON.stringify(DEFAULT_MATCH_OPTIONS)}+views:${CARD_PURCHASE_SWEEP_VIEWS}+recognition-pass-v1`;
 
 type Outcome = "written" | "conflict" | "failed";
 
@@ -258,9 +282,13 @@ function bounded(value: number | undefined, fallback: number, max: number): numb
 }
 
 /**
- * Retire every live recognised event none of whose provider rows is current
- * any more, a merged event holding a pending and a posted key included: the
- * stale read reports a revision only when none of its keys is current. True
+ * Retire every live recognised event none of whose deciding provider rows is
+ * current any more, a merged event holding a pending and a posted key
+ * included: the stale read reports a revision only when none of its posted
+ * keys is current, or, holding no posted key, none of its keys. A merged
+ * event whose posted row is gone is retired even while its pending row is
+ * still current, so it never stays captured beside the event of the row that
+ * replaced its posted row (ADR 0002, amendment 2026-11-21). True
  * when the page was full and every event on it was retired: more stale keys
  * may be waiting, and nothing on the page was one this pass cannot act on.
  */
@@ -307,8 +335,10 @@ async function retirePass(
   for (const [eventId, rows] of byEvent) {
     const current = live.get(eventId);
     // The live revision read now must be the one the stale read reported,
-    // holding as many keys; the page may cut an event's keys, but each one
-    // it reports is stale, and so is every other key of that revision.
+    // holding as many keys; the page may cut an event's keys, but the read
+    // reports a revision only when none of its deciding keys is current, so
+    // the whole revision is stale (a merged event's pending key may still be
+    // current: it follows its posted row).
     if (
       !current ||
       current.revision.revision !== rows[0]!.revision ||
@@ -344,13 +374,23 @@ async function recognitionPass(
   result: CardPurchaseSweepResult,
   limits: { scan: number; write: number },
   at: WriteAt,
-): Promise<CurrentCardUsageRow[]> {
-  const cursor =
-    (
-      await db
-        .prepare("SELECT last_observation_id FROM card_purchase_scan_cursor WHERE singleton=1")
-        .first<{ last_observation_id: number }>()
-    )?.last_observation_id ?? 0;
+): Promise<{
+  rows: CurrentCardUsageRow[];
+  cursor: number;
+  next: number;
+  finished: boolean;
+  token: string | null;
+}> {
+  // A pass starts from the first row only when something it reads moved
+  // since the last pass that read them all (src/sweep-pass.ts).
+  const tick = await openSweepTick(
+    db,
+    "card_purchase_recognition",
+    CARD_PURCHASE_SWEEP_POLICY,
+    "SELECT last_observation_id FROM card_purchase_scan_cursor WHERE singleton=1",
+  );
+  if (tick.skip) return { rows: [], cursor: 0, next: 0, finished: false, token: null };
+  const cursor = tick.cursor;
   const rows = await page<CurrentCardUsageRow>(
     db,
     currentCardUsageSql({ afterId: cursor, limit: limits.scan }),
@@ -421,19 +461,13 @@ WHERE recognition_key IN (SELECT value FROM json_each(?1))`,
     else result.failed += 1;
     handled = row.observation_id;
   }
-  // The last page wraps to the start: a row below the cursor can become
-  // current again (a reappearing row, a newly resolved identity). The update
-  // is conditional on the value this tick read, so a tick that overlapped
-  // this one and already moved the cursor is never pulled back.
-  const next = budgetReached ? handled : rows.length < limits.scan ? 0 : handled;
-  if (next !== cursor)
-    await db
-      .prepare(
-        "UPDATE card_purchase_scan_cursor SET last_observation_id=?1 WHERE singleton=1 AND last_observation_id=?2",
-      )
-      .bind(next, cursor)
-      .run();
-  return rows;
+  // The last page ends the pass and goes back to the start: a row below the
+  // cursor can become current again (a reappearing row, a newly resolved
+  // identity), and every such change moves the CORE revision, which starts
+  // the next pass. The sweep moves the cursor once the page's candidates and
+  // merges are done.
+  const finished = !budgetReached && rows.length < limits.scan;
+  return { rows, cursor, next: finished ? 0 : handled, finished, token: tick.token };
 }
 
 /**
@@ -667,7 +701,7 @@ async function candidatePass(
   rows: readonly CurrentCardUsageRow[],
   limits: { write: number; lookup: number },
   now: string,
-): Promise<string[]> {
+): Promise<{ linked: string[]; limited: boolean }> {
   const limit = limits.write;
   const groups = new Map<string, Group>();
   for (const row of rows) {
@@ -676,7 +710,7 @@ async function candidatePass(
     const entry = groupOf(fact.accountId, fact.sourceId, cardStatementPeriod(fact), fact.usageDate);
     groups.set(JSON.stringify(entry), entry);
   }
-  if (groups.size === 0) return [];
+  if (groups.size === 0) return { linked: [], limited: false };
   const facts = await page<GroupFactRow>(db, {
     sql: GROUP_FACTS_SQL,
     args: [JSON.stringify([...groups.values()]), CANDIDATE_READ_LIMIT + 1],
@@ -684,7 +718,7 @@ async function candidatePass(
   // A truncated read would pair a partial group; every group waits instead.
   if (facts.length > CANDIDATE_READ_LIMIT) {
     result.groupsSkipped += groups.size;
-    return [];
+    return { linked: [], limited: false };
   }
   const byGroup = new Map<string, { size: number; kinds: Map<string, MatchFact[]> }>();
   for (const row of facts) {
@@ -742,7 +776,8 @@ WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
       result.failed += 1;
     }
   }
-  return linked;
+  // A full budget may have left proposals of this page unwritten.
+  return { linked, limited: writes.length >= limit };
 }
 
 /**
@@ -965,7 +1000,7 @@ export async function cardPurchaseSweep(
     result.deferred = true;
     return result;
   }
-  const rows = await recognitionPass(
+  const { rows, cursor, next, finished, token } = await recognitionPass(
     db,
     result,
     {
@@ -974,16 +1009,49 @@ export async function cardPurchaseSweep(
     },
     at,
   );
-  const linked = await candidatePass(
-    db,
-    result,
-    rows,
-    {
-      write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
-      lookup: bounded(options.candidateLookupChunk, CANDIDATE_LOOKUP_CHUNK, CANDIDATE_LOOKUP_CHUNK),
-    },
-    now,
-  );
-  await mergeLinked(db, result, linked, at);
+  // A step that throws is counted like a failed write rather than holding
+  // the cursor on the page, so one page that keeps failing cannot stop
+  // recognition of the rows after it.
+  let linked: string[] = [];
+  let limited = false;
+  try {
+    ({ linked, limited } = await candidatePass(
+      db,
+      result,
+      rows,
+      {
+        write: bounded(options.candidateWriteLimit, CANDIDATE_WRITE_LIMIT, CANDIDATE_WRITE_LIMIT),
+        lookup: bounded(
+          options.candidateLookupChunk,
+          CANDIDATE_LOOKUP_CHUNK,
+          CANDIDATE_LOOKUP_CHUNK,
+        ),
+      },
+      now,
+    ));
+    await mergeLinked(db, result, linked, at);
+  } catch {
+    result.failed += 1;
+  }
+  // Work left for later: a full candidate budget, links past the merge
+  // limit, or a failure (a retirement's included, conservatively). Those
+  // rows are only reached again by a pass from the first row, so the pass
+  // marks nothing clean (src/sweep-pass.ts).
+  if (limited || new Set(linked).size > LINK_MERGE_LIMIT || result.failed > 0)
+    await abandonSweepPass(db, "card_purchase_recognition", token);
+  // Only now does the cursor leave the page: a tick cut off before here (or
+  // one whose abandonment failed) reads the page again (recognition writes
+  // nothing twice), so no page's candidates and merges are skipped by a pass
+  // that then ends clean. The update is conditional on the value this tick read, so a tick
+  // that overlapped this one and already moved the cursor is never pulled
+  // back.
+  if (next !== cursor)
+    await db
+      .prepare(
+        "UPDATE card_purchase_scan_cursor SET last_observation_id=?1 WHERE singleton=1 AND last_observation_id=?2",
+      )
+      .bind(next, cursor)
+      .run();
+  if (finished) await finishSweepPass(db, "card_purchase_recognition", token);
   return result;
 }

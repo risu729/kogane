@@ -24,14 +24,29 @@ import {
 } from "../../../packages/observation-shared/src/api-schema";
 import {
   balanceHistoryPage,
+  cashPerAccountPage,
   latestBalancePage,
   balanceReadConfigured,
   legacyLatestFromProjection,
+  V2_CASH_PATH,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
+import {
+  BalanceListSummaryLimitError,
+  balanceListSummary,
+  readDetail,
+} from "../../../packages/application/src/query/read-detail.ts";
+import {
+  OverviewSummaryLimitError,
+  overviewSummary,
+} from "../../../packages/application/src/query/overview-detail.ts";
+import type {
+  BalanceListPage,
+  OverviewPage,
+} from "../../../packages/observation-shared/src/api-contract";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -71,7 +86,7 @@ function boundedPage(value: Record<string, unknown>, offset?: number): Record<st
 }
 
 const OBSERVATION_PATH =
-  /^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/;
+  /^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history|cash))(\/|$)/;
 
 /** A route request: its path and query, which is all the observation readers read. */
 export interface RouteRequest {
@@ -206,7 +221,24 @@ export async function readObservationRoute(
   }
   if (path === V2_LATEST_PATH) return { body: await latestBalancePage(env, url, identityRead) };
   if (path === V2_HISTORY_PATH) return { body: await balanceHistoryPage(env, url, identityRead) };
-  if (path === "/api/overview") return { body: boundedPage({ ...(await reader.overview()) }) };
+  if (path === V2_CASH_PATH) return { body: await cashPerAccountPage(env, url, identityRead) };
+  if (path === "/api/overview") {
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-19): the
+    // summary is the full page, shaped by the one function the tool shares.
+    const detail = readDetail(url.searchParams.get("detail"));
+    if (detail === null) throw new HttpError(400, "invalid_detail");
+    const page = boundedPage({ ...(await reader.overview()) }) as unknown as OverviewPage;
+    if (detail === "full") return { body: page };
+    try {
+      return { body: overviewSummary(page) };
+    } catch (error) {
+      // Its status lines alone pass the byte budget (amendment 2026-11-20):
+      // refused, never answered past it or with a status line cut.
+      if (error instanceof OverviewSummaryLimitError)
+        throw new HttpError(413, "result_limit_exceeded", [], { retryWith: { detail: "full" } });
+      throw error;
+    }
+  }
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
       d1Executor(env.DB),
@@ -242,6 +274,10 @@ export async function readObservationRoute(
     };
   }
   if (path === "/api/balances") {
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-20): the
+    // summary is the full answer, shaped by the one function the tool shares.
+    const detail = readDetail(url.searchParams.get("detail"));
+    if (detail === null) throw new HttpError(400, "invalid_detail");
     const value = url.searchParams.get("latestOffset") ?? "0";
     const latestOffset = Number(value);
     if (
@@ -303,26 +339,34 @@ export async function readObservationRoute(
       history.slice(0, 500),
       identityRead,
     );
-    return {
-      body: {
-        latest: await decimalRows(d1Executor(env.DB), "balance", latest.slice(0, 500)),
-        history: await decimalRows(
-          d1Executor(env.DB),
-          "balance",
-          describeBalanceRows(organizedHistory),
-        ),
-        interpretationContext: organizationContext(identityRead, [
-          ...latest.slice(0, 500).map((row) => row.organization),
-          ...organizedHistory.map((row) => row.organization),
-        ]),
-        coverage: {
-          limit: 500,
-          truncated: latest.length > 500 || history.length > 500,
-          nextOffset: history.length > 500 ? offset + 500 : null,
-          latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
-        },
+    const full: BalanceListPage = {
+      latest: await decimalRows(d1Executor(env.DB), "balance", latest.slice(0, 500)),
+      history: await decimalRows(
+        d1Executor(env.DB),
+        "balance",
+        describeBalanceRows(organizedHistory),
+      ),
+      interpretationContext: organizationContext(identityRead, [
+        ...latest.slice(0, 500).map((row) => row.organization),
+        ...organizedHistory.map((row) => row.organization),
+      ]),
+      coverage: {
+        limit: 500,
+        truncated: latest.length > 500 || history.length > 500,
+        nextOffset: history.length > 500 ? offset + 500 : null,
+        latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
       },
     };
+    if (detail === "full") return { body: full };
+    try {
+      return { body: balanceListSummary(full, { offset, latestOffset }) };
+    } catch (error) {
+      // Its first line alone passes the byte budget: refused, never answered
+      // past it or with the line cut; `full` answers the same window.
+      if (error instanceof BalanceListSummaryLimitError)
+        throw new HttpError(413, "result_limit_exceeded", [], { retryWith: { detail: "full" } });
+      throw error;
+    }
   }
   if (path === "/api/positions") {
     const entries = await reader.listPositions({
@@ -369,7 +413,20 @@ export async function readObservationRoute(
               organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
             })),
           })),
-          interpretationContext: organizationContext(identityRead, organizations.values()),
+          // The rows the page returns, as on the transaction and balance
+          // lists: the reader's row past the page (its truncation probe) is
+          // cut by `boundedPage` and names no release here.
+          interpretationContext: organizationContext(
+            identityRead,
+            entries
+              .slice(0, 500)
+              .flatMap((entry) => [
+                organizations.get(organizationKey({ kind: "position", id: entry.position.id })),
+                ...entry.valuations.map(({ id }) =>
+                  organizations.get(organizationKey({ kind: "valuation", id })),
+                ),
+              ]),
+          ),
         },
         offset,
       ),

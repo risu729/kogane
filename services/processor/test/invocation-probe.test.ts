@@ -9,7 +9,7 @@
 // constants, never a key, a statement or an exception message.
 //
 // Synthetic throughout: `kogane-synthetic`, no amount, no account, no token.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import type { Miniflare } from "miniflare";
 import {
@@ -38,6 +38,7 @@ import {
   type CollectionHarness,
 } from "./collection-harness.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 // The first build of the migrated CORE image runs every migration; pay it
 // here under its own budget, not inside whichever test first asks for a copy
@@ -49,9 +50,9 @@ beforeAll(() => {
 let mf: Miniflare;
 let pipelineEnv: Env;
 
-beforeAll(async () => {
-  ({ mf, env: pipelineEnv } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env: pipelineEnv } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -738,4 +739,38 @@ test("thenable introspection and observer setup never replace a source result or
     r2SettledOperations: 1,
     r2FailedOperations: 1,
   });
+});
+
+test("a failed queue message names only a built-in error class, never a custom class name", async () => {
+  class Synthetic_private_account_label extends Error {}
+  const refuse = () => {
+    throw new Error("synthetic private trap");
+  };
+  const hostile = new Proxy({}, { get: refuse, getPrototypeOf: refuse, has: refuse });
+  const lines: string[] = [];
+  const throwing = (thrown: unknown) => ({
+    body: { invalid: true },
+    ack() {
+      throw thrown;
+    },
+    retry() {},
+  });
+  await consumeTerminalNotifications(
+    [
+      throwing(new Synthetic_private_account_label("synthetic")),
+      throwing("synthetic private text"),
+      throwing(hostile),
+      throwing(new URIError("synthetic")),
+    ],
+    {} as Env,
+    invocationContext(),
+    (line) => lines.push(line),
+  );
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_notification_failed", code: "Error" },
+    { event: "collection_notification_failed", code: "unknown" },
+    { event: "collection_notification_failed", code: "unknown" },
+    { event: "collection_notification_failed", code: "URIError" },
+  ]);
+  expect(lines.join("\n")).not.toMatch(/Synthetic_private|synthetic private/u);
 });

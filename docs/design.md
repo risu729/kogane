@@ -87,11 +87,11 @@ Layer transitions have different rules:
 
 ### Mutation Policy
 
-| Class                  | Examples                                                                       | Policy                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Immutable              | raw objects, fetch history, source observations, historical price observations | Append-only. Never updated or deleted, with one declared exception (below). |
-| Versioned / corrigible | identity mappings, observation links, event interpretation, classification     | May be corrected; corrections are tracked.                                  |
-| Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.                                   |
+| Class                  | Examples                                                                       | Policy                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| Immutable              | raw objects, fetch history, source observations, historical price observations | Append-only. Never updated or deleted, except by the two migrations below. |
+| Versioned / corrigible | identity mappings, observation links, event interpretation, classification     | May be corrected; corrections are tracked.                                 |
+| Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.                                  |
 
 What a collector may write in the first place is narrower than what it
 reads: credentials and full payment-instrument numbers are removed before an
@@ -100,7 +100,26 @@ written while names were replaced carry the marker `[redacted:name]` and are
 not rewritten
 ([ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence)).
 
-The one declared exception to the immutable class is migration 0063
+Two migrations have dropped append-only guards to change rows of the
+immutable class.
+
+Migration 0043 ([#207](https://github.com/risu729/kogane/pull/207)) deleted
+synthetic bootstrap metadata. It selected the fetch runs of the dedicated
+`kogane-synthetic` source, and the fetch runs in acquisition sessions of the
+`synthetic` external-id namespace that carry an `exclude_from_financial_views`
+annotation with reason `legacy-synthetic-bootstrap`. It dropped the
+`*_no_delete` guards of nine tables (`ingestion_attempts`, `fetch_run_seals`,
+`run_inventory_items`, `run_inventories`, `fetch_artifacts`,
+`fetch_run_reports`, `fetch_run_annotations`, `fetch_runs`,
+`acquisition_sessions`), deleted those runs' rows from them and each of their
+acquisition sessions left with no fetch or collection run, and recreated the
+nine guards with their original text (0001, 0003). It also deleted the
+`kogane-synthetic` source and its registry rows, which have no delete guard.
+It deleted no raw object. A parse run of one of those runs' artifacts, and so
+any parsed observation, would have made it fail through the restrictive
+foreign keys rather than be removed. No ADR records this decision.
+
+The one exception declared in an ADR is migration 0063
 ([ADR 0030's amendment](adr/0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)):
 once, it replaces each staged importer-era identity value (a digest the
 platform derived, not a provider claim) by the collector's value in five
@@ -109,8 +128,50 @@ columns of the retired importer's rows (`fetch_units.unit_key`,
 `transaction_observations.source_account` of the MoneyForward importer
 parses, `account_connection_reviews.connection_key`), drops and recreates
 their append-only guards with their exact text, and keeps every id, raw
-object and other column. No other migration may rewrite evidence without a
-new ADR.
+object and other column.
+
+No other migration may rewrite evidence without a new ADR.
+
+Append-only tables refuse `UPDATE` and `DELETE` by trigger. SQLite's
+`INSERT OR REPLACE` deletes every row a new row collides with (on the primary
+key, a unique index or the rowid) without firing `DELETE` triggers while
+`recursive_triggers` is off, as on D1, so a table also needs a replacement
+guard: a `BEFORE INSERT` trigger that refuses an insert colliding with a
+stored row. What the guards cover today:
+
+- The keys each guard names (`*_no_replace`, `*_reject_duplicate_insert` and a
+  few `*_guard` triggers; 0001, 0018, 0029, 0105 and later migrations).
+- The rowid, on every table with a guard: an INTEGER PRIMARY KEY is its rowid
+  and its guard names it (`economic_identity_epochs` instead requires the next
+  ordinal); the observation decimal and price tables check
+  `rowid` in their 0105 guard; and since migration 0106 the 43 other tables
+  with a hidden rowid or an unchecked integer key (`raw_objects`, identity,
+  the decision log, plans, receipts, the outbox, audit, the economic tables
+  and the card relations) have a second trigger, `<table>_no_replace_rowid`.
+  0106 adds triggers only and changes no existing one. The rowid check relies
+  on `NEW.rowid` being -1 when an insert names no rowid; SQLite documents that
+  value as undefined, bun:sqlite and Miniflare's D1 give -1, and no writer
+  names a rowid.
+
+Open limits, pinned by `packages/storage-d1/test/no-replace-rowid-migration.test.ts`:
+
+- Thirty-six tables refuse `DELETE` by trigger but have no replacement guard,
+  among them `card_debit_account_statement`,
+  `card_settlement_debit_account_evidence`, `fetch_run_annotations`,
+  `parse_runs`, `published_parse_runs`, `metadata_projections`,
+  `calculation_results`, `report_artifacts` and the reward claim tables; a
+  REPLACE on their key or rowid still deletes a stored row. `parser_releases`
+  has a `BEFORE INSERT` trigger that refuses only a changed code digest, so
+  its `release_id` is not guarded either.
+- Some guards do not name a unique key of their table: the live-pair indexes
+  of `allocations` and `settlement_relations`, the idempotency and
+  confirm-once indexes of `audit_records`, the policy key of
+  `identity_run_policies`, the idempotency key of `ops_requests` and the
+  digest of `reconciliation_proposals`. A REPLACE colliding on one of those
+  still deletes the stored row.
+
+No production writer uses `OR REPLACE`, so these limits are reachable only
+through a statement the code does not issue.
 
 Evidence is not "the truth" — providers correct their own data. Evidence is a
 record of _what a source claimed at a point in time_. That is why nothing

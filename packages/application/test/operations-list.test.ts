@@ -28,6 +28,7 @@ import {
   type OperationStatus,
 } from "../src/index.ts";
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
+import { validOperationListPage } from "../../observation-shared/src/operation-contract.ts";
 
 beforeAll(() => {
   migratedDatabase().close();
@@ -130,6 +131,13 @@ async function pageThrough(
     if (!outcome.ok) throw new Error(outcome.error);
     pages++;
     expect(outcome.page.operations.length).toBeLessThanOrEqual(query.limit);
+    // Every page is one the 依頼の一覧 page accepts for the filters it sent.
+    expect(
+      validOperationListPage(outcome.page, {
+        kind: query.kind ?? undefined,
+        status: query.status ?? undefined,
+      }),
+    ).toBe(true);
     ids.push(...outcome.page.operations.map((operation) => operation.operationId));
     if (outcome.page.nextCursor === null) return { ids, pages };
     expect(outcome.page.operations.length).toBe(query.limit);
@@ -202,12 +210,14 @@ describe("listOperations", () => {
     expect(outcome).toEqual({
       ok: true,
       page: {
-        schemaVersion: "kogane-operation-list-v1",
+        schemaVersion: "kogane-operation-list-v2",
+        statusFilterMatches: "storedStatus",
         operations: [
           {
             operationId: `op_${hex64(9)}`,
             kind: "projection",
             status: "accepted",
+            storedStatus: "accepted",
             source: null,
             dispatch: { state: "dispatch_pending", attempts: 0 },
             failureCode: null,
@@ -216,12 +226,14 @@ describe("listOperations", () => {
           },
         ],
         nextCursor: null,
+        next: null,
+        paging: { limit: 20, returned: 1, hasMore: false, stoppedBy: null },
       },
     });
     db.close();
   });
 
-  test("a cursor of another principal pages on; one of no operation is receipt_not_found", async () => {
+  test("a cursor of another principal pages on; one of no operation is invalid_cursor", async () => {
     const db = migratedDatabase();
     const foreign = `op_${hex64(5)}`;
     const older = `op_${hex64(4)}`;
@@ -250,12 +262,15 @@ describe("listOperations", () => {
     if (!first.ok) throw new Error(first.error);
     expect(first.page.operations.map((row) => row.operationId)).toEqual([foreign]);
     expect(first.page.nextCursor).toBe(foreign);
+    expect(first.page.next).toEqual({ arguments: { cursor: foreign } });
+    expect(first.page.paging).toEqual({ limit: 1, returned: 1, hasMore: true, stoppedBy: "limit" });
     const second = await page(foreign);
     if (!second.ok) throw new Error(second.error);
     expect(second.page).toMatchObject({ operations: [{ operationId: older }], nextCursor: null });
+    // A cursor this list did not issue is `invalid_cursor` (ADR 0128).
     expect(await page(`op_${hex64(6)}`)).toEqual({
       ok: false,
-      error: "receipt_not_found",
+      error: "invalid_cursor",
       refs: ["cursor"],
     });
     db.close();

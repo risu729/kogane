@@ -199,7 +199,7 @@ describe("the events page read", () => {
       { collection: "events" },
       { collection: "activity", basis: "tax" },
       { collection: "activity", offset: -1 },
-      { collection: "activity", cursor: "200" },
+      { collection: "activity", limit: 200 },
     ]) {
       const overHttp = await page.http(EVENTS, args);
       expect(overHttp.status, JSON.stringify(args)).toBe(400);

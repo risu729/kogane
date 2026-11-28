@@ -37,7 +37,6 @@ import {
 import {
   authorityRank,
   createCoreProjectionSource,
-  createD1ObservationReader,
   d1Executor,
   DECIMAL_POLICY_RELEASE,
   LATEST_IDENTITY_RELEASE,
@@ -45,11 +44,13 @@ import {
   projectionBuildDigest,
   projectionInputManifest,
   projectionRelationsSql,
+  readLatestBalanceCandidates,
   ResultLimitExceededError,
   type CoreRevisionRow,
   type EntityRelationRow,
   type ProjectionCandidate,
   type ProjectionInputs,
+  type SnapshotSource,
   type SubjectStatus,
 } from "../../../packages/read-model/src/index";
 import {
@@ -70,9 +71,9 @@ import {
   type ProjectionInputStore,
 } from "./projection-input.ts";
 import { readPublishedSnapshotAt, runReadProjection } from "./read-projection.ts";
+import { withSnapshotSelection } from "./snapshot-memo-step.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
-const CANDIDATE_LIMIT = 5001;
 const CANDIDATE_BOUND = 5000;
 /** Rows written per invocation, so one cron tick is bounded whatever the size. */
 const PROJECTION_WRITE_BUDGET = 1000;
@@ -179,27 +180,22 @@ interface OrganizationFields {
 type CandidateRow = BalanceRow & { measureView: "balances" | "summaries"; latestInGroup: boolean };
 
 /**
- * The candidate set: the same latest-balance query the reader serves, taken
- * once for the unfiltered list and once for each measure view, so the
- * projection holds their union and every view selects the same rows it does
- * today. The reader refuses more than 5,000 candidates; the job records that
- * refusal and seals nothing rather than projecting a partial set.
+ * The candidate set: the rows the reader's latest-balance query returns
+ * unfiltered and for each measure view, taken from one flagged read (ADR 0129,
+ * slice 1), so the projection holds their union and every view selects the
+ * same rows it does today. The read refuses more than 5,000 rows in any one
+ * view; the job records that refusal and seals nothing rather than projecting
+ * a partial set.
  */
-async function readCandidates(db: D1Like): Promise<CandidateRow[]> {
-  const reader = createD1ObservationReader(db);
+async function readCandidates(db: D1Like, source: SnapshotSource): Promise<CandidateRow[]> {
   let latest: BalanceRow[];
   let balances: BalanceRow[];
   let summaries: BalanceRow[];
   try {
-    [latest, balances, summaries] = await Promise.all([
-      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT }),
-      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "balances" }),
-      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "summaries" }),
-    ]);
+    ({ latest, balances, summaries } = await readLatestBalanceCandidates(d1Executor(db), source));
   } catch (error) {
-    // The reader refuses more than 5,000 candidates. That bound is the read
-    // contract, so the job reports the refusal and seals nothing rather than
-    // projecting a silently partial set.
+    // The 5,000-row bound is the read contract, so the job reports the
+    // refusal and seals nothing rather than projecting a silently partial set.
     if (error instanceof ResultLimitExceededError)
       throw new ProjectionBudgetError("candidate_limit_exceeded");
     throw error;
@@ -244,16 +240,19 @@ interface OriginRow {
   parse_run_id: number;
   fetch_artifact_id: number;
   dataset: string | null;
+  /** The artifact's fetch unit key; '' when the artifact has no fetch unit. */
+  unit: string;
 }
 
-/** Parse, artifact and dataset of each candidate, straight from Layer B. */
+/** Parse, artifact, dataset and fetch unit of each candidate, straight from Layer B. */
 async function readOrigins(db: D1Like, ids: readonly number[]): Promise<Map<number, OriginRow>> {
   const found = new Map<number, OriginRow>();
   for (let start = 0; start < ids.length; start += ORGANIZATION_CHUNK) {
     const page = ids.slice(start, start + ORGANIZATION_CHUNK);
     const result = await db
       .prepare(
-        `SELECT b.id AS observation_id, b.parse_run_id, p.fetch_artifact_id, fa.dataset
+        `SELECT b.id AS observation_id, b.parse_run_id, p.fetch_artifact_id, fa.dataset,
+           coalesce(fa.fetch_unit_key,'') AS unit
          FROM balance_observations b
          JOIN parse_runs p ON p.id = b.parse_run_id
          JOIN observation_fetch_artifacts fa ON fa.id = p.fetch_artifact_id
@@ -288,6 +287,11 @@ async function readDecimals(
     }
   }
   return found;
+}
+
+/** The coverage group of one (source, dataset, fetch unit); '' stands for an absent part. */
+function coverageGroupKey(sourceId: string, dataset: string, unit: string): string {
+  return JSON.stringify([sourceId, dataset, unit]);
 }
 
 interface CoverageFacts {
@@ -348,7 +352,7 @@ async function readCoverage(db: D1Like): Promise<CoverageFacts> {
       absenceMeaning: row.absence_meaning,
     };
     const eligibility = snapshotEligibility(claim);
-    const key = `${row.source_id} ${row.dataset} ${row.unit}`;
+    const key = coverageGroupKey(row.source_id, row.dataset, row.unit);
     const current = groups.get(key);
     if (!current || row.parse_run_id > current.parseRunId)
       groups.set(key, {
@@ -470,7 +474,8 @@ function projectionInput(
  * stays a conflict rather than being collapsed.
  */
 async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
-  const rows = await readCandidates(db);
+  // The candidates take the current snapshots from the memo (ADR 0129).
+  const rows = await withSnapshotSelection(db, (source) => readCandidates(db, source));
   const ids = rows.map((row) => row.id);
   const [organization, origins, decimals, coverage] = await Promise.all([
     readOrganization(db, ids),
@@ -492,8 +497,13 @@ async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
     const dataset = origin?.dataset ?? null;
     const parseRunId = origin?.parse_run_id ?? 0;
     const claim = coverage.byParseRun.get(parseRunId);
-    const groupKey = `${row.source_id} ${dataset ?? ""} `;
-    const newest = [...coverage.groups.entries()].find(([key]) => key.startsWith(groupKey))?.[1];
+    // The newest attempt over this candidate's own fetch unit: a unit of
+    // the same dataset is another connection or card, whose attempts can
+    // neither re-observe this scope nor fail to (the latest-balance query
+    // keys a measurement by its unit for the same reason).
+    const newest = coverage.groups.get(
+      coverageGroupKey(row.source_id, dataset ?? "", origin?.unit ?? ""),
+    );
     const stale =
       newest !== undefined && !newest.replacesPrevious && newest.parseRunId > parseRunId;
     candidates.push({
@@ -539,6 +549,9 @@ async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
       authorityRank: authorityRank(row.source_id),
       measureView: row.measureView,
       latestInGroup: row.latestInGroup,
+      // The current mapping's account entity: two references of one entity
+      // are never declared disjoint (ADR 0001's amendment of 2026-11-20).
+      accountEntity: fields?.account_target ?? null,
     });
   }
   // Two witnesses of one measurement collapse into one candidate, so the

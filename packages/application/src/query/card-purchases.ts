@@ -31,15 +31,33 @@ import {
   type CardPurchaseKind,
   type CardPurchaseSourceId,
 } from "../../../domain/src/card-purchase.ts";
-import type {
-  CardPurchaseCandidate,
-  CardPurchasePage,
-  CardPurchaseRevisionEntry,
-  CardPurchaseSettlementLink,
-  CardPurchaseSourceRow,
-  CardPurchaseStatementLink,
-  CardPurchaseUnrecognizedReasons,
-  CardPurchaseView,
+import {
+  CARD_PURCHASE_CARDS_MAX,
+  CARD_PURCHASE_LINE_SORTS,
+  CARD_PURCHASE_LINES_BYTES,
+  CARD_PURCHASE_LINES_MAX,
+  CARD_PURCHASE_STATEMENT_REASONS,
+  cardFigures,
+  compactAmount,
+  compactDate,
+  compareCardPurchaseLineKeys,
+  lineCounterparty,
+  type CardPurchaseLine,
+  type CardPurchaseLineKey,
+  type CardPurchaseLineSort,
+  type CardPurchaseLinesPage,
+  type CardPurchaseCard,
+  type CardPurchaseCardsPage,
+  type CardPurchaseCardStatement,
+  type CardPurchaseStatementReason,
+  type CardPurchaseCandidate,
+  type CardPurchasePage,
+  type CardPurchaseRevisionEntry,
+  type CardPurchaseSettlementLink,
+  type CardPurchaseSourceRow,
+  type CardPurchaseStatementLink,
+  type CardPurchaseUnrecognizedReasons,
+  type CardPurchaseView,
 } from "../../../domain/src/card-purchase-view.ts";
 import {
   validCardSettlementFacts,
@@ -55,9 +73,13 @@ import {
   type SourceFactRef,
   type UnknownStateReason,
 } from "../../../domain/src/events.ts";
+import { canonicalJson } from "../../../domain/src/context.ts";
+import { hasExactKeys, isOneOf, isRecord, isSafeInt, isText } from "../../../domain/src/guards.ts";
 import { validLocalDateText, type TemporalValue } from "../../../domain/src/time.ts";
 import {
   absentQuantity,
+  decimalFromString,
+  decimalToString,
   exactQuantity,
   normalizeDecimal,
   type Quantity,
@@ -70,6 +92,7 @@ import {
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { cardUsageFactOf } from "../card-usage-fact.ts";
 import { loadPendingPostedCandidates } from "./card-purchase-candidates.ts";
+import { decodeCursorJson, encodeCursorJson } from "./cursor.ts";
 
 export const CARD_PURCHASE_PAGE_SIZE = 50;
 /** Revisions listed per event, newest first; older ones stay stored. */
@@ -223,7 +246,7 @@ interface CurrentRow extends CurrentCardUsageRow {
  * revision is a 0047 invariant, so a row is an event. Only the columns the
  * figures, the order and the statement links read; the rest is PAGE_SQL's.
  */
-const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_reason,c.account_id,c.source_id,
+export const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_reason,c.account_id,c.source_id,
   c.statement_period,json_extract(c.facts_json,'$.providerStatus') AS provider_status,
   json_extract(c.facts_json,'$.usageDate') AS usage_date,
   l.leg_index,l.subject_ref,l.unit_ref,l.value_status,l.coefficient,l.scale,l.value_reason_code,l.role,l.basis
@@ -231,6 +254,26 @@ const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_rea
  LEFT JOIN economic_legs l ON l.event_id=c.event_id AND l.revision=c.revision
  WHERE (?1 IS NULL OR c.statement_period=?1) AND (?2 IS NULL OR c.event_id=?2)
  LIMIT ?3`;
+
+/** The predicate of `SELECTION_SQL` that the usage-month selection replaces. */
+const EVENT_ID_PREDICATE = "AND (?2 IS NULL OR c.event_id=?2)";
+/**
+ * `SELECTION_SQL` with a provider usage month (`?2`, `YYYY-MM`) in place of
+ * the event id: the same columns, joins and whole-filter bound (`?3`), built
+ * from the shipped text so the two cannot drift. The usage date is the
+ * recognition's own `facts_json.usageDate`, which the 0047 trigger keeps a
+ * `YYYY-MM-DD` civil date, so its first seven characters are its month.
+ */
+export const USAGE_MONTH_SELECTION_SQL = SELECTION_SQL.replace(
+  EVENT_ID_PREDICATE,
+  "AND substr(json_extract(c.facts_json,'$.usageDate'),1,7)=?2",
+);
+if (!SELECTION_SQL.includes(EVENT_ID_PREDICATE) || USAGE_MONTH_SELECTION_SQL === SELECTION_SQL)
+  throw new Error("card_purchase_selection_sql_changed");
+
+/** The stored label of each listed account, by primary key. */
+export const ACCOUNT_LABELS_SQL = `SELECT a.id,a.label FROM json_each(?1) w
+ JOIN accounts a ON a.id=w.value`;
 
 /**
  * The stored facts (validated before anything is shown), the evidence and the
@@ -536,6 +579,85 @@ function unrecognizedReasonCounts(
   return { complete: classifiedRows === total, counts: entries };
 }
 
+interface StatementChain {
+  statements: Map<string, { row: StatementRow; link: LinkedStatement }>;
+  settlements: Map<string, CardPurchaseSettlementLink>;
+}
+
+/**
+ * The newest provider statement of every (account, source, period) a posted
+ * event of `events` names, and each one's settlement review: the page and
+ * the per-card view read the same chain.
+ */
+async function statementChain(
+  sql: SqlExecutor,
+  events: readonly LiveEvent[],
+): Promise<StatementChain> {
+  const triples = new Map<string, [string, string, string]>();
+  for (const event of events)
+    if (event.posted && event.statementPeriod !== null)
+      triples.set(tripleKey(event.accountId, event.sourceId, event.statementPeriod), [
+        event.accountId,
+        event.sourceId,
+        event.statementPeriod,
+      ]);
+  const statements: StatementChain["statements"] = new Map();
+  if (triples.size > 0)
+    for (const row of await sql.all<StatementRow>(STATEMENT_SQL, [
+      JSON.stringify([...triples.values()]),
+    ]))
+      statements.set(tripleKey(row.account_id, row.source_id, row.period), {
+        row,
+        link: statementLink(row),
+      });
+  const settlements: StatementChain["settlements"] = new Map();
+  if (statements.size > 0)
+    for (const row of await sql.all<SettlementRow>(SETTLEMENT_SQL, [
+      JSON.stringify(
+        [...statements.values()].map(({ row }) => [row.account_id, row.source_id, row.period]),
+      ),
+    ]))
+      settlements.set(tripleKey(row.account_id, row.source_id, row.period), settlementLink(row));
+  return { statements, settlements };
+}
+
+/**
+ * One pass over current usage: which of `keys` the provider still displays,
+ * and every unrecognised current row with the reason the writer skips it.
+ */
+async function currentUsage(
+  sql: SqlExecutor,
+  keys: readonly string[],
+): Promise<{
+  currentKeys: Set<string>;
+  unrecognizedCurrentRows: number;
+  unrecognizedReasons: CardPurchaseUnrecognizedReasons;
+}> {
+  const current = await sql.all<CurrentRow>(CURRENT_SQL, [
+    0,
+    -1,
+    JSON.stringify([...new Set(keys)]),
+    CARD_PURCHASE_UNRECOGNIZED_LIMIT,
+  ]);
+  const currentKeys = new Set(
+    current.flatMap((row) =>
+      row.on_page === 1 && row.recognition_key !== null ? [row.recognition_key] : [],
+    ),
+  );
+  const unrecognizedCurrentRows = current[0]?.unrecognized_total ?? 0;
+  if (!Number.isSafeInteger(unrecognizedCurrentRows) || unrecognizedCurrentRows < 0)
+    throw new Error("card_usage_count_missing");
+  const unrecognizedReasons = unrecognizedReasonCounts(
+    // A row on the page is returned past the bound too; only the first `?4`
+    // unrecognised rows by observation id are classified.
+    current.filter(
+      (row) => row.unrecognized === 1 && row.position <= CARD_PURCHASE_UNRECOGNIZED_LIMIT,
+    ),
+    unrecognizedCurrentRows,
+  );
+  return { currentKeys, unrecognizedCurrentRows, unrecognizedReasons };
+}
+
 /**
  * Offset lists, a statement-period filter and exact-id reads share one DTO.
  * The summary covers every live event the filter selects, not only the page.
@@ -565,31 +687,7 @@ export async function queryCardPurchases(
 
   // Statements and their settlements, for every posted event of the filter:
   // the page needs its own, and the summary shows all of them beside the figures.
-  const triples = new Map<string, [string, string, string]>();
-  for (const event of events)
-    if (event.posted && event.statementPeriod !== null)
-      triples.set(tripleKey(event.accountId, event.sourceId, event.statementPeriod), [
-        event.accountId,
-        event.sourceId,
-        event.statementPeriod,
-      ]);
-  const statements = new Map<string, { row: StatementRow; link: LinkedStatement }>();
-  if (triples.size > 0)
-    for (const row of await sql.all<StatementRow>(STATEMENT_SQL, [
-      JSON.stringify([...triples.values()]),
-    ]))
-      statements.set(tripleKey(row.account_id, row.source_id, row.period), {
-        row,
-        link: statementLink(row),
-      });
-  const settlements = new Map<string, CardPurchaseSettlementLink>();
-  if (statements.size > 0)
-    for (const row of await sql.all<SettlementRow>(SETTLEMENT_SQL, [
-      JSON.stringify(
-        [...statements.values()].map(({ row }) => [row.account_id, row.source_id, row.period]),
-      ),
-    ]))
-      settlements.set(tripleKey(row.account_id, row.source_id, row.period), settlementLink(row));
+  const { statements, settlements } = await statementChain(sql, events);
 
   const page = events.slice(offset, offset + CARD_PURCHASE_PAGE_SIZE);
   const selected = JSON.stringify(
@@ -616,27 +714,9 @@ export async function queryCardPurchases(
 
   // One pass over current usage: the page's current keys, and each
   // unrecognised row with the reason the writer skips it.
-  const current = await sql.all<CurrentRow>(CURRENT_SQL, [
-    0,
-    -1,
-    JSON.stringify([...new Set(keyRows.map((row) => row.recognition_key))]),
-    CARD_PURCHASE_UNRECOGNIZED_LIMIT,
-  ]);
-  const currentKeys = new Set(
-    current.flatMap((row) =>
-      row.on_page === 1 && row.recognition_key !== null ? [row.recognition_key] : [],
-    ),
-  );
-  const unrecognizedCurrentRows = current[0]?.unrecognized_total ?? 0;
-  if (!Number.isSafeInteger(unrecognizedCurrentRows) || unrecognizedCurrentRows < 0)
-    throw new Error("card_usage_count_missing");
-  const unrecognizedReasons = unrecognizedReasonCounts(
-    // A row on the page is returned past the bound too; only the first `?4`
-    // unrecognised rows by observation id are classified.
-    current.filter(
-      (row) => row.unrecognized === 1 && row.position <= CARD_PURCHASE_UNRECOGNIZED_LIMIT,
-    ),
-    unrecognizedCurrentRows,
+  const { currentKeys, unrecognizedCurrentRows, unrecognizedReasons } = await currentUsage(
+    sql,
+    keyRows.map((row) => row.recognition_key),
   );
 
   // Pending-to-posted candidates touching the page's rows, resolved by the
@@ -792,4 +872,463 @@ export async function queryCardPurchases(
       limit: CARD_PURCHASE_PAGE_SIZE,
     },
   };
+}
+
+/** The per-card read's filter: exactly one of a statement period and a usage month (ADR 0125). */
+export interface CardPurchaseCardsQuery {
+  /** A statement period, `YYYY-MM`, as the page filters. */
+  period?: string;
+  /** A provider usage month, `YYYY-MM`: the events whose usage date falls in it. */
+  usageMonth?: string;
+}
+
+/**
+ * The per-card view of the card purchase read (`view: cards`, ADR 0125): the
+ * whole-filter selection of `queryCardPurchases`, under the same bound,
+ * grouped by card (resolved account and source), with each card's figures
+ * from `cardPurchaseSummary` (exact decimals added in the domain, INV03), the
+ * statements its posted events belong to with their settlement reviews (the
+ * page's own chain), and the count of events without a statement figure by
+ * the page's closed reason. No per-event explanation, provider row or
+ * candidate is read. A usage month selects by `facts_json.usageDate`.
+ */
+/** Exactly one month, validated: a statement period or a usage month (ADR 0125). */
+function monthFilter(input: CardPurchaseCardsQuery): {
+  period: string | null;
+  usageMonth: string | null;
+} {
+  const period = input.period ?? null;
+  const usageMonth = input.usageMonth ?? null;
+  if (period !== null && !CARD_PURCHASE_PERIOD.test(period)) throw new Error("invalid_period");
+  if (usageMonth !== null && !CARD_PURCHASE_PERIOD.test(usageMonth))
+    throw new Error("invalid_usage_month");
+  // Exactly one month: it keeps each card to the one or two statements its
+  // events can belong to, so the answer grows with the cards, not the history.
+  if ((period === null) === (usageMonth === null)) throw new Error("invalid_query");
+  return { period, usageMonth };
+}
+
+/**
+ * Every live event of one month: the page's whole-filter selection for a
+ * statement period, its usage-month form for a usage month, under the
+ * page's bound (a larger filter is refused, never partly read).
+ */
+async function monthEvents(
+  sql: SqlExecutor,
+  period: string | null,
+  usageMonth: string | null,
+): Promise<LiveEvent[]> {
+  const rows =
+    usageMonth === null
+      ? await sql.all<SelectionRow>(SELECTION_SQL, [period, null, CARD_PURCHASE_SUMMARY_LIMIT + 1])
+      : await sql.all<SelectionRow>(USAGE_MONTH_SELECTION_SQL, [
+          null,
+          usageMonth,
+          CARD_PURCHASE_SUMMARY_LIMIT + 1,
+        ]);
+  if (rows.length > CARD_PURCHASE_SUMMARY_LIMIT) throw new CardPurchaseLimitError();
+  return liveEvents(rows);
+}
+
+export async function queryCardPurchaseCards(
+  sql: SqlExecutor,
+  input: CardPurchaseCardsQuery,
+): Promise<CardPurchaseCardsPage> {
+  const { period, usageMonth } = monthFilter(input);
+  const events = await monthEvents(sql, period, usageMonth);
+  const totals = cardPurchaseSummary(events.map(summaryRevision));
+  if (!totals.ok) throw new Error("card_purchase_amount_invalid");
+
+  const cardKey = (event: LiveEvent): string => JSON.stringify([event.sourceId, event.accountId]);
+  const byCard = new Map<string, LiveEvent[]>();
+  for (const event of events) {
+    const key = cardKey(event);
+    const list = byCard.get(key);
+    if (list === undefined) byCard.set(key, [event]);
+    else list.push(event);
+  }
+  const sourceOrder = (sourceId: CardPurchaseSourceId) => CARD_PURCHASE_SOURCES.indexOf(sourceId);
+  const ordered = [...byCard.values()].sort((a, b) => {
+    const x = a[0]!,
+      y = b[0]!;
+    if (x.sourceId !== y.sourceId) return sourceOrder(x.sourceId) - sourceOrder(y.sourceId);
+    return x.accountId < y.accountId ? -1 : x.accountId > y.accountId ? 1 : 0;
+  });
+  const listed = ordered.slice(0, CARD_PURCHASE_CARDS_MAX);
+  const listedEvents = listed.flat();
+
+  // Only the listed cards' statements, settlements and labels are read.
+  const { statements, settlements } = await statementChain(sql, listedEvents);
+  const accountIds = [...new Set(listed.map((card) => card[0]!.accountId))];
+  const labels = new Map<string, string>();
+  if (accountIds.length > 0)
+    for (const row of await sql.all<{ id: string; label: string }>(ACCOUNT_LABELS_SQL, [
+      JSON.stringify(accountIds),
+    ]))
+      labels.set(row.id, row.label);
+  const { unrecognizedCurrentRows, unrecognizedReasons } = await currentUsage(sql, []);
+
+  const cards = listed.map((cardEvents): CardPurchaseCard => {
+    const first = cardEvents[0]!;
+    const figures = cardPurchaseSummary(cardEvents.map(summaryRevision));
+    if (!figures.ok) throw new Error("card_purchase_amount_invalid");
+    const reasons = new Map<CardPurchaseStatementReason, number>();
+    const periods = new Set<string>();
+    for (const event of cardEvents) {
+      const reasonCode: CardPurchaseStatementReason | null = !event.posted
+        ? "not_posted"
+        : event.statementPeriod === null
+          ? "period_unrecognized"
+          : statements.has(tripleKey(event.accountId, event.sourceId, event.statementPeriod))
+            ? null
+            : "statement_not_collected";
+      if (reasonCode === null) periods.add(event.statementPeriod!);
+      else reasons.set(reasonCode, (reasons.get(reasonCode) ?? 0) + 1);
+    }
+    return {
+      accountId: first.accountId,
+      sourceId: first.sourceId,
+      label: labels.get(first.accountId) ?? null,
+      events: cardEvents.length,
+      unresolved: figures.summary.unresolved,
+      figures: figures.summary.units.map(cardFigures),
+      withoutStatement: CARD_PURCHASE_STATEMENT_REASONS.flatMap((reasonCode) => {
+        const count = reasons.get(reasonCode);
+        return count === undefined ? [] : [{ reasonCode, events: count }];
+      }),
+      statements: [...periods]
+        .sort()
+        .reverse()
+        .map((statementPeriod): CardPurchaseCardStatement => {
+          const key = tripleKey(first.accountId, first.sourceId, statementPeriod);
+          const { link } = statements.get(key)!;
+          const settlement = settlements.get(key) ?? null;
+          return {
+            period: statementPeriod,
+            total: compactAmount(link.providerTotal),
+            paymentDate: compactDate(link.paymentDate),
+            settlement: settlement?.reviewStatus ?? null,
+            debit:
+              settlement === null || settlement.bankDebit === null
+                ? null
+                : {
+                    sourceId: settlement.bankDebit.sourceId,
+                    date: compactDate(settlement.bankDebit.occurred),
+                  },
+          };
+        }),
+    };
+  });
+
+  return {
+    view: "cards",
+    frame: usageMonth !== null ? "usage-month" : "statement-period",
+    cards,
+    cardsTruncated: ordered.length > listed.length,
+    totals: totals.summary.units.map(cardFigures),
+    events: events.length,
+    unresolved: totals.summary.unresolved,
+    settlementAddsPurchaseExpense: false,
+    coverage: {
+      scope: "card-purchase-recognition",
+      completeTransactionHistory: false,
+      unsupportedShapes: [...CARD_USAGE_EXCLUSIONS],
+      unrecognizedCurrentRows,
+      unrecognizedReasons,
+      refundsAllocated: false,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Purchase lines (`view: lines`, ADR 0125 amendment: gap G2)
+// ---------------------------------------------------------------------------
+
+/** A resolved account id the line view takes: the route's 128-character bound on a value. */
+export const CARD_PURCHASE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u;
+/** The longest line cursor this read issues or takes. */
+export const CARD_PURCHASE_LINES_CURSOR_MAX = 2048;
+
+/** The line view's filter: one month as the per-card view takes it, optionally one account. */
+export interface CardPurchaseLinesQuery extends CardPurchaseCardsQuery {
+  /** One resolved account (`accountId`); every card's lines without it. */
+  account?: string;
+  /** `date` (the default) or `amount`. */
+  sort?: CardPurchaseLineSort;
+  /** The previous page's `nextCursor`, with the same filter and sort. */
+  cursor?: string;
+}
+
+/**
+ * What a line cursor carries: the request it continues, the key of the last
+ * line listed (the next page starts strictly after it in the total order),
+ * and the depth of the next page: the lines the earlier pages listed, or more
+ * when more now sort at or before the key (the agent API's row budget counts
+ * it). It is opaque to callers but not signed, so the read recounts the depth
+ * from the key (`readCardPurchaseLines`). A cursor whose request differs
+ * from the one it is sent with is refused, never read as another request's.
+ */
+export interface CardPurchaseLinesCursor {
+  query: {
+    account: string | null;
+    period: string | null;
+    usageMonth: string | null;
+    sort: CardPurchaseLineSort;
+  };
+  after: CardPurchaseLineKey;
+  listed: number;
+}
+
+const validMonth = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && CARD_PURCHASE_PERIOD.test(value));
+
+/** base64url of the canonical JSON, the agent query cursor's form (cursor.ts). */
+export function encodeLinesCursor(cursor: CardPurchaseLinesCursor): string {
+  const { amount } = cursor.after;
+  return encodeCursorJson({
+    query: cursor.query,
+    after: {
+      date: cursor.after.date,
+      eventId: cursor.after.eventId,
+      amount: amount === null ? null : { unit: amount.unit, value: decimalToString(amount.value) },
+    },
+    listed: cursor.listed,
+  });
+}
+
+/** The cursor, or null for anything this read did not issue. */
+export function decodeLinesCursor(text: string): CardPurchaseLinesCursor | null {
+  const value = decodeCursorJson(text, CARD_PURCHASE_LINES_CURSOR_MAX);
+  if (!isRecord(value) || !hasExactKeys(value, ["query", "after", "listed"])) return null;
+  const { query, after, listed } = value;
+  if (
+    !isRecord(query) ||
+    !hasExactKeys(query, ["account", "period", "usageMonth", "sort"]) ||
+    !(
+      query["account"] === null ||
+      (typeof query["account"] === "string" && CARD_PURCHASE_ACCOUNT.test(query["account"]))
+    ) ||
+    !validMonth(query["period"]) ||
+    !validMonth(query["usageMonth"]) ||
+    (query["period"] === null) === (query["usageMonth"] === null) ||
+    !isOneOf(CARD_PURCHASE_LINE_SORTS)(query["sort"]) ||
+    !isRecord(after) ||
+    !hasExactKeys(after, ["date", "eventId", "amount"]) ||
+    !validLocalDateText(after["date"]) ||
+    typeof after["eventId"] !== "string" ||
+    !CARD_PURCHASE_EVENT_ID.test(after["eventId"]) ||
+    !isSafeInt(listed, 1, CARD_PURCHASE_SUMMARY_LIMIT)
+  )
+    return null;
+  let amount: CardPurchaseLineKey["amount"] = null;
+  const stored = after["amount"];
+  if (stored !== null) {
+    if (
+      !isRecord(stored) ||
+      !hasExactKeys(stored, ["unit", "value"]) ||
+      !isText(stored["unit"], 128) ||
+      !isText(stored["value"], 512)
+    )
+      return null;
+    const parsed = decimalFromString(stored["value"]);
+    // Only the canonical text this read writes.
+    if (!parsed.ok || decimalToString(parsed.value) !== stored["value"]) return null;
+    amount = { unit: stored["unit"], value: parsed.value };
+  }
+  return {
+    query: {
+      account: query["account"],
+      period: query["period"],
+      usageMonth: query["usageMonth"],
+      sort: query["sort"],
+    },
+    after: { date: after["date"], eventId: after["eventId"], amount },
+    listed,
+  };
+}
+
+/**
+ * Whether `text` is a line cursor this read issued for the request `input`
+ * (the same account, month and sort; an absent sort is `date`). The route and
+ * the agent service refuse any other before reading.
+ */
+export function linesCursorFits(text: string, input: CardPurchaseLinesQuery): boolean {
+  const cursor = decodeLinesCursor(text);
+  return (
+    cursor !== null &&
+    canonicalJson(cursor.query) ===
+      canonicalJson({
+        account: input.account ?? null,
+        period: input.period ?? null,
+        usageMonth: input.usageMonth ?? null,
+        sort: input.sort ?? "date",
+      })
+  );
+}
+
+/** The event's live purchase-recognition leg; an `unknown` revision has none. */
+const purchaseLeg = (event: LiveEvent): EconomicLeg | null =>
+  event.legs.find((leg) => leg.basis === "purchase-recognition") ?? null;
+
+/** Where the event sorts: its usage date, its id and its amount when that is exact. */
+function lineKey(event: LiveEvent): CardPurchaseLineKey {
+  const quantity = purchaseLeg(event)?.quantity;
+  return {
+    date: event.usageDate,
+    eventId: event.eventId,
+    amount:
+      quantity === undefined || quantity.value.status !== "exact"
+        ? null
+        : { unit: quantity.unitRef, value: quantity.value.value },
+  };
+}
+
+/**
+ * The line view (`view: lines`, ADR 0125 amendment): the per-card view's
+ * selection of one month, optionally narrowed to one resolved account, in
+ * one total order (`compareCardPurchaseLineKeys`, which compares exact
+ * decimals in the domain), one keyset page at a time. A page lists at most
+ * `CARD_PURCHASE_LINES_MAX` lines, and fewer when the answer would pass
+ * `CARD_PURCHASE_LINES_BYTES`. Per line: the usage date, the amount (or,
+ * without one, its reason and the last known amount), kind and state, the
+ * counterparty the page publishes (cut to a bound) and the event id.
+ *
+ * Reads: the month's selection (the page's, bounded at 10,000 live events),
+ * then for the listed lines only the page's own provider-row read and, for
+ * lines without an amount, its last-amount read, and the page's one pass over
+ * current usage for the unrecognised-row count. Sorting by amount happens
+ * here, over the bounded selection the figures already read: SQL never orders
+ * or adds an amount.
+ */
+export async function queryCardPurchaseLines(
+  sql: SqlExecutor,
+  input: CardPurchaseLinesQuery,
+): Promise<CardPurchaseLinesPage> {
+  return (await readCardPurchaseLines(sql, input)).page;
+}
+
+/**
+ * `queryCardPurchaseLines` with how deep the page starts: the larger of the
+ * lines the cursor says were listed and the lines that now sort at or before
+ * its key. The cursor is not signed, so its count alone could be rewritten;
+ * the position cannot, and the agent API's row budget counts this depth.
+ */
+export async function readCardPurchaseLines(
+  sql: SqlExecutor,
+  input: CardPurchaseLinesQuery,
+): Promise<{ page: CardPurchaseLinesPage; before: number }> {
+  const { period, usageMonth } = monthFilter(input);
+  const account = input.account ?? null;
+  if (account !== null && !CARD_PURCHASE_ACCOUNT.test(account)) throw new Error("invalid_account");
+  const sort = input.sort ?? "date";
+  if (!isOneOf(CARD_PURCHASE_LINE_SORTS)(sort)) throw new Error("invalid_sort");
+  const query: CardPurchaseLinesCursor["query"] = { account, period, usageMonth, sort };
+  const cursor = input.cursor === undefined ? null : decodeLinesCursor(input.cursor);
+  // A cursor continues only the request that issued it.
+  if (input.cursor !== undefined && !linesCursorFits(input.cursor, input))
+    throw new Error("invalid_cursor");
+
+  const month = await monthEvents(sql, period, usageMonth);
+  const events = account === null ? month : month.filter((event) => event.accountId === account);
+  const totals = cardPurchaseSummary(events.map(summaryRevision));
+  if (!totals.ok) throw new Error("card_purchase_amount_invalid");
+
+  const ordered = events
+    .map((event) => ({ event, key: lineKey(event) }))
+    .sort((a, b) => compareCardPurchaseLineKeys(sort, a.key, b.key));
+  const after =
+    cursor === null
+      ? ordered
+      : ordered.filter(({ key }) => compareCardPurchaseLineKeys(sort, key, cursor.after) > 0);
+  const listed = after.slice(0, CARD_PURCHASE_LINES_MAX);
+  const before = Math.max(cursor?.listed ?? 0, ordered.length - after.length);
+
+  const pinned = (entries: readonly { event: LiveEvent }[]) =>
+    JSON.stringify(
+      entries.map(({ event }) => ({ eventId: event.eventId, revision: event.revision })),
+    );
+  const legless = listed.filter(({ event }) => purchaseLeg(event) === null);
+  const [keyRows, amountRows] = await Promise.all([
+    listed.length === 0 ? [] : sql.all<KeyRow>(KEYS_SQL, [pinned(listed)]),
+    legless.length === 0 ? [] : sql.all<AmountRow>(LAST_AMOUNT_SQL, [pinned(legless)]),
+  ]);
+  const { unrecognizedCurrentRows } = await currentUsage(sql, []);
+
+  const lines = listed.map(({ event }): CardPurchaseLine => {
+    const leg = purchaseLeg(event);
+    const last =
+      leg === null ? amountRows.find((row) => row.event_id === event.eventId) : undefined;
+    // Posted rows before pending ones, as the page lists them (KEYS_SQL).
+    const counterparty = lineCounterparty(
+      keyRows.find((row) => row.event_id === event.eventId && row.counterparty !== null)
+        ?.counterparty ?? null,
+    );
+    return {
+      eventId: event.eventId,
+      date: event.usageDate,
+      kind: event.kind,
+      state: event.state,
+      amount:
+        leg === null
+          ? { unit: null, status: "missing", reason: event.unknownReason ?? "leg_absent" }
+          : compactAmount(leg.quantity),
+      ...(last === undefined
+        ? {}
+        : {
+            lastKnown: compactAmount(
+              quantity(
+                last.unit_ref,
+                last.value_status,
+                last.coefficient,
+                last.scale,
+                last.value_reason_code,
+              ),
+            ),
+          }),
+      counterparty: counterparty.text,
+      ...(counterparty.cut ? { counterpartyCut: true as const } : {}),
+      ...(account === null ? { accountId: event.accountId } : {}),
+    };
+  });
+
+  const nextCursor = (count: number): string | null => {
+    if (count >= after.length) return null;
+    const text = encodeLinesCursor({
+      query,
+      after: listed[count - 1]!.key,
+      // Held at the summary bound, past every grant's maxRows: a cursor that
+      // claims a deeper count still continues rather than failing the read.
+      listed: Math.min(before + count, CARD_PURCHASE_SUMMARY_LIMIT),
+    });
+    // A cursor this read would refuse is never handed out.
+    if (decodeLinesCursor(text) === null) throw new Error("card_purchase_cursor_invalid");
+    return text;
+  };
+  const page = (count: number): CardPurchaseLinesPage => ({
+    view: "lines",
+    frame: usageMonth !== null ? "usage-month" : "statement-period",
+    sort,
+    accountId: account,
+    lines: lines.slice(0, count),
+    nextCursor: nextCursor(count),
+    events: events.length,
+    unresolved: totals.summary.unresolved,
+    figures: totals.summary.units.map(cardFigures),
+    coverage: {
+      scope: "card-purchase-recognition",
+      completeTransactionHistory: false,
+      unrecognizedCurrentRows,
+      refundsAllocated: false,
+    },
+  });
+  // As many lines as fit the byte bound, at least one so paging moves on.
+  const bytes = (answer: CardPurchaseLinesPage) =>
+    new TextEncoder().encode(JSON.stringify(answer)).length;
+  let count = lines.length;
+  let answer = page(count);
+  while (count > 1 && bytes(answer) > CARD_PURCHASE_LINES_BYTES) {
+    count -= 1;
+    answer = page(count);
+  }
+  return { page: answer, before };
 }

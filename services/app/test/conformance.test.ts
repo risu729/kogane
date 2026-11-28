@@ -79,6 +79,8 @@ const production: ConformanceTarget = {
     reportedStateOnDate: true,
     reconstructedStateOnDate: true,
     reportArtifacts: true,
+    pendingDecisions: true,
+    changesSince: true,
     eventsV2: true,
     rewardsV2: true,
     cardPurchaseRecognition: true,
@@ -141,6 +143,7 @@ describe("observation API conformance: local synthetic snapshot", () => {
 describe("shared contract pin", () => {
   it("matches the request schema pinned in the frontend package", () => {
     expect(LIST_REQUEST_SCHEMA).toEqual({
+      "/api/overview": { detail: "sharedQuery" },
       "/api/transactions": {
         source: "collectionFilters",
         account: "collectionFilters",
@@ -159,6 +162,7 @@ describe("shared contract pin", () => {
         offset: "paginationVersion:offset-v1",
         latestOffset: "paginationVersion:offset-v1",
         identityRead: "identityReadModes",
+        detail: "sharedQuery",
       },
       "/api/positions": {
         source: "collectionFilters",
@@ -177,6 +181,7 @@ describe("shared contract pin", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
       },
       "/api/v2/balances/history": {
         source: "collectionFilters",
@@ -184,6 +189,15 @@ describe("shared contract pin", () => {
         instrument: "collectionFilters",
         metric: "collectionFilters",
         view: "measureViews",
+        identityRead: "identityReadModes",
+        cursor: "balancesV2",
+        limit: "balancesV2",
+        detail: "balancesV2",
+      },
+      "/api/v2/balances/cash": {
+        source: "collectionFilters",
+        account: "collectionFilters",
+        instrument: "collectionFilters",
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
@@ -222,6 +236,8 @@ describe("shared contract pin", () => {
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
       reportArtifacts: false,
+      pendingDecisions: false,
+      changesSince: false,
       eventsV2: false,
       opsApi: false,
     });

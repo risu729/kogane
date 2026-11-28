@@ -1,6 +1,6 @@
 // Local fixture values simulate the financial API contract for rendering tests.
 // Local synthetic fixtures only. No connection to a user browser or real account.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -15,6 +15,7 @@ import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared
 import { INSTRUMENT_COVERAGE_PATH } from "../../../packages/observation-shared/src/instrument-coverage-contract.ts";
 import type { InstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { INSTRUMENT_CANDIDATE_POLICY } from "../../../packages/domain/src/instrument-candidates.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -30,13 +31,18 @@ const pageTwo = "IDENTITY_SECOND_PAGE";
 // The coverage contract bounds a source at 128 characters.
 const instrumentSource = "synthetic-instrument-source";
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("protected identity client on local synthetic server", () => {
   const fixture = buildFixture();
   const observation = fixture.store.db
     .query("SELECT id FROM transaction_observations LIMIT 1")
     .get() as { id: number };
   const requests: string[] = [];
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   beforeAll(async () => {
@@ -183,7 +189,6 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();
@@ -309,16 +314,25 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         page.getByRole("button", { name: "絞り込む", exact: true }).click(),
       ]);
       expect(new URL(page.url()).search).toBe("");
-      await page.getByRole("button", { name: "次の100件", exact: true }).last().click();
+      // The list renders after its response arrives, and until then the only
+      // 次の100件 is the 整理状況 pager's, disabled with no next page. Wait for
+      // the filtered rows, then press the list's own pager.
+      await page
+        .locator("article")
+        .filter({ hasText: `${freshLabel}-0` })
+        .filter({ hasText: "sbi-securities · " })
+        .waitFor();
+      const listPages = page.getByRole("group", { name: "一覧のページ", exact: true });
+      await listPages.getByRole("button", { name: "次の100件", exact: true }).click();
       await page.getByRole("heading", { name: new RegExp(pageTwo) }).waitFor();
-      await page.getByRole("button", { name: "前の100件", exact: true }).last().click();
+      await listPages.getByRole("button", { name: "前の100件", exact: true }).click();
       await page
         .getByRole("heading", { name: new RegExp(freshLabel) })
         .first()
         .waitFor();
       await page.getByRole("button", { name: "通貨・銘柄", exact: true }).click();
       await page.getByRole("heading", { name: /Synthetic foreign security/ }).waitFor();
-      await page.getByRole("button", { name: "次の100件", exact: true }).last().click();
+      await listPages.getByRole("button", { name: "次の100件", exact: true }).click();
       await page.getByRole("heading", { name: new RegExp(pageTwo) }).waitFor();
       await page.getByRole("link", { name: "代表記録・原本を確認", exact: true }).click();
       await page.waitForURL(`**/observations/transaction/${observation.id}`);
@@ -366,7 +380,10 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         await page.locator("main").getByRole("alert").waitFor();
         expect(await page.locator("main").innerText()).not.toContain(freshLabel);
         failure = 503;
-        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+        await page
+          .locator("main")
+          .getByRole("button", { name: "口座を再試行", exact: true })
+          .click();
         await page
           .locator("main")
           .getByText(/HTTP 503/)
@@ -377,7 +394,10 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         await page.locator("main").getByRole("alert").waitFor();
         expect(await page.locator("main").innerText()).not.toContain(freshLabel);
         failure = 0;
-        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+        await page
+          .locator("main")
+          .getByRole("button", { name: "口座を再試行", exact: true })
+          .click();
         await page
           .getByRole("heading", { name: new RegExp(freshLabel) })
           .first()
@@ -427,8 +447,20 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       await page.getByText(/^整理状況を読み込めませんでした.*408/).waitFor();
       await page.getByText(/^銘柄の整理状況を読み込めませんでした.*408/).waitFor();
       await page.getByText(/取得経路の対応を読み込めませんでした.*408/).waitFor();
+      // Each retry names the read it repeats.
+      for (const label of ["口座", "整理状況", "銘柄の整理状況", "取得経路の対応"])
+        expect(
+          await page
+            .locator("main")
+            .getByRole("button", { name: `${label}を再試行`, exact: true })
+            .count(),
+        ).toBe(1);
+      // Those four, and no other retry.
       expect(
-        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).count(),
+        await page
+          .locator("main")
+          .getByRole("button", { name: /再試行/ })
+          .count(),
       ).toBe(4);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
