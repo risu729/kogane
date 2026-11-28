@@ -88,6 +88,7 @@ parse/publication and the production reader across two overlapping captures.
 A USD statement of 12 rows was observed in the official UI: page 2 changes
 only `pageNumber` and holds the remainder rows, as for yen. The foreign chain
 is now walked like the yen chain, and `sbi_foreign_cash_pagination_unobserved`
-is retired. Each page must repeat page 1's totals, so a row arriving between
-requests fails closed (`sbi_cash_history_total`), since USD rows carry no id
-(docs/sources/sbi-securities.md, 2026-11-28).
+is retired. USD rows carry no id, so each page must repeat page 1's totals and
+the date must step down strictly at every page boundary; a row arriving
+between requests or a date spanning a boundary fails closed
+(`sbi_cash_history_pagination`) (docs/sources/sbi-securities.md, 2026-11-28).

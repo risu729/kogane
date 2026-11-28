@@ -277,11 +277,17 @@ export function validateCashHistory(value: unknown, kind: CashHistoryKind): Cash
           if (JSON.stringify(current.page[key]) !== JSON.stringify(first.page[key]))
             throw new CashHistoryError("sbi_cash_history_total");
       }
-      for (const rawRow of current.records) {
+      for (const [rowIndex, rawRow] of current.records.entries()) {
         const row = object(rawRow, kind === "yen" ? YEN_ROW_KEYS : FOREIGN_ROW_KEYS);
         const asOf = cashRowDate(row, kind, "cash history row date");
         if (asOf < from || asOf > to || asOf > previousDate)
           throw new CashHistoryError("sbi_cash_history_range");
+        // USD rows carry no id, and the provider's order within one date was
+        // not observed. A date that spans a page boundary could repeat one row
+        // and drop another, or be a repeated page, so only a strict date step
+        // proves the next page continues the previous one.
+        if (kind === "foreign" && index > 0 && rowIndex === 0 && asOf === previousDate)
+          throw new CashHistoryError("sbi_cash_history_pagination");
         previousDate = asOf;
         if (kind === "yen") {
           const id = strictSafeInteger(row["did"], "cash history id", { minimum: 1 });

@@ -137,7 +137,7 @@ test("missing, changed or repeated raw inputs cannot seal successful cash covera
 });
 
 /** Twelve synthetic USD rows as the provider pages them: ten, then two, newest first. */
-function twoPageForeign(secondPageTotal = 12) {
+function twoPageForeign(inserted = false) {
   const body = fixture();
   const row = body.pages[0].items[2];
   const page = (rows: number, first: number, totalCount: number) => ({
@@ -146,11 +146,12 @@ function twoPageForeign(secondPageTotal = 12) {
     businessErrorMessage: null,
     items: Array.from({ length: rows }, (_, index) => ({
       ...row,
-      valueDate: `2099${String(12 - Math.floor((first + index) / 3)).padStart(2, "0")}01`,
+      valueDate: `2099${String(12 - Math.floor((first + index) / 2)).padStart(2, "0")}01`,
     })),
   });
   body.totalCount = 12;
-  body.pages = [page(10, 0, 12), page(2, 10, secondPageTotal)];
+  // A row inserted after page 1 pushes one more row onto page 2.
+  body.pages = [page(10, 0, 12), inserted ? page(3, 9, 13) : page(2, 10, 12)];
   return body;
 }
 
@@ -178,9 +179,10 @@ test("a USD statement over ten rows is collected page by page, like the yen stat
 });
 
 test("a USD row arriving between page requests fails closed after keeping both pages", async () => {
-  // Without row ids, a moved page boundary shows only as a changed total.
+  // Without row ids, a moved page boundary shows as a total that changed
+  // between pages (and here also as a date repeated across the boundary).
   const retained: Artifact[] = [];
-  const body = twoPageForeign(13);
+  const body = twoPageForeign(true);
   await expect(
     collectCashHistory({
       kind: "foreign",
@@ -188,10 +190,10 @@ test("a USD row arriving between page requests fails closed after keeping both p
       retain: (artifact) => retained.push(artifact),
       fetchPage: async (_, number) => encoded(body.pages[number - 1]),
     }),
-  ).rejects.toThrow("sbi_cash_history_total");
+  ).rejects.toThrow("sbi_cash_history_pagination");
   expect(retained.map((a) => a.role)).toEqual(["provider_response", "provider_response"]);
-  expect(safeFailureCode(new CashHistoryError("sbi_cash_history_total"))).toBe(
-    "sbi_cash_history_total",
+  expect(safeFailureCode(new CashHistoryError("sbi_cash_history_pagination"))).toBe(
+    "sbi_cash_history_pagination",
   );
 });
 

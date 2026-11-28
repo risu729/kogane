@@ -115,7 +115,7 @@ interface Scenario {
   code: string;
 }
 const scenarios: Scenario[] = [
-  { name: "foreign-shifted-page", unit: "cash-history-foreign", code: "sbi_cash_history_total" },
+  { name: "foreign-repeated-page", unit: "cash-history-foreign", code: "sbi_cash_history_total" },
   { name: "foreign-gain", unit: "income-history-gains", code: "sbi_income_history_count" },
   {
     name: "fund-distribution",
@@ -179,7 +179,7 @@ async function supplements(scenario?: Scenario) {
               totalTransPaymentCount: "0",
             }
           : body.pages[0];
-      if (scenario?.name === "foreign-shifted-page" && kind === "foreign") {
+      if (scenario?.name === "foreign-repeated-page" && kind === "foreign") {
         page.items = Array.from({ length: 10 }, () => page.items[0]);
         page.pageCount = 2;
         page.totalCount = 11;

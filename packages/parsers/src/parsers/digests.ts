@@ -93,7 +93,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts":
       "9a9dec469cd4a4d7d70b8bc9b9b52d9ef9dae5e965b036e1d89be5138101a86a",
     "poc/observation-pipeline/src/parsers/sbi-cash-history-schema.ts":
-      "97d2b04b645ef7b964b5c3f2f95a4ed8f90eb6eb6ea9ef17a75c6b3623c53f77",
+      "c6b44989efb795e599efc53dec51b36fe05a947e06bd95f5a49d5abbfcf581e6",
     "poc/observation-pipeline/src/parsers/sbi-cash-history.ts":
       "9ecc82431be5aef6ab02d2a0808965917f268cbedb7965cca60789a3d1d94451",
     "poc/observation-pipeline/src/parsers/sbi-documents.ts":
@@ -580,7 +580,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "sbi-foreign-cash-history": {
       version: "0.1.4",
-      codeDigest: "0a973e395969ac56f96c5b636979b41423739d7ead95c86bb1d7fb58d3b99e11",
+      codeDigest: "04a496890f75bafcd4243e9510cd42039a3813dc92f28e0856ecf89e61a78f12",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -828,7 +828,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "sbi-yen-detail-history": {
       version: "1.1.4",
-      codeDigest: "0bcddc1dfd3bd9ea7e214732354d6a57c98e674e5bde7865ad344200b2ebf19d",
+      codeDigest: "a0d0aba98f37a4b2bf20cd9b0969ce2ef05e241fae8d8e697508c93f976ba880",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

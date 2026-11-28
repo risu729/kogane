@@ -1264,9 +1264,15 @@ The collector now walks the declared USD chain exactly as the yen chain, with
 the USD filter `currencyCode=011` and only `pageNumber` changing, retaining
 each page under its page-qualified key. Every page must repeat page 1's
 `totalCount` and `pageCount` and hold exactly its share of rows, and dates may
-not rise across pages. USD rows have no id, so a row arriving between page
-requests shows only as a changed total and fails closed with
-`sbi_cash_history_total`. Occurrence identities count across the whole bundle,
-so a row keeps its identity when a later capture moves it to another page.
+not rise across pages. USD rows have no id and the provider's order within one
+date was not observed, so the date must also step down strictly at each page
+boundary: one date spanning a boundary could repeat one row and drop another,
+or hide a repeated page. Both a total that changes between pages (a row
+arriving between requests) and a date spanning a boundary fail closed with
+`sbi_cash_history_pagination`; the statement then stays unpublished until the
+boundary moves. A row added and another removed between requests with the
+total unchanged is not detectable without ids; the statement is append-only
+in observed use. Occurrence identities count across the whole bundle, so a row
+keeps its identity when a later capture moves it to another page.
 `sbi-foreign-cash-history@0.1.4` and `sbi-yen-detail-history@1.1.4` (shared
 schema module) publish these bundles; neither has a pinned snapshot policy.

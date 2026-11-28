@@ -152,7 +152,7 @@ function twoPageForeign() {
     businessErrorMessage: null,
     items: Array.from({ length: rows }, (_, index) => ({
       ...row,
-      valueDate: `2099${String(12 - Math.floor((first + index) / 3)).padStart(2, "0")}01`,
+      valueDate: `2099${String(12 - Math.floor((first + index) / 2)).padStart(2, "0")}01`,
     })),
   });
   fixture.totalCount = 12;
@@ -174,17 +174,21 @@ test("a two-page USD statement publishes every row with one identity sequence", 
   const last = result.observations[11]!;
   expect(last.rawLocator).toBe("json:$.pages[1].items[1]");
   expect(last.extra).toMatchObject({ _kogane: { providerPageNumber: 2 } });
-  // Identical rows on both sides of the page boundary keep counting up.
+  // Identical rows keep counting up by occurrence, page by page.
   const ids = result.observations.map((row) => (row.kind === "transaction" ? row.externalId : ""));
   expect(new Set(ids).size).toBe(12);
-  expect(ids[9]!.endsWith(":1")).toBe(true);
-  expect(ids[10]!.endsWith(":2")).toBe(true);
+  expect(ids[10]!.endsWith(":1")).toBe(true);
+  expect(ids[11]!.endsWith(":2")).toBe(true);
   for (const mutate of [
     (b: any) => b.pages.pop(),
     (b: any) => b.pages[1].items.pop(),
     (b: any) => (b.pages[1].totalCount = 13),
     (b: any) => (b.pages[1].pageCount = 3),
     (b: any) => (b.pages[1].items[0].valueDate = "20991231"),
+    // One date spanning the boundary: the provider's order within a date is
+    // unobserved, so a repeated or dropped row could not be told apart.
+    (b: any) => (b.pages[1].items[0].valueDate = b.pages[0].items[9].valueDate),
+    (b: any) => (b.pages[1] = { ...b.pages[0], items: b.pages[0].items.slice(8) }),
   ]) {
     const fixture = twoPageForeign();
     mutate(fixture);
