@@ -136,29 +136,64 @@ test("missing, changed or repeated raw inputs cannot seal successful cash covera
   }
 });
 
-test("unobserved USD continuation fails closed after keeping only the known-schema page", async () => {
+/** Twelve synthetic USD rows as the provider pages them: ten, then two, newest first. */
+function twoPageForeign(inserted = false) {
   const body = fixture();
-  body.pages[0].items = Array.from({ length: 10 }, () => body.pages[0].items[0]);
-  body.pages[0].pageCount = 2;
-  body.pages[0].totalCount = 11;
+  const row = body.pages[0].items[2];
+  const page = (rows: number, first: number, totalCount: number) => ({
+    pageCount: 2,
+    totalCount,
+    businessErrorMessage: null,
+    items: Array.from({ length: rows }, (_, index) => ({
+      ...row,
+      valueDate: `2099${String(12 - Math.floor((first + index) / 2)).padStart(2, "0")}01`,
+    })),
+  });
+  body.totalCount = 12;
+  // A row inserted after page 1 pushes one more row onto page 2.
+  body.pages = [page(10, 0, 12), inserted ? page(3, 9, 13) : page(2, 10, 12)];
+  return body;
+}
+
+test("a USD statement over ten rows is collected page by page, like the yen statement", async () => {
+  const body = twoPageForeign();
+  const { artifacts, calls } = await capture(body);
+  expect(calls.map((call) => (call as [unknown, number])[1])).toEqual([1, 2]);
+  const sources = artifacts.filter((a) => a.role === "provider_response");
+  expect(sources.map((a) => a.artifactKey)).toEqual([
+    "foreign-cash-history-page-0001-source.json",
+    "foreign-cash-history-page-0002-source.json",
+  ]);
+  const bundle = artifacts.find((a) => a.dataset === "foreign-cash-history")!;
+  expect(bundle.inputArtifactKeys).toEqual([
+    "foreign-cash-history-page-0001-source.json",
+    "foreign-cash-history-page-0002-source.json",
+  ]);
+  expect((bundle.body as { pages: unknown[] }).pages).toHaveLength(2);
+  expect(await cashHistoryInventoryComplete(artifacts)).toBe(true);
+  // Page 2 differs from the observed page-1 request only in its page number.
+  const range = cashRetentionRange("2099-12-31", "foreign");
+  const first = Object.fromEntries(cashHistoryRequestUrl("foreign", range, 1).searchParams);
+  const second = Object.fromEntries(cashHistoryRequestUrl("foreign", range, 2).searchParams);
+  expect(second).toEqual({ ...first, pageNumber: "2" });
+});
+
+test("a USD row arriving between page requests fails closed after keeping both pages", async () => {
+  // Without row ids, a moved page boundary shows as a total that changed
+  // between pages (and here also as a date repeated across the boundary).
   const retained: Artifact[] = [];
-  const calls: number[] = [];
+  const body = twoPageForeign(true);
   await expect(
     collectCashHistory({
       kind: "foreign",
       today: "2099-12-31",
       retain: (artifact) => retained.push(artifact),
-      fetchPage: async (_, number) => {
-        calls.push(number);
-        return encoded(body.pages[0]);
-      },
+      fetchPage: async (_, number) => encoded(body.pages[number - 1]),
     }),
-  ).rejects.toThrow("sbi_foreign_cash_pagination_unobserved");
-  expect(calls).toEqual([1]);
-  expect(retained).toHaveLength(1);
-  expect(retained[0]!.role).toBe("provider_response");
-  expect(safeFailureCode(new CashHistoryError("sbi_foreign_cash_pagination_unobserved"))).toBe(
-    "sbi_foreign_cash_pagination_unobserved",
+  ).rejects.toThrow("sbi_cash_history_pagination");
+  expect(retained.map((a) => a.role)).toEqual(["provider_response", "provider_response"]);
+  expect(safeFailureCode(new CashHistoryError("sbi_cash_history_pagination"))).toBe(
+    "sbi_cash_history_pagination",
   );
 });
 

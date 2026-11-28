@@ -142,6 +142,62 @@ test("USD keeps exact signed-direction semantics and identical-row multiplicity 
   );
 });
 
+/** Twelve synthetic USD rows across the provider's two ten-row pages. */
+function twoPageForeign() {
+  const fixture = foreignFixture();
+  const row = fixture.pages[0].items[2];
+  const page = (rows: number, first: number) => ({
+    pageCount: 2,
+    totalCount: 12,
+    businessErrorMessage: null,
+    items: Array.from({ length: rows }, (_, index) => ({
+      ...row,
+      valueDate: `2099${String(12 - Math.floor((first + index) / 2)).padStart(2, "0")}01`,
+    })),
+  });
+  fixture.totalCount = 12;
+  fixture.pages = [page(10, 0), page(2, 10)];
+  return fixture;
+}
+
+test("a two-page USD statement publishes every row with one identity sequence", () => {
+  const result = sbiForeignCashHistory.parse(
+    encoded(twoPageForeign()),
+    cashMeta("foreign-cash-history"),
+  );
+  expect(result.observations).toHaveLength(12);
+  expect(result.coverage?.[0]).toMatchObject({
+    completeness: "complete",
+    expectedCount: 12,
+    observedCount: 12,
+  });
+  const last = result.observations[11]!;
+  expect(last.rawLocator).toBe("json:$.pages[1].items[1]");
+  expect(last.extra).toMatchObject({ _kogane: { providerPageNumber: 2 } });
+  // Identical rows keep counting up by occurrence, page by page.
+  const ids = result.observations.map((row) => (row.kind === "transaction" ? row.externalId : ""));
+  expect(new Set(ids).size).toBe(12);
+  expect(ids[10]!.endsWith(":1")).toBe(true);
+  expect(ids[11]!.endsWith(":2")).toBe(true);
+  for (const mutate of [
+    (b: any) => b.pages.pop(),
+    (b: any) => b.pages[1].items.pop(),
+    (b: any) => (b.pages[1].totalCount = 13),
+    (b: any) => (b.pages[1].pageCount = 3),
+    (b: any) => (b.pages[1].items[0].valueDate = "20991231"),
+    // One date spanning the boundary: the provider's order within a date is
+    // unobserved, so a repeated or dropped row could not be told apart.
+    (b: any) => (b.pages[1].items[0].valueDate = b.pages[0].items[9].valueDate),
+    (b: any) => (b.pages[1] = { ...b.pages[0], items: b.pages[0].items.slice(8) }),
+  ]) {
+    const fixture = twoPageForeign();
+    mutate(fixture);
+    expect(() =>
+      sbiForeignCashHistory.parse(encoded(fixture), cashMeta("foreign-cash-history")),
+    ).toThrow(/sbi_cash_history_/u);
+  }
+});
+
 test("schema, unknown codes, numeric rounding, totals, dates and pagination fail closed without provider text", () => {
   for (const mutate of [
     (b: any) => b.pages.pop(),

@@ -427,8 +427,6 @@ export function cashHistoryRequestUrl(
   range: { from: string; to: string },
   pageNumber: number,
 ): URL {
-  if (kind === "foreign" && pageNumber !== 1)
-    throw new CashHistoryError("sbi_foreign_cash_pagination_unobserved");
   const url = new URL(
     kind === "yen" ? "/banking/api/yen/detail/query" : "/banking/api/fc/detail-history/search",
     MEMBER_SITE_ORIGIN,

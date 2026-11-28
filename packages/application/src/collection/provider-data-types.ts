@@ -124,8 +124,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
     // Scheduled runs publish every retained yen page and the USD statement
-    // with complete coverage (#1226). A USD statement longer than one page has
-    // not been observed and is refused, so this stays partial under #446.
+    // with complete coverage (#1226), every USD page since 2026-11-28. Positive
+    // yen transfer controls and non-USD statements are unobserved, so this
+    // stays partial under #446.
     partial(
       "settlement_cash",
       ["sbi-foreign-cash-balances", "sbi-yen-detail-history", "sbi-foreign-cash-history"],
