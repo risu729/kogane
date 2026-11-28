@@ -643,8 +643,10 @@ Limits:
   `no_debit_in_window` when no other debit falls in its window and
   `no_equal_amount_debit` when one does. Telling them apart would mean
   summing the window's debits, which the sweep does not do.
-- **Per tick, not per store.** The cursor wraps at the last statement, so a
-  statement is counted again on every pass; a tick that stops at 500 written
+- **Per tick, not per store.** A pass that reaches the last statement
+  starts again from the first only once something it reads moves (see
+  [Cost](#cost)), so a statement is counted again on every such pass, and a
+  tick the pass gate skips counts nothing; a tick that stops at 500 written
   candidates leaves the rest of its page uncounted until the next tick.
 - **The bank read stops at 1,000 rows.** A statement whose window holds more
   counts as `no_equal_amount_debit` when none of those rows matches.
@@ -1344,7 +1346,7 @@ exactly those expressions (`card_settlement_candidates_statement_period`), so
 its text is unchanged and each statement's reviews are found by key.
 
 What still grows with history: `card_statement_facts` ranks every captured
-statement total once per request and once per sweep tick (74 ms here; the
+statement total once per request and once per sweep page (74 ms here; the
 scan of every balance observation is 4 ms of it, and neither a partial index
 on the statement metric nor an index on `metric` changed the time), and
 `card_bank_debit_facts` ranks every adapter's rows once per statement of the sweep's
@@ -1352,6 +1354,35 @@ page (51 ms here, so a full page of 100 is about 5 s of D1 time a tick).
 Candidates accrue one per recapture of a paid bill, reached by the index. The
 rest of the purchases page is the current card usage pass
 ([read model](read-model.md#cost)).
+
+The sweep reads its pages only while something may have changed (ADR 0129,
+slice 3; migration `0109_processor_sweep_passes.sql`;
+`services/processor/src/sweep-pass.ts`). A pass that starts from the first
+statement records the CORE revision (source revision, visibility revision,
+core epoch) and the sweep's policy it starts at, and a pass that reaches the
+last statement marks that start clean. While both still equal the clean ones,
+a tick reads the card information mark, then its cursor and the gate in one
+statement, and stops. The statements, debits, owners and decisions it pages through are on
+the CORE dependency ledger. The rest is in the policy:
+`CARD_SETTLEMENT_SWEEP_POLICY` (the matching, debit-account and card
+information reader versions, a digest of the views the sweep's code reads,
+pinned against the migrated schema by `test/sweep-pass.test.ts`, and the
+sweep's own version) and the highest card information reading id
+(`CARD_DEBIT_READING_MARK_SQL`), since the debit-account lane writes those
+readings in its own time and off the ledger. The candidates and debit-account
+evidence it checks for are written only by the sweep and never deleted. So
+the pass that started there saw what a new one would see. The sweep's own
+writes are off the ledger and move nothing; a deploy that changes the policy
+runs a pass again; a change to the code that no version carries (a
+statement's text) is applied by the pass after the next CORE write, or by a
+bump of `sweep-v1`. A pass's end names the token its start recorded, so a pass
+started by an overlapping tick is never marked clean by another's end. A
+tick that stops at the write budget leaves the cursor on its statement, so a
+pass that reaches the end has written everything.
+`services/processor/test/sweep-pass.test.ts` checks that a quiet tick
+prepares those two statements only. In production on 2026-11-24 a pass over
+52 current statements read about 86,000 rows of `card_statement_facts` on
+every 5-minute tick before the gate.
 
 The list of statements without a candidate costs one ranking of
 `card_statement_facts` (as the sweep's page does, the candidate check keyed

@@ -476,6 +476,150 @@ The draft's open questions, as the accepted design answers them:
   24,401), reward buckets 290 and 530 (from 8,571 and 17,101), the walk 968
   and 1,448 once per revision.
 
+## Slice 3 as built (2026-11-24)
+
+- After slice 2, one hour of ticks (06:35 to 07:35 UTC) read about 2.5M
+  rows a tick, 65% of it in the card settlement sweep and the purchase
+  recognition pass: both page through their whole input every tick (52
+  current statements, about 86k rows of `card_statement_facts`; the current
+  card usage rows) because one pass fits in one tick and the cursor wraps.
+- Gate, not high-water mark: `processor_sweep_passes` (migration 0109) holds
+  one row per sweep. A pass from the first row records the CORE revision
+  (source revision, visibility revision, core epoch), the sweep's policy and a
+  token; a pass that reaches the end with its work done marks that start
+  clean, naming the token, so an overlapping tick's pass is never marked by
+  another's end. While the revision and the policy equal the clean ones, a
+  tick at cursor 0 reads the gate row and stops. What the sweeps read off the
+  CORE dependency ledger is folded in or argued:
+  - the policy carries code-owned versions (the matching, debit-account and
+    card information reader versions; the recognition writer and the
+    matcher's release and options) and a digest of the views each sweep's
+    code reads, which `test/sweep-pass.test.ts` checks against the migrated
+    schema, so a migration that redefines one of them fails until the pin
+    moves;
+  - the settlement policy also carries the highest card information reading
+    id, since the debit-account lane writes those readings off the ledger;
+  - the settlement candidates and debit-account evidence are written only by
+    that sweep, the purchase proposals only added (by the sweep, or under
+    other digests by the reconciliation sweep) or decided through a decision
+    revision, and none is deleted.
+
+  A pass whose own writes moved the revision (purchase events) is followed by
+  one more, which writes nothing and closes the gate. A tick reads its cursor
+  and the recorded pass in one statement. The purchase cursor leaves a page
+  only after its candidates and merges, so a tick cut off before then reads
+  the page again. A purchase pass in which a tick left work for later (the
+  candidate budget full, more linked events than one merge takes, any failed
+  write, or a candidate or merge step that threw, counted as a failure so one
+  failing page never holds the cursor) marks nothing clean; a failure that repeats keeps that pass
+  reading everything each tick. The settlement sweep's write budget stops the
+  cursor on its statement, so a pass that reaches the end has written
+  everything. A code change that no version string carries (a statement's
+  text written in TypeScript, a domain rule) runs no pass by itself: the pass
+  after the next CORE write applies it, or a bump of the sweep's version.
+
+- Decision 7's "proportional to new rows" is not reached: a tick in which the
+  revision moved still runs a whole pass. Quiet ticks cost the gate read; the
+  first measured hour of production had a moving revision on every tick (the
+  parse backlog left by the stop: 1,080 pending parse jobs at 13:05 UTC, about
+  150 parses an hour), so the effect shows only once that backlog is done.
+  Reading only what changed would need the statement and usage readings keyed
+  by what moved, which the sweeps' rankings do not offer; it stays open under
+  issue #1491 with slice 4.
+- Measured on the harness: a quiet settlement tick prepares two statements
+  (the card information mark, then the cursor and the gate together), and a quiet purchase
+  tick reads the gate instead of the usage page, checked by
+  `services/processor/test/sweep-pass.test.ts`.
+- Not changed here: the stale-key read of the retirement pass, which already
+  skips while its own revision check holds.
+
+## Decision 4 as built (2026-11-25)
+
+- After slice 3, the Processor's hourly read guard (decision 8) was holding
+  the derived lanes to one tick an hour (24-hour sum above 300M since 18:05
+  UTC on 2026-11-24), at about 13M rows an hour. About 9.4M of such a tick
+  (02:02 UTC on 2026-11-25) was the Vpass binding insert of the identity
+  sweep. All rows read were billed, the period's included rows being spent
+  (43B since 2026-10-25), so 2026-11-24's 1.0B rows cost about $1.00 and the
+  guarded rate about $0.33 a day.
+- `VPASS_BINDING_INSERT_SQL` is the shipped text with its three joins as
+  `CROSS JOIN`s; the view is unchanged and there is no migration. Its plan's
+  only scan is the batch's candidates (checked by `tick-rows-read.test.ts`).
+  On the harness, for a batch of every policy-2 identity run (260 and 510),
+  its select reads 37 and 38 rows per candidate at 30 and 60 days, against
+  1,766 and 3,500 before. The insert adds a constant per candidate on top
+  (the observation and pin probes, and per pinned row the provenance and
+  revision triggers), so a pinned Vpass candidate costs an estimated twice
+  that (read from the plans, not measured), still flat in history. The table's call, which reaches no Vpass run, reads
+  3 rows against 75,890 and 283,740. The frozen text selects the same rows on
+  both scaled stores, for every policy-2 identity run whether or not its
+  parse is empty or already pinned. Option 2a named
+  `vpass-binding-view.test.ts`'s random stores too; they hold only the view's
+  own tables, not identity runs or parses, and a `CROSS JOIN` with an `ON`
+  clause is an inner join in SQLite, so only the order, not the rows, can
+  differ.
+
+## Guard counts the tick first (2026-11-25)
+
+- From 03:00 UTC on 2026-11-25, every 5-minute tick ran the derived lanes and
+  read about 9.5M rows, though the guard was over its budget. The identity
+  sweep's binding insert left CORE answering every later statement of the
+  tick as overloaded, including the guard's own record at the tick's end, so
+  the hour never showed a tick and each tick ran as its first.
+- A scheduled tick now counts itself in its hour before any lane, even when
+  the budget read failed (`claimScheduledTick`,
+  `services/processor/src/read-budget.ts`), and the record at the end adds
+  only rows. A count that fails is logged at error level
+  (`read_budget_claim_failed`); over the budget the tick then runs as
+  throttled. The count's answer also keeps two ticks that overlap at the start
+  of an hour from both running the derived lanes.
+- No migration: the count writes the same `processor_read_budget_hours` row.
+  The rows of a tick whose end record fails are still lost from the sum, so
+  the guard can release early after such an hour; the hour's throttling does
+  not depend on them.
+- Once the parse backlog drained (04:25 UTC), the card sweeps still read their
+  whole input on every hourly tick (about 1M rows each): the identity sweep,
+  throttled to the same tick, wrote 25 and 39 identity runs in the hours from
+  04:00 and 05:00 UTC against 4,262 unidentified parse runs, and each moved
+  the CORE revision. The gate was right to reopen, since identity decides the
+  card accounts (396 of 402 usages were waiting on it). While its latest tick
+  record is recent, made progress and took a full page, the identity sweep now
+  runs on every tick above the budget, which drains such a backlog in about
+  nine hours if every tick takes a page of 40, at about 270k rows a tick; a
+  short page, a failure, a page without progress or a lost record ends that.
+
+## One-page sweeps wait for a change too (2026-11-27)
+
+- Once the identity backlog was drained, the Processor read about 6.25M rows
+  an hour outside the collection hours, about 520k a 5-minute tick, and
+  2026-11-26 read 291M rows on CORE (about $0.29). Of a quiet tick (06:30 to
+  07:05 UTC on 2026-11-27), the identity sweep read 197k rows and the reward
+  claim promotion 187k with nothing to do: each reads its whole candidate set
+  in one statement on every tick (about 110M rows a day between them).
+- Both get a row in `processor_sweep_passes` (migration 0110, which rebuilds
+  the table to widen its `sweep` CHECK and keeps the card rows) and run as a
+  pass of one page: the cursor is always 0, and only a candidate read that
+  returned nothing ends the pass clean. A tick that found a candidate leaves
+  its pass open, so the next tick reads again, as before the gate. For the
+  identity sweep a tick with candidates always processes at least one, so
+  `processedRuns === 0` is exactly an empty read; for the promotion it is
+  `scanned === 0`.
+- What the reads depend on off the CORE ledger is argued in
+  `services/processor/src/identity-sweep-lane.ts` and at `rewardClaimsStage`
+  (`services/processor/src/reward-claims-job.ts`): fetch reports, units and
+  artifacts are written before a run is sealed and only sealed runs are read;
+  the trusted Vpass card bindings need both runs sealed. The policies carry a
+  digest of each candidate statement's text (and, for the promotion, its bound
+  values and release), so the gap slice 3 names for a statement written in
+  TypeScript does not apply here, and a digest of the views each module's code
+  reads, checked by `test/sweep-pass.test.ts` like the card sweeps' pins.
+- Not gated: the private `POST /identity-sweep` route, and
+  `rewardPromotionPending`, which reads one candidate for the READ capture.
+- Expected: about 110M fewer rows a day, leaving the quiet tick mostly
+  `observation_sweep` (about 104k rows) and the collection hours, in which
+  new rows move the revision and the card sweeps read everything on every
+  tick (about 43M rows an hour from 21:00 to 00:00 UTC on 2026-11-26).
+
 ## Verification
 
 - `services/processor/test/tick-rows-read.test.ts` (landed in #1510): each

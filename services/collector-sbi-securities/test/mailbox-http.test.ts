@@ -338,6 +338,52 @@ test("every navigation hop checks the same absolute deadline before another requ
   }
 });
 
+test("a repeated attribute that says the same thing is kept once; a conflicting one is refused", () => {
+  const jar: MailboxCookie[] = [];
+  updateMailboxCookies(
+    jar,
+    new Headers({ "set-cookie": "nav=synthetic; Path=/; HttpOnly; Secure; HttpOnly; path=/" }),
+    new URL(HANDOFF),
+  );
+  expect(jar).toEqual([
+    {
+      name: "nav",
+      value: "synthetic",
+      domain: "m.sbisec.co.jp",
+      path: "/",
+      hostOnly: true,
+      secure: true,
+    },
+  ]);
+  for (const header of [
+    "nav=synthetic; Path=/; Path=/other",
+    "nav=synthetic; Domain=m.sbisec.co.jp; Domain=sbisec.co.jp",
+    "nav=synthetic; Max-Age=60; Max-Age=0",
+  ])
+    expect(() =>
+      updateMailboxCookies([], new Headers({ "set-cookie": header }), new URL(HANDOFF)),
+    ).toThrow("sbi_mailbox_transport_failed");
+});
+
+test("the hand-off's repeated HttpOnly no longer stops the mailbox", async () => {
+  const { fetcher, calls } = sequence();
+  const repeated = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+    if (url === HANDOFF)
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: "/switchnaviMain",
+          "set-cookie": "nav=synthetic-nav; Path=/; HttpOnly; HttpOnly",
+        },
+      });
+    return fetcher(input, init);
+  };
+  await new MailboxHttp([], repeated).open();
+  expect(calls.map((call) => call.url)).toContain(MAILBOX_APPLICATION);
+  expect(new Headers(calls[1]!.init.headers).get("cookie")).toBe("nav=synthetic-nav");
+});
+
 test("default cookie paths use the parent path and unrelated embeds do not alter a form carrier", () => {
   const jar: MailboxCookie[] = [];
   updateMailboxCookies(
@@ -509,9 +555,9 @@ test("a refusal at the hand-off names the rule that refused, never the provider'
       [{ location: "https://[synthetic-secret" }, 302, { reason: "bad-location" }],
       [{ ...onward, "set-cookie": "synthetic-secret" }, 302, { reason: "cookie-pair" }],
       [
-        { ...onward, "set-cookie": "secret=synthetic; Path=/; Secure; Secure" },
+        { ...onward, "set-cookie": "secret=synthetic; Path=/; Secure; Path=/synthetic-secret" },
         302,
-        { reason: "cookie-attribute", cookieAttribute: "secure" },
+        { reason: "cookie-attribute", cookieAttribute: "path" },
       ],
       [
         { ...onward, "set-cookie": "secret=synthetic; X-Synthetic-Secret=1; x-synthetic-secret=2" },
@@ -544,6 +590,33 @@ test("a refusal at the hand-off names the rule that refused, never the provider'
   }
   expect(logged).toHaveLength(10);
   expect(logged.join("\n")).not.toMatch(/synthetic|secret/iu);
+});
+
+test("a refused bootstrap page logs its grammar rule and count, never the page", async () => {
+  const logged: string[] = [];
+  const original = console.log;
+  console.log = (line: string) => logged.push(line);
+  try {
+    const { fetcher } = sequence();
+    const client = new MailboxHttp([], async (input, init) =>
+      new URL(input instanceof Request ? input.url : input.toString()).href === MAILBOX_BOOTSTRAP
+        ? html(mailboxBootstrapHtml().replace("</body>", "<script>var secret = 1;</script></body>"))
+        : fetcher(input, init),
+    );
+    await expect(client.open()).rejects.toThrow("sbi_mailbox_bootstrap_unobserved");
+    expect(client.lastDiagnosis).toEqual({
+      step: "sso",
+      hop: 1,
+      status: 200,
+      contentType: "text/html",
+      bootstrapRule: "script-element",
+      bootstrapCount: 2,
+    });
+  } finally {
+    console.log = original;
+  }
+  expect(logged).toHaveLength(1);
+  expect(logged[0]).not.toMatch(/secret|synthetic/iu);
 });
 
 test("calls the fetcher unbound, as the Workers runtime's fetch requires", async () => {

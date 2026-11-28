@@ -712,6 +712,16 @@ published it unless the sweep's 200-observation cap or an older backlog defers
 it to the next ticks; the repair budget sets how fast a parser version bump drains
 ([observation-lanes.md](observation-lanes.md#repair-budget-and-drain-rate)).
 
+The scheduled `identity_sweep` and `reward_claims_sweep` each read their whole
+candidate set in one statement, so they wait for a change like the card sweeps
+(`services/processor/src/sweep-pass.ts`, migration 0110): a tick whose candidate
+read found nothing marks the CORE revision it started at clean, and later ticks
+read only their gate row in `processor_sweep_passes` until the revision or the
+sweep's policy moves (the policy carries a digest of the candidate statement
+and of the views the code reads). A tick that found candidates closes nothing,
+so the next tick reads again. The private `POST /identity-sweep` route calls
+the sweep directly and is not gated.
+
 `collection_scan` sits after the parse sweep and before identity so a run
 found this tick can reach identity and parsing on the same tick.
 `operation_dispatch` sits before `decision_outbox`, which stays after every
@@ -743,11 +753,14 @@ Every metered invocation, scheduled tick or queue batch, adds the D1 rows it
 read (the `invocation_budget` line's `d1RowsRead.reported`) to its starting
 hour's row in `processor_read_budget_hours` (migration 0107), in one batch that
 also drops rows older than 48 hours (`src/read-budget.ts`). Before its lanes,
-the scheduled tick sums the current hour and the 23 before it. Above
+the scheduled tick sums the current hour and the 23 before it, then counts
+itself in its hour (`claimScheduledTick`); a queue batch is counted with its
+rows. Above
 `D1_ROWS_READ_DAILY_BUDGET` (300 million rows, about a third of the 25 billion
 the plan includes per month):
 
-- the first scheduled tick of each hour runs every lane and logs one
+- the first scheduled tick that counts itself in each hour runs every lane
+  and logs one
   `{"event":"d1_read_budget_exceeded","rowsRead24h":…,"budget":…}` line at error
   level, which Workers Issues reports;
 - the later ticks of that hour skip the lanes that recompute from stored state
@@ -757,16 +770,38 @@ the plan includes per month):
   `price_promotion`, `report_job`, `decision_outbox`), each with a
   `{"event":<lane>,"skipped":"read_budget"}` line and no tick record. Collection,
   parsing, operation dispatch, the maintenance survey and the audit overflow
-  keep their cadence.
+  keep their cadence;
+- the identity sweep is the exception while it drains a backlog: when its
+  latest tick record is from the last 15 minutes, ran, made progress (sealed a
+  run or identified an observation) and took a full page
+  (`IDENTITY_RUNS_PER_TICK` parse runs, or `IDENTITY_SWEEP_OBSERVATIONS`), it
+  runs on every tick (`identityBacklogDraining`). Each identity run moves the
+  CORE revision, and the card sweeps read their whole input again on the next
+  hourly tick after any move; at one page an hour, the 4,262 parse runs left
+  unidentified after the parse backlog of 2026-11-24 would have taken about
+  six days, each hour rereading about 2M card rows. A short page, a failed
+  sweep, a page without progress (runs selected again but never sealed at
+  their required policy) and a lost record (within about two ticks the latest
+  is too old) each end the exemption, so a sweep that keeps failing goes back
+  to once an hour.
 
 The sum is what D1 reports: a statement read with `first()` returns no
 metadata and is not counted (`d1RowsRead.missing`). A failed budget read
-throttles nothing; a failed write loses that invocation's count and logs
-`read_budget_record_failed`. A tick is counted when it ends, so two ticks that
-overlap at the start of an hour, or a first tick whose record failed, both run
-as the hour's first. While throttled, an accepted decision's projection
-rebuild (`decision_outbox`) waits up to an hour, and the throttled lanes leave
-gaps of up to an hour in `processor_lane_ticks`.
+throttles nothing. A tick is counted before its lanes, not when it ends: on
+2026-11-25 the identity sweep left D1 answering every later statement of the
+tick as overloaded, the end-of-tick record failed, and every tick of the hour
+ran as its first (about 9.5M rows each). The tick counts itself even when the
+budget read failed. A count that fails logs
+`{"event":"read_budget_claim_failed","over":…}` at error level, which Workers
+Issues reports; over the budget the tick then runs as throttled, and under it
+(or when the budget could not be read) it runs every lane. A count that was
+stored but whose answer was lost therefore leaves the hour with no derived
+run. The count answers how many ticks the hour has, so of two ticks that
+overlap at the start of an hour only the first counted runs the derived lanes.
+A failed rows-read record at the end loses that invocation's rows and logs
+`read_budget_record_failed`. While throttled, an accepted
+decision's projection rebuild (`decision_outbox`) waits up to an hour, and the
+throttled lanes leave gaps of up to an hour in `processor_lane_ticks`.
 
 ### 6.0.1 Snapshot memo (ADR 0129)
 

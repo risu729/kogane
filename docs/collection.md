@@ -488,8 +488,11 @@ artifact, and `unknown` for a failure. The null start names the
 provider's retention, not proved account-opening coverage.
 
 The realised-gains and documents runs, read only after the core steps succeed,
-share the core run's ID as `acquisitionSessionRef`. The realised-gains run has
-no `request-window` (`full_snapshot` with null bounds); its units are
+share the core run's ID as `acquisitionSessionRef` and as `attemptId`, since
+the same attempt writes all three runs. Supplementary runs stored before this
+was fixed name their own run ID as `attemptId`, an attempt no other run
+carries, and stay as stored. The realised-gains run has no `request-window`
+(`full_snapshot` with null bounds); its units are
 `realised-evidence` and `realised-year-YYYY` for what it stored. The documents
 run requests the five-year `date_range` ending yesterday, and each stored PDF
 has its own complete `document` unit (`delivered-document-NNNN`) with a unit
@@ -1393,6 +1396,9 @@ source `sbi-shinsei-bank`).
 | Artifact                                  | Role                         | Bytes                                                             |
 | ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
 | `raw-<dataset>.json` (four CORE datasets) | `sanitized_provider_capture` | the provider response with `header.newToken` removed              |
+| `raw-period-activity-NNNN.json`           | `sanitized_provider_capture` | one savings account's selected-period response, token removed     |
+| `savings-activity-NNNN.json`              | `collector_derived`          | that response bound to its requested account, currency and range  |
+| `monthly-report-YYYY-MM-<sha256>.pdf`     | `provider_document`          | a monthly report's PDF bytes, decoded from the download response  |
 | `normalized.json`                         | `collector_derived`          | the collector's own normalized snapshot                           |
 | `manifest.json`                           | `collector_manifest`         | the collector manifest with failures reduced to allowlisted codes |
 
@@ -1422,22 +1428,45 @@ the collector's own record, so it is `collector_manifest` now.
   manifest describes the bytes DATA holds") checks every entry against the
   object at its digest in a fake `DATA` bucket.
 
-- `requestedScope`: `full_snapshot` — this source is a current snapshot and the
-  trigger accepts no date range. No units, ranges or reports.
+- `requestedScope`: `full_snapshot` with null bounds and no unit keys — the
+  core captures are a current snapshot and the trigger accepts no date range.
+  The four core captures, `normalized.json` and `manifest.json` name no unit.
+- Units, ranges and reports (`buildSharedRunPlan`, `src/shared-collection.ts`;
+  until 2026-11-23 this section said there were none, which stopped being true
+  when the savings history and the monthly reports were added, ADR 0095 and
+  ADR 0097):
+  - each savings account read is an `account` unit
+    `savings-<first 32 hex digits of the account number's SHA-256>`. A
+    supported response gives it its two artifacts (`artifactCount: 2`,
+    `complete`), a `requested` (`basis: manifest`) and a `declared_coverage`
+    (`basis: source`) `date` range over the requested dates, and a unit
+    `terminal` report `success`. An account whose read failed or whose response
+    was refused keeps no artifact: the unit is `partial` with the closed code
+    `provider_read_failed` (also for `history_budget_exceeded`) or
+    `provider_response_invalid`, with only the `requested` range and a
+    `partial` unit report carrying the same code;
+  - each stored monthly report is a `document` unit `monthly-report-YYYY-MM`
+    (`artifactCount: 1`, `complete`) with a `declared_coverage` `month` range
+    over that month and a unit `terminal` report `success`.
 - `transformations`: one `redacted` step per provider capture
   (`sbi-shinsei-token-sanitizer` v3: the rotating CSRF token stripped, the
   balance summary's name fields kept as sent; v2 runs replaced those with
   `[redacted:name]`, which
   [ADR 0029's amendment 2](adr/0029-data-classification-and-unkeyed-identity.md#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence) withdrew),
   one `extracted` step for `normalized.json`
-  (`sbi-shinsei-normalizer`), matching the central descriptors.
+  (`sbi-shinsei-normalizer`), matching the central descriptors; one
+  `extracted` step per `savings-activity-NNNN.json`
+  (`sbi-shinsei-period-scope` v1) naming its raw period capture and the
+  top-balances capture as inputs; one `extracted` step per report PDF
+  (`sbi-shinsei-report-pdf-extractor` v1) with no retained input.
 - `acquisitionSessionRef`: none. The container authenticates once per run and no
   session survives it, so there is no generation to reference (12 §4).
 - Human-required: a rejected credential or refused login (`credential-shape`,
   `credential-validation`, `login-rejected`, `login-failed`) ends the run
   `failed` with `human_required_credentials`.
-- Staging: **none**. The four provider responses and the normalized snapshot
-  are held in memory until the terminal is written; the `r2:<dataset>` failure
+- Staging: **none**. The four core responses, the savings history, the report
+  PDFs and the normalized snapshot are held in memory until the terminal is
+  written; the `r2:<dataset>` failure
   operation means "not admitted to the run" (validation), not a staging put.
   The Worker admits each artifact with `describeArtifact` (dataset, filename and
   media-type checks); `test/storage.test.ts` proves that record equals the one
@@ -1448,7 +1477,8 @@ the collector's own record, so it is `collector_manifest` now.
   with the importer ([legacy-retirement.md](legacy-retirement.md)).
 - Verified with synthetic fixtures only:
   `test/shared-collection.test.ts` (decisions, sanitization, outcomes, an
-  end-to-end DATA-only run with a mocked container) and
+  end-to-end DATA-only run with a mocked container, the report document unit),
+  `test/savings-activity.test.ts` (the savings account units) and
   `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2 `DATA` bucket).
   No provider was contacted and no production bucket was read or written.
 

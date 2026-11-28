@@ -7,14 +7,14 @@
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "2.0.1",
-    "@cloudflare/vitest-plugin": "1.9.0",
+    "@cloudflare/vitest-plugin": "1.9.2",
     "@types/bun": "1.4.5",
-    "@types/node": "26.6.6",
-    "@vitest/coverage-istanbul": "5.1.1",
-    "cf": "1.0.0-rc.2",
-    "devtools-protocol": "0.0.1751165",
+    "@types/node": "26.6.11",
+    "@vitest/coverage-istanbul": "5.1.2",
+    "cf": "1.0.0-rc.6",
+    "devtools-protocol": "0.0.1755318",
     "typescript": "7.0.2",
-    "vitest": "5.1.1",
-    "wrangler": "4.166.0"
+    "vitest": "5.1.2",
+    "wrangler": "4.168.0"
   }
 }

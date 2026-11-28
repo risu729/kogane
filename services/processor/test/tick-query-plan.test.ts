@@ -14,8 +14,9 @@
 // sweep's empty-parse batch is one.
 //
 // Only `SCAN` steps are checked. A keyed `SEARCH` nested under another
-// table's rows (the Vpass binding insert searches every Vpass artifact once
-// per binding artifact), an automatic index built over a whole table each
+// table's rows (as the Vpass binding insert searched every Vpass artifact once
+// per binding artifact before ADR 0129's decision 4; tick-rows-read.test.ts
+// checks its plan), an automatic index built over a whole table each
 // call, and correlated subqueries run once per scanned row all pass here; what
 // a statement reads per call, and how that grows with history, is measured by
 // tick-rows-read.test.ts.

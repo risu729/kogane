@@ -1,6 +1,8 @@
 import {
+  BootstrapRefusal,
   mailboxBootstrap,
   MailboxError,
+  type BootstrapRule,
   MAILBOX_APPLICATION,
   MAILBOX_ORIGIN,
 } from "./mailbox-bootstrap";
@@ -86,6 +88,10 @@ interface MailboxDiagnosis {
   reason?: MailboxRefusal;
   /** For a repeated cookie attribute, its name when it is a standard one. */
   cookieAttribute?: (typeof COOKIE_ATTRIBUTES)[number] | "other";
+  /** For a refused bootstrap page, the grammar part it departed from. */
+  bootstrapRule?: BootstrapRule;
+  /** For a count rule, how many scripts, statements, handler actions or redirect statements (at most 99). */
+  bootstrapCount?: number;
 }
 /**
  * The navigation's own refusal rules. Each names a rule, never what the
@@ -233,7 +239,17 @@ export class MailboxHttp {
       new Set([MAILBOX_BOOTSTRAP]),
     );
     await requireHtml(bootstrap);
-    const material = mailboxBootstrap(await html(bootstrap, this.signals.get(bootstrap)));
+    const page = await html(bootstrap, this.signals.get(bootstrap));
+    let material: ReturnType<typeof mailboxBootstrap>;
+    try {
+      material = mailboxBootstrap(page);
+    } catch (error) {
+      if (error instanceof BootstrapRefusal) {
+        this.diagnosis.bootstrapRule = error.rule;
+        if (error.count !== undefined) this.diagnosis.bootstrapCount = error.count;
+      }
+      throw error;
+    }
     this.csrf = material.csrf;
     this.riyoCd = material.riyoCd;
     this.at("application");
@@ -521,12 +537,16 @@ export function updateMailboxCookies(jar: MailboxCookie[], headers: Headers, ori
     for (const piece of pieces) {
       const split = piece.indexOf("=");
       const name = (split < 0 ? piece : piece.slice(0, split)).toLowerCase();
+      const value = split < 0 ? "" : piece.slice(split + 1);
+      // A repeat that says the same thing is not ambiguous: the mobile hand-off
+      // repeats `HttpOnly` (2026-11-24). A repeat with another value is refused.
+      if (attrs.get(name) === value) continue;
       if (attrs.has(name))
         throw new CookieRefusal(
           "cookie-attribute",
           COOKIE_ATTRIBUTES.find((known) => known === name) ?? "other",
         );
-      attrs.set(name, split < 0 ? "" : piece.slice(split + 1));
+      attrs.set(name, value);
     }
     const requestedDomain = attrs.get("domain")?.replace(/^\./u, "").toLowerCase();
     const domain = requestedDomain ?? origin.hostname;

@@ -20,8 +20,13 @@ import {
   balanceProjectionOutboxProcessor,
   runBalanceProjection,
 } from "./balance-projection-job.ts";
-import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
+import {
+  IDENTITY_POLICY_VERSION,
+  IDENTITY_SWEEP_OBSERVATIONS,
+  identitySweep,
+} from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { identitySweepLane } from "./identity-sweep-lane.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
@@ -110,6 +115,8 @@ import { reportsEnabled, runReportJob } from "./report-job.ts";
 import {
   D1_ROWS_READ_DAILY_BUDGET,
   READ_BUDGET_THROTTLED_LANES,
+  claimScheduledTick,
+  identityBacklogDraining,
   readBudgetState,
   recordRowsRead,
 } from "./read-budget.ts";
@@ -1924,7 +1931,9 @@ const defaultStages: ScheduledStages = {
   // Sized to what the incremental and repair lanes publish per tick, so a
   // re-parse is identified on the tick that published it unless the sweep's
   // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
-  identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
+  // Reads only its gate row while nothing it reads has moved since a tick
+  // found no candidate (src/identity-sweep-lane.ts, migration 0110).
+  identity: (env) => identitySweepLane(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   instrumentAutoAdoption: (env) => instrumentAutoAdoptionLane(env.DB),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
@@ -2035,10 +2044,23 @@ export async function runScheduled(
 ): Promise<void> {
   const reconciliation = reconciliationEnabled(env.RECONCILIATION_ENABLED);
   // ADR 0129: above the daily read budget, the derived lanes run on the first
-  // scheduled tick of each hour only, and that tick logs the error once.
-  const budget = await readBudgetState(env.DB, (guard.now ?? Date.now)(), guard.budget);
-  if (budget?.over && !budget.throttled)
-    (guard.alert ?? ((line: string) => console.error(line)))(
+  // scheduled tick of each hour only, and that tick logs the error once. The
+  // tick counts itself before any lane runs, even when the budget could not be
+  // read. A count that fails is logged at error level; over the budget the
+  // tick then runs as throttled, since D1 is likely unable to record the
+  // hour's first tick at all (src/read-budget.ts).
+  const alert = guard.alert ?? ((line: string) => console.error(line));
+  const nowMs = (guard.now ?? Date.now)();
+  const budget = await readBudgetState(env.DB, nowMs, guard.budget);
+  let throttled = budget?.throttled ?? false;
+  try {
+    if ((await claimScheduledTick(env.DB, nowMs)) > 1 && budget?.over) throttled = true;
+  } catch {
+    alert(JSON.stringify({ event: "read_budget_claim_failed", over: budget?.over ?? null }));
+    if (budget?.over) throttled = true;
+  }
+  if (budget?.over && !throttled)
+    alert(
       JSON.stringify({
         event: "d1_read_budget_exceeded",
         rowsRead24h: budget.rowsRead24h,
@@ -2118,11 +2140,27 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // While throttled, the identity sweep still runs on every tick if its last
+  // run took a full page, so a backlog drains in hours (src/read-budget.ts).
+  const identityDraining =
+    throttled &&
+    (await identityBacklogDraining(
+      env.DB,
+      // The lane tick records' own clock (the loop below), not the guard's.
+      Date.now(),
+      IDENTITY_RUNS_PER_TICK,
+      IDENTITY_SWEEP_OBSERVATIONS,
+    ));
   // One correlation id for the lane audit records of this invocation.
   const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
-    if (budget?.throttled && enabled && READ_BUDGET_THROTTLED_LANES.has(event)) {
+    if (
+      throttled &&
+      enabled &&
+      READ_BUDGET_THROTTLED_LANES.has(event) &&
+      !(event === "identity_sweep" && identityDraining)
+    ) {
       // Not a tick of the lane: it did not run, and its flag is not off.
       log(JSON.stringify({ event, skipped: "read_budget" }));
       continue;

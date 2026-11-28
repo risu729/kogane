@@ -986,7 +986,54 @@ test("the candidate pass looks up stored pairs a bounded chunk at a time", async
   expect(await tick()).toEqual({ proposed: 2, lookups: [2] });
   // The stored chunk takes no budget; the next chunk's new pair is written.
   expect(await tick()).toEqual({ proposed: 1, lookups: [2, 1] });
+  // That pass wrote below its budget and reached the end, and a proposal is
+  // not on the CORE dependency ledger: the pass gate (src/sweep-pass.ts)
+  // holds, so the next tick looks nothing up.
+  expect(await tick()).toEqual({ proposed: 0, lookups: [] });
+  // A pass that runs anyway (here under another policy) finds every pair
+  // stored, and writes nothing.
+  await w.db
+    .prepare(
+      "UPDATE processor_sweep_passes SET clean_policy='an-older-pass' WHERE sweep='card_purchase_recognition'",
+    )
+    .run();
   expect(await tick()).toEqual({ proposed: 0, lookups: [2, 1] });
+  expect(await proposals(w)).toHaveLength(3);
+}, 120_000);
+
+test("a tick whose candidate pass throws counts a failure and drops its pass, and a later pass writes the page's proposals", async () => {
+  const w = await world();
+  await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);
+  const throwing = new Proxy(w.db, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql: string) => {
+        if (sql.includes("WHERE proposal_digest IN")) throw new Error("synthetic: D1 unavailable");
+        return target.prepare(sql);
+      };
+    },
+  });
+  // The page is recognised, then the candidate pass throws: the failure is
+  // counted, the pass is dropped so it ends nothing clean, and the cursor
+  // still moves on, so the rows after the page are not held back.
+  const cursor = async () =>
+    (
+      await w.all<{ id: number }>("SELECT last_observation_id AS id FROM card_purchase_scan_cursor")
+    )[0]!.id;
+  expect(await cursor()).toBe(0);
+  expect((await cardPurchaseSweep(throwing, { now: NOW, scanLimit: 1 })).failed).toBe(1);
+  expect(await cursor()).not.toBe(0);
+  expect(
+    await w.all(
+      "SELECT pass_token FROM processor_sweep_passes WHERE sweep='card_purchase_recognition'",
+    ),
+  ).toEqual([{ pass_token: null }]);
+  // The rest of that pass, then a pass from the first row, write them.
+  await w.sweep();
+  await w.sweep();
   expect(await proposals(w)).toHaveLength(3);
 }, 120_000);
 

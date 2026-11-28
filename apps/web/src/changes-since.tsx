@@ -24,6 +24,7 @@ import { CHANGES_SINCE_PATH } from "../../../packages/observation-shared/src/cha
 import { OUTCOMES } from "./evidence-ui.tsx";
 import { BusyButton } from "./busy-button.tsx";
 import { Link } from "./router.tsx";
+import { tokyoTime } from "./tokyo-time.ts";
 import {
   ArtifactLink,
   Badge,
@@ -152,13 +153,6 @@ const NOT_COVERED_REASONS: Record<NotCovered["reason"], string> = {
 const number = (value: number): string => value.toLocaleString("ja-JP");
 /** A count the digest cut is a lower bound, never an exact figure (INV05). */
 const counted = (value: number, cut: boolean): string => `${number(value)}件${cut ? "以上" : ""}`;
-const tokyoTime = (value: string): string =>
-  new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-
 /** An instant shown in Japan time; the `<time>` element keeps the instant itself. */
 export function Time({ value }: { value: string }): ReactNode {
   return (

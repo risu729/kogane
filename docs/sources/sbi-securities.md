@@ -515,6 +515,41 @@ the navigation (a page's media type or form, an API answer, the response
 bound, a lost lease) still carry no `reason`. Still no header value, cookie
 name or provider text.
 
+The 2026-11-24 21:00 UTC run named it: step `landing`, hop 1, status 302,
+`reason` `cookie-attribute`, `cookieAttribute` `httponly`. The hand-off's
+redirect sets a cookie that repeats `HttpOnly`, and the jar refused every
+repeated attribute. A repeat with the same value says nothing new, so the jar
+now keeps it once; a repeat with another value (two `Path`, `Domain` or
+`Max-Age` values, for example) is still refused as ambiguous.
+
+The 2026-11-25 and 2026-11-26 21:00 UTC runs passed the hand-off, the entry and
+the connecting page, then refused at step `sso`, hop 1, status 200 `text/html`
+with `sbi_mailbox_bootstrap_unobserved`: the SSO redirect reached the bootstrap
+page, but that page departed from the witnessed grammar (one script that stores
+eight known `sessionStorage` keys and then redirects to the application). The
+refusal line now also carries `bootstrapRule`, the part of that grammar the page
+departed from (`html`, `elements`, `script-element`, `script-parse`,
+`statements`, `onload`, `storage`, `redirect-call`, `redirect-function`, and
+since 2026-11-27 `redirect-navigation`, `redirect-dynamic`, `redirect-origin`,
+`redirect-path`), and for a count rule `bootstrapCount`, how many scripts,
+statements, handler actions or redirect-body statements the page had (at most
+99). Never the page text, a script, a key or a
+value.
+
+The 2026-11-27 21:00 UTC run named it: `bootstrapRule` `redirect-function`. The
+page still had one script that stored the eight known keys and then called
+`autoRedirect()`, but the redirect function no longer matched the witnessed
+`window.location.href = origin + path` form. The client never executes the
+page and opens the application itself, so the redirect now only has to be a
+navigation (`[window.]location[.href] = X` or `[window.]location.assign(X)` /
+`.replace(X)`) whose destination is a constant string (literals, an
+expression-free template, or `+` of those, at most nine pieces) equal to the
+application URL. A
+refusal there names `redirect-function` (declaration shape, or the number of
+statements in its body as `bootstrapCount`), `redirect-navigation` (another
+statement), `redirect-dynamic` (a destination that is not a constant),
+`redirect-origin` or `redirect-path`.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

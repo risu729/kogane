@@ -1095,6 +1095,12 @@ for (const options of [{}, { csvShort: true }, { documentTotal: 11 }, { badPdf: 
         if (result.outcome !== "found") throw new Error("missing");
         return result.manifest;
       });
+      // Every run of the session, the core run and both supplements, names
+      // the session as its acquisition session and its attempt.
+      for (const manifest of manifests) {
+        expect(manifest?.acquisitionSessionRef).toBe(value.runId);
+        expect(manifest?.attemptId).toBe(value.runId);
+      }
       expect(manifests[0]?.providerOutcome).toBe("success");
       expect(manifests[0]?.artifacts.some((a) => a.artifactKey === "gross-balance.json")).toBe(
         true,
